@@ -1,0 +1,10 @@
+# claude code scheduler lock (machine-local, not source)
+.claude/scheduled_tasks.lock
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# editor
+*.swp
+*~
