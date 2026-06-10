@@ -11,9 +11,8 @@
 -- K2 : primary action
 -- K3 : secondary action
 --
--- STAGE 2 — record + granular + window + time-stretch modes.
--- TAPE/FILTER/DELAY/REVERB are placeholders for later stages.
--- See SPEC/spec.md.
+-- STAGE 3 — record + granular + window + time-stretch modes + softcut TAPE.
+-- FILTER/DELAY/REVERB are placeholders for stage 4. See SPEC/spec.md.
 
 engine.name = "Mangler"
 
@@ -21,18 +20,20 @@ engine.name = "Mangler"
 -- appears without "init() called", the engine died in alloc — check the SC tab.
 print("mangler: script file executed")
 
-local sc = require "softcut"  -- reserved for STAGE 3 (tape); unused until then
+local sc = require "softcut"  -- the TAPE path: parallel ADC tap, own CPU core
 
 -- ============================================================================
 -- state
 -- ============================================================================
 
 local PAGES = {
-  "MIX", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE", "FILTER", "DELAY", "REVERB",
+  "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
+  "FILTER", "DELAY", "REVERB",
 }
 local page = 1
 local alt = false          -- K1 held
 local held = {}            -- held[n] = true while key n is down (global, page-independent)
+local held_gesture = {}    -- held_gesture[n] = param id to zero when key n releases
 
 local FPS = 15
 local frame = 0            -- redraw frame counter (drives the REC blink)
@@ -42,14 +43,24 @@ local rec_arm_phase = 0    -- write-head position when rec was armed
 local rec_amp = 0          -- engine poll: amplitude of what's being written
 local amp_in = { 0, 0 }    -- system polls: live input amplitude L/R
 local amp_out = { 0, 0 }   -- system polls: output amplitude L/R
+local tape_phase = 0       -- softcut phase event: tape head, normalized
+local tape_arm_phase = 0   -- head position when tape rec was armed
 local polls = {}
 local redraw_clock
+
+local TAPE_LEN = 60        -- seconds of softcut buffer used by the tape loop
 
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
 local wave = {}
 for i = 1, 128 do wave[i] = 0 end
 local wave_bin = 0
+
+-- same idea for the tape loop: bins indexed by the tape head while recording
+local twave = {}
+for i = 1, 128 do twave[i] = 0 end
+local twave_bin = 0
+local twave_any = false
 
 -- grain particles (visual only): spawned at the playhead at ~density rate,
 -- spread by jitter, lifetime scaled by grain size
@@ -60,14 +71,17 @@ local spawn_acc = 0
 -- nil entries draw as "--" until the owning stage wires them.
 local ENC_MAP = {
   MIX     = { "mix", "out_level", "sc_level", "cut_level" },
+  -- LEVEL drives the SYSTEM params directly (they share the script paramset);
+  -- never ADD params with these ids — referencing them is fine
+  LEVEL   = { "input_level", "monitor_level", "output_level", "headphone_gain" },
   REC     = { "rec_level", "pre_level", "dry_wet", "resample" },
   WINDOW  = { "pos_start", "scan", "pos_end", "pos_jitter" },
   GRAIN   = { "size", "spread", "density", "grain_level" },
   STRETCH = { "scan", "pitch", "warp_window", "warp_rand" },
-  TAPE    = { nil, nil, nil, nil },
-  FILTER  = { nil, nil, nil, nil },
-  DELAY   = { nil, nil, nil, nil },
-  REVERB  = { nil, nil, nil, nil },
+  TAPE    = { "tape_rate", "tape_pre", "loop_start", "loop_end" },
+  FILTER  = { "cutoff", nil, "resonance", nil },
+  DELAY   = { "delay_mix", "delay_time", "delay_fb", nil },
+  REVERB  = { "rev_size", nil, "rev_mix", nil },
 }
 
 -- per-page key hints + placeholder stage labels
@@ -76,12 +90,9 @@ local KEY_HINTS = {
   WINDOW  = "K2 reset window",
   GRAIN   = "K3 pitch reset",
   STRETCH = "K2 mode / K3 pv freeze",
-}
-local COMING = {
-  TAPE    = "softcut tape — stage 3",
-  FILTER  = "lp/hp/bp filter — stage 4",
-  DELAY   = "delay — stage 4",
-  REVERB  = "reverb — stage 4",
+  TAPE    = "K2 rec  K3 fz  (+K1 rev/clear)",
+  FILTER  = "K2 filter type",
+  DELAY   = "K3 kill feedback",
 }
 
 -- ============================================================================
@@ -118,6 +129,106 @@ local function window_bounds()
   return lo, hi, math.max(hi - lo, 0.001)
 end
 
+-- ============================================================================
+-- mix + tape plumbing (defined before params so actions can close over them)
+-- ============================================================================
+
+-- MIX page, now real: `mix` crossfades SC engine <-> tape, out_level masters
+-- both, each side keeps its own trim. center keeps both at full trim.
+local function update_mix()
+  local mixv = pget("mix", 0.5)
+  local out = pget("out_level", 1)
+  local sc_l = pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out
+  local tp_l = pget("cut_level", 1) * math.min(1, 2 * mixv) * out
+  if engine.level then engine.level(sc_l) end
+  sc.level(1, tp_l)
+  sc.level(2, tp_l)
+end
+
+-- apply identical settings to both tape voices (1 = L, 2 = R)
+local function tape_set(fn)
+  fn(1)
+  fn(2)
+end
+
+local function update_tape_rate()
+  local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
+  tape_set(function(v) sc.rate(v, r) end)
+end
+
+-- rec/freeze/pre interact: freeze stops capture and holds the loop at full
+-- regeneration; otherwise rec gates capture and tape_pre sets the overdub
+local function update_tape_rec()
+  local frozen = pget("tape_freeze", 0) == 1
+  local rec_on = pget("tape_rec", 0) == 1 and not frozen
+  tape_set(function(v)
+    sc.rec_level(v, rec_on and 1 or 0)
+    sc.pre_level(v, frozen and 1 or pget("tape_pre", 0))
+    sc.rec(v, rec_on and 1 or 0)
+  end)
+end
+
+local function update_tape_loop()
+  local a = pget("loop_start", 0) * TAPE_LEN
+  local b = pget("loop_end", 1) * TAPE_LEN
+  local lo, hi = math.min(a, b), math.max(a, b)
+  if hi - lo < 0.1 then hi = lo + 0.1 end
+  tape_set(function(v)
+    sc.loop_start(v, lo)
+    sc.loop_end(v, hi)
+  end)
+end
+
+local function init_tape()
+  audio.level_adc_cut(1)   -- parallel ADC tap into softcut
+  audio.level_eng_cut(0)   -- engine does NOT feed softcut (resample is SC-side)
+  audio.level_cut(1)       -- softcut master out: persists across scripts, force up
+  sc.buffer_clear()
+  for v = 1, 2 do
+    sc.enable(v, 1)
+    sc.buffer(v, v)
+    sc.pan(v, v == 1 and -1 or 1)
+    sc.play(v, 1)
+    sc.loop(v, 1)
+    sc.position(v, 0)
+    sc.fade_time(v, pget("tape_fade", 0.05))
+    sc.level_slew_time(v, 0.05)
+    sc.rate_slew_time(v, 0.05)
+    -- force the filter sections fully open: their defaults can mute the voice
+    sc.pre_filter_dry(v, 1.0)
+    sc.pre_filter_lp(v, 0.0)
+    sc.post_filter_dry(v, 1.0)
+    sc.post_filter_lp(v, 0.0)
+    for ch = 1, 2 do
+      sc.level_input_cut(ch, v, (ch == v) and 1.0 or 0.0)
+    end
+  end
+  update_tape_rate()
+  update_tape_rec()
+  update_tape_loop()
+  update_mix()
+  -- tape head position events drive the TAPE page needle
+  sc.phase_quant(1, 0.1)
+  sc.event_phase(function(v, pos)
+    if v == 1 then tape_phase = pos / TAPE_LEN end
+  end)
+  sc.poll_start_phase()
+end
+
+-- ============================================================================
+-- gestures
+-- ============================================================================
+-- a momentary hold registers held_gesture[n] = param id on press; release
+-- zeroes it here, page-independently, so switching pages mid-hold is safe.
+
+local function gesture_release(n)
+  local id = held_gesture[n]
+  if id then
+    params:set(id, 0)
+    held_gesture[n] = nil
+  end
+end
+
 -- page key actions (K2/K3 on key-down). all of them drive params, never
 -- locals, so MIDI mappings stay in lockstep with the keys.
 local KEY_MAP = {
@@ -135,6 +246,36 @@ local KEY_MAP = {
     -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
     [2] = function() params:set("mode", (params:get("mode") % 4) + 1) end,
     [3] = function() ptoggle("pv_freeze") end,
+  },
+  TAPE = {
+    -- K2: toggle tape record; with K1 (alt) held it's momentary reverse
+    [2] = function()
+      if alt then
+        params:set("tape_reverse", 1)
+        held_gesture[2] = "tape_reverse"
+      else
+        ptoggle("tape_rec")
+      end
+    end,
+    [3] = function()
+      if alt then
+        -- clear tape: wipe the loop and start over
+        sc.buffer_clear()
+        for i = 1, 128 do twave[i] = 0 end
+        twave_any = false
+        params:set("tape_freeze", 0)
+        params:set("loop_start", 0)
+        params:set("loop_end", 1)
+      else
+        ptoggle("tape_freeze")
+      end
+    end,
+  },
+  FILTER = {
+    [2] = function() params:set("filt_type", (params:get("filt_type") % 3) + 1) end,
+  },
+  DELAY = {
+    [3] = function() params:set("delay_fb", 0) end,
   },
 }
 
@@ -164,18 +305,19 @@ local function init_params()
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
   params:add_group("grp_mix", "mix", 4)
-  params:add_control("mix", "sc<>tape mix",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))        -- wired in S3
+  params:add_control("mix", "eng <> tape",
+    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  params:set_action("mix", update_mix)
   params:add_control("out_level", "out level",
-    controlspec.new(0, 1.5, "lin", 0, 1.0, ""))       -- wired in S3
-  params:add_control("sc_level", "sc level",
+    controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+  params:set_action("out_level", update_mix)
+  params:add_control("sc_level", "eng level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
-  params:set_action("sc_level", function(v)
-    if engine.level then engine.level(v) end   -- engine command is `level`
-  end)
+  params:set_action("sc_level", update_mix)
   -- id "tape_level" is RESERVED by the system TAPE deck; "cut_level" avoids it
   params:add_control("cut_level", "tape level",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))         -- wired in S3
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  params:set_action("cut_level", update_mix)
 
   params:add_group("grp_rec", "rec", 6)
   add_eng_binary("rec", "record")
@@ -241,15 +383,73 @@ local function init_params()
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   add_eng_binary("pv_freeze", "pv freeze")
 
+  params:add_group("grp_tape", "tape", 8)
+  params:add_binary("tape_rec", "tape record", "toggle", 0)
+  -- mirror the SC side's workflow: arming with no overdub opens the loop to
+  -- the full tape for a fresh take; stopping snaps the loop around the take
+  -- and jumps the head to its start, so it plays back tight immediately
+  params:set_action("tape_rec", function(v)
+    if v == 1 then
+      if pget("tape_pre", 0) == 0
+          and (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
+        params:set("loop_start", 0)
+        params:set("loop_end", 1)
+      end
+      tape_arm_phase = tape_phase
+    elseif tape_phase > tape_arm_phase + 0.005 then
+      params:set("loop_start", tape_arm_phase)
+      params:set("loop_end", tape_phase)
+      tape_set(function(vc) sc.position(vc, tape_arm_phase * TAPE_LEN) end)
+    end
+    update_tape_rec()
+  end)
+  params:add_control("tape_rate", "tape rate",
+    controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
+  params:set_action("tape_rate", update_tape_rate)
+  params:add_binary("tape_reverse", "tape reverse", "momentary", 0)
+  params:set_action("tape_reverse", update_tape_rate)
+  params:add_control("loop_start", "loop start",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("loop_start", update_tape_loop)
+  params:add_control("loop_end", "loop end",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  params:set_action("loop_end", update_tape_loop)
+  params:add_control("tape_pre", "tape overdub",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("tape_pre", update_tape_rec)
+  params:add_binary("tape_freeze", "tape freeze", "toggle", 0)
+  params:set_action("tape_freeze", update_tape_rec)
+  params:add_control("tape_fade", "tape fade",
+    controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
+  params:set_action("tape_fade", function(v)
+    tape_set(function(vc) sc.fade_time(vc, v) end)
+  end)
+
+  params:add_group("grp_filter", "filter", 3)
+  params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
+  params:set_action("filt_type", function(v)
+    if engine.filt_type then engine.filt_type(v - 1) end
+  end)
+  add_eng_control("cutoff", "cutoff",
+    controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
+  add_eng_control("resonance", "resonance",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+
+  params:add_group("grp_delay", "delay", 3)
+  add_eng_control("delay_time", "delay time",
+    controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
+  add_eng_control("delay_fb", "feedback",
+    controlspec.new(0, 0.95, "lin", 0, 0.3, ""))
+  add_eng_control("delay_mix", "delay mix",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+
+  params:add_group("grp_reverb", "reverb", 2)
+  add_eng_control("rev_size", "reverb size",
+    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  add_eng_control("rev_mix", "reverb mix",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+
   params:bang()
-end
-
--- ============================================================================
--- gestures
--- ============================================================================
-
-local function gesture_release(n)
-  -- no-op until a momentary gesture (stutter, reverse...) lands in S3.
 end
 
 -- ============================================================================
@@ -266,6 +466,22 @@ local function update_wave()
       wave_bin = bin
     else
       wave[bin] = math.max(wave[bin], rec_amp)
+    end
+  end
+end
+
+-- track the tape loop's contents as the head records (input amplitude,
+-- since softcut exposes no per-voice output meter); tape_pre sets survival
+local function update_tape_wave()
+  if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+    local bin = math.floor(clamp(tape_phase, 0, 0.999) * 128) + 1
+    local a = math.max(amp_in[1], amp_in[2])
+    if a > 0.01 then twave_any = true end
+    if bin ~= twave_bin then
+      twave[bin] = math.max(twave[bin] * pget("tape_pre", 0), a)
+      twave_bin = bin
+    else
+      twave[bin] = math.max(twave[bin], a)
     end
   end
 end
@@ -303,6 +519,7 @@ end
 function init()
   print("mangler: init() called")
   init_params()
+  init_tape()
   print("mangler: init() done, params built")
 
   local function watch(name, fn)
@@ -330,6 +547,7 @@ function init()
       clock.sleep(1 / FPS)
       frame = frame + 1
       update_wave()
+      update_tape_wave()
       update_particles()
       -- never draw over the system menu
       if norns.menu.status() == false then redraw() end
@@ -342,6 +560,7 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  sc.poll_stop_phase()
 end
 
 function enc(n, d)
@@ -374,7 +593,7 @@ end
 -- ============================================================================
 -- screen
 -- ============================================================================
--- layout: header y<=9 (page name, ALT, page dots, REC/FZ status)
+-- layout: header y<=9 (page name, ALT, page dots, status flags)
 --         body  y12..44 (per-page visualization)
 --         hints y48 (key actions, dim)
 --         params y53..62 (two name/value cells for E2/E3)
@@ -468,14 +687,47 @@ local function draw_body()
   local pname = PAGES[page]
 
   if pname == "MIX" then
-    -- live signal: input pair left, output pair right
-    draw_meter(28, amp_in[1], "")
-    draw_meter(36, amp_in[2], "in")
-    draw_meter(86, amp_out[1], "")
-    draw_meter(94, amp_out[2], "out")
+    -- one control, drawn big: the engine <> tape fader (E2)
+    local mixv = pget("mix", 0.5)
     screen.level(3)
-    screen.move(64, 30)
-    screen.text_center(">")
+    screen.move(14, 22)
+    screen.text("engine")
+    screen.move(114, 22)
+    screen.text_right("tape")
+    screen.level(2)
+    screen.rect(14, 30, 100, 2)
+    screen.fill()
+    screen.level(15)
+    screen.rect(12 + mixv * 100, 26, 3, 10)
+    screen.fill()
+  elseif pname == "LEVEL" then
+    -- live meters + the system level params on the encoders
+    local rows = {
+      { "in",  math.sqrt(math.max(amp_in[1], amp_in[2])) },
+      { "out", math.sqrt(math.max(amp_out[1], amp_out[2])) },
+    }
+    for i, r in ipairs(rows) do
+      local y = 11 + i * 10
+      screen.level(3)
+      screen.move(22, y + 5)
+      screen.text_right(r[1])
+      screen.level(1)
+      screen.rect(26, y, 98, 6)
+      screen.fill()
+      local w = math.floor(clamp(r[2], 0, 1) * 98)
+      if w > 0 then
+        screen.level(12)
+        screen.rect(26, y, w, 6)
+        screen.fill()
+      end
+    end
+    screen.level(3)
+    screen.move(0, 44)
+    screen.text("monitor " ..
+      (params.lookup["monitor_level"] and params:string("monitor_level") or "?"))
+    screen.move(128, 44)
+    screen.text_right("phones " ..
+      (params.lookup["headphone_gain"] and params:string("headphone_gain") or "?"))
   elseif pname == "REC" then
     draw_strip(false)
     draw_particles()
@@ -497,27 +749,179 @@ local function draw_body()
     draw_strip(false)
     draw_particles()
   elseif pname == "STRETCH" then
-    draw_strip(false)
-    if pget("mode", 2) == 2 then draw_particles() end
-    -- the stretch, unmissable: big speed readout + active algorithm
+    -- transport layout: big mode + big speed up top, thin window bar below —
+    -- nothing overlaps the text
     local m = params.lookup["mode"] and params:string("mode") or "?"
-    screen.level(10)
-    screen.move(30, 26)
-    screen.text_center(m)
     screen.font_size(16)
+    screen.level(12)
+    screen.move(2, 28)
+    screen.text(m)
     screen.level(15)
-    screen.move(88, 31)
-    screen.text_center(string.format("%.2fx", pget("scan", 1)))
+    screen.move(126, 28)
+    screen.text_right(string.format("%.2fx", pget("scan", 1)))
     screen.font_size(8)
     if pget("pv_freeze", 0) == 1 and pget("mode", 2) == 4 then
       screen.level(15)
-      screen.move(30, 35)
+      screen.move(64, 24)
       screen.text_center("HELD")
     end
-  else
+    -- thin transport bar: window segment + playhead
+    local lo, hi, _ = window_bounds()
     screen.level(2)
-    screen.move(64, 30)
-    screen.text_center(COMING[pname] or "")
+    screen.move(0, 40)
+    screen.line(128, 40)
+    screen.stroke()
+    screen.level(6)
+    screen.move(lo * 127, 40)
+    screen.line(hi * 127, 40)
+    screen.stroke()
+    screen.level(15)
+    local px = clamp(play_phase, 0, 1) * 127
+    screen.move(px, 36)
+    screen.line(px, 44)
+    screen.stroke()
+  elseif pname == "TAPE" then
+    -- tape strip: recorded material as waveform (bright inside the loop),
+    -- loop handles, head needle (doubles as write head while recording)
+    local a = pget("loop_start", 0)
+    local b = pget("loop_end", 1)
+    local lo, hi = math.min(a, b), math.max(a, b)
+    local mid = (BAND_T + BAND_B) / 2
+    local half = (BAND_B - BAND_T) / 2
+    screen.level(1)
+    screen.move(0, mid)
+    screen.line(128, mid)
+    screen.stroke()
+    for x = 0, 127 do
+      local amp = twave[x + 1]
+      if amp > 0.002 then
+        local h = clamp(math.sqrt(math.min(amp * 2, 1)) * half, 1, half)
+        local nx = x / 127
+        screen.level((nx >= lo and nx <= hi) and 12 or 2)
+        screen.move(x, mid - h)
+        screen.line(x, mid + h)
+        screen.stroke()
+      end
+    end
+    screen.level(4)
+    screen.move(lo * 127, BAND_B + 2)
+    screen.line(hi * 127, BAND_B + 2)
+    screen.stroke()
+    for _, e in ipairs({ lo, hi }) do
+      screen.level(15)
+      screen.move(e * 127, BAND_T - 2)
+      screen.line(e * 127, BAND_B + 2)
+      screen.stroke()
+    end
+    screen.level(15)
+    local tx = clamp(tape_phase, 0, 1) * 127
+    screen.move(tx, BAND_T - 2)
+    screen.line(tx, BAND_B + 2)
+    screen.stroke()
+    if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+      screen.level((frame % FPS) < (FPS / 2) and 12 or 3)
+      screen.move(2, 21)
+      screen.text("rec")
+    elseif not twave_any then
+      screen.level(3)
+      screen.move(64, mid - 5)
+      screen.text_center("empty loop — K2 to record")
+    end
+    -- effective rate; reverse flips the sign live
+    local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
+    screen.level(10)
+    screen.move(127, 21)
+    screen.text_right(string.format("%+.2fx", r))
+  elseif pname == "FILTER" then
+    -- stylized response curve: cutoff on a log axis, resonance bump
+    local ft = pget("filt_type", 1)
+    local res = pget("resonance", 0)
+    local cx = clamp((math.log(pget("cutoff", 20000) / 20) / math.log(1000)) * 127, 0, 127)
+    local mid = 26
+    screen.level(8)
+    if ft == 1 then       -- LP
+      screen.move(0, mid)
+      screen.line(math.max(cx - 10, 0), mid)
+      screen.line(cx, mid - res * 10)
+      screen.line(math.min(cx + 14, 127), BAND_B)
+    elseif ft == 2 then   -- HP
+      screen.move(127, mid)
+      screen.line(math.min(cx + 10, 127), mid)
+      screen.line(cx, mid - res * 10)
+      screen.line(math.max(cx - 14, 0), BAND_B)
+    else                  -- BP
+      screen.move(math.max(cx - 26, 0), BAND_B)
+      screen.line(cx, mid - 6 - res * 6)
+      screen.line(math.min(cx + 26, 127), BAND_B)
+    end
+    screen.stroke()
+    screen.level(12)
+    screen.move(2, 21)
+    screen.text(params.lookup["filt_type"] and params:string("filt_type") or "?")
+  elseif pname == "DELAY" then
+    -- zones: readout row y<=20, viz band y24..42 — never overlapping
+    local t = pget("delay_time", 0.3)
+    local fb = pget("delay_fb", 0.3)
+    local mixv = pget("delay_mix", 0)
+    screen.level(mixv > 0 and 10 or 3)
+    screen.move(127, 20)
+    screen.text_right(string.format("mix %d%%", math.floor(mixv * 100 + 0.5)))
+    if mixv == 0 then
+      screen.level(3)
+      screen.move(0, 20)
+      screen.text("E2 opens the mix")
+    end
+    -- echo train: source tick + repeats spaced by time, decaying by feedback
+    screen.level(1)
+    screen.move(0, 42)
+    screen.line(128, 42)
+    screen.stroke()
+    screen.level(12)
+    screen.rect(4, 24, 2, 18)
+    screen.fill()
+    local x = 4
+    local lvl = 1.0
+    for i = 1, 10 do
+      x = x + t * 56
+      lvl = lvl * fb
+      if x > 125 or lvl < 0.04 then break end
+      local hh = math.max(18 * lvl, 1)
+      screen.level(math.max(math.floor(12 * lvl), 1))
+      screen.rect(x, 42 - hh, 2, hh)
+      screen.fill()
+    end
+  elseif pname == "REVERB" then
+    -- zones: readout row y<=20, viz band y24..42 — never overlapping
+    local size = pget("rev_size", 0.5)
+    local mixv = pget("rev_mix", 0)
+    screen.level(mixv > 0 and 10 or 3)
+    screen.move(127, 20)
+    screen.text_right(string.format("mix %d%%", math.floor(mixv * 100 + 0.5)))
+    if mixv == 0 then
+      screen.level(3)
+      screen.move(0, 20)
+      screen.text("E3 opens the mix")
+    end
+    -- impulse + decaying tail; tail length follows size
+    screen.level(1)
+    screen.move(0, 42)
+    screen.line(128, 42)
+    screen.stroke()
+    screen.level(12)
+    screen.rect(4, 24, 3, 18)
+    screen.fill()
+    local len = 10 + size * 110
+    local x = 10
+    while x < 10 + len and x < 126 do
+      local frac = (x - 10) / len
+      local lvl = math.floor(12 * (1 - frac))
+      if lvl < 1 then break end
+      local hh = math.max(18 * (1 - frac), 1)
+      screen.level(lvl)
+      screen.rect(x, 42 - hh, 2, hh)
+      screen.fill()
+      x = x + 4
+    end
   end
 end
 
@@ -541,7 +945,7 @@ end
 function redraw()
   screen.clear()
 
-  -- header: page name, ALT, page dots, rec/freeze status
+  -- header: page name, ALT, page dots, status flags
   screen.level(15)
   screen.move(0, 8)
   screen.text(PAGES[page])
@@ -558,8 +962,10 @@ function redraw()
   local status = {}
   if pget("rec", 0) == 1 then status[#status + 1] = "REC" end
   if pget("freeze", 0) == 1 then status[#status + 1] = "FZ" end
+  if pget("tape_rec", 0) == 1 then status[#status + 1] = "TR" end
+  if pget("tape_freeze", 0) == 1 then status[#status + 1] = "TFZ" end
   if #status > 0 then
-    -- REC blinks at ~1hz so an armed recorder is impossible to miss
+    -- blinks at ~1hz so an armed recorder is impossible to miss
     screen.level((frame % FPS) < (FPS / 2) and 15 or 4)
     screen.move(128, 8)
     screen.text_right(table.concat(status, " "))

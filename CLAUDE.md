@@ -6,13 +6,20 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S0 — PASSED on device (2026-06-10) → next: S1**
+## CURRENT STAGE: **S4 — filter + delay + reverb, on-device gate pending**
 
-S0 (no-op engine + Lua control shell) loads clean on hardware: engine alloc completes,
-command registered, `init()` runs, MIX page draws. The DSP is brought up one stage at a
-time on hardware (S1 → S4). Do **not** write a later stage's code until the previous
-stage has passed its on-device gate (see `SPEC/spec.md`). The S0 bring-up diagnostics
-(milestone prints) stay in until S1 is gated — they cost nothing and saved the day once.
+S1 PASSED, S2 PASSED (stretch modes), S3 PASSED with UX iterations (tape looper:
+one-button take workflow, K1+K3 clear). S4 adds the FX chain to the io synth's wet
+path: LP/HP/BP filter, feedback delay (soft-clipped loop), FreeVerb — each FX with
+its own dry/wet. Bring-up diagnostics (milestone prints, missing-poll warnings)
+stay in — they cost nothing and have saved the day repeatedly.
+
+**Engine deploy ritual (every time the .sc changes, no exceptions):**
+1. replace file → verify on-disk with a REPL fingerprint grep
+2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
+3. load script → check `Engine.register_commands; count:` in maiden matches the
+   expected fingerprint (S2 = 22, S4 = **30**). Wrong count = old engine still live.
+Lua-only changes skip all this: save + reload the script.
 
 ---
 

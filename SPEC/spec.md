@@ -177,7 +177,13 @@ moving. No xruns.
 
 ## 7. Stage 2 — TIME-STRETCH MODES
 
-`mode = GRAIN | WARP | PV` selects the playback algorithm on the **same** voice/buffer/window.
+`mode = OFF | GRAIN | WARP | PV` selects the playback algorithm on the **same**
+buffer/window. The engine is split: a persistent io synth (input, record head with
+resample feedback, dry/wet, output) + one playback synth spawned/freed per mode —
+only the active algorithm costs CPU, and OFF frees the SC voice entirely (the
+"engine on/off" control; the S3 softcut tape path is independent and parallel).
+`scan` doubles as the stretch rate: it is the window pointer speed in every mode,
+and pitch stays independent in GRAIN/WARP.
 
 - **GRAIN** — the S1 cloud.
 - **WARP** — `Warp1.ar(2, buf, pointer, freqScale, windowSize, env, overlaps, windowRandRatio,
