@@ -6,11 +6,13 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S0 — loadable skeleton**
+## CURRENT STAGE: **S0 — PASSED on device (2026-06-10) → next: S1**
 
-S0 ships a no-op engine + a Lua control shell that loads with no LOADING hang. The DSP is
-brought up one stage at a time on hardware (S1 → S4). Do **not** write a later stage's code
-until the previous stage has passed its on-device gate (see `SPEC/spec.md`).
+S0 (no-op engine + Lua control shell) loads clean on hardware: engine alloc completes,
+command registered, `init()` runs, MIX page draws. The DSP is brought up one stage at a
+time on hardware (S1 → S4). Do **not** write a later stage's code until the previous
+stage has passed its on-device gate (see `SPEC/spec.md`). The S0 bring-up diagnostics
+(milestone prints) stay in until S1 is gated — they cost nothing and saved the day once.
 
 ---
 
@@ -97,6 +99,31 @@ xruns past ~60%).
   stuck on "loading" or goes black, scroll maiden below `<ok>` for the Lua traceback.
 - **`params:add_group` id must not collide with any param id.** Use the 3-arg form with a
   distinct id: `params:add_group("grp_mix", "mix", n)`.
+- **System param ids are reserved — the system shares the script paramset.** Adding a param
+  with a system id (e.g. `tape_level`, owned by the TAPE deck) prints "refusing to clobber"
+  and the param is silently NOT added — which also desyncs the surrounding `add_group`
+  count. Reserved (verified on hardware): `output_level, input_level, monitor_level,
+  engine_level, softcut_level, tape_level, monitor_mode, headphone_gain, reverb, rev_*,
+  compressor, comp_*, cut_input_*, clock_*, link_*`. mangler uses `cut_level` for the
+  softcut path's level.
+- **The ~60 system params (LEVELS/REVERB/COMPRESSOR/SOFTCUT/CLOCK) appearing in
+  `params.count` is normal** — they are not leftovers from another script.
+- **`context.in_b` is an ARRAY of two mono busses** (`in_b[0].index`, `in_b[1].index`);
+  `out_b` is one stereo bus. `context.in_b.index` throws doesNotUnderstand inside alloc's
+  fork → the doneCallback never fires → matron waits forever → the script's `init()` is
+  never called → stuck on "loading" with NO error in the matron tab.
+- **SC errors print in maiden's SC tab, not the matron tab.** A script hanging on
+  "loading" with a clean matron log means: check the SC tab. The load chain is:
+  script file runs → `engine.load(name, Script.init)` → SC alloc → doneCallback →
+  `init()` → `norns.init_done` → screen handoff. A silent break before `init()` is
+  almost always the engine failing in alloc.
+- **Editing a `.sc` file requires SYSTEM > RESTART** (sclang must recompile the class
+  library); reloading the script is not enough.
+- **`clock.lua:62 bad argument #1 to 'resume' (thread expected)`** is a system-level race
+  (a clock timer fires for an already-dead coroutine, often on script reload) and wedges
+  clock state until restart. It is not specific to one script, but: keep mangler's clock
+  usage minimal, always `clock.cancel` in `cleanup`, and when this error appears, restart
+  before drawing conclusions about whichever script loaded last. S0 uses no clocks at all.
 
 ---
 

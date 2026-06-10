@@ -79,6 +79,13 @@ long-press → assign CC), saved per-script in `data/mangler/mangler.pmap`.
 - mode selects → `add_option`
 - toggles (freeze, reverse, rec-arm) → `add_binary` (key-toggleable **and** MIDI-mappable)
 
+**Reserved ids:** norns system params share the script paramset. Never reuse their ids —
+on collision the system refuses the add ("refusing to clobber"), silently leaving the
+script param missing (and desyncing any `add_group` count). Verified reserved on hardware:
+`output_level, input_level, monitor_level, engine_level, softcut_level, tape_level,
+monitor_mode, headphone_gain, reverb, rev_*, compressor, comp_*, cut_input_*, clock_*,
+link_*`. This is why the softcut path's level is `cut_level`, not `tape_level`.
+
 Params are grouped (`add_group`) per section so the PARAMS menu mirrors the pages.
 
 ---
@@ -91,9 +98,10 @@ and the control shell, before any DSP exists.
 ### `lib/Engine_Mangler.sc`
 - `Engine_Mangler : CroneEngine` with `*new { |context, doneCallback| ^super.new(...) }`.
 - `alloc`: build a trivial **stereo pass-through** SynthDef
-  `\mangler_io` = `In.ar(\in.kr, 2)` → soft level → `Out.ar(\out.kr, sig)`; `.add`;
+  `\mangler_io` = `[In.ar(in1,1), In.ar(in2,1)]` → soft level → `Out.ar(out, sig)`; `.add`;
   `context.server.sync`; start it in `context.xg` with
-  `\in, context.in_b.index, \out, context.out_b.index`.
+  `in1/in2 = context.in_b[0].index / in_b[1].index` (in_b is an ARRAY of two mono
+  busses) and `out = context.out_b.index` (one stereo bus).
 - one no-op command (`addCommand("noop", "f", { })`) to prove the command channel.
 - `free { synth.free }`.
 
@@ -118,7 +126,7 @@ and the control shell, before any DSP exists.
 | `mix`        | control      | 0..1 (grain/stretch ↔ tape) | MIX |
 | `out_level`  | control      | 0..1.5                  | MIX  |
 | `sc_level`   | control      | 0..1 (SC voice level)   | MIX  |
-| `tape_level` | control      | 0..1 (softcut level)    | MIX  |
+| `cut_level`  | control      | 0..1 (softcut level)    | MIX  |
 
 ### S0 gate (on-device)
 `luac5.3 -p mangler.lua` passes → deploy → `;restart` → loads to MIX page, **no LOADING
@@ -259,7 +267,7 @@ Reverb tail audible. All under CPU budget with a stretch mode active + tape runn
 
 | page    | E2 / E2-alt              | E3 / E3-alt             | K2            | K3            |
 |---------|--------------------------|-------------------------|---------------|---------------|
-| MIX     | `mix` / `out_level`      | `sc_level` / `tape_level`| —            | —             |
+| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| —             | —             |
 | REC     | `rec_level` / `pre_level`| `dry_wet` / `envscale`  | `rec` toggle  | `freeze` toggle |
 | WINDOW  | `pos_start` / `scan`     | `pos_end` / `pos_jitter`| reset window  | —             |
 | GRAIN   | `size` / `spread`        | `density` / `pan`       | —             | `pitch` reset |
