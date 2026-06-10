@@ -19,11 +19,14 @@ Engine_Mangler : CroneEngine {
 	}
 
 	alloc {
-		// trivial stereo pass-through: ADC bus -> level -> crone output bus.
+		// trivial stereo pass-through: ADC busses -> level -> crone output bus.
+		// NB: context.in_b is an ARRAY of two mono busses (in_b[0], in_b[1]);
+		// out_b is one stereo bus. Calling .index on the array kills alloc,
+		// the doneCallback never fires, and the script hangs on "loading".
 		SynthDef(\mangler_io, {
-			arg in, out, level = 1.0, lag = 0.05;
+			arg in1, in2, out, level = 1.0, lag = 0.05;
 			var sig;
-			sig = In.ar(in, 2);
+			sig = [In.ar(in1, 1), In.ar(in2, 1)];
 			sig = sig * Lag.kr(level, lag);
 			Out.ar(out, sig);
 		}).add;
@@ -31,7 +34,8 @@ Engine_Mangler : CroneEngine {
 		context.server.sync;
 
 		synth = Synth.new(\mangler_io, [
-			\in, context.in_b.index,
+			\in1, context.in_b[0].index,
+			\in2, context.in_b[1].index,
 			\out, context.out_b.index,
 		], context.xg);
 

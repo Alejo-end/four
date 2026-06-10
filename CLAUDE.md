@@ -87,6 +87,19 @@ xruns past ~60%).
 
 ---
 
+## norns Lua API gotchas (learned on hardware)
+
+- **`params:get_name(i)` takes a numeric index ONLY** (`self.params[i]`, no id lookup).
+  With a string id it indexes nil and throws. Use `params:lookup_param(id).name`.
+  (`params:string / get / set / delta` DO accept string ids.)
+- **An error inside `redraw()` shows as a frozen/black screen, not a crash.** The script
+  still prints `<ok>`; the display just never reaches `screen.update()`. If the screen is
+  stuck on "loading" or goes black, scroll maiden below `<ok>` for the Lua traceback.
+- **`params:add_group` id must not collide with any param id.** Use the 3-arg form with a
+  distinct id: `params:add_group("grp_mix", "mix", n)`.
+
+---
+
 ## Workflow
 
 ```sh
