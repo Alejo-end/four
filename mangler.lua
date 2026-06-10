@@ -11,8 +11,8 @@
 -- K2 : primary action
 -- K3 : secondary action
 --
--- STAGE 1 — record + granular + window. REC/WINDOW/GRAIN pages are live;
--- STRETCH/TAPE/FILTER/DELAY/REVERB are placeholders for later stages.
+-- STAGE 2 — record + granular + window + time-stretch modes.
+-- TAPE/FILTER/DELAY/REVERB are placeholders for later stages.
 -- See SPEC/spec.md.
 
 engine.name = "Mangler"
@@ -63,7 +63,7 @@ local ENC_MAP = {
   REC     = { "rec_level", "pre_level", "dry_wet", "resample" },
   WINDOW  = { "pos_start", "scan", "pos_end", "pos_jitter" },
   GRAIN   = { "size", "spread", "density", "grain_level" },
-  STRETCH = { nil, nil, nil, nil },
+  STRETCH = { "scan", "pitch", "warp_window", "warp_rand" },
   TAPE    = { nil, nil, nil, nil },
   FILTER  = { nil, nil, nil, nil },
   DELAY   = { nil, nil, nil, nil },
@@ -72,12 +72,12 @@ local ENC_MAP = {
 
 -- per-page key hints + placeholder stage labels
 local KEY_HINTS = {
-  REC    = "K2 rec / K3 freeze",
-  WINDOW = "K2 reset window",
-  GRAIN  = "K3 pitch reset",
+  REC     = "K2 rec / K3 freeze",
+  WINDOW  = "K2 reset window",
+  GRAIN   = "K3 pitch reset",
+  STRETCH = "K2 mode / K3 pv freeze",
 }
 local COMING = {
-  STRETCH = "time-stretch modes — stage 2",
   TAPE    = "softcut tape — stage 3",
   FILTER  = "lp/hp/bp filter — stage 4",
   DELAY   = "delay — stage 4",
@@ -130,6 +130,11 @@ local KEY_MAP = {
   },
   GRAIN = {
     [3] = function() params:set("pitch", 1.0) end,
+  },
+  STRETCH = {
+    -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
+    [2] = function() params:set("mode", (params:get("mode") % 4) + 1) end,
+    [3] = function() ptoggle("pv_freeze") end,
   },
 }
 
@@ -218,6 +223,23 @@ local function init_params()
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+
+  params:add_group("grp_stretch", "stretch", 5)
+  -- mode swaps the playback synth in the engine: only the active algorithm
+  -- costs CPU; OFF frees the SC voice entirely
+  params:add_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV" }, 2)
+  params:set_action("mode", function(v)
+    if engine.mode then engine.mode(v - 1) end
+  end)
+  add_eng_control("warp_window", "warp window",
+    controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
+  params:add_number("warp_overlaps", "warp overlaps", 1, 8, 4)
+  params:set_action("warp_overlaps", function(v)
+    if engine.warp_overlaps then engine.warp_overlaps(v) end
+  end)
+  add_eng_control("warp_rand", "warp rand",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_binary("pv_freeze", "pv freeze")
 
   params:bang()
 end
@@ -474,6 +496,24 @@ local function draw_body()
   elseif pname == "GRAIN" then
     draw_strip(false)
     draw_particles()
+  elseif pname == "STRETCH" then
+    draw_strip(false)
+    if pget("mode", 2) == 2 then draw_particles() end
+    -- the stretch, unmissable: big speed readout + active algorithm
+    local m = params.lookup["mode"] and params:string("mode") or "?"
+    screen.level(10)
+    screen.move(30, 26)
+    screen.text_center(m)
+    screen.font_size(16)
+    screen.level(15)
+    screen.move(88, 31)
+    screen.text_center(string.format("%.2fx", pget("scan", 1)))
+    screen.font_size(8)
+    if pget("pv_freeze", 0) == 1 and pget("mode", 2) == 4 then
+      screen.level(15)
+      screen.move(30, 35)
+      screen.text_center("HELD")
+    end
   else
     screen.level(2)
     screen.move(64, 30)
