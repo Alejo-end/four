@@ -84,17 +84,6 @@ local ENC_MAP = {
   REVERB  = { "rev_size", nil, "rev_mix", nil },
 }
 
--- per-page key hints + placeholder stage labels
-local KEY_HINTS = {
-  REC     = "K2 rec / K3 freeze",
-  WINDOW  = "K2 reset window",
-  GRAIN   = "K3 pitch reset",
-  STRETCH = "K2 mode / K3 pv freeze",
-  TAPE    = "K2 rec  K3 fz  (+K1 rev/clear)",
-  FILTER  = "K2 filter type",
-  DELAY   = "K3 kill feedback",
-}
-
 -- ============================================================================
 -- helpers
 -- ============================================================================
@@ -593,12 +582,145 @@ end
 -- ============================================================================
 -- screen
 -- ============================================================================
--- layout: header y<=9 (page name, ALT, page dots, status flags)
---         body  y12..44 (per-page visualization)
---         hints y48 (key actions, dim)
---         params y53..62 (two name/value cells for E2/E3)
+-- layout: header y0..11  (title, ALT tag, page dots, status flags)
+--         body   y15..40 (per-page visualization, BAND_T..BAND_B)
+--         footer y44..63 (name+value readouts, then the hardware row:
+--                         E2 hex dial . K2 pill . K3 pill . E3 hex dial —
+--                         mirroring the physical panel left to right)
 
-local BAND_T, BAND_B = 15, 41  -- visualization band
+local BAND_T, BAND_B = 15, 40
+
+-- per-page key pills: { k2, k3, k2_alt, k3_alt }. each def is
+-- { label, active_fn }; when active_fn returns true the pill draws inverted
+-- (filled box, knocked-out text = engaged, like a lit hardware button).
+-- alt defs fall back to the un-alt def; nil draws a dim "--" pill so the
+-- footer geometry never changes between pages.
+local function pon(id)
+  return function() return pget(id, 0) == 1 end
+end
+
+local KEY_LABELS = {
+  REC     = { { "REC", pon("rec") }, { "FRZ", pon("freeze") } },
+  WINDOW  = { { "RST" }, nil },
+  GRAIN   = { nil, { "PT=1" } },
+  STRETCH = { { "MODE" }, { "PVFZ", pon("pv_freeze") } },
+  TAPE    = { { "REC", pon("tape_rec") }, { "FRZ", pon("tape_freeze") },
+              { "REV", pon("tape_reverse") }, { "CLR" } },
+  FILTER  = { { "TYPE" }, nil },
+  DELAY   = { nil, { "KILL" } },
+}
+
+local function key_def(n)
+  local defs = KEY_LABELS[PAGES[page]]
+  if not defs then return nil end
+  local i = (n == 2) and 1 or 2
+  if alt and defs[i + 2] then return defs[i + 2] end
+  return defs[i]
+end
+
+-- normalized 0..1 position of a param, for the dial pointer. bipolar
+-- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
+local function param_norm(id)
+  if not (id and params.lookup[id]) then return nil end
+  local p = params:lookup_param(id)
+  local v = params:get(id)
+  if p.controlspec then
+    return clamp(p.controlspec:unmap(v), 0, 1)
+  elseif p.count then
+    return p.count > 1 and (v - 1) / (p.count - 1) or 0
+  elseif p.min and p.max and p.max > p.min then
+    return (v - p.min) / (p.max - p.min)
+  end
+  return clamp(v, 0, 1)
+end
+
+-- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees.
+-- a hexagon renders crisp at this size where a circle goes lumpy.
+local function draw_hex_dial(cx, cy, r, val)
+  screen.level(4)
+  for i = 0, 6 do
+    local a = -math.pi / 2 + i * math.pi / 3
+    local x, y = cx + math.cos(a) * r, cy + math.sin(a) * r
+    if i == 0 then screen.move(x, y) else screen.line(x, y) end
+  end
+  screen.stroke()
+  if val then
+    local a = math.pi * 0.75 + clamp(val, 0, 1) * math.pi * 1.5
+    screen.level(15)
+    screen.move(cx, cy)
+    screen.line(cx + math.cos(a) * (r - 2), cy + math.sin(a) * (r - 2))
+    screen.stroke()
+  end
+end
+
+-- key pill: outline = idle, inverted = engaged. `dim` for unassigned keys.
+local function draw_pill(cx, y, label, on, dim)
+  local w = screen.text_extents(label) + 6
+  local x = math.floor(cx - w / 2)
+  if on then
+    screen.level(15)
+    screen.rect(x, y, w, 9)
+    screen.fill()
+    screen.level(0)
+    screen.move(cx, y + 7)
+    screen.text_center(label)
+  else
+    screen.level(dim and 1 or 4)
+    screen.rect(x + 0.5, y + 0.5, w, 9)
+    screen.stroke()
+    screen.level(dim and 2 or 10)
+    screen.move(cx, y + 7)
+    screen.text_center(label)
+  end
+end
+
+-- name (dim) + value (bright) inline readout for one encoder
+local function draw_enc_readout(n, right)
+  local id = enc_param(n)
+  if not (id and params.lookup[id]) then
+    screen.level(2)
+    screen.move(right and 128 or 0, 49)
+    if right then screen.text_right("E" .. n .. " --")
+    else screen.text("E" .. n .. " --") end
+    return
+  end
+  local name = string.upper(string.sub(params:lookup_param(id).name, 1, 7))
+  local val = params:string(id)
+  if right then
+    screen.level(15)
+    screen.move(128, 49)
+    screen.text_right(val)
+    screen.level(4)
+    screen.move(128 - screen.text_extents(val) - 3, 49)
+    screen.text_right(name)
+  else
+    screen.level(4)
+    screen.move(0, 49)
+    screen.text(name)
+    screen.level(15)
+    screen.move(screen.text_extents(name) + 3, 49)
+    screen.text(val)
+  end
+end
+
+-- the shared footer: readout row, then dial . pill . pill . dial,
+-- laid out in the same order as the physical E2 K2 K3 E3
+local function draw_footer()
+  draw_enc_readout(2, false)
+  draw_enc_readout(3, true)
+  draw_hex_dial(6, 57, 6, param_norm(enc_param(2)))
+  draw_hex_dial(121, 57, 6, param_norm(enc_param(3)))
+  for n = 2, 3 do
+    local def = key_def(n)
+    local cx = (n == 2) and 52 or 76
+    if def then
+      local on = (def[2] and def[2]()) or held[n] == true
+      draw_pill(cx, 52, def[1], on, false)
+    else
+      draw_pill(cx, 52, "--", false, true)
+    end
+  end
+end
 
 -- buffer strip: waveform of recorded material (bright inside the window),
 -- window underline, playhead needle, write-head ticks
@@ -722,10 +844,10 @@ local function draw_body()
       end
     end
     screen.level(3)
-    screen.move(0, 44)
+    screen.move(0, 41)
     screen.text("monitor " ..
       (params.lookup["monitor_level"] and params:string("monitor_level") or "?"))
-    screen.move(128, 44)
+    screen.move(128, 41)
     screen.text_right("phones " ..
       (params.lookup["headphone_gain"] and params:string("headphone_gain") or "?"))
   elseif pname == "REC" then
@@ -740,10 +862,10 @@ local function draw_body()
     end
   elseif pname == "WINDOW" then
     draw_strip(true)
-    -- scan direction + speed, right-aligned on the hint row
+    -- scan direction + speed, top-right inside the band
     local scan = pget("scan", 1)
     screen.level(3)
-    screen.move(128, 49)
+    screen.move(126, BAND_T + 6)
     screen.text_right((scan < 0 and "<< " or ">> ") .. string.format("%.2fx", scan))
   elseif pname == "GRAIN" then
     draw_strip(false)
@@ -768,17 +890,17 @@ local function draw_body()
     -- thin transport bar: window segment + playhead
     local lo, hi, _ = window_bounds()
     screen.level(2)
-    screen.move(0, 40)
-    screen.line(128, 40)
+    screen.move(0, 38)
+    screen.line(128, 38)
     screen.stroke()
     screen.level(6)
-    screen.move(lo * 127, 40)
-    screen.line(hi * 127, 40)
+    screen.move(lo * 127, 38)
+    screen.line(hi * 127, 38)
     screen.stroke()
     screen.level(15)
     local px = clamp(play_phase, 0, 1) * 127
-    screen.move(px, 36)
-    screen.line(px, 44)
+    screen.move(px, 34)
+    screen.line(px, 42)
     screen.stroke()
   elseif pname == "TAPE" then
     -- tape strip: recorded material as waveform (bright inside the loop),
@@ -925,69 +1047,59 @@ local function draw_body()
   end
 end
 
-local function enc_cell(x, n)
-  local id = enc_param(n)
-  screen.move(x, 55)
-  -- params.lookup guard: a missing param must never crash redraw — an error
-  -- thrown here kills the menu->script screen handoff and wedges the whole UI
-  if id and params.lookup[id] then
-    screen.level(4)
-    screen.text("E" .. n .. " " .. string.sub(params:lookup_param(id).name, 1, 11))
-    screen.move(x, 63)
-    screen.level(15)
-    screen.text(params:string(id))
-  else
-    screen.level(2)
-    screen.text("E" .. n .. " --")
-  end
-end
-
 function redraw()
   screen.clear()
+  screen.font_face(1)
+  screen.font_size(8)
 
-  -- header: page name, ALT, page dots, status flags
+  -- header: title, ALT tag (inverted), page dots, status flags
   screen.level(15)
   screen.move(0, 8)
   screen.text(PAGES[page])
   if alt then
+    local ax = screen.text_extents(PAGES[page]) + 4
+    local aw = screen.text_extents("ALT") + 5
     screen.level(15)
-    screen.move(46, 8)
+    screen.rect(ax, 1, aw, 8)
+    screen.fill()
+    screen.level(0)
+    screen.move(ax + 3, 8)
     screen.text("ALT")
   end
+
+  -- page dots, top-right row: current page is a 3x3 block, others 1px
   for i = 1, #PAGES do
-    screen.level(i == page and 15 or 2)
-    screen.rect(62 + (i - 1) * 5, 4, 2, 2)
+    local x = 128 - (#PAGES - i + 1) * 5 + 1
+    if i == page then
+      screen.level(15)
+      screen.rect(x - 1, 1, 3, 3)
+    else
+      screen.level(2)
+      screen.rect(x, 2, 1, 1)
+    end
     screen.fill()
   end
+
+  -- status flags: blink at ~1hz under the dots, so an armed recorder is
+  -- impossible to miss from any page
   local status = {}
   if pget("rec", 0) == 1 then status[#status + 1] = "REC" end
   if pget("freeze", 0) == 1 then status[#status + 1] = "FZ" end
   if pget("tape_rec", 0) == 1 then status[#status + 1] = "TR" end
   if pget("tape_freeze", 0) == 1 then status[#status + 1] = "TFZ" end
   if #status > 0 then
-    -- blinks at ~1hz so an armed recorder is impossible to miss
     screen.level((frame % FPS) < (FPS / 2) and 15 or 4)
-    screen.move(128, 8)
+    screen.move(128, 10)
     screen.text_right(table.concat(status, " "))
   end
+
   screen.level(1)
-  screen.move(0, 11)
-  screen.line(128, 11)
+  screen.move(0, 12)
+  screen.line(128, 12)
   screen.stroke()
 
   draw_body()
-
-  -- key hints
-  local hint = KEY_HINTS[PAGES[page]]
-  if hint then
-    screen.level(2)
-    screen.move(0, 49)
-    screen.text(hint)
-  end
-
-  -- the two encoder cells
-  enc_cell(0, 2)
-  enc_cell(66, 3)
+  draw_footer()
 
   screen.update()
 end
