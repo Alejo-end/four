@@ -50,6 +50,11 @@ local redraw_clock
 
 local TAPE_LEN = 60        -- seconds of softcut buffer used by the tape loop
 
+local BAND_T, BAND_B = 15, 40  -- visualization band (screen + particle bounds)
+
+local reel_angle = 0           -- TAPE page reel rotation, driven by tape rate
+local flash_id, flash_until = nil, 0  -- transient top-right value readout
+
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
 local wave = {}
@@ -116,6 +121,26 @@ local function window_bounds()
   local b = pget("pos_end", 1)
   local lo, hi = math.min(a, b), math.max(a, b)
   return lo, hi, math.max(hi - lo, 0.001)
+end
+
+-- zoom-aware fine control: window/loop edge params scale their encoder
+-- deltas by the current span, so steps shrink as the region tightens —
+-- a wide-open window moves fast, a tight loop nudges by milliseconds.
+-- (combined with the 0.002 quantum on these specs: ~10ms at the finest.)
+local FINE_IDS = { pos_start = "win", pos_end = "win",
+                   loop_start = "loop", loop_end = "loop" }
+
+local function fine_delta(id, d)
+  local kind = FINE_IDS[id]
+  if not kind then return d end
+  local span
+  if kind == "win" then
+    local _, _, s = window_bounds()
+    span = s
+  else
+    span = math.abs(pget("loop_end", 1) - pget("loop_start", 0))
+  end
+  return d * clamp(math.max(span, 0.001) * 4, 0.08, 1)
 end
 
 -- ============================================================================
@@ -196,8 +221,9 @@ local function init_tape()
   update_tape_rec()
   update_tape_loop()
   update_mix()
-  -- tape head position events drive the TAPE page needle
-  sc.phase_quant(1, 0.1)
+  -- tape head position events drive the TAPE page needle AND the loop
+  -- snap points — 25ms quant keeps snapped loops tight (0.1 was audible)
+  sc.phase_quant(1, 0.025)
   sc.event_phase(function(v, pos)
     if v == 1 then tape_phase = pos / TAPE_LEN end
   end)
@@ -218,55 +244,75 @@ local function gesture_release(n)
   end
 end
 
--- page key actions (K2/K3 on key-down). all of them drive params, never
--- locals, so MIDI mappings stay in lockstep with the keys.
-local KEY_MAP = {
+-- page key actions + footer pill labels, ONE table: k2/k3 (and k2_alt/k3_alt
+-- while K1 is held) each carry the pill label, an optional `lit` param id
+-- (pill draws inverted while it reads 1), and the action. behavior and UI
+-- come from the same definition, so they can never drift apart.
+-- all actions drive params, never locals, so MIDI mappings stay in lockstep.
+local KEYS = {
   REC = {
-    [2] = function() ptoggle("rec") end,
-    [3] = function() ptoggle("freeze") end,
+    k2 = { label = "REC", lit = "rec",
+      act = function() ptoggle("rec") end },
+    k3 = { label = "FRZ", lit = "freeze",
+      act = function() ptoggle("freeze") end },
   },
   WINDOW = {
-    [2] = function() params:set("pos_start", 0) params:set("pos_end", 1) end,
+    k2 = { label = "RST",
+      act = function() params:set("pos_start", 0) params:set("pos_end", 1) end },
   },
   GRAIN = {
-    [3] = function() params:set("pitch", 1.0) end,
+    k3 = { label = "PT=1",
+      act = function() params:set("pitch", 1.0) end },
   },
   STRETCH = {
     -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
-    [2] = function() params:set("mode", (params:get("mode") % 4) + 1) end,
-    [3] = function() ptoggle("pv_freeze") end,
+    k2 = { label = "MODE",
+      act = function() params:set("mode", (params:get("mode") % 4) + 1) end },
+    k3 = { label = "PVFZ", lit = "pv_freeze",
+      act = function() ptoggle("pv_freeze") end },
   },
   TAPE = {
-    -- K2: toggle tape record; with K1 (alt) held it's momentary reverse
-    [2] = function()
-      if alt then
+    k2 = { label = "REC", lit = "tape_rec",
+      act = function() ptoggle("tape_rec") end },
+    k3 = { label = "FRZ", lit = "tape_freeze",
+      act = function() ptoggle("tape_freeze") end },
+    -- alt layer: momentary reverse + clear
+    k2_alt = { label = "REV", lit = "tape_reverse",
+      act = function()
         params:set("tape_reverse", 1)
         held_gesture[2] = "tape_reverse"
-      else
-        ptoggle("tape_rec")
-      end
-    end,
-    [3] = function()
-      if alt then
+      end },
+    k3_alt = { label = "CLR",
+      act = function()
         -- clear tape: wipe the loop and start over
         sc.buffer_clear()
         for i = 1, 128 do twave[i] = 0 end
+        twave_bin = 0
         twave_any = false
         params:set("tape_freeze", 0)
         params:set("loop_start", 0)
         params:set("loop_end", 1)
-      else
-        ptoggle("tape_freeze")
-      end
-    end,
+      end },
   },
   FILTER = {
-    [2] = function() params:set("filt_type", (params:get("filt_type") % 3) + 1) end,
+    k2 = { label = "TYPE",
+      act = function() params:set("filt_type", (params:get("filt_type") % 3) + 1) end },
   },
   DELAY = {
-    [3] = function() params:set("delay_fb", 0) end,
+    k3 = { label = "KILL",
+      act = function() params:set("delay_fb", 0) end },
   },
 }
+
+-- the key def addressed by key n on the current page, alt-aware; alt falls
+-- back to the un-alt def so a page needn't define both layers
+local function key_def(n)
+  local defs = KEYS[PAGES[page]]
+  if not defs then return nil end
+  local base = (n == 2) and "k2" or "k3"
+  if alt then return defs[base .. "_alt"] or defs[base] end
+  return defs[base]
+end
 
 -- ============================================================================
 -- params  (single source of truth: keys, encoders, and MIDI all drive these)
@@ -319,6 +365,14 @@ local function init_params()
     elseif rec_phase > rec_arm_phase + 0.005 then
       params:set("pos_start", rec_arm_phase)
       params:set("pos_end", rec_phase)
+    elseif rec_phase < rec_arm_phase - 0.005 then
+      -- the write head wrapped past the buffer end mid-take. a wrapped
+      -- window (start > end) would be SORTED into the wrong slice by
+      -- window_bounds, so fall back to the whole buffer — the take is in
+      -- there, just split across the seam. (proper wrap-around windows
+      -- need engine support.)
+      params:set("pos_start", 0)
+      params:set("pos_end", 1)
     end
   end)
   add_eng_control("rec_level", "rec level",
@@ -332,10 +386,15 @@ local function init_params()
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
   params:add_group("grp_window", "window", 4)
-  add_eng_control("pos_start", "win start",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  add_eng_control("pos_end", "win end",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s
+  -- buffer: way too coarse to set a loop. 0.002 base + fine_delta's span
+  -- scaling in enc() gets down to ~10ms nudges on a tight window.
+  local pos_start_spec = controlspec.new(0, 1, "lin", 0, 0.0, "")
+  pos_start_spec.quantum = 0.002
+  add_eng_control("pos_start", "win start", pos_start_spec)
+  local pos_end_spec = controlspec.new(0, 1, "lin", 0, 1.0, "")
+  pos_end_spec.quantum = 0.002
+  add_eng_control("pos_end", "win end", pos_end_spec)
   add_eng_control("scan", "scan rate",
     controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
   add_eng_control("pos_jitter", "jitter",
@@ -389,6 +448,11 @@ local function init_params()
       params:set("loop_start", tape_arm_phase)
       params:set("loop_end", tape_phase)
       tape_set(function(vc) sc.position(vc, tape_arm_phase * TAPE_LEN) end)
+    elseif tape_phase < tape_arm_phase - 0.005 then
+      -- head wrapped past the tape end mid-take: softcut loops can't cross
+      -- the seam, so keep the full tape rather than snapping a wrong slice
+      params:set("loop_start", 0)
+      params:set("loop_end", 1)
     end
     update_tape_rec()
   end)
@@ -397,11 +461,14 @@ local function init_params()
   params:set_action("tape_rate", update_tape_rate)
   params:add_binary("tape_reverse", "tape reverse", "momentary", 0)
   params:set_action("tape_reverse", update_tape_rate)
-  params:add_control("loop_start", "loop start",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- same fine quantum + span-scaled deltas as the window edges
+  local loop_start_spec = controlspec.new(0, 1, "lin", 0, 0.0, "")
+  loop_start_spec.quantum = 0.002
+  params:add_control("loop_start", "loop start", loop_start_spec)
   params:set_action("loop_start", update_tape_loop)
-  params:add_control("loop_end", "loop end",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  local loop_end_spec = controlspec.new(0, 1, "lin", 0, 1.0, "")
+  loop_end_spec.quantum = 0.002
+  params:add_control("loop_end", "loop end", loop_end_spec)
   params:set_action("loop_end", update_tape_loop)
   params:add_control("tape_pre", "tape overdub",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
@@ -438,6 +505,27 @@ local function init_params()
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
+  -- PSETs persist the tape audio too: PARAMS > PSET > SAVE writes the
+  -- softcut buffers (L=buf1, R=buf2, matching init_tape's routing) next to
+  -- the pset; LOAD reads them back, DELETE cleans up. so "save my current
+  -- state and load it again" is one menu action. the granular engine's
+  -- record buffer would need a matching save command on the SC side to
+  -- round-trip as well — until then, only the tape survives a restart.
+  params.action_write = function(filename, name, number)
+    sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
+      0, TAPE_LEN)
+  end
+  params.action_read = function(filename, silent, number)
+    local path = norns.state.data .. "tape-" .. number .. ".wav"
+    if util.file_exists(path) then
+      sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
+      twave_any = true
+    end
+  end
+  params.action_delete = function(filename, name, number)
+    os.remove(norns.state.data .. "tape-" .. number .. ".wav")
+  end
+
   params:bang()
 end
 
@@ -445,17 +533,32 @@ end
 -- visuals: waveform bins + grain particles
 -- ============================================================================
 
+-- paint amplitude into display bins between the last-seen head position and
+-- the current one, walking the SHORTER way around the (circular) buffer —
+-- so bins skipped between frames at high rates get filled, wrap-around is
+-- seamless, and reverse playback paints in the right direction. entering a
+-- fresh bin, previous content survives by `pre` (the overdub picture).
+local function paint_bins(bins, last, bin, amp, pre)
+  if last == 0 or last == bin then
+    bins[bin] = math.max(bins[bin], amp)
+    return bin
+  end
+  local fwd = (bin - last) % 128
+  local bwd = (last - bin) % 128
+  local step = (fwd <= bwd) and 1 or -1
+  local b = last
+  repeat
+    b = ((b - 1 + step) % 128) + 1
+    bins[b] = math.max(bins[b] * pre, amp)
+  until b == bin
+  return bin
+end
+
 -- track the buffer's contents as the write head passes over it
 local function update_wave()
   if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
     local bin = math.floor(clamp(rec_phase, 0, 0.999) * 128) + 1
-    if bin ~= wave_bin then
-      -- entering a fresh bin: previous content survives by the overdub amount
-      wave[bin] = math.max(wave[bin] * pget("pre_level", 0), rec_amp)
-      wave_bin = bin
-    else
-      wave[bin] = math.max(wave[bin], rec_amp)
-    end
+    wave_bin = paint_bins(wave, wave_bin, bin, rec_amp, pget("pre_level", 0))
   end
 end
 
@@ -466,12 +569,7 @@ local function update_tape_wave()
     local bin = math.floor(clamp(tape_phase, 0, 0.999) * 128) + 1
     local a = math.max(amp_in[1], amp_in[2])
     if a > 0.01 then twave_any = true end
-    if bin ~= twave_bin then
-      twave[bin] = math.max(twave[bin] * pget("tape_pre", 0), a)
-      twave_bin = bin
-    else
-      twave[bin] = math.max(twave[bin], a)
-    end
+    twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end
 end
 
@@ -486,7 +584,8 @@ local function update_particles()
       local px = clamp(play_phase + (math.random() * 2 - 1) * jit * span, 0, 1)
       particles[#particles + 1] = {
         x = px * 127,
-        y = 17 + math.random() * 22,
+        -- spawn below the strip zone so GRAIN's top strip stays readable
+        y = BAND_T + 6 + math.random() * (BAND_B - BAND_T - 8),
         lvl = 13,
         decay = 13 / math.max(pget("size", 0.1) * FPS * 4, 2),
       }
@@ -558,7 +657,10 @@ function enc(n, d)
   else
     local id = enc_param(n)
     -- params.lookup guard: a missing param must not throw
-    if id and params.lookup[id] then params:delta(id, d) end
+    if id and params.lookup[id] then
+      params:delta(id, fine_delta(id, d))
+      flash_id, flash_until = id, frame + FPS  -- show the value for ~1s
+    end
   end
   redraw()
 end
@@ -569,9 +671,8 @@ function key(n, z)
   else
     held[n] = (z == 1)
     if z == 1 then
-      local acts = KEY_MAP[PAGES[page]]
-      local fn = acts and acts[n]
-      if fn then fn() end
+      local def = key_def(n)
+      if def and def.act then def.act() end
     else
       gesture_release(n)
     end
@@ -580,43 +681,135 @@ function key(n, z)
 end
 
 -- ============================================================================
--- screen
+-- screen  (the bitmap mockups are the bible: same font, same geometry)
 -- ============================================================================
--- layout: header y0..11  (title, ALT tag, page dots, status flags)
---         body   y15..40 (per-page visualization, BAND_T..BAND_B)
---         footer y44..63 (name+value readouts, then the hardware row:
---                         E2 hex dial . K2 pill . K3 pill . E3 hex dial —
---                         mirroring the physical panel left to right)
+-- layout: header y0..10  (title 2x pixel font, ALT chip, page dots, status)
+--         body   y12..41 (per-page visualization)
+--         footer y44..63 (labels row, then the hardware row mirroring the
+--                         panel: E2 hexagon . K2 pill . K3 pill . E3 hexagon)
+-- values are not parked in the footer: turning an encoder flashes the value
+-- top-right for a second (like the mockup readouts), then it gets out of
+-- the way.
 
-local BAND_T, BAND_B = 15, 40
-
--- per-page key pills: { k2, k3, k2_alt, k3_alt }. each def is
--- { label, active_fn }; when active_fn returns true the pill draws inverted
--- (filled box, knocked-out text = engaged, like a lit hardware button).
--- alt defs fall back to the un-alt def; nil draws a dim "--" pill so the
--- footer geometry never changes between pages.
-local function pon(id)
-  return function() return pget(id, 0) == 1 end
-end
-
-local KEY_LABELS = {
-  REC     = { { "REC", pon("rec") }, { "FRZ", pon("freeze") } },
-  WINDOW  = { { "RST" }, nil },
-  GRAIN   = { nil, { "PT=1" } },
-  STRETCH = { { "MODE" }, { "PVFZ", pon("pv_freeze") } },
-  TAPE    = { { "REC", pon("tape_rec") }, { "FRZ", pon("tape_freeze") },
-              { "REV", pon("tape_reverse") }, { "CLR" } },
-  FILTER  = { { "TYPE" }, nil },
-  DELAY   = { nil, { "KILL" } },
+-- the 4x5 pixel font from the mockups, drawn rect-by-rect so the device
+-- renders exactly what the bitmaps promised. rows top->bottom, '1' = lit.
+local FONT = {
+  A = { "0110", "1001", "1111", "1001", "1001" },
+  B = { "1110", "1001", "1110", "1001", "1110" },
+  C = { "0111", "1000", "1000", "1000", "0111" },
+  D = { "1110", "1001", "1001", "1001", "1110" },
+  E = { "1111", "1000", "1110", "1000", "1111" },
+  F = { "1111", "1000", "1110", "1000", "1000" },
+  G = { "0111", "1000", "1011", "1001", "0111" },
+  H = { "1001", "1001", "1111", "1001", "1001" },
+  I = { "111", "010", "010", "010", "111" },
+  J = { "0011", "0001", "0001", "1001", "0110" },
+  K = { "1001", "1010", "1100", "1010", "1001" },
+  L = { "1000", "1000", "1000", "1000", "1111" },
+  M = { "10001", "11011", "10101", "10001", "10001" },
+  N = { "1001", "1101", "1011", "1001", "1001" },
+  O = { "0110", "1001", "1001", "1001", "0110" },
+  P = { "1110", "1001", "1110", "1000", "1000" },
+  Q = { "0110", "1001", "1001", "1010", "0101" },
+  R = { "1110", "1001", "1110", "1010", "1001" },
+  S = { "0111", "1000", "0110", "0001", "1110" },
+  T = { "111", "010", "010", "010", "010" },
+  U = { "1001", "1001", "1001", "1001", "0110" },
+  V = { "101", "101", "101", "101", "010" },
+  W = { "10001", "10001", "10101", "11011", "10001" },
+  X = { "101", "101", "010", "101", "101" },
+  Y = { "101", "101", "010", "010", "010" },
+  Z = { "1111", "0001", "0110", "1000", "1111" },
+  ["0"] = { "0110", "1001", "1011", "1101", "0110" },
+  ["1"] = { "010", "110", "010", "010", "111" },
+  ["2"] = { "1110", "0001", "0110", "1000", "1111" },
+  ["3"] = { "1110", "0001", "0110", "0001", "1110" },
+  ["4"] = { "1001", "1001", "1111", "0001", "0001" },
+  ["5"] = { "1111", "1000", "1110", "0001", "1110" },
+  ["6"] = { "0111", "1000", "1110", "1001", "0110" },
+  ["7"] = { "1111", "0001", "0010", "0100", "0100" },
+  ["8"] = { "0110", "1001", "0110", "1001", "0110" },
+  ["9"] = { "0110", "1001", "0111", "0001", "1110" },
+  ["."] = { "0", "0", "0", "0", "1" },
+  ["-"] = { "000", "000", "111", "000", "000" },
+  ["+"] = { "000", "010", "111", "010", "000" },
+  ["="] = { "000", "111", "000", "111", "000" },
+  [":"] = { "0", "1", "0", "1", "0" },
+  ["/"] = { "001", "001", "010", "100", "100" },
+  ["%"] = { "11001", "11010", "00100", "01011", "10011" },
+  ["<"] = { "001", "010", "100", "010", "001" },
+  [">"] = { "100", "010", "001", "010", "100" },
+  [" "] = { "00", "00", "00", "00", "00" },
 }
 
-local function key_def(n)
-  local defs = KEY_LABELS[PAGES[page]]
-  if not defs then return nil end
-  local i = (n == 2) and 1 or 2
-  if alt and defs[i + 2] then return defs[i + 2] end
-  return defs[i]
+local function glyph(ch)
+  return FONT[ch] or FONT[ch:upper()] or FONT[" "]
 end
+
+local function text_w(str, sc)
+  local w = 0
+  for ch in str:gmatch(".") do w = w + (#glyph(ch)[1] + 1) * sc end
+  return w - sc
+end
+
+-- draw a pixel-font string at (x,y) top-left, scale sc, brightness lvl
+local function ptext(str, x, y, sc, lvl)
+  screen.level(lvl)
+  local cx = x
+  for ch in str:gmatch(".") do
+    local g = glyph(ch)
+    for r = 1, 5 do
+      local row = g[r]
+      for c = 1, #row do
+        if row:sub(c, c) == "1" then
+          screen.rect(cx + (c - 1) * sc, y + (r - 1) * sc, sc, sc)
+        end
+      end
+    end
+    cx = cx + (#g[1] + 1) * sc
+  end
+  screen.fill()
+  return cx - x - sc
+end
+
+local function ptext_c(str, cx, y, sc, lvl)
+  ptext(str, math.floor(cx - text_w(str, sc) / 2 + 0.5), y, sc, lvl)
+end
+
+local function ptext_r(str, rx, y, sc, lvl)
+  ptext(str, rx - text_w(str, sc), y, sc, lvl)
+end
+
+-- inverted chip (the ALT tag / mode badge from the mockups)
+local function chip(str, x, y)
+  local w = text_w(str, 1) + 5
+  screen.level(15)
+  screen.rect(x, y, w, 9)
+  screen.fill()
+  ptext(str, x + 3, y + 2, 1, 0)
+  return w
+end
+
+-- deterministic dither, same trick as the mockups
+local function hash(x, y, sd)
+  local f = math.sin(x * 12.9898 + y * 78.233 + sd * 37.719) * 43758.5453
+  return f - math.floor(f)
+end
+
+-- short footer labels per param id (4-5 chars, mockup style)
+local SHORT = {
+  mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
+  input_level = "IN", monitor_level = "MON",
+  output_level = "OUT", headphone_gain = "HP",
+  rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
+  pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
+  size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "LVL",
+  pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND",
+  tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
+  cutoff = "CUT", resonance = "RES",
+  delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
+  rev_size = "SIZE", rev_mix = "MIX",
+}
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
 -- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
@@ -634,8 +827,7 @@ local function param_norm(id)
   return clamp(v, 0, 1)
 end
 
--- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees.
--- a hexagon renders crisp at this size where a circle goes lumpy.
+-- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees
 local function draw_hex_dial(cx, cy, r, val)
   screen.level(4)
   for i = 0, 6 do
@@ -653,71 +845,50 @@ local function draw_hex_dial(cx, cy, r, val)
   end
 end
 
--- key pill: outline = idle, inverted = engaged. `dim` for unassigned keys.
-local function draw_pill(cx, y, label, on, dim)
-  local w = screen.text_extents(label) + 6
+-- key pill, mockup geometry: y=51, h=11, inverted while lit
+local function draw_pill(cx, label, on, dim)
+  local w = text_w(label, 1) + 7
   local x = math.floor(cx - w / 2)
   if on then
     screen.level(15)
-    screen.rect(x, y, w, 9)
+    screen.rect(x, 51, w, 11)
     screen.fill()
-    screen.level(0)
-    screen.move(cx, y + 7)
-    screen.text_center(label)
+    ptext_c(label, cx, 54, 1, 0)
   else
     screen.level(dim and 1 or 4)
-    screen.rect(x + 0.5, y + 0.5, w, 9)
+    screen.rect(x + 0.5, 51.5, w, 11)
     screen.stroke()
-    screen.level(dim and 2 or 10)
-    screen.move(cx, y + 7)
-    screen.text_center(label)
+    ptext_c(label, cx, 54, 1, dim and 2 or 10)
   end
 end
 
--- name (dim) + value (bright) inline readout for one encoder
-local function draw_enc_readout(n, right)
-  local id = enc_param(n)
-  if not (id and params.lookup[id]) then
-    screen.level(2)
-    screen.move(right and 128 or 0, 49)
-    if right then screen.text_right("E" .. n .. " --")
-    else screen.text("E" .. n .. " --") end
-    return
-  end
-  local name = string.upper(string.sub(params:lookup_param(id).name, 1, 7))
-  local val = params:string(id)
-  if right then
-    screen.level(15)
-    screen.move(128, 49)
-    screen.text_right(val)
-    screen.level(4)
-    screen.move(128 - screen.text_extents(val) - 3, 49)
-    screen.text_right(name)
-  else
-    screen.level(4)
-    screen.move(0, 49)
-    screen.text(name)
-    screen.level(15)
-    screen.move(screen.text_extents(name) + 3, 49)
-    screen.text(val)
-  end
+-- transient value readout, top-right of the body (mockup "1.25X" spot).
+-- pages can park a persistent dim readout there too; the flash wins.
+local flash_on = false
+
+local function topright(str, lvl)
+  if flash_on then return end
+  ptext_r(string.upper(str), 126, 13, 1, lvl or 4)
 end
 
--- the shared footer: readout row, then dial . pill . pill . dial,
--- laid out in the same order as the physical E2 K2 K3 E3
+-- footer: labels row at y44, then hexagon . pill . pill . hexagon at the
+-- exact mockup positions (dials 20/108, pills 51/81)
 local function draw_footer()
-  draw_enc_readout(2, false)
-  draw_enc_readout(3, true)
-  draw_hex_dial(6, 57, 6, param_norm(enc_param(2)))
-  draw_hex_dial(121, 57, 6, param_norm(enc_param(3)))
+  local id2, id3 = enc_param(2), enc_param(3)
+  ptext_c(SHORT[id2] or "--", 20, 44, 1, 4)
+  ptext_c("K2", 51, 44, 1, 4)
+  ptext_c("K3", 81, 44, 1, 4)
+  ptext_c(SHORT[id3] or "--", 108, 44, 1, 4)
+  draw_hex_dial(20, 56, 7, param_norm(id2))
+  draw_hex_dial(108, 56, 7, param_norm(id3))
   for n = 2, 3 do
     local def = key_def(n)
-    local cx = (n == 2) and 52 or 76
+    local cx = (n == 2) and 51 or 81
     if def then
-      local on = (def[2] and def[2]()) or held[n] == true
-      draw_pill(cx, 52, def[1], on, false)
+      local on = (def.lit ~= nil and pget(def.lit, 0) == 1) or held[n] == true
+      draw_pill(cx, def.label, on, false)
     else
-      draw_pill(cx, 52, "--", false, true)
+      draw_pill(cx, "--", false, true)
     end
   end
 end
@@ -789,67 +960,74 @@ local function draw_particles()
   end
 end
 
--- vertical meter: x position, normalized amp 0..1
-local function draw_meter(x, amp, label)
-  local h = math.floor(clamp(math.sqrt(amp) * (BAND_B - BAND_T), 0, BAND_B - BAND_T))
-  screen.level(1)
-  screen.rect(x, BAND_T, 6, BAND_B - BAND_T)
-  screen.fill()
-  screen.level(12)
-  if h > 0 then
-    screen.rect(x, BAND_B - h, 6, h)
-    screen.fill()
-  end
-  screen.level(3)
-  screen.move(x + 3, BAND_B + 8)
-  screen.text_center(label)
-end
-
 local function draw_body()
   local pname = PAGES[page]
 
   if pname == "MIX" then
-    -- one control, drawn big: the engine <> tape fader (E2)
+    -- two lanes like the mockup: engine as grains, tape as its real
+    -- waveform, crossfader between them. lane energy follows the mix.
     local mixv = pget("mix", 0.5)
-    screen.level(3)
-    screen.move(14, 22)
-    screen.text("engine")
-    screen.move(114, 22)
-    screen.text_right("tape")
+    local sd = math.floor(frame / 2)
+    ptext("ENG", 2, 13, 1, 4)
+    screen.level(12)
+    for x = 26, 122 do
+      if hash(x, 1, sd) < 0.1 + (1 - mixv) * 0.4 then
+        local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + (1 - mixv) * 5)
+        screen.rect(x, 16 + dy, 1, 1)
+      end
+    end
+    screen.fill()
     screen.level(2)
-    screen.rect(14, 30, 100, 2)
-    screen.fill()
+    screen.move(26, 24)
+    screen.line(122, 24)
+    screen.stroke()
     screen.level(15)
-    screen.rect(12 + mixv * 100, 26, 3, 10)
+    screen.rect(25 + mixv * 96, 21, 3, 7)
     screen.fill()
-  elseif pname == "LEVEL" then
-    -- live meters + the system level params on the encoders
-    local rows = {
-      { "in",  math.sqrt(math.max(amp_in[1], amp_in[2])) },
-      { "out", math.sqrt(math.max(amp_out[1], amp_out[2])) },
-    }
-    for i, r in ipairs(rows) do
-      local y = 11 + i * 10
-      screen.level(3)
-      screen.move(22, y + 5)
-      screen.text_right(r[1])
-      screen.level(1)
-      screen.rect(26, y, 98, 6)
-      screen.fill()
-      local w = math.floor(clamp(r[2], 0, 1) * 98)
-      if w > 0 then
+    ptext("TAPE", 2, 30, 1, 4)
+    screen.level(1)
+    screen.move(26, 33)
+    screen.line(122, 33)
+    screen.stroke()
+    local g = 0.3 + 0.7 * mixv
+    for x = 26, 122 do
+      local a = twave[math.floor((x - 26) / 96 * 127) + 1]
+      if a > 0.002 then
+        local h = clamp(math.sqrt(math.min(a * 2, 1)) * 5 * g, 1, 5)
         screen.level(12)
-        screen.rect(26, y, w, 6)
+        screen.move(x, 33 - h)
+        screen.line(x, 33 + h)
+        screen.stroke()
+      end
+    end
+  elseif pname == "LEVEL" then
+    -- mockup levels page: IN/OUT faders with live VU columns beside them
+    local defs = {
+      { 40, "IN", param_norm("input_level"), math.max(amp_in[1], amp_in[2]) },
+      { 88, "OUT", param_norm("output_level"), math.max(amp_out[1], amp_out[2]) },
+    }
+    for _, d in ipairs(defs) do
+      local fx, label, pos, amp = d[1], d[2], d[3] or 0, d[4]
+      ptext_c(label, fx + 4, 12, 1, 4)
+      screen.level(4)
+      screen.move(fx, 19)
+      screen.line(fx, 40)
+      screen.move(fx - 2, 19)
+      screen.line(fx + 2, 19)
+      screen.move(fx - 2, 40)
+      screen.line(fx + 2, 40)
+      screen.stroke()
+      local hy = 40 - math.floor(pos * 21)
+      screen.level(15)
+      screen.rect(fx - 4, hy - 1, 9, 3)
+      screen.fill()
+      local vu = math.floor(clamp(math.sqrt(amp), 0, 1) * 21)
+      if vu > 0 then
+        screen.level(12)
+        screen.rect(fx + 9, 40 - vu, 3, vu)
         screen.fill()
       end
     end
-    screen.level(3)
-    screen.move(0, 41)
-    screen.text("monitor " ..
-      (params.lookup["monitor_level"] and params:string("monitor_level") or "?"))
-    screen.move(128, 41)
-    screen.text_right("phones " ..
-      (params.lookup["headphone_gain"] and params:string("headphone_gain") or "?"))
   elseif pname == "REC" then
     draw_strip(false)
     draw_particles()
@@ -862,98 +1040,117 @@ local function draw_body()
     end
   elseif pname == "WINDOW" then
     draw_strip(true)
-    -- scan direction + speed, top-right inside the band
     local scan = pget("scan", 1)
-    screen.level(3)
-    screen.move(126, BAND_T + 6)
-    screen.text_right((scan < 0 and "<< " or ">> ") .. string.format("%.2fx", scan))
+    topright((scan < 0 and "<< " or ">> ") .. string.format("%.2fX", math.abs(scan)))
   elseif pname == "GRAIN" then
-    draw_strip(false)
-    draw_particles()
-  elseif pname == "STRETCH" then
-    -- transport layout: big mode + big speed up top, thin window bar below —
-    -- nothing overlaps the text
-    local m = params.lookup["mode"] and params:string("mode") or "?"
-    screen.font_size(16)
-    screen.level(12)
-    screen.move(2, 28)
-    screen.text(m)
-    screen.level(15)
-    screen.move(126, 28)
-    screen.text_right(string.format("%.2fx", pget("scan", 1)))
-    screen.font_size(8)
-    if pget("pv_freeze", 0) == 1 and pget("mode", 2) == 4 then
-      screen.level(15)
-      screen.move(64, 24)
-      screen.text_center("HELD")
-    end
-    -- thin transport bar: window segment + playhead
-    local lo, hi, _ = window_bounds()
-    screen.level(2)
-    screen.move(0, 38)
-    screen.line(128, 38)
-    screen.stroke()
-    screen.level(6)
-    screen.move(lo * 127, 38)
-    screen.line(hi * 127, 38)
-    screen.stroke()
-    screen.level(15)
-    local px = clamp(play_phase, 0, 1) * 127
-    screen.move(px, 34)
-    screen.line(px, 42)
-    screen.stroke()
-  elseif pname == "TAPE" then
-    -- tape strip: recorded material as waveform (bright inside the loop),
-    -- loop handles, head needle (doubles as write head while recording)
-    local a = pget("loop_start", 0)
-    local b = pget("loop_end", 1)
-    local lo, hi = math.min(a, b), math.max(a, b)
-    local mid = (BAND_T + BAND_B) / 2
-    local half = (BAND_B - BAND_T) / 2
+    -- mockup grain page: thin sample strip up top with window brackets,
+    -- grain cloud (the real particles) below, playhead tick between
     screen.level(1)
-    screen.move(0, mid)
-    screen.line(128, mid)
+    screen.move(0, 16)
+    screen.line(128, 16)
     screen.stroke()
     for x = 0, 127 do
-      local amp = twave[x + 1]
-      if amp > 0.002 then
-        local h = clamp(math.sqrt(math.min(amp * 2, 1)) * half, 1, half)
-        local nx = x / 127
-        screen.level((nx >= lo and nx <= hi) and 12 or 2)
-        screen.move(x, mid - h)
-        screen.line(x, mid + h)
+      local a = wave[x + 1]
+      if a > 0.002 then
+        local h = clamp(math.sqrt(math.min(a * 2, 1)) * 4, 1, 4)
+        screen.level(6)
+        screen.move(x, 16 - h)
+        screen.line(x, 16 + h)
         screen.stroke()
       end
     end
-    screen.level(4)
-    screen.move(lo * 127, BAND_B + 2)
-    screen.line(hi * 127, BAND_B + 2)
-    screen.stroke()
+    local lo, hi = window_bounds()
     for _, e in ipairs({ lo, hi }) do
+      local ex = e * 127
       screen.level(15)
-      screen.move(e * 127, BAND_T - 2)
-      screen.line(e * 127, BAND_B + 2)
+      screen.move(ex, 11)
+      screen.line(ex, 21)
+      screen.move(ex - 2, 11)
+      screen.line(ex + 2, 11)
+      screen.move(ex - 2, 21)
+      screen.line(ex + 2, 21)
       screen.stroke()
     end
     screen.level(15)
-    local tx = clamp(tape_phase, 0, 1) * 127
-    screen.move(tx, BAND_T - 2)
-    screen.line(tx, BAND_B + 2)
+    local px = clamp(play_phase, 0, 1) * 127
+    screen.move(px, 22)
+    screen.line(px, 25)
     screen.stroke()
-    if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
-      screen.level((frame % FPS) < (FPS / 2) and 12 or 3)
-      screen.move(2, 21)
-      screen.text("rec")
-    elseif not twave_any then
-      screen.level(3)
-      screen.move(64, mid - 5)
-      screen.text_center("empty loop — K2 to record")
+    draw_particles()
+  elseif pname == "STRETCH" then
+    -- mockup stretch page: inverted mode badge, speed readout, waveform
+    -- whose wavelength follows the rate, real playhead, window bar
+    local m = params.lookup["mode"] and params:string("mode") or "?"
+    chip(m, 2, 13)
+    local scan = pget("scan", 1)
+    topright(string.format("%+.2fX", scan))
+    if pget("pv_freeze", 0) == 1 and pget("mode", 2) == 4 then
+      ptext_c("HELD", 64, 14, 1, 15)
     end
-    -- effective rate; reverse flips the sign live
+    local rate = math.max(math.abs(scan), 0.05)
+    screen.level(6)
+    for x = 0, 127 do
+      screen.rect(x, 30 + math.sin(x * 0.35 * rate) * 6, 1, 1)
+    end
+    screen.fill()
+    local lo, hi = window_bounds()
+    screen.level(2)
+    screen.move(0, 39)
+    screen.line(128, 39)
+    screen.stroke()
+    screen.level(6)
+    screen.move(lo * 127, 39)
+    screen.line(hi * 127, 39)
+    screen.stroke()
+    screen.level(15)
+    local px = clamp(play_phase, 0, 1) * 127
+    screen.move(px, 22)
+    screen.line(px, 42)
+    screen.stroke()
+  elseif pname == "TAPE" then
+    -- mockup tape page: two reels spinning at the effective rate (reverse
+    -- spins backward, stopped stands still), loop track + head below
     local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
-    screen.level(10)
-    screen.move(127, 21)
-    screen.text_right(string.format("%+.2fx", r))
+    reel_angle = reel_angle + r * 0.35
+    for _, cx in ipairs({ 46, 86 }) do
+      screen.level(4)
+      screen.circle(cx, 24, 8)
+      screen.stroke()
+      screen.level(10)
+      for k = 0, 2 do
+        local a = reel_angle + k * 2.094
+        screen.move(cx, 24)
+        screen.line(cx + math.cos(a) * 6, 24 + math.sin(a) * 6)
+      end
+      screen.stroke()
+    end
+    screen.level(4)
+    screen.move(46, 15)
+    screen.line(86, 15)
+    screen.move(46, 33)
+    screen.line(86, 33)
+    screen.stroke()
+    local a2, b2 = pget("loop_start", 0), pget("loop_end", 1)
+    local lo, hi = math.min(a2, b2), math.max(a2, b2)
+    screen.level(2)
+    screen.move(0, 40)
+    screen.line(128, 40)
+    screen.stroke()
+    screen.level(8)
+    screen.move(lo * 127, 40)
+    screen.line(hi * 127, 40)
+    screen.stroke()
+    screen.level(15)
+    local tx = clamp(tape_phase, 0, 1) * 127
+    screen.move(tx, 37)
+    screen.line(tx, 43)
+    screen.stroke()
+    topright(string.format("%+.2fX", r))
+    if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+      if (frame % FPS) < (FPS / 2) then chip("REC", 2, 13) end
+    elseif not twave_any then
+      ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+    end
   elseif pname == "FILTER" then
     -- stylized response curve: cutoff on a log axis, resonance bump
     local ft = pget("filt_type", 1)
@@ -977,99 +1174,93 @@ local function draw_body()
       screen.line(math.min(cx + 26, 127), BAND_B)
     end
     screen.stroke()
-    screen.level(12)
-    screen.move(2, 21)
-    screen.text(params.lookup["filt_type"] and params:string("filt_type") or "?")
+    chip(params.lookup["filt_type"] and params:string("filt_type") or "?", 2, 13)
   elseif pname == "DELAY" then
-    -- zones: readout row y<=20, viz band y24..42 — never overlapping
-    local t = pget("delay_time", 0.3)
+    -- mockup delay page: the echo as a bouncing ball — impact spacing =
+    -- time, shrinking bounces = feedback, ball animates one repeat per hop
+    local tnorm = param_norm("delay_time") or 0.3
     local fb = pget("delay_fb", 0.3)
     local mixv = pget("delay_mix", 0)
-    screen.level(mixv > 0 and 10 or 3)
-    screen.move(127, 20)
-    screen.text_right(string.format("mix %d%%", math.floor(mixv * 100 + 0.5)))
-    if mixv == 0 then
-      screen.level(3)
-      screen.move(0, 20)
-      screen.text("E2 opens the mix")
-    end
-    -- echo train: source tick + repeats spaced by time, decaying by feedback
+    topright(string.format("MIX %d%%", math.floor(mixv * 100 + 0.5)),
+      mixv > 0 and 10 or 3)
+    local base = 39
     screen.level(1)
-    screen.move(0, 42)
-    screen.line(128, 42)
+    screen.move(0, base + 1)
+    screen.line(128, base + 1)
     screen.stroke()
-    screen.level(12)
-    screen.rect(4, 24, 2, 18)
+    local sp = 12 + tnorm * 24
+    local heights = {}
+    local h = 20
+    while 8 + #heights * sp <= 116 and h >= 1.5 do
+      heights[#heights + 1] = h
+      h = h * math.max(fb, 0.05)
+    end
+    screen.level(6)
+    for i, hh in ipairs(heights) do
+      local xa = 8 + (i - 1) * sp
+      local k = 0
+      for u = 0, 1, 0.05 do
+        if k % 2 == 0 then
+          screen.rect(xa + u * sp, base - 4 * hh * u * (1 - u), 1, 1)
+        end
+        k = k + 1
+      end
+      screen.rect(xa, base - 2, 1, 2)
+    end
     screen.fill()
-    local x = 4
-    local lvl = 1.0
-    for i = 1, 10 do
-      x = x + t * 56
-      lvl = lvl * fb
-      if x > 125 or lvl < 0.04 then break end
-      local hh = math.max(18 * lvl, 1)
-      screen.level(math.max(math.floor(12 * lvl), 1))
-      screen.rect(x, 42 - hh, 2, hh)
+    if #heights > 0 then
+      local ph = (frame * 0.02) % 1
+      local seg = math.min(#heights, math.floor(ph * #heights) + 1)
+      local u = (ph * #heights) % 1
+      local bx = 8 + (seg - 1) * sp + u * sp
+      local by = base - 4 * heights[seg] * u * (1 - u)
+      screen.level(15)
+      screen.rect(bx - 1, by - 2, 2, 2)
       screen.fill()
     end
   elseif pname == "REVERB" then
-    -- zones: readout row y<=20, viz band y24..42 — never overlapping
+    -- mockup reverb page: a room seen from above — size grows the walls,
+    -- rays are the reflections bouncing off them
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
-    screen.level(mixv > 0 and 10 or 3)
-    screen.move(127, 20)
-    screen.text_right(string.format("mix %d%%", math.floor(mixv * 100 + 0.5)))
-    if mixv == 0 then
-      screen.level(3)
-      screen.move(0, 20)
-      screen.text("E3 opens the mix")
-    end
-    -- impulse + decaying tail; tail length follows size
-    screen.level(1)
-    screen.move(0, 42)
-    screen.line(128, 42)
+    topright(string.format("MIX %d%%", math.floor(mixv * 100 + 0.5)),
+      mixv > 0 and 10 or 3)
+    local w = 44 + size * 60
+    local hh = 14 + size * 12
+    local x0, x1 = 64 - w / 2, 64 + w / 2
+    local y0, y1 = 26 - hh / 2, 26 + hh / 2
+    screen.level(8)
+    screen.rect(x0 + 0.5, y0 + 0.5, w, hh)
     screen.stroke()
-    screen.level(12)
-    screen.rect(4, 24, 3, 18)
+    local sx, sy = x0 + 7, 26
+    screen.level(15)
+    screen.rect(sx - 1, sy - 1, 2, 2)
     screen.fill()
-    local len = 10 + size * 110
-    local x = 10
-    while x < 10 + len and x < 126 do
-      local frac = (x - 10) / len
-      local lvl = math.floor(12 * (1 - frac))
-      if lvl < 1 then break end
-      local hh = math.max(18 * (1 - frac), 1)
-      screen.level(lvl)
-      screen.rect(x, 42 - hh, 2, hh)
-      screen.fill()
-      x = x + 4
+    screen.level(6)
+    for k = 0, 1 do
+      local a = k * 2.4 + frame * 0.03
+      local px2, py = sx, sy
+      local dx, dy = math.cos(a), math.sin(a)
+      for i = 0, 70 do
+        px2 = px2 + dx
+        py = py + dy
+        if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end
+        if py <= y0 + 1 or py >= y1 - 1 then dy = -dy end
+        if i % 3 == 0 then screen.rect(px2, py, 1, 1) end
+      end
     end
+    screen.fill()
   end
 end
 
-function redraw()
-  screen.clear()
-  screen.font_face(1)
-  screen.font_size(8)
+local function draw_header()
+  -- title in the 2x pixel font, ALT chip beside it
+  local w = ptext(PAGES[page], 2, 1, 2, 15)
+  if alt then chip("ALT", 2 + w + 5, 1) end
 
-  -- header: title, ALT tag (inverted), page dots, status flags
-  screen.level(15)
-  screen.move(0, 8)
-  screen.text(PAGES[page])
-  if alt then
-    local ax = screen.text_extents(PAGES[page]) + 4
-    local aw = screen.text_extents("ALT") + 5
-    screen.level(15)
-    screen.rect(ax, 1, aw, 8)
-    screen.fill()
-    screen.level(0)
-    screen.move(ax + 3, 8)
-    screen.text("ALT")
-  end
-
-  -- page dots, top-right row: current page is a 3x3 block, others 1px
+  -- page dots, top-right: current page is a 3x3 block, the rest are 1px
   for i = 1, #PAGES do
-    local x = 128 - (#PAGES - i + 1) * 5 + 1
+    local x = 126 - (#PAGES - i) * 4
     if i == page then
       screen.level(15)
       screen.rect(x - 1, 1, 3, 3)
@@ -1080,26 +1271,35 @@ function redraw()
     screen.fill()
   end
 
-  -- status flags: blink at ~1hz under the dots, so an armed recorder is
-  -- impossible to miss from any page
+  -- status flags blink under the dots: an armed recorder is impossible
+  -- to miss from any page
   local status = {}
   if pget("rec", 0) == 1 then status[#status + 1] = "REC" end
   if pget("freeze", 0) == 1 then status[#status + 1] = "FZ" end
   if pget("tape_rec", 0) == 1 then status[#status + 1] = "TR" end
   if pget("tape_freeze", 0) == 1 then status[#status + 1] = "TFZ" end
   if #status > 0 then
-    screen.level((frame % FPS) < (FPS / 2) and 15 or 4)
-    screen.move(128, 10)
-    screen.text_right(table.concat(status, " "))
+    ptext_r(table.concat(status, " "), 126, 6, 1,
+      (frame % FPS) < (FPS / 2) and 15 or 4)
   end
+end
 
-  screen.level(1)
-  screen.move(0, 12)
-  screen.line(128, 12)
-  screen.stroke()
+function redraw()
+  screen.clear()
 
+  -- the transient value readout claims the top-right corner while active;
+  -- page readouts (topright) yield to it
+  flash_on = flash_id ~= nil and frame < flash_until
+    and params.lookup[flash_id] ~= nil
+
+  draw_header()
   draw_body()
   draw_footer()
+
+  if flash_on then
+    ptext_r((SHORT[flash_id] or "") .. " " ..
+      string.upper(params:string(flash_id)), 126, 13, 1, 15)
+  end
 
   screen.update()
 end
