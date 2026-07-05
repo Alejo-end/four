@@ -14,9 +14,11 @@ path: LP/HP/BP filter, feedback delay (soft-clipped loop), FreeVerb — each FX 
 its own dry/wet. Bring-up diagnostics (milestone prints, missing-poll warnings)
 stay in — they cost nothing and have saved the day repeatedly.
 
-Lua-only addition (untested on device): chromatic MIDI note input — note-ons set
-`pitch` = 2^((note−root)/12); PARAMS > keys group (enable / channel / root /
-pitch quantize). No engine change, fingerprint count unaffected.
+Lua-only addition (untested on device): chromatic note input — MIDI note-ons set
+`pitch` = 2^((note−root)/12), and a USB typing keyboard plays ableton-style
+musical typing (A-row/W-row, Z/X octave) via `keyboard.code`. PARAMS > keys group
+(enable / channel / root / octave / pitch quantize). No engine change,
+fingerprint count unaffected.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

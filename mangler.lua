@@ -15,7 +15,9 @@
 -- FILTER/DELAY/REVERB are placeholders for stage 4. See SPEC/spec.md.
 --
 -- MIDI notes play the sample chromatically: note-ons retune `pitch`
--- relative to the root note (PARAMS > keys).
+-- relative to the root note (PARAMS > keys). a USB typing keyboard works
+-- too: ableton-style musical typing (A-row = white keys, W-row = black,
+-- Z/X = octave down/up).
 
 engine.name = "Mangler"
 
@@ -525,10 +527,10 @@ local function init_params()
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  -- chromatic note input: note-ons drive the same `pitch` param as the
-  -- encoder and any mapped CC, so all three stay in lockstep
-  params:add_group("grp_keys", "keys", 4)
-  params:add_binary("keys_enable", "midi notes", "toggle", 1)
+  -- chromatic note input (MIDI notes + typing keyboard): all of it drives
+  -- the same `pitch` param as the encoder and any mapped CC, in lockstep
+  params:add_group("grp_keys", "keys", 5)
+  params:add_binary("keys_enable", "note input", "toggle", 1)
   params:add_number("midi_channel", "midi channel", 0, 16, 0,
     function(p)
       local v = p:get()
@@ -536,6 +538,9 @@ local function init_params()
     end)
   params:add_number("root_note", "root note", 0, 127, 60,
     function(p) return mu.note_num_to_name(p:get(), true) end)
+  -- typing-keyboard octave (Z/X); MIDI keyboards shift octaves themselves
+  params:add_number("kb_octave", "keys octave", -3, 3, 0,
+    function(p) return string.format("%+d", p:get()) end)
   params:add_binary("pitch_quant", "pitch quantize", "toggle", 0)
   params:set_action("pitch_quant", function()
     -- re-send pitch so the engine snaps (or unsnaps) immediately
@@ -591,6 +596,32 @@ local function init_midi()
   for i = 1, #midi.vports do
     midi_devices[i] = midi.connect(i)
     midi_devices[i].event = midi_event
+  end
+end
+
+-- USB typing keyboard: ableton-style musical typing. the A-row is the white
+-- keys, the W-row the black keys — A plays the sample as recorded, and Z/X
+-- shift the octave (kb_octave). semitone offsets are root-relative, so the
+-- root_note param only concerns MIDI (which sends absolute note numbers).
+local KB_NOTES = {
+  A = 0, W = 1, S = 2, E = 3, D = 4, F = 5, T = 6, G = 7, Y = 8,
+  H = 9, U = 10, J = 11, K = 12, O = 13, L = 14, P = 15,
+  SEMICOLON = 16, APOSTROPHE = 17,
+}
+
+function keyboard.code(code, value)
+  if value ~= 1 then return end           -- key-down only (2 = autorepeat)
+  if norns.menu.status() then return end  -- the menu owns typing (PSET names)
+  if pget("keys_enable", 1) == 0 then return end
+  if code == "Z" or code == "X" then
+    params:delta("kb_octave", code == "X" and 1 or -1)
+    flash_id, flash_until = "kb_octave", frame + FPS
+  else
+    local st = KB_NOTES[code]
+    if st then
+      params:set("pitch", 2 ^ ((st + 12 * pget("kb_octave", 0)) / 12))
+      flash_id, flash_until = "pitch", frame + FPS
+    end
   end
 end
 
@@ -715,6 +746,7 @@ function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
   for _, d in ipairs(midi_devices) do d.event = nil end
+  keyboard.code = nil
   sc.poll_stop_phase()
 end
 
@@ -871,7 +903,7 @@ local SHORT = {
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "LVL",
-  pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND",
+  pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
   cutoff = "CUT", resonance = "RES",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
