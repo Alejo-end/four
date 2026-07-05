@@ -13,6 +13,9 @@
 --
 -- STAGE 3 — record + granular + window + time-stretch modes + softcut TAPE.
 -- FILTER/DELAY/REVERB are placeholders for stage 4. See SPEC/spec.md.
+--
+-- MIDI notes play the sample chromatically: note-ons retune `pitch`
+-- relative to the root note (PARAMS > keys).
 
 engine.name = "Mangler"
 
@@ -21,6 +24,7 @@ engine.name = "Mangler"
 print("mangler: script file executed")
 
 local sc = require "softcut"  -- the TAPE path: parallel ADC tap, own CPU core
+local mu = require "musicutil"
 
 -- ============================================================================
 -- state
@@ -405,8 +409,24 @@ local function init_params()
     controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
   add_eng_control("density", "density",
     controlspec.new(1, 200, "exp", 0, 20, "hz"))
-  add_eng_control("pitch", "pitch",
-    controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
+  -- pitch is playable chromatically: MIDI notes set it (see grp_keys), and
+  -- pitch_quant snaps encoder/CC moves to semitones on the way to the engine
+  -- (the param keeps the raw value; only the engine command is quantized)
+  params:add_control("pitch", "pitch",
+    controlspec.new(0.25, 4, "exp", 0, 1.0, "x"),
+    function(p)
+      local v = p:get()
+      if pget("pitch_quant", 0) == 1 then
+        return string.format("%+d st", util.round(12 * math.log(v, 2)))
+      end
+      return string.format("%.2f x", v)
+    end)
+  params:set_action("pitch", function(v)
+    if pget("pitch_quant", 0) == 1 then
+      v = 2 ^ (util.round(12 * math.log(v, 2)) / 12)
+    end
+    if engine.pitch then engine.pitch(v) end
+  end)
   add_eng_control("spread", "spread",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   add_eng_control("pan", "pan",
@@ -505,6 +525,23 @@ local function init_params()
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
+  -- chromatic note input: note-ons drive the same `pitch` param as the
+  -- encoder and any mapped CC, so all three stay in lockstep
+  params:add_group("grp_keys", "keys", 4)
+  params:add_binary("keys_enable", "midi notes", "toggle", 1)
+  params:add_number("midi_channel", "midi channel", 0, 16, 0,
+    function(p)
+      local v = p:get()
+      return v == 0 and "any" or tostring(v)
+    end)
+  params:add_number("root_note", "root note", 0, 127, 60,
+    function(p) return mu.note_num_to_name(p:get(), true) end)
+  params:add_binary("pitch_quant", "pitch quantize", "toggle", 0)
+  params:set_action("pitch_quant", function()
+    -- re-send pitch so the engine snaps (or unsnaps) immediately
+    params:lookup_param("pitch"):bang()
+  end)
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE writes the
   -- softcut buffers (L=buf1, R=buf2, matching init_tape's routing) next to
   -- the pset; LOAD reads them back, DELETE cleans up. so "save my current
@@ -527,6 +564,34 @@ local function init_params()
   end
 
   params:bang()
+end
+
+-- ============================================================================
+-- midi note input (chromatic playing)
+-- ============================================================================
+-- note-ons set `pitch` = 2^(semitones/12) relative to root_note: middle C
+-- (with the default root) plays the sample as recorded, and the 0.25–4 spec
+-- covers ±24 st (notes beyond that clamp to the edges). last-note priority,
+-- no envelope — a note retunes the running voice rather than gating one.
+-- CC mappings (PMAP) are handled by the system and unaffected by this.
+
+local midi_devices = {}
+
+local function midi_event(data)
+  local msg = midi.to_msg(data)
+  if msg.type ~= "note_on" or (msg.vel or 0) == 0 then return end
+  if pget("keys_enable", 1) == 0 then return end
+  local ch = pget("midi_channel", 0)
+  if ch > 0 and msg.ch ~= ch then return end
+  params:set("pitch", 2 ^ ((msg.note - pget("root_note", 60)) / 12))
+end
+
+local function init_midi()
+  -- connect every vport: any keyboard works, including ones plugged in later
+  for i = 1, #midi.vports do
+    midi_devices[i] = midi.connect(i)
+    midi_devices[i].event = midi_event
+  end
 end
 
 -- ============================================================================
@@ -608,6 +673,7 @@ function init()
   print("mangler: init() called")
   init_params()
   init_tape()
+  init_midi()
   print("mangler: init() done, params built")
 
   local function watch(name, fn)
@@ -648,6 +714,7 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  for _, d in ipairs(midi_devices) do d.event = nil end
   sc.poll_stop_phase()
 end
 
