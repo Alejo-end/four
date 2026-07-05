@@ -3,12 +3,17 @@
 -- believable performance scenario (a take, a tape loop, live FX), then
 -- exports every UI page as a PGM framebuffer (0..15 levels -> 0..255).
 --
--- usage: lua render_pages.lua <mangler.lua path> <outdir> <prefix> [empty]
+-- usage: lua render_pages.lua <mangler.lua path> <outdir> <prefix> [variant]
+--   variant "empty": empty-buffer states (REC + GRAIN)
+--   variant "grain": GRAIN page across its param extremes (size/density/
+--                    spread/jitter/pan edges, mode OFF)
 
 local MANGLER = arg[1] or "mangler.lua"
 local OUTDIR = arg[2] or "."
 local PREFIX = arg[3] or "shot"
-local EMPTY = arg[4] == "empty"
+local VARIANT = arg[4]
+local EMPTY = VARIANT == "empty"
+local GRAINX = VARIANT == "grain"
 
 -- ============================================================================
 -- screen: 128x64, 16 levels, cairo-ish path model (overwrite paints)
@@ -357,6 +362,37 @@ if EMPTY then
   run_ticks(10)
   redraw()
   export(PREFIX .. "_03_REC_EMPTY")
+  enc(1, 2)  -- GRAIN page: no cloud, no needle — silence lies dim and flat
+  run_ticks(10)
+  redraw()
+  export(PREFIX .. "_05_GRAIN_EMPTY")
+elseif GRAINX then
+  -- GRAIN extremes: pin the cloud's params to one edge per shot, settle to
+  -- steady state (longest grain life is ~2s = 30 ticks), then shoot. BASE
+  -- restates the defaults so every case is one delta from the same cloud.
+  math.randomseed(1)  -- reproducible cloud for diffing
+  local BASE = { size = 0.1, density = 20, spread = 0.5, pos_jitter = 0,
+    pan = 0, mode = 2 }
+  local CASES = {
+    { "BASE", {} },
+    { "SIZE_MIN", { size = 0.01 } },
+    { "SIZE_MAX", { size = 0.5 } },
+    { "DENS_MIN", { density = 1 } },
+    { "DENS_MAX", { density = 200 } },
+    { "SPRD_0", { spread = 0 } },
+    { "SPRD_1", { spread = 1 } },
+    { "JIT_1", { pos_jitter = 1 } },
+    { "PAN_L", { pan = -1 } },
+    { "MODE_OFF", { mode = 1 } },
+  }
+  enc(1, 4)  -- GRAIN page
+  for _, c in ipairs(CASES) do
+    for id, v in pairs(BASE) do params:set(id, v) end
+    for id, v in pairs(c[2]) do params:set(id, v) end
+    run_ticks(60)
+    redraw()
+    export(PREFIX .. "_05_GRAIN_" .. c[1])
+  end
 else
   for i, name in ipairs(PAGES) do
     if i > 1 then enc(1, 1) end

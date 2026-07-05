@@ -67,7 +67,7 @@ local redraw_clock
 
 local TAPE_LEN = 60        -- seconds of softcut buffer used by the tape loop
 
-local BAND_T, BAND_B = 15, 40  -- visualization band (screen + particle bounds)
+local BAND_T, BAND_B = 15, 40  -- visualization band (strip pages)
 
 local reel_angle = 0           -- TAPE page reel rotation, driven by tape rate
 local delay_hop = 0            -- DELAY page ball position, in hops (1 hop = 1 repeat)
@@ -92,14 +92,18 @@ for i = 1, 128 do twave[i] = 0 end
 local twave_bin = 0
 local twave_any = false
 
--- grain particles (visual only): spawned at the playhead at ~density rate,
--- spread by jitter, lifetime scaled by grain size. slots are pooled and
--- kept in spawn order, so steady-state spawning never allocates
+-- grain particles (visual only): spawned at the playhead at ~density rate.
+-- x is buffer position (playhead + jitter scatter), y is the grain's stereo
+-- seat (pan + spread scatter, the engine's own per-grain pan law: L up,
+-- R down), dot side and lifetime both step with grain size. slots are
+-- pooled and kept in spawn order, so steady-state spawning never allocates
 local PARTICLE_MAX = 32
+local GRAIN_CY, GRAIN_CH = 31, 8  -- stereo axis: mono rail row + half-height
+local SIZE_LOG_SPAN = log(50)     -- size spec is exp 0.01..0.5s: a 50x range
 local particles = {}
 local particles_n = 0
 for i = 1, PARTICLE_MAX do
-  particles[i] = { x = 0, y = 0, lvl = 0, decay = 0 }
+  particles[i] = { x = 0, y = 0, lvl = 0, decay = 0, sz = 1 }
 end
 local spawn_acc = 0
 
@@ -898,7 +902,14 @@ local function update_particles()
   end
   local lo, hi, span = window_bounds()
   local jit = pget("pos_jitter", 0)
-  local decay = 13 / max(pget("size", 0.1) * FPS * 4, 2)
+  local size = pget("size", 0.1)
+  local decay = 13 / max(size * FPS * 4, 2)
+  -- grain size reads twice: lifetime (decay above) and dot side — 1..3 px
+  -- stepped along the size spec's exp scale, fixed at spawn like the
+  -- sounding grain (thresholds land near 27ms and 190ms)
+  local sz = 1 + floor(clamp(log(size * 100) / SIZE_LOG_SPAN, 0, 1) * 2 + 0.5)
+  local pan = pget("pan", 0)
+  local spr = pget("spread", 0.5)
   while spawn_acc >= 1 do
     spawn_acc = spawn_acc - 1
     if particles_n < PARTICLE_MAX then
@@ -906,10 +917,14 @@ local function update_particles()
       particles_n = particles_n + 1
       local p = particles[particles_n]
       p.x = px * 127
-      -- spawn below the strip zone so GRAIN's top strip stays readable
-      p.y = BAND_T + 6 + random() * (BAND_B - BAND_T - 8)
+      -- y is the grain's stereo seat: pan + spread scatter, clipped the
+      -- same way the engine clips per-grain pan — so cloud height IS
+      -- stereo width, and hard pans pile up on the band edge
+      p.y = clamp(GRAIN_CY + (pan + (random() * 2 - 1) * spr) * GRAIN_CH,
+        GRAIN_CY - GRAIN_CH, GRAIN_CY + GRAIN_CH)
       p.lvl = 13
       p.decay = decay
+      p.sz = sz
     else
       spawn_acc = 0
     end
@@ -1323,11 +1338,12 @@ end
 
 local function draw_particles()
   -- level varies per particle and overlaps must layer in spawn order, so
-  -- the fill stays per-particle (32 max)
+  -- the fill stays per-particle (32 max); dots center on their stereo seat
   for i = 1, particles_n do
     local p = particles[i]
+    local off = (p.sz - 1) * 0.5
     screen.level(floor(p.lvl))
-    screen.rect(p.x, p.y, 1, 1)
+    screen.rect(p.x - off, p.y - off, p.sz, p.sz)
     screen.fill()
   end
 end
@@ -1453,7 +1469,9 @@ local function draw_body()
     topright((scan < 0 and "<< " or ">> ") .. string.format("%.2fX", abs(scan)))
   elseif pname == "GRAIN" then
     -- mockup grain page: thin sample strip up top with window brackets,
-    -- grain cloud (the real particles) below, playhead tick between
+    -- grain cloud (the real particles) below, playhead tick between.
+    -- the cloud is a stereo-field plot: y is per-grain pan (L up, R down),
+    -- so height IS spread, off-rail drift IS pan, dot size IS grain size
     screen.level(1)
     screen.move(0, 16)
     screen.line(128, 16)
@@ -1482,11 +1500,29 @@ local function draw_body()
       screen.line(ex + 2, 21)
     end
     screen.stroke()
-    screen.level(15)
-    local px = clamp(play_phase, 0, 1) * 127
-    screen.move(px, 22)
-    screen.line(px, 25)
+    -- stereo axis under the cloud: dim mono rail + L/R poles. spread 0
+    -- lays every grain on the rail; silence leaves only the flat line
+    screen.level(1)
+    screen.move(0, GRAIN_CY)
+    screen.line(128, GRAIN_CY)
     screen.stroke()
+    ptext("L", 1, GRAIN_CY - GRAIN_CH - 1, 1, 1)
+    ptext("R", 1, GRAIN_CY + GRAIN_CH - 4, 1, 1)
+    -- playhead: bright tick under the strip, dim needle through the cloud
+    -- (the scatter's center once jitter detaches grains from it). no
+    -- needle while the voice is freed or the buffer is empty: nothing
+    -- is playing (matches the STRETCH page rule)
+    if wave_any and pget("mode", 2) ~= 1 then
+      local px = clamp(play_phase, 0, 1) * 127
+      screen.level(15)
+      screen.move(px, 22)
+      screen.line(px, 25)
+      screen.stroke()
+      screen.level(2)
+      screen.move(px, 26)
+      screen.line(px, GRAIN_CY + GRAIN_CH)
+      screen.stroke()
+    end
     draw_particles()
     -- pitch parks top-right, in a quiet corner knocked out of the strip:
     -- it's the one grain value you play from anywhere (MIDI, typing
