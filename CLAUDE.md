@@ -38,6 +38,15 @@ a screen polish pass — grouped page dots, alt-aware LEVEL faders (MON/HP),
 FILTER/GRAIN top-right readouts, "EMPTY - K2 REC" on REC, the audibility rule
 (see Workflow), and per-mode STRETCH textures. All draw-code only.
 
+Fourth Lua-only change (verified pixel-identical in SPEC/uisim, untested on
+device): mangler.lua is split into script-internal modules — lib/mfont,
+lib/mparticles, lib/mtape, lib/minput, lib/mgrid, lib/mpages — loaded with
+`include("lib/<name>")` and sharing one `ctx` table built in mangler.lua;
+params stay the single source of truth. These are plain Lua modules, NOT
+engines (the one-engine-file invariant is untouched), and at lib/ depth they
+don't appear in norns SELECT. The seeded render suite matches the pre-split
+output byte-for-byte and the bench shows no cost (0.076 ms/tick, ~0 garbage).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -175,7 +184,8 @@ xruns past ~60%).
 luac5.3 -p mangler.lua
 
 # render every UI page to PNGs with NO hardware: SPEC/uisim/render_pages.lua
-# stubs the norns env, runs the real mangler.lua redraw code against a fake
+# stubs the norns env (including include(), so the lib/*.lua modules resolve
+# from the repo), runs the real mangler.lua redraw code against a fake
 # framebuffer, and drives a scripted performance (a take, a tape loop, FX).
 # eyeball these before deploying any screen change — a redraw error on
 # device is a silent black screen.

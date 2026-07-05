@@ -286,6 +286,13 @@ end
 -- load the real script + drive the scenario
 -- ============================================================================
 
+-- mangler is split across lib/*.lua modules pulled in with norns' include();
+-- resolve those from the repo the mangler path points into. (the midigrid
+-- include stays safely dead here: its util.file_exists guard returns false,
+-- and the pcall would swallow the dofile error anyway.)
+local REPO = MANGLER:match("^(.*)/") or "."
+include = function(p) return dofile(REPO .. "/" .. p .. ".lua") end
+
 dofile(MANGLER)
 init()
 

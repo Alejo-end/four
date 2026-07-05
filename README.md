@@ -121,6 +121,12 @@ CLAUDE.md              agent manual: invariants, build order, current stage
 README.md              this file
 SPEC/spec.md           durable design contract (full per-stage detail)
 SPEC/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
-mangler.lua            Lua control layer (engine.name = 'Mangler')
+mangler.lua            orchestrator: state, params, keys/encoders (engine.name = 'Mangler')
+lib/mfont.lua          the 4x5 pixel font and type-setting routines
+lib/mparticles.lua     pooled grain-cloud particle system
+lib/mtape.lua          softcut plumbing: tape path, eng<>tape mix, PSET tape audio
+lib/minput.lua         chromatic note input: MIDI notes + USB typing keyboard
+lib/mgrid.lua          optional grid surface (monome, or midigrid controllers)
+lib/mpages.lua         the screen: wave models, page bodies, header/footer
 lib/Engine_Mangler.sc  the one and only SuperCollider engine file
 ```
