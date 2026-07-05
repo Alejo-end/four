@@ -32,6 +32,13 @@ print("mangler: script file executed")
 local sc = require "softcut"  -- the TAPE path: parallel ADC tap, own CPU core
 local mu = require "musicutil"
 
+-- the redraw path runs at 15fps on a core shared with the audio engine:
+-- hot loops read these as registers instead of two table hops per call
+local floor, sin, cos = math.floor, math.sin, math.cos
+local abs, sqrt, min, max = math.abs, math.sqrt, math.min, math.max
+local random, log = math.random, math.log
+local sbyte = string.byte
+
 -- ============================================================================
 -- state
 -- ============================================================================
@@ -86,8 +93,14 @@ local twave_bin = 0
 local twave_any = false
 
 -- grain particles (visual only): spawned at the playhead at ~density rate,
--- spread by jitter, lifetime scaled by grain size
+-- spread by jitter, lifetime scaled by grain size. slots are pooled and
+-- kept in spawn order, so steady-state spawning never allocates
+local PARTICLE_MAX = 32
 local particles = {}
+local particles_n = 0
+for i = 1, PARTICLE_MAX do
+  particles[i] = { x = 0, y = 0, lvl = 0, decay = 0 }
+end
 local spawn_acc = 0
 
 -- which params each page's encoders address: { e2, e2_alt, e3, e3_alt }.
@@ -137,8 +150,8 @@ end
 local function window_bounds()
   local a = pget("pos_start", 0)
   local b = pget("pos_end", 1)
-  local lo, hi = math.min(a, b), math.max(a, b)
-  return lo, hi, math.max(hi - lo, 0.001)
+  local lo, hi = min(a, b), max(a, b)
+  return lo, hi, max(hi - lo, 0.001)
 end
 
 -- zoom-aware fine control: window/loop edge params scale their encoder
@@ -327,9 +340,12 @@ local KEYS = {
 local function key_def(n)
   local defs = KEYS[PAGES[page]]
   if not defs then return nil end
-  local base = (n == 2) and "k2" or "k3"
-  if alt then return defs[base .. "_alt"] or defs[base] end
-  return defs[base]
+  if n == 2 then
+    if alt then return defs.k2_alt or defs.k2 end
+    return defs.k2
+  end
+  if alt then return defs.k3_alt or defs.k3 end
+  return defs.k3
 end
 
 -- ============================================================================
@@ -691,6 +707,10 @@ end
 local GRID_WHITE = { 0, 2, 4, 5, 7, 9, 11, 12 }
 local GRID_BLACK = { nil, 1, 3, nil, 6, 8, 10, nil }
 
+-- note-pad row pairs { black row, white row, octave offset }: static, so
+-- the per-frame grid refresh builds no tables
+local GRID_NOTE_ROWS = { { 5, 6, 1 }, { 7, 8, 0 } }
+
 -- window/loop slice pads: track what's held per row so a second press
 -- while the first is down stretches the region between them
 local slice_held = { win = {}, loop = {} }
@@ -782,22 +802,22 @@ local function grid_redraw()
   -- rows 3/4: slices lit across the active region, head pad brightest
   local wlo, whi = window_bounds()
   local la, lb = pget("loop_start", 0), pget("loop_end", 1)
-  local llo, lhi = math.min(la, lb), math.max(la, lb)
+  local llo, lhi = min(la, lb), max(la, lb)
   for x = 1, 8 do
     local a, b = (x - 1) / 8, x / 8
     gg:led(x, 3, (a < whi and b > wlo) and 6 or 1)
     gg:led(x, 4, (a < lhi and b > llo) and 6 or 1)
   end
-  gg:led(math.floor(clamp(play_phase, 0, 0.999) * 8) + 1, 3, 15)
-  gg:led(math.floor(clamp(tape_phase, 0, 0.999) * 8) + 1, 4, 15)
+  gg:led(floor(clamp(play_phase, 0, 0.999) * 8) + 1, 3, 15)
+  gg:led(floor(clamp(tape_phase, 0, 0.999) * 8) + 1, 4, 15)
 
   -- rows 5-8: note pads. current pitch lights its pad; the whole block
   -- dims when note input is off so it's visible why pads are dead
   local en = pget("keys_enable", 1) == 1
   local oct = pget("kb_octave", 0)
-  local st_cur = util.round(12 * math.log(pget("pitch", 1), 2))
-  for _, rows in ipairs({ { 5, 6, oct + 1 }, { 7, 8, oct } }) do
-    local by, wy, o = rows[1], rows[2], rows[3]
+  local st_cur = util.round(12 * log(pget("pitch", 1), 2))
+  for _, rows in ipairs(GRID_NOTE_ROWS) do
+    local by, wy, o = rows[1], rows[2], oct + rows[3]
     for x = 1, 8 do
       local w = GRID_WHITE[x] + 12 * o
       gg:led(x, wy, not en and 1 or w == st_cur and 15
@@ -832,7 +852,7 @@ end
 -- fresh bin, previous content survives by `pre` (the overdub picture).
 local function paint_bins(bins, last, bin, amp, pre)
   if last == 0 or last == bin then
-    bins[bin] = math.max(bins[bin], amp)
+    bins[bin] = max(bins[bin], amp)
     return bin
   end
   local fwd = (bin - last) % 128
@@ -841,7 +861,7 @@ local function paint_bins(bins, last, bin, amp, pre)
   local b = last
   repeat
     b = ((b - 1 + step) % 128) + 1
-    bins[b] = math.max(bins[b] * pre, amp)
+    bins[b] = max(bins[b] * pre, amp)
   until b == bin
   return bin
 end
@@ -849,7 +869,7 @@ end
 -- track the buffer's contents as the write head passes over it
 local function update_wave()
   if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
-    local bin = math.floor(clamp(rec_phase, 0, 0.999) * 128) + 1
+    local bin = floor(clamp(rec_phase, 0, 0.999) * 128) + 1
     if rec_amp > 0.01 then wave_any = true end
     wave_bin = paint_bins(wave, wave_bin, bin, rec_amp, pget("pre_level", 0))
   end
@@ -859,8 +879,8 @@ end
 -- since softcut exposes no per-voice output meter); tape_pre sets survival
 local function update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
-    local bin = math.floor(clamp(tape_phase, 0, 0.999) * 128) + 1
-    local a = math.max(amp_in[1], amp_in[2])
+    local bin = floor(clamp(tape_phase, 0, 0.999) * 128) + 1
+    local a = max(amp_in[1], amp_in[2])
     if a > 0.01 then twave_any = true end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end
@@ -878,26 +898,36 @@ local function update_particles()
   end
   local lo, hi, span = window_bounds()
   local jit = pget("pos_jitter", 0)
+  local decay = 13 / max(pget("size", 0.1) * FPS * 4, 2)
   while spawn_acc >= 1 do
     spawn_acc = spawn_acc - 1
-    if #particles < 32 then
-      local px = clamp(play_phase + (math.random() * 2 - 1) * jit * span, 0, 1)
-      particles[#particles + 1] = {
-        x = px * 127,
-        -- spawn below the strip zone so GRAIN's top strip stays readable
-        y = BAND_T + 6 + math.random() * (BAND_B - BAND_T - 8),
-        lvl = 13,
-        decay = 13 / math.max(pget("size", 0.1) * FPS * 4, 2),
-      }
+    if particles_n < PARTICLE_MAX then
+      local px = clamp(play_phase + (random() * 2 - 1) * jit * span, 0, 1)
+      particles_n = particles_n + 1
+      local p = particles[particles_n]
+      p.x = px * 127
+      -- spawn below the strip zone so GRAIN's top strip stays readable
+      p.y = BAND_T + 6 + random() * (BAND_B - BAND_T - 8)
+      p.lvl = 13
+      p.decay = decay
     else
       spawn_acc = 0
     end
   end
-  for i = #particles, 1, -1 do
+  -- decay + compact in place: live slots keep their order (draw order is
+  -- part of the picture), dead slots swap to the tail for reuse
+  local w = 0
+  for i = 1, particles_n do
     local p = particles[i]
     p.lvl = p.lvl - p.decay
-    if p.lvl < 1 then table.remove(particles, i) end
+    if p.lvl >= 1 then
+      w = w + 1
+      if w ~= i then
+        particles[w], particles[i] = p, particles[w]
+      end
+    end
   end
+  particles_n = w
 end
 
 -- ============================================================================
@@ -1055,13 +1085,20 @@ local FONT = {
   [" "] = { "00", "00", "00", "00", "00" },
 }
 
-local function glyph(ch)
-  return FONT[ch] or FONT[ch:upper()] or FONT[" "]
+-- byte-indexed glyph + advance tables, built once: text draws every frame,
+-- and a byte walk allocates nothing (per-char gmatch/sub costs an iterator
+-- or a string per call). lua patterns are byte-based, so bytes match them.
+local FONT_B, FONT_ADV = {}, {}
+for b = 0, 255 do
+  local ch = string.char(b)
+  local g = FONT[ch] or FONT[ch:upper()] or FONT[" "]
+  FONT_B[b] = g
+  FONT_ADV[b] = #g[1] + 1
 end
 
 local function text_w(str, sc)
   local w = 0
-  for ch in str:gmatch(".") do w = w + (#glyph(ch)[1] + 1) * sc end
+  for i = 1, #str do w = w + FONT_ADV[sbyte(str, i)] * sc end
   return w - sc
 end
 
@@ -1069,24 +1106,25 @@ end
 local function ptext(str, x, y, sc, lvl)
   screen.level(lvl)
   local cx = x
-  for ch in str:gmatch(".") do
-    local g = glyph(ch)
+  for i = 1, #str do
+    local b = sbyte(str, i)
+    local g = FONT_B[b]
     for r = 1, 5 do
       local row = g[r]
       for c = 1, #row do
-        if row:sub(c, c) == "1" then
+        if sbyte(row, c) == 49 then  -- 49 = "1"
           screen.rect(cx + (c - 1) * sc, y + (r - 1) * sc, sc, sc)
         end
       end
     end
-    cx = cx + (#g[1] + 1) * sc
+    cx = cx + FONT_ADV[b] * sc
   end
   screen.fill()
   return cx - x - sc
 end
 
 local function ptext_c(str, cx, y, sc, lvl)
-  ptext(str, math.floor(cx - text_w(str, sc) / 2 + 0.5), y, sc, lvl)
+  ptext(str, floor(cx - text_w(str, sc) / 2 + 0.5), y, sc, lvl)
 end
 
 local function ptext_r(str, rx, y, sc, lvl)
@@ -1105,8 +1143,8 @@ end
 
 -- deterministic dither, same trick as the mockups
 local function hash(x, y, sd)
-  local f = math.sin(x * 12.9898 + y * 78.233 + sd * 37.719) * 43758.5453
-  return f - math.floor(f)
+  local f = sin(x * 12.9898 + y * 78.233 + sd * 37.719) * 43758.5453
+  return f - floor(f)
 end
 
 -- short footer labels per param id (4-5 chars, mockup style)
@@ -1140,12 +1178,18 @@ local function param_norm(id)
   return clamp(v, 0, 1)
 end
 
--- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees
+-- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees.
+-- the outline is a constant ring — its trig lives in a table, not the frame
+local HEX_DX, HEX_DY = {}, {}
+for i = 0, 6 do
+  local a = -math.pi / 2 + i * math.pi / 3
+  HEX_DX[i], HEX_DY[i] = math.cos(a), math.sin(a)
+end
+
 local function draw_hex_dial(cx, cy, r, val)
   screen.level(4)
   for i = 0, 6 do
-    local a = -math.pi / 2 + i * math.pi / 3
-    local x, y = cx + math.cos(a) * r, cy + math.sin(a) * r
+    local x, y = cx + HEX_DX[i] * r, cy + HEX_DY[i] * r
     if i == 0 then screen.move(x, y) else screen.line(x, y) end
   end
   screen.stroke()
@@ -1153,7 +1197,7 @@ local function draw_hex_dial(cx, cy, r, val)
     local a = math.pi * 0.75 + clamp(val, 0, 1) * math.pi * 1.5
     screen.level(15)
     screen.move(cx, cy)
-    screen.line(cx + math.cos(a) * (r - 2), cy + math.sin(a) * (r - 2))
+    screen.line(cx + cos(a) * (r - 2), cy + sin(a) * (r - 2))
     screen.stroke()
   end
 end
@@ -1161,7 +1205,7 @@ end
 -- key pill, mockup geometry: y=51, h=11, inverted while lit
 local function draw_pill(cx, label, on, dim)
   local w = text_w(label, 1) + 7
-  local x = math.floor(cx - w / 2)
+  local x = floor(cx - w / 2)
   if on then
     screen.level(15)
     screen.rect(x, 51, w, 11)
@@ -1219,18 +1263,26 @@ local function draw_strip(handles)
   screen.line(128, mid)
   screen.stroke()
 
-  -- waveform columns (sqrt + 2x gain for visual headroom on quiet material)
+  -- waveform columns (sqrt + 2x gain for visual headroom on quiet material).
+  -- disjoint verticals raster the same under one stroke per brightness run,
+  -- so up to 128 stroke calls collapse into at most three
+  local run = 0
   for x = 0, 127 do
     local a = wave[x + 1]
     if a > 0.002 then
-      local h = clamp(math.sqrt(math.min(a * 2, 1)) * half, 1, half)
+      local h = clamp(sqrt(min(a * 2, 1)) * half, 1, half)
       local nx = x / 127
-      screen.level((nx >= lo and nx <= hi) and 12 or 2)
+      local lvl = (nx >= lo and nx <= hi) and 12 or 2
+      if lvl ~= run then
+        if run ~= 0 then screen.stroke() end
+        screen.level(lvl)
+        run = lvl
+      end
       screen.move(x, mid - h)
       screen.line(x, mid + h)
-      screen.stroke()
     end
   end
+  if run ~= 0 then screen.stroke() end
 
   -- window underline + optional edge handles
   screen.level(4)
@@ -1238,12 +1290,13 @@ local function draw_strip(handles)
   screen.line(hi * 127, BAND_B + 2)
   screen.stroke()
   if handles then
-    for _, e in ipairs({ lo, hi }) do
-      screen.level(15)
+    screen.level(15)
+    for k = 1, 2 do
+      local e = k == 1 and lo or hi
       screen.move(e * 127, BAND_T - 2)
       screen.line(e * 127, BAND_B + 2)
-      screen.stroke()
     end
+    screen.stroke()
   end
 
   -- playhead needle — only once there's material to play; an empty buffer
@@ -1269,11 +1322,35 @@ local function draw_strip(handles)
 end
 
 local function draw_particles()
-  for _, p in ipairs(particles) do
-    screen.level(math.floor(p.lvl))
+  -- level varies per particle and overlaps must layer in spawn order, so
+  -- the fill stays per-particle (32 max)
+  for i = 1, particles_n do
+    local p = particles[i]
+    screen.level(floor(p.lvl))
     screen.rect(p.x, p.y, 1, 1)
     screen.fill()
   end
+end
+
+-- LEVEL fader layout per alt layer: { x, label, param id }. the left
+-- fader's vu meters the input, the right one the output, in either layer
+local LEVEL_DEFS = {
+  { 40, "IN", "input_level" },
+  { 88, "OUT", "output_level" },
+}
+local LEVEL_DEFS_ALT = {
+  { 40, "MON", "monitor_level" },
+  { 88, "HP", "headphone_gain" },
+}
+
+local REEL_X = { 46, 86 }   -- TAPE page reel centers
+
+local delay_heights = {}    -- DELAY bounce peaks, slots reused every frame
+
+-- STRETCH lane curve, shared by the mode textures (a closure built inside
+-- the frame would be gc churn at 15fps)
+local function stretch_wy(x, ph, rate)
+  return 30 + sin((x + ph) * 0.35 * rate) * 6
 end
 
 local function draw_body()
@@ -1285,7 +1362,7 @@ local function draw_body()
     -- mode OFF silences the engine, so its lane lies flat — nothing
     -- moves that can't be heard.
     local mixv = pget("mix", 0.5)
-    local sd = math.floor(frame / 2)
+    local sd = floor(frame / 2)
     ptext("ENG", 2, 13, 1, 4)
     if pget("mode", 2) == 1 then
       screen.level(1)
@@ -1314,35 +1391,28 @@ local function draw_body()
     screen.move(26, 33)
     screen.line(122, 33)
     screen.stroke()
+    -- lane columns share one brightness: a single stroke rasters the same
     local g = 0.3 + 0.7 * mixv
+    screen.level(12)
     for x = 26, 122 do
-      local a = twave[math.floor((x - 26) / 96 * 127) + 1]
+      local a = twave[floor((x - 26) / 96 * 127) + 1]
       if a > 0.002 then
-        local h = clamp(math.sqrt(math.min(a * 2, 1)) * 5 * g, 1, 5)
-        screen.level(12)
+        local h = clamp(sqrt(min(a * 2, 1)) * 5 * g, 1, 5)
         screen.move(x, 33 - h)
         screen.line(x, 33 + h)
-        screen.stroke()
       end
     end
+    screen.stroke()
   elseif pname == "LEVEL" then
     -- mockup levels page: faders with live VU columns beside them. the
     -- faders track the alt layer, so they always show what E2/E3 grab:
     -- IN/OUT normally, MON/HP while K1 is held
-    local defs
-    if alt then
-      defs = {
-        { 40, "MON", param_norm("monitor_level"), math.max(amp_in[1], amp_in[2]) },
-        { 88, "HP", param_norm("headphone_gain"), math.max(amp_out[1], amp_out[2]) },
-      }
-    else
-      defs = {
-        { 40, "IN", param_norm("input_level"), math.max(amp_in[1], amp_in[2]) },
-        { 88, "OUT", param_norm("output_level"), math.max(amp_out[1], amp_out[2]) },
-      }
-    end
-    for _, d in ipairs(defs) do
-      local fx, label, pos, amp = d[1], d[2], d[3] or 0, d[4]
+    local defs = alt and LEVEL_DEFS_ALT or LEVEL_DEFS
+    for i = 1, 2 do
+      local d = defs[i]
+      local fx, label, pos = d[1], d[2], param_norm(d[3]) or 0
+      local amp = i == 1 and max(amp_in[1], amp_in[2])
+        or max(amp_out[1], amp_out[2])
       ptext_c(label, fx + 4, 12, 1, 4)
       screen.level(4)
       screen.move(fx, 19)
@@ -1352,11 +1422,11 @@ local function draw_body()
       screen.move(fx - 2, 40)
       screen.line(fx + 2, 40)
       screen.stroke()
-      local hy = 40 - math.floor(pos * 21)
+      local hy = 40 - floor(pos * 21)
       screen.level(15)
       screen.rect(fx - 4, hy - 1, 9, 3)
       screen.fill()
-      local vu = math.floor(clamp(math.sqrt(amp), 0, 1) * 21)
+      local vu = floor(clamp(sqrt(amp), 0, 1) * 21)
       if vu > 0 then
         screen.level(12)
         screen.rect(fx + 9, 40 - vu, 3, vu)
@@ -1371,7 +1441,7 @@ local function draw_body()
       ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
     end
     -- input meter rides the right edge so you can see what's being captured
-    local h = math.floor(clamp(math.sqrt(math.max(amp_in[1], amp_in[2])) * (BAND_B - BAND_T), 0, BAND_B - BAND_T))
+    local h = floor(clamp(sqrt(max(amp_in[1], amp_in[2])) * (BAND_B - BAND_T), 0, BAND_B - BAND_T))
     screen.level(15)
     if h > 0 then
       screen.rect(125, BAND_B - h, 3, h)
@@ -1380,7 +1450,7 @@ local function draw_body()
   elseif pname == "WINDOW" then
     draw_strip(true)
     local scan = pget("scan", 1)
-    topright((scan < 0 and "<< " or ">> ") .. string.format("%.2fX", math.abs(scan)))
+    topright((scan < 0 and "<< " or ">> ") .. string.format("%.2fX", abs(scan)))
   elseif pname == "GRAIN" then
     -- mockup grain page: thin sample strip up top with window brackets,
     -- grain cloud (the real particles) below, playhead tick between
@@ -1388,28 +1458,30 @@ local function draw_body()
     screen.move(0, 16)
     screen.line(128, 16)
     screen.stroke()
+    -- strip columns and both window brackets each share one brightness:
+    -- batched strokes raster identically
+    screen.level(6)
     for x = 0, 127 do
       local a = wave[x + 1]
       if a > 0.002 then
-        local h = clamp(math.sqrt(math.min(a * 2, 1)) * 4, 1, 4)
-        screen.level(6)
+        local h = clamp(sqrt(min(a * 2, 1)) * 4, 1, 4)
         screen.move(x, 16 - h)
         screen.line(x, 16 + h)
-        screen.stroke()
       end
     end
+    screen.stroke()
     local lo, hi = window_bounds()
-    for _, e in ipairs({ lo, hi }) do
-      local ex = e * 127
-      screen.level(15)
+    screen.level(15)
+    for k = 1, 2 do
+      local ex = (k == 1 and lo or hi) * 127
       screen.move(ex, 11)
       screen.line(ex, 21)
       screen.move(ex - 2, 11)
       screen.line(ex + 2, 11)
       screen.move(ex - 2, 21)
       screen.line(ex + 2, 21)
-      screen.stroke()
     end
+    screen.stroke()
     screen.level(15)
     local px = clamp(play_phase, 0, 1) * 127
     screen.move(px, 22)
@@ -1424,7 +1496,7 @@ local function draw_body()
     screen.rect(84, 11, 44, 9)
     screen.fill()
     if pget("pitch_quant", 0) == 1 then
-      topright(string.format("PT %+d ST", util.round(12 * math.log(pv, 2))))
+      topright(string.format("PT %+d ST", util.round(12 * log(pv, 2))))
     else
       topright(string.format("PT %.2fX", pv))
     end
@@ -1439,14 +1511,13 @@ local function draw_body()
     chip(m, 2, 13)
     local scan = pget("scan", 1)
     local mode = pget("mode", 2)
+    local held_pv = pget("pv_freeze", 0) == 1
     topright(string.format("%+.2fX", scan))
-    if pget("pv_freeze", 0) == 1 and mode == 4 then
+    if held_pv and mode == 4 then
       ptext_c("HELD", 64, 14, 1, 15)
     end
-    local rate = math.max(math.abs(scan), 0.05)
-    local ph = (mode == 4 and pget("pv_freeze", 0) == 1) and 0
-      or frame * 0.8 * scan
-    local function wy(x) return 30 + math.sin((x + ph) * 0.35 * rate) * 6 end
+    local rate = max(abs(scan), 0.05)
+    local ph = (mode == 4 and held_pv) and 0 or frame * 0.8 * scan
     if mode == 1 then          -- OFF: dormant lane
       screen.level(1)
       screen.move(0, 30)
@@ -1455,24 +1526,24 @@ local function draw_body()
     elseif mode == 2 then      -- GRAIN: the wave sampled as grains
       screen.level(6)
       for x = 0, 127, 3 do
-        screen.rect(x, wy(x), 1, 1)
+        screen.rect(x, stretch_wy(x, ph, rate), 1, 1)
       end
       screen.fill()
     elseif mode == 3 then      -- WARP: an overlapped window ghosts behind
       screen.level(2)
       for x = 0, 127 do
-        screen.rect(x, wy(x + 9), 1, 1)
+        screen.rect(x, stretch_wy(x + 9, ph, rate), 1, 1)
       end
       screen.fill()
       screen.level(8)
       for x = 0, 127 do
-        screen.rect(x, wy(x), 1, 1)
+        screen.rect(x, stretch_wy(x, ph, rate), 1, 1)
       end
       screen.fill()
     else                       -- PV: spectral columns under the same curve
       screen.level(6)
       for x = 0, 127, 4 do
-        local h = math.abs(math.sin((x + ph) * 0.35 * rate)) * 11 + 1
+        local h = abs(sin((x + ph) * 0.35 * rate)) * 11 + 1
         screen.rect(x, 38 - h, 2, h)
       end
       screen.fill()
@@ -1499,7 +1570,7 @@ local function draw_body()
     -- spins backward, stopped stands still), loop track + head below
     local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
     reel_angle = reel_angle + r * 0.35
-    for _, cx in ipairs({ 46, 86 }) do
+    for _, cx in ipairs(REEL_X) do
       screen.level(4)
       screen.circle(cx, 24, 8)
       screen.stroke()
@@ -1507,7 +1578,7 @@ local function draw_body()
       for k = 0, 2 do
         local a = reel_angle + k * 2.094
         screen.move(cx, 24)
-        screen.line(cx + math.cos(a) * 6, 24 + math.sin(a) * 6)
+        screen.line(cx + cos(a) * 6, 24 + sin(a) * 6)
       end
       screen.stroke()
     end
@@ -1518,7 +1589,7 @@ local function draw_body()
     screen.line(86, 33)
     screen.stroke()
     local a2, b2 = pget("loop_start", 0), pget("loop_end", 1)
-    local lo, hi = math.min(a2, b2), math.max(a2, b2)
+    local lo, hi = min(a2, b2), max(a2, b2)
     screen.level(2)
     screen.move(0, 40)
     screen.line(128, 40)
@@ -1543,26 +1614,26 @@ local function draw_body()
     -- the cutoff parks top-right — every page keeps its one number there
     local cut = pget("cutoff", 20000)
     topright(cut >= 1000 and string.format("%.1fKHZ", cut / 1000)
-      or string.format("%dHZ", math.floor(cut + 0.5)))
+      or string.format("%dHZ", floor(cut + 0.5)))
     local ft = pget("filt_type", 1)
     local res = pget("resonance", 0)
-    local cx = clamp((math.log(cut / 20) / math.log(1000)) * 127, 0, 127)
+    local cx = clamp((log(cut / 20) / log(1000)) * 127, 0, 127)
     local mid = 26
     screen.level(8)
     if ft == 1 then       -- LP
       screen.move(0, mid)
-      screen.line(math.max(cx - 10, 0), mid)
+      screen.line(max(cx - 10, 0), mid)
       screen.line(cx, mid - res * 10)
-      screen.line(math.min(cx + 14, 127), BAND_B)
+      screen.line(min(cx + 14, 127), BAND_B)
     elseif ft == 2 then   -- HP
       screen.move(127, mid)
-      screen.line(math.min(cx + 10, 127), mid)
+      screen.line(min(cx + 10, 127), mid)
       screen.line(cx, mid - res * 10)
-      screen.line(math.max(cx - 14, 0), BAND_B)
+      screen.line(max(cx - 14, 0), BAND_B)
     else                  -- BP
-      screen.move(math.max(cx - 26, 0), BAND_B)
+      screen.move(max(cx - 26, 0), BAND_B)
       screen.line(cx, mid - 6 - res * 6)
-      screen.line(math.min(cx + 26, 127), BAND_B)
+      screen.line(min(cx + 26, 127), BAND_B)
     end
     screen.stroke()
     chip(params.lookup["filt_type"] and params:string("filt_type") or "?", 2, 13)
@@ -1576,7 +1647,7 @@ local function draw_body()
     local tnorm = param_norm("delay_time") or 0.3
     local fb = pget("delay_fb", 0.3)
     local mixv = pget("delay_mix", 0)
-    topright(string.format("MIX %d%%", math.floor(mixv * 100 + 0.5)),
+    topright(string.format("MIX %d%%", floor(mixv * 100 + 0.5)),
       mixv > 0 and 10 or 3)
     local base = 39
     screen.level(1)
@@ -1584,14 +1655,16 @@ local function draw_body()
     screen.line(128, base + 1.5)
     screen.stroke()
     local sp = 12 + tnorm * 24
-    local heights = {}
+    local nh = 0
     local h = 20
-    while 8 + #heights * sp <= 116 and h >= 1.5 do
-      heights[#heights + 1] = h
-      h = h * math.max(fb, 0.05)
+    while 8 + nh * sp <= 116 and h >= 1.5 do
+      nh = nh + 1
+      delay_heights[nh] = h
+      h = h * max(fb, 0.05)
     end
     screen.level(mixv > 0 and 6 or 2)
-    for i, hh in ipairs(heights) do
+    for i = 1, nh do
+      local hh = delay_heights[i]
       local xa = 8 + (i - 1) * sp
       local k = 0
       for u = 0, 1, 0.05 do
@@ -1603,12 +1676,12 @@ local function draw_body()
       screen.rect(xa, base - 2, 1, 2)
     end
     screen.fill()
-    if #heights > 0 and mixv > 0 then
-      delay_hop = (delay_hop + (1 / FPS) / math.max(dtime, 0.12)) % #heights
-      local seg = math.floor(delay_hop) + 1
+    if nh > 0 and mixv > 0 then
+      delay_hop = (delay_hop + (1 / FPS) / max(dtime, 0.12)) % nh
+      local seg = floor(delay_hop) + 1
       local u = delay_hop % 1
       local bx = 8 + (seg - 1) * sp + u * sp
-      local by = base - 4 * heights[seg] * u * (1 - u)
+      local by = base - 4 * delay_heights[seg] * u * (1 - u)
       screen.level(15)
       screen.rect(bx - 1, by - 2, 2, 2)
       screen.fill()
@@ -1619,7 +1692,7 @@ local function draw_body()
     -- dormant: dim room, still air — nothing moves that can't be heard.
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
-    topright(string.format("MIX %d%%", math.floor(mixv * 100 + 0.5)),
+    topright(string.format("MIX %d%%", floor(mixv * 100 + 0.5)),
       mixv > 0 and 10 or 3)
     local w = 44 + size * 60
     local hh = 14 + size * 12
@@ -1637,7 +1710,7 @@ local function draw_body()
       for k = 0, 1 do
         local a = k * 2.4 + frame * 0.03
         local px2, py = sx, sy
-        local dx, dy = math.cos(a), math.sin(a)
+        local dx, dy = cos(a), sin(a)
         for i = 0, 70 do
           px2 = px2 + dx
           py = py + dy
@@ -1651,43 +1724,60 @@ local function draw_body()
   end
 end
 
+-- page-dot x positions, top-right, computed once: dots cluster by signal
+-- family — source (MIX LEVEL REC) · shape (WINDOW GRAIN STRETCH) · TAPE ·
+-- fx (FILTER DELAY REVERB) — so position in the row tells you which part
+-- of the instrument you're in.
+local DOT_X = {}
+do
+  local GAP_AFTER = { [3] = true, [6] = true, [7] = true }
+  local x = 126
+  for i = #PAGES, 1, -1 do
+    DOT_X[i] = x
+    x = x - 4
+    if i > 1 and GAP_AFTER[i - 1] then x = x - 2 end
+  end
+end
+
+-- the status line for each of the 16 flag combos, built once: the header
+-- redraws every frame, and only the combo index changes
+local STATUS_STR = {}
+do
+  local flags = { "REC", "FZ", "TR", "TFZ" }
+  for m = 0, 15 do
+    local t = {}
+    for b = 1, 4 do
+      if m & (1 << (b - 1)) ~= 0 then t[#t + 1] = flags[b] end
+    end
+    STATUS_STR[m] = table.concat(t, " ")
+  end
+end
+
 local function draw_header()
   -- title in the 2x pixel font, ALT chip beside it
   local w = ptext(PAGES[page], 2, 1, 2, 15)
   if alt then chip("ALT", 2 + w + 5, 1) end
 
-  -- page dots, top-right: current page is a 3x3 block, the rest are 1px.
-  -- dots cluster by signal family — source (MIX LEVEL REC) · shape (WINDOW
-  -- GRAIN STRETCH) · TAPE · fx (FILTER DELAY REVERB) — so position in the
-  -- row tells you which part of the instrument you're in.
-  local GAP_AFTER = { [3] = true, [6] = true, [7] = true }
-  local xs = {}
-  local x = 126
-  for i = #PAGES, 1, -1 do
-    xs[i] = x
-    x = x - 4
-    if i > 1 and GAP_AFTER[i - 1] then x = x - 2 end
-  end
+  -- page dots, top-right: current page is a 3x3 block, the rest are 1px
   for i = 1, #PAGES do
     if i == page then
       screen.level(15)
-      screen.rect(xs[i] - 1, 1, 3, 3)
+      screen.rect(DOT_X[i] - 1, 1, 3, 3)
     else
       screen.level(2)
-      screen.rect(xs[i], 2, 1, 1)
+      screen.rect(DOT_X[i], 2, 1, 1)
     end
     screen.fill()
   end
 
   -- status flags blink under the dots: an armed recorder is impossible
   -- to miss from any page
-  local status = {}
-  if pget("rec", 0) == 1 then status[#status + 1] = "REC" end
-  if pget("freeze", 0) == 1 then status[#status + 1] = "FZ" end
-  if pget("tape_rec", 0) == 1 then status[#status + 1] = "TR" end
-  if pget("tape_freeze", 0) == 1 then status[#status + 1] = "TFZ" end
-  if #status > 0 then
-    ptext_r(table.concat(status, " "), 126, 6, 1,
+  local m = (pget("rec", 0) == 1 and 1 or 0)
+    + (pget("freeze", 0) == 1 and 2 or 0)
+    + (pget("tape_rec", 0) == 1 and 4 or 0)
+    + (pget("tape_freeze", 0) == 1 and 8 or 0)
+  if m > 0 then
+    ptext_r(STATUS_STR[m], 126, 6, 1,
       (frame % FPS) < (FPS / 2) and 15 or 4)
   end
 end
