@@ -3,7 +3,8 @@
 A monome **norns** live stereo sample-mangling instrument for external line-level gear
 (synth, drum machine, anything line-level). Performance-first: record, window, granulate,
 time-stretch, tape-loop, filter, delay, reverb — played from **3 keys + 3 encoders**, with
-**every parameter MIDI-mappable**. Built for **shield XL on Raspberry Pi 4**.
+**every parameter MIDI-mappable**. An optional **grid** (monome, or a launchpad-style MIDI
+grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**.
 
 ## What it does
 
@@ -17,6 +18,8 @@ time-stretch, tape-loop, filter, delay, reverb — played from **3 keys + 3 enco
 - **MIDI** — map any parameter to a CC from the PARAMS menu (saved per-script as a PMAP).
 - **Chromatic note input** — play the sample from a MIDI keyboard (or a USB typing
   keyboard), retuning pitch in semitones without changing speed.
+- **Grid (optional)** — a monome grid, or a launchpad-style MIDI grid via the midigrid
+  library: note pads, window/loop slice pads, and transport toggles.
 
 > **Status:** Stage 4 (filter + delay + reverb), on-device gate pending. Stages 1–3
 > (record/granular/window, stretch modes, tape looper) have passed on hardware. See
@@ -67,6 +70,29 @@ keys (`A` = as recorded), the `W` row the black keys, and `Z` / `X` shift the oc
 Settings live in **PARAMS > keys**: note input on/off, MIDI channel (default: any), root
 note, typing-keyboard octave, and **pitch quantize** — which also snaps the pitch encoder
 and any mapped CC to semitones.
+
+### Grid (optional)
+
+mangler needs no grid — but if one is attached it becomes an 8×8 performance surface.
+A **monome grid** just works. A **launchpad-style MIDI grid** (Launchpad family, APC mini)
+works through the community [midigrid](https://github.com/miker2049/midigrid) library:
+install it on the norns (maiden REPL: `;install https://github.com/miker2049/midigrid`),
+plug the controller in, and load mangler — it is adopted automatically whenever no real
+monome grid is attached.
+
+```
+row 1    ENGINE  [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv freeze]
+row 2    TAPE    [rec] [freeze] [reverse (hold)]  ·  ·  ·  ·  ·
+row 3    WINDOW  8 slice pads — tap = that eighth, hold one + tap = the span
+row 4    LOOP    8 slice pads for the tape loop, same gesture
+rows 5–8 NOTES   two piano octaves, black row above its white row (same shape
+                 as musical typing; upper pair +1 octave). row 7 corners =
+                 octave −/+ · row 5 corners = pitch reset / pitch quantize
+```
+
+Pads drive the same params as everything else, so grid, keys, encoders, and MIDI CCs stay
+in lockstep. The grid controller's own MIDI is excluded from chromatic note input — its
+pads are pads, not notes. (The grid layer is new and not yet verified on hardware.)
 
 ## Performance model (Pi 4)
 

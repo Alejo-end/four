@@ -11,13 +11,17 @@
 -- K2 : primary action
 -- K3 : secondary action
 --
--- STAGE 3 — record + granular + window + time-stretch modes + softcut TAPE.
--- FILTER/DELAY/REVERB are placeholders for stage 4. See SPEC/spec.md.
+-- STAGE 4 — record + granular + window + time-stretch modes + softcut TAPE
+-- + filter/delay/reverb. See SPEC/spec.md.
 --
 -- MIDI notes play the sample chromatically: note-ons retune `pitch`
 -- relative to the root note (PARAMS > keys). a USB typing keyboard works
 -- too: ableton-style musical typing (A-row = white keys, W-row = black,
 -- Z/X = octave down/up).
+--
+-- a grid is optional, never required: a monome grid — or a launchpad-style
+-- MIDI grid controller via the midigrid library — adds note pads, window/
+-- loop slice pads, and transport toggles (see the grid section below).
 
 engine.name = "Mangler"
 
@@ -59,7 +63,14 @@ local TAPE_LEN = 60        -- seconds of softcut buffer used by the tape loop
 local BAND_T, BAND_B = 15, 40  -- visualization band (screen + particle bounds)
 
 local reel_angle = 0           -- TAPE page reel rotation, driven by tape rate
+local delay_hop = 0            -- DELAY page ball position, in hops (1 hop = 1 repeat)
 local flash_id, flash_until = nil, 0  -- transient top-right value readout
+
+-- grid (optional): native monome or a midi grid controller via midigrid.
+-- declared up here so the midi note-input filter can see them — it must
+-- ignore the grid controller's own note messages (see the grid section).
+local gg                     -- connected grid; no device attached until one is
+local have_midigrid = false  -- true when the midigrid library is standing in
 
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
@@ -582,7 +593,21 @@ end
 
 local midi_devices = {}
 
-local function midi_event(data)
+-- true when vport i holds the device midigrid adopted as the grid: its
+-- note-ons are grid pads, not notes. norns dispatches midi to BOTH the
+-- device-level handler (which midigrid uses) and the vport-level handler
+-- (which we use), so without this filter every pad press would also yank
+-- `pitch` to whatever the pad's raw note number maps to.
+local function is_grid_vport(i)
+  if not (have_midigrid and gg and gg.device) then return false end
+  local vp = midi.vports[i]
+  local dev = vp and vp.device
+  if not dev then return false end
+  return dev == gg.device or dev.name == gg.device.name
+end
+
+local function midi_event(data, vport)
+  if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
   if msg.type ~= "note_on" or (msg.vel or 0) == 0 then return end
   if pget("keys_enable", 1) == 0 then return end
@@ -595,7 +620,7 @@ local function init_midi()
   -- connect every vport: any keyboard works, including ones plugged in later
   for i = 1, #midi.vports do
     midi_devices[i] = midi.connect(i)
-    midi_devices[i].event = midi_event
+    midi_devices[i].event = function(data) midi_event(data, i) end
   end
 end
 
@@ -623,6 +648,176 @@ function keyboard.code(code, value)
       flash_id, flash_until = "pitch", frame + FPS
     end
   end
+end
+
+-- ============================================================================
+-- grid (optional): monome grid, or launchpad-style controllers via midigrid
+-- ============================================================================
+-- an 8x8 performance surface. native monome grids just work; with the
+-- midigrid library installed (~/dust/code/midigrid) a launchpad-family or
+-- APC mini controller stands in — but only when no real grid is attached
+-- (a monome on grid vport 1 wins). every pad drives params, the same
+-- single source of truth as keys, encoders, and MIDI CCs.
+--
+--   row 1  engine: [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv frz]
+--   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  ·
+--   row 3  window slices: a pad = that eighth; hold one + press another
+--          = the span between them
+--   row 4  tape loop slices: same gesture, driving loop start/end
+--   rows 5-8  two piano octaves, black row above its white row (same
+--          shape as the typing keyboard; upper pair is +1 octave).
+--          black-row gap pads: row 7 ends = octave -/+, row 5 ends =
+--          pitch reset / pitch quantize
+
+local grid_mod = grid
+do
+  local gname = (grid.vports and grid.vports[1] and grid.vports[1].name)
+    or "none"
+  if gname == "none" and util.file_exists(_path.code .. "midigrid") then
+    -- pcall: a broken midigrid install must not take mangler down with it
+    local ok, mg = pcall(include, "midigrid/lib/midigrid")
+    if ok and mg then
+      grid_mod = mg
+      have_midigrid = true
+      print("mangler: midigrid loaded — midi grid controllers welcome")
+    else
+      print("mangler: midigrid present but failed to load: " .. tostring(mg))
+    end
+  end
+end
+
+-- semitone offsets per column, root-relative (nil = no black key there)
+local GRID_WHITE = { 0, 2, 4, 5, 7, 9, 11, 12 }
+local GRID_BLACK = { nil, 1, 3, nil, 6, 8, 10, nil }
+
+-- window/loop slice pads: track what's held per row so a second press
+-- while the first is down stretches the region between them
+local slice_held = { win = {}, loop = {} }
+local SLICE_IDS = {
+  win = { "pos_start", "pos_end" },
+  loop = { "loop_start", "loop_end" },
+}
+
+local function slice_key(kind, x, z)
+  local h = slice_held[kind]
+  if z == 1 then
+    local anchor = h[1] or x   -- first held pad anchors the span
+    h[#h + 1] = x
+    local lo, hi = math.min(anchor, x), math.max(anchor, x)
+    params:set(SLICE_IDS[kind][1], (lo - 1) / 8)
+    params:set(SLICE_IDS[kind][2], hi / 8)
+  else
+    for i = #h, 1, -1 do
+      if h[i] == x then table.remove(h, i) end
+    end
+  end
+end
+
+local function grid_note_key(x, y, z)
+  if z ~= 1 then return end
+  if pget("keys_enable", 1) == 0 then return end
+  local st
+  if y == 6 or y == 8 then
+    st = GRID_WHITE[x]
+  else
+    st = GRID_BLACK[x]
+    if not st then
+      -- the black rows' gap pads carry the utility functions
+      if y == 7 and (x == 1 or x == 8) then
+        params:delta("kb_octave", x == 8 and 1 or -1)
+        flash_id, flash_until = "kb_octave", frame + FPS
+      elseif y == 5 and x == 1 then
+        params:set("pitch", 1.0)
+        flash_id, flash_until = "pitch", frame + FPS
+      elseif y == 5 and x == 8 then
+        ptoggle("pitch_quant")
+      end
+      return
+    end
+  end
+  local oct = pget("kb_octave", 0) + (y <= 6 and 1 or 0)
+  params:set("pitch", 2 ^ ((st + 12 * oct) / 12))
+  flash_id, flash_until = "pitch", frame + FPS
+end
+
+local function grid_key(x, y, z)
+  if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
+  if y == 1 then
+    if z ~= 1 then return end
+    if x == 1 then ptoggle("rec")
+    elseif x == 2 then ptoggle("freeze")
+    elseif x >= 4 and x <= 7 then params:set("mode", x - 3)
+    elseif x == 8 then ptoggle("pv_freeze") end
+  elseif y == 2 then
+    if x == 3 then
+      params:set("tape_reverse", z)  -- momentary, like K1+K2 on TAPE
+    elseif z == 1 then
+      if x == 1 then ptoggle("tape_rec")
+      elseif x == 2 then ptoggle("tape_freeze") end
+    end
+  elseif y == 3 or y == 4 then
+    slice_key(y == 3 and "win" or "loop", x, z)
+  else
+    grid_note_key(x, y, z)
+  end
+end
+
+local function grid_redraw()
+  if not (gg and gg.device) then return end
+  gg:all(0)
+
+  -- row 1: engine transport + mode radio
+  gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)
+  gg:led(2, 1, pget("freeze", 0) == 1 and 15 or 2)
+  local mode = pget("mode", 2)
+  for x = 4, 7 do gg:led(x, 1, (x - 3) == mode and 15 or 3) end
+  gg:led(8, 1, pget("pv_freeze", 0) == 1 and 15 or 2)
+
+  -- row 2: tape transport
+  gg:led(1, 2, pget("tape_rec", 0) == 1 and 15 or 2)
+  gg:led(2, 2, pget("tape_freeze", 0) == 1 and 15 or 2)
+  gg:led(3, 2, pget("tape_reverse", 0) == 1 and 15 or 2)
+
+  -- rows 3/4: slices lit across the active region, head pad brightest
+  local wlo, whi = window_bounds()
+  local la, lb = pget("loop_start", 0), pget("loop_end", 1)
+  local llo, lhi = math.min(la, lb), math.max(la, lb)
+  for x = 1, 8 do
+    local a, b = (x - 1) / 8, x / 8
+    gg:led(x, 3, (a < whi and b > wlo) and 6 or 1)
+    gg:led(x, 4, (a < lhi and b > llo) and 6 or 1)
+  end
+  gg:led(math.floor(clamp(play_phase, 0, 0.999) * 8) + 1, 3, 15)
+  gg:led(math.floor(clamp(tape_phase, 0, 0.999) * 8) + 1, 4, 15)
+
+  -- rows 5-8: note pads. current pitch lights its pad; the whole block
+  -- dims when note input is off so it's visible why pads are dead
+  local en = pget("keys_enable", 1) == 1
+  local oct = pget("kb_octave", 0)
+  local st_cur = util.round(12 * math.log(pget("pitch", 1), 2))
+  for _, rows in ipairs({ { 5, 6, oct + 1 }, { 7, 8, oct } }) do
+    local by, wy, o = rows[1], rows[2], rows[3]
+    for x = 1, 8 do
+      local w = GRID_WHITE[x] + 12 * o
+      gg:led(x, wy, not en and 1 or w == st_cur and 15
+        or (x == 1 or x == 8) and 6 or 4)
+      if GRID_BLACK[x] then
+        local b = GRID_BLACK[x] + 12 * o
+        gg:led(x, by, not en and 1 or b == st_cur and 15 or 2)
+      end
+    end
+  end
+  gg:led(1, 7, en and 3 or 1)  -- octave -
+  gg:led(8, 7, en and 3 or 1)  -- octave +
+  gg:led(1, 5, en and 3 or 1)  -- pitch reset
+  gg:led(8, 5, (en and pget("pitch_quant", 0) == 1) and 15 or (en and 3 or 1))
+
+  gg:refresh()
+end
+
+local function init_grid()
+  gg = grid_mod.connect()
+  if gg then gg.key = grid_key end
 end
 
 -- ============================================================================
@@ -705,6 +900,7 @@ function init()
   init_params()
   init_tape()
   init_midi()
+  init_grid()
   print("mangler: init() done, params built")
 
   local function watch(name, fn)
@@ -734,12 +930,14 @@ function init()
       update_wave()
       update_tape_wave()
       update_particles()
-      -- never draw over the system menu
+      -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
+      grid_redraw()
     end
   end)
 
   redraw()
+  grid_redraw()
 end
 
 function cleanup()
@@ -747,6 +945,13 @@ function cleanup()
   if redraw_clock then clock.cancel(redraw_clock) end
   for _, d in ipairs(midi_devices) do d.event = nil end
   keyboard.code = nil
+  if gg then
+    gg.key = nil
+    if gg.device then
+      gg:all(0)
+      gg:refresh()
+    end
+  end
   sc.poll_stop_phase()
 end
 
@@ -1276,7 +1481,11 @@ local function draw_body()
     chip(params.lookup["filt_type"] and params:string("filt_type") or "?", 2, 13)
   elseif pname == "DELAY" then
     -- mockup delay page: the echo as a bouncing ball — impact spacing =
-    -- time, shrinking bounces = feedback, ball animates one repeat per hop
+    -- time, shrinking bounces = feedback. the ball is literal: it crosses
+    -- one arc per repeat, i.e. delay_time seconds per hop (clamped so the
+    -- shortest times still read at 15fps). at mix 0 the page goes dormant:
+    -- dim train, no ball — nothing moves that can't be heard.
+    local dtime = pget("delay_time", 0.3)
     local tnorm = param_norm("delay_time") or 0.3
     local fb = pget("delay_fb", 0.3)
     local mixv = pget("delay_mix", 0)
@@ -1284,8 +1493,8 @@ local function draw_body()
       mixv > 0 and 10 or 3)
     local base = 39
     screen.level(1)
-    screen.move(0, base + 1)
-    screen.line(128, base + 1)
+    screen.move(0, base + 1.5)
+    screen.line(128, base + 1.5)
     screen.stroke()
     local sp = 12 + tnorm * 24
     local heights = {}
@@ -1294,7 +1503,7 @@ local function draw_body()
       heights[#heights + 1] = h
       h = h * math.max(fb, 0.05)
     end
-    screen.level(6)
+    screen.level(mixv > 0 and 6 or 2)
     for i, hh in ipairs(heights) do
       local xa = 8 + (i - 1) * sp
       local k = 0
@@ -1307,10 +1516,10 @@ local function draw_body()
       screen.rect(xa, base - 2, 1, 2)
     end
     screen.fill()
-    if #heights > 0 then
-      local ph = (frame * 0.02) % 1
-      local seg = math.min(#heights, math.floor(ph * #heights) + 1)
-      local u = (ph * #heights) % 1
+    if #heights > 0 and mixv > 0 then
+      delay_hop = (delay_hop + (1 / FPS) / math.max(dtime, 0.12)) % #heights
+      local seg = math.floor(delay_hop) + 1
+      local u = delay_hop % 1
       local bx = 8 + (seg - 1) * sp + u * sp
       local by = base - 4 * heights[seg] * u * (1 - u)
       screen.level(15)
@@ -1319,7 +1528,8 @@ local function draw_body()
     end
   elseif pname == "REVERB" then
     -- mockup reverb page: a room seen from above — size grows the walls,
-    -- rays are the reflections bouncing off them
+    -- rays are the reflections bouncing off them. at mix 0 the page goes
+    -- dormant: dim room, still air — nothing moves that can't be heard.
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
     topright(string.format("MIX %d%%", math.floor(mixv * 100 + 0.5)),
@@ -1328,27 +1538,29 @@ local function draw_body()
     local hh = 14 + size * 12
     local x0, x1 = 64 - w / 2, 64 + w / 2
     local y0, y1 = 26 - hh / 2, 26 + hh / 2
-    screen.level(8)
+    screen.level(mixv > 0 and 8 or 2)
     screen.rect(x0 + 0.5, y0 + 0.5, w, hh)
     screen.stroke()
     local sx, sy = x0 + 7, 26
-    screen.level(15)
+    screen.level(mixv > 0 and 15 or 4)
     screen.rect(sx - 1, sy - 1, 2, 2)
     screen.fill()
-    screen.level(6)
-    for k = 0, 1 do
-      local a = k * 2.4 + frame * 0.03
-      local px2, py = sx, sy
-      local dx, dy = math.cos(a), math.sin(a)
-      for i = 0, 70 do
-        px2 = px2 + dx
-        py = py + dy
-        if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end
-        if py <= y0 + 1 or py >= y1 - 1 then dy = -dy end
-        if i % 3 == 0 then screen.rect(px2, py, 1, 1) end
+    if mixv > 0 then
+      screen.level(6)
+      for k = 0, 1 do
+        local a = k * 2.4 + frame * 0.03
+        local px2, py = sx, sy
+        local dx, dy = math.cos(a), math.sin(a)
+        for i = 0, 70 do
+          px2 = px2 + dx
+          py = py + dy
+          if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end
+          if py <= y0 + 1 or py >= y1 - 1 then dy = -dy end
+          if i % 3 == 0 then screen.rect(px2, py, 1, 1) end
+        end
       end
+      screen.fill()
     end
-    screen.fill()
   end
 end
 

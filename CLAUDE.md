@@ -20,6 +20,19 @@ musical typing (A-row/W-row, Z/X octave) via `keyboard.code`. PARAMS > keys grou
 (enable / channel / root / octave / pitch quantize). No engine change,
 fingerprint count unaffected.
 
+Second Lua-only addition (untested on device): an optional **grid layer** — native
+monome grid, or launchpad-family / APC mini via the **midigrid** library
+(`include "midigrid/lib/midigrid"`, guarded by `util.file_exists` + `pcall`,
+used only when no real grid holds grid vport 1). 8×8 layout: engine + tape
+transport/mode toggles (rows 1–2), window and tape-loop slice pads with a
+two-pad span gesture (rows 3–4), two piano octaves plus octave/reset/quantize
+gap pads (rows 5–8). Every pad drives params. The grid controller's MIDI device
+is filtered out of chromatic note input (`is_grid_vport`, see the dual-dispatch
+gotcha below). Grid LEDs refresh on the existing 15fps clock, also while the
+menu is open. No engine change, fingerprint count unaffected. On-device check:
+pads toggle/light correctly, slice spans work, note pads retune, and a pad
+press must NOT jump `pitch` to 0.25/4 (that means the note-input filter failed).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -33,7 +46,9 @@ Lua-only changes skip all this: save + reload the script.
 
 A performance-first **stereo sample-mangling instrument** for external line-level gear
 (synth, drum machine, anything line-level). Built for norns **shield XL on Raspberry Pi 4**,
-played with **3 keys + 3 encoders only** — no grid, no arc. It records live stereo input
+played with **3 keys + 3 encoders** — everything reachable without a grid; an **optional
+grid** (monome, or launchpad-style MIDI grids via midigrid) adds a pad surface. No arc.
+It records live stereo input
 and mangles it with: multiple **time-stretch** algorithms (pitch-independent), **granular**
 clouds, **tape-like** varispeed/looping, a **playback window** (slice start/stop), a
 **filter** (LP/HP/BP), and an **FX** section (delay + reverb, each with its own dry/wet).
@@ -132,6 +147,14 @@ xruns past ~60%).
   almost always the engine failing in alloc.
 - **Editing a `.sc` file requires SYSTEM > RESTART** (sclang must recompile the class
   library); reloading the script is not enough.
+- **midi dispatch is dual-path: norns fires BOTH `midi.devices[id].event` (device
+  level) and `midi.vports[port].event` (vport level) for the same message.** midigrid
+  binds device-level; mangler's note input binds vport-level on all 16 slots — so a
+  grid controller's pad note-ons reach both handlers unless filtered. mangler's
+  `is_grid_vport()` skips the vport whose device midigrid claimed (compared by
+  identity and by name against `gg.device`). Symptom when this breaks: every pad
+  press also slams `pitch` to an extreme (raw launchpad note numbers are far from
+  root 60 and clamp to the 0.25–4 spec edges).
 - **`clock.lua:62 bad argument #1 to 'resume' (thread expected)`** is a system-level race
   (a clock timer fires for an already-dead coroutine, often on script reload) and wedges
   clock state until restart. It is not specific to one script, but: keep mangler's clock
