@@ -120,6 +120,7 @@ Passing a stage's gate unlocks the next (current stage: see the top of `CLAUDE.m
 CLAUDE.md              agent manual: invariants, build order, current stage
 README.md              this file
 SPEC/spec.md           durable design contract (full per-stage detail)
+SPEC/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
 mangler.lua            Lua control layer (engine.name = 'Mangler')
 lib/Engine_Mangler.sc  the one and only SuperCollider engine file
 ```

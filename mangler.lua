@@ -77,6 +77,7 @@ local have_midigrid = false  -- true when the midigrid library is standing in
 local wave = {}
 for i = 1, 128 do wave[i] = 0 end
 local wave_bin = 0
+local wave_any = false  -- false until something audible lands in the buffer
 
 -- same idea for the tape loop: bins indexed by the tape head while recording
 local twave = {}
@@ -849,6 +850,7 @@ end
 local function update_wave()
   if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
     local bin = math.floor(clamp(rec_phase, 0, 0.999) * 128) + 1
+    if rec_amp > 0.01 then wave_any = true end
     wave_bin = paint_bins(wave, wave_bin, bin, rec_amp, pget("pre_level", 0))
   end
 end
@@ -866,9 +868,16 @@ end
 
 local function update_particles()
   if not params.lookup["density"] then return end
+  -- nothing moves that can't be heard: mode OFF frees the SC voice, and an
+  -- empty buffer granulates silence — either way the cloud stops spawning
+  -- (live particles still decay out)
+  if pget("mode", 2) == 1 or not wave_any then
+    spawn_acc = 0
+  else
+    spawn_acc = spawn_acc + pget("density", 20) / FPS
+  end
   local lo, hi, span = window_bounds()
   local jit = pget("pos_jitter", 0)
-  spawn_acc = spawn_acc + pget("density", 20) / FPS
   while spawn_acc >= 1 do
     spawn_acc = spawn_acc - 1
     if #particles < 32 then
@@ -1237,12 +1246,15 @@ local function draw_strip(handles)
     end
   end
 
-  -- playhead needle
-  screen.level(15)
-  local px = clamp(play_phase, 0, 1) * 127
-  screen.move(px, BAND_T - 2)
-  screen.line(px, BAND_B + 2)
-  screen.stroke()
+  -- playhead needle — only once there's material to play; an empty buffer
+  -- keeps the strip quiet so the EMPTY invitation stands alone
+  if wave_any then
+    screen.level(15)
+    local px = clamp(play_phase, 0, 1) * 127
+    screen.move(px, BAND_T - 2)
+    screen.line(px, BAND_B + 2)
+    screen.stroke()
+  end
 
   -- write head: dim ticks top+bottom while recording, so capture is visible
   if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
@@ -1270,17 +1282,26 @@ local function draw_body()
   if pname == "MIX" then
     -- two lanes like the mockup: engine as grains, tape as its real
     -- waveform, crossfader between them. lane energy follows the mix.
+    -- mode OFF silences the engine, so its lane lies flat — nothing
+    -- moves that can't be heard.
     local mixv = pget("mix", 0.5)
     local sd = math.floor(frame / 2)
     ptext("ENG", 2, 13, 1, 4)
-    screen.level(12)
-    for x = 26, 122 do
-      if hash(x, 1, sd) < 0.1 + (1 - mixv) * 0.4 then
-        local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + (1 - mixv) * 5)
-        screen.rect(x, 16 + dy, 1, 1)
+    if pget("mode", 2) == 1 then
+      screen.level(1)
+      screen.move(26, 17)
+      screen.line(122, 17)
+      screen.stroke()
+    else
+      screen.level(12)
+      for x = 26, 122 do
+        if hash(x, 1, sd) < 0.1 + (1 - mixv) * 0.4 then
+          local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + (1 - mixv) * 5)
+          screen.rect(x, 16 + dy, 1, 1)
+        end
       end
+      screen.fill()
     end
-    screen.fill()
     screen.level(2)
     screen.move(26, 24)
     screen.line(122, 24)
@@ -1305,11 +1326,21 @@ local function draw_body()
       end
     end
   elseif pname == "LEVEL" then
-    -- mockup levels page: IN/OUT faders with live VU columns beside them
-    local defs = {
-      { 40, "IN", param_norm("input_level"), math.max(amp_in[1], amp_in[2]) },
-      { 88, "OUT", param_norm("output_level"), math.max(amp_out[1], amp_out[2]) },
-    }
+    -- mockup levels page: faders with live VU columns beside them. the
+    -- faders track the alt layer, so they always show what E2/E3 grab:
+    -- IN/OUT normally, MON/HP while K1 is held
+    local defs
+    if alt then
+      defs = {
+        { 40, "MON", param_norm("monitor_level"), math.max(amp_in[1], amp_in[2]) },
+        { 88, "HP", param_norm("headphone_gain"), math.max(amp_out[1], amp_out[2]) },
+      }
+    else
+      defs = {
+        { 40, "IN", param_norm("input_level"), math.max(amp_in[1], amp_in[2]) },
+        { 88, "OUT", param_norm("output_level"), math.max(amp_out[1], amp_out[2]) },
+      }
+    end
     for _, d in ipairs(defs) do
       local fx, label, pos, amp = d[1], d[2], d[3] or 0, d[4]
       ptext_c(label, fx + 4, 12, 1, 4)
@@ -1335,6 +1366,10 @@ local function draw_body()
   elseif pname == "REC" then
     draw_strip(false)
     draw_particles()
+    -- an empty buffer is an invitation, in the same voice as the TAPE page
+    if not wave_any and pget("rec", 0) == 0 then
+      ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+    end
     -- input meter rides the right edge so you can see what's being captured
     local h = math.floor(clamp(math.sqrt(math.max(amp_in[1], amp_in[2])) * (BAND_B - BAND_T), 0, BAND_B - BAND_T))
     screen.level(15)
@@ -1381,22 +1416,67 @@ local function draw_body()
     screen.line(px, 25)
     screen.stroke()
     draw_particles()
+    -- pitch parks top-right, in a quiet corner knocked out of the strip:
+    -- it's the one grain value you play from anywhere (MIDI, typing
+    -- keyboard, grid) without seeing this page
+    local pv = pget("pitch", 1)
+    screen.level(0)
+    screen.rect(84, 11, 44, 9)
+    screen.fill()
+    if pget("pitch_quant", 0) == 1 then
+      topright(string.format("PT %+d ST", util.round(12 * math.log(pv, 2))))
+    else
+      topright(string.format("PT %.2fX", pv))
+    end
   elseif pname == "STRETCH" then
-    -- mockup stretch page: inverted mode badge, speed readout, waveform
-    -- whose wavelength follows the rate, real playhead, window bar
+    -- mockup stretch page: inverted mode badge, speed readout, real
+    -- playhead, window bar — and the wave drawn in the active algorithm's
+    -- own texture: GRAIN samples it as grains, WARP lays a second window
+    -- over it, PV rebuilds it as spectral columns. wavelength follows the
+    -- rate; the texture drifts with scan (still at 0) and freezes with
+    -- pv_freeze. mode OFF frees the voice, so the lane lies flat.
     local m = params.lookup["mode"] and params:string("mode") or "?"
     chip(m, 2, 13)
     local scan = pget("scan", 1)
+    local mode = pget("mode", 2)
     topright(string.format("%+.2fX", scan))
-    if pget("pv_freeze", 0) == 1 and pget("mode", 2) == 4 then
+    if pget("pv_freeze", 0) == 1 and mode == 4 then
       ptext_c("HELD", 64, 14, 1, 15)
     end
     local rate = math.max(math.abs(scan), 0.05)
-    screen.level(6)
-    for x = 0, 127 do
-      screen.rect(x, 30 + math.sin(x * 0.35 * rate) * 6, 1, 1)
+    local ph = (mode == 4 and pget("pv_freeze", 0) == 1) and 0
+      or frame * 0.8 * scan
+    local function wy(x) return 30 + math.sin((x + ph) * 0.35 * rate) * 6 end
+    if mode == 1 then          -- OFF: dormant lane
+      screen.level(1)
+      screen.move(0, 30)
+      screen.line(128, 30)
+      screen.stroke()
+    elseif mode == 2 then      -- GRAIN: the wave sampled as grains
+      screen.level(6)
+      for x = 0, 127, 3 do
+        screen.rect(x, wy(x), 1, 1)
+      end
+      screen.fill()
+    elseif mode == 3 then      -- WARP: an overlapped window ghosts behind
+      screen.level(2)
+      for x = 0, 127 do
+        screen.rect(x, wy(x + 9), 1, 1)
+      end
+      screen.fill()
+      screen.level(8)
+      for x = 0, 127 do
+        screen.rect(x, wy(x), 1, 1)
+      end
+      screen.fill()
+    else                       -- PV: spectral columns under the same curve
+      screen.level(6)
+      for x = 0, 127, 4 do
+        local h = math.abs(math.sin((x + ph) * 0.35 * rate)) * 11 + 1
+        screen.rect(x, 38 - h, 2, h)
+      end
+      screen.fill()
     end
-    screen.fill()
     local lo, hi = window_bounds()
     screen.level(2)
     screen.move(0, 39)
@@ -1406,11 +1486,14 @@ local function draw_body()
     screen.move(lo * 127, 39)
     screen.line(hi * 127, 39)
     screen.stroke()
-    screen.level(15)
-    local px = clamp(play_phase, 0, 1) * 127
-    screen.move(px, 22)
-    screen.line(px, 42)
-    screen.stroke()
+    -- no playhead while the voice is freed: nothing is playing
+    if mode ~= 1 then
+      screen.level(15)
+      local px = clamp(play_phase, 0, 1) * 127
+      screen.move(px, 22)
+      screen.line(px, 42)
+      screen.stroke()
+    end
   elseif pname == "TAPE" then
     -- mockup tape page: two reels spinning at the effective rate (reverse
     -- spins backward, stopped stands still), loop track + head below
@@ -1456,10 +1539,14 @@ local function draw_body()
       ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
     end
   elseif pname == "FILTER" then
-    -- stylized response curve: cutoff on a log axis, resonance bump
+    -- stylized response curve: cutoff on a log axis, resonance bump.
+    -- the cutoff parks top-right — every page keeps its one number there
+    local cut = pget("cutoff", 20000)
+    topright(cut >= 1000 and string.format("%.1fKHZ", cut / 1000)
+      or string.format("%dHZ", math.floor(cut + 0.5)))
     local ft = pget("filt_type", 1)
     local res = pget("resonance", 0)
-    local cx = clamp((math.log(pget("cutoff", 20000) / 20) / math.log(1000)) * 127, 0, 127)
+    local cx = clamp((math.log(cut / 20) / math.log(1000)) * 127, 0, 127)
     local mid = 26
     screen.level(8)
     if ft == 1 then       -- LP
@@ -1569,15 +1656,25 @@ local function draw_header()
   local w = ptext(PAGES[page], 2, 1, 2, 15)
   if alt then chip("ALT", 2 + w + 5, 1) end
 
-  -- page dots, top-right: current page is a 3x3 block, the rest are 1px
+  -- page dots, top-right: current page is a 3x3 block, the rest are 1px.
+  -- dots cluster by signal family — source (MIX LEVEL REC) · shape (WINDOW
+  -- GRAIN STRETCH) · TAPE · fx (FILTER DELAY REVERB) — so position in the
+  -- row tells you which part of the instrument you're in.
+  local GAP_AFTER = { [3] = true, [6] = true, [7] = true }
+  local xs = {}
+  local x = 126
+  for i = #PAGES, 1, -1 do
+    xs[i] = x
+    x = x - 4
+    if i > 1 and GAP_AFTER[i - 1] then x = x - 2 end
+  end
   for i = 1, #PAGES do
-    local x = 126 - (#PAGES - i) * 4
     if i == page then
       screen.level(15)
-      screen.rect(x - 1, 1, 3, 3)
+      screen.rect(xs[i] - 1, 1, 3, 3)
     else
       screen.level(2)
-      screen.rect(x, 2, 1, 1)
+      screen.rect(xs[i], 2, 1, 1)
     end
     screen.fill()
   end

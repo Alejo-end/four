@@ -33,6 +33,11 @@ menu is open. No engine change, fingerprint count unaffected. On-device check:
 pads toggle/light correctly, slice spans work, note pads retune, and a pad
 press must NOT jump `pitch` to 0.25/4 (that means the note-input filter failed).
 
+Third Lua-only addition (verified in SPEC/uisim renders, untested on device):
+a screen polish pass — grouped page dots, alt-aware LEVEL faders (MON/HP),
+FILTER/GRAIN top-right readouts, "EMPTY - K2 REC" on REC, the audibility rule
+(see Workflow), and per-mode STRETCH textures. All draw-code only.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -169,11 +174,30 @@ xruns past ~60%).
 # static check (only one available locally)
 luac5.3 -p mangler.lua
 
+# render every UI page to PNGs with NO hardware: SPEC/uisim/render_pages.lua
+# stubs the norns env, runs the real mangler.lua redraw code against a fake
+# framebuffer, and drives a scripted performance (a take, a tape loop, FX).
+# eyeball these before deploying any screen change — a redraw error on
+# device is a silent black screen.
+lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + variants
+lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base empty  # empty-buffer state
+python3 SPEC/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG, 4x
+
 # deploy to the norns (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
 
 # then on the norns: ;restart  (or reload the script), watch maiden for SC errors
 ```
+
+**Screen design rules (hold these in every page):** brightness encodes
+audibility — if a thing isn't sounding, its picture lies flat and dim (mode
+OFF stills the ENG lane, the STRETCH texture, the particles, the playhead;
+mix-0 FX pages go dormant). Each page parks its one defining number dim in
+the top-right corner (yielding to the transient flash). An empty buffer is
+an invitation, always in the same voice: "EMPTY - K2 REC". The page dots
+cluster by signal family (source · shape · tape · fx). The STRETCH body
+draws the active algorithm's own texture: grains / overlapped warp windows /
+spectral columns.
 
 **On-device gate per stage:** load the script, confirm no LOADING hang and no SC errors in
 maiden, then run that stage's acceptance test in `SPEC/spec.md`. Only then write the next
