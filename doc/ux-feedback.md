@@ -98,8 +98,15 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     dead lane flat-dim, and a slim master VU (`amp_out`, same sqrt law as
     LEVEL/REC) rides the right edge — this page is where the blend gets
     pushed. Suite grew a `MIX_TAPE` full-throw truth shot. Loop 4 added a
-    peak-hold tick on the VU (~1s decay, bright at clip). Converged pending
-    on-device feedback.
+    peak-hold tick on the VU (~1s decay, bright at clip).
+
+15. **(user-directed) MIX page redesigned as TOWERS.** From an 8-candidate
+    rendered gallery the user picked "2's towers with 4's master VU": two
+    columns whose height IS each deck's real gain under the plateau law
+    (both stand full at center), ENG filled with live static, TAPE with
+    the loop's actual waveform, knockout name plates at the tower feet,
+    crossfader below, and the right-edge master VU with peak-hold kept
+    from the truth pass. Lanes + law-curve drawing retired.
 
 ## Still open / next loop iterations
 

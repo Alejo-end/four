@@ -95,7 +95,8 @@ gain instead of the raw fader, draws the law itself between the lanes
 slim master VU (amp_out, sqrt law like LEVEL/REC) on the right edge with
 a peak-hold tick (~1s decay, bright at clip — mix_peak module state).
 Suite grew a MIX_TAPE full-throw shot; dist byte-identical (23 shots).
-The MIX page is considered converged pending on-device feedback.
+(The lanes+curve drawing was later replaced by TOWERS — see the tenth
+change; the truth rules and the VU survive there.)
 
 Ninth Lua-only change (renders verified, untested on device): REVERB page
 redesigned as CATHEDRAL (doc/ux-feedback.md §13) — user-picked from 16
@@ -106,6 +107,15 @@ inside-ellipse test) thickens with mix; two ray pulses arc source →
 listener on parabolic paths; RT badge top-left (0.4+size*2.6 s — an
 estimate, FreeVerb size→RT is not calibrated); dormant at mix 0. Suite
 gained REVERB_WASH; dist byte-identical (24 shots).
+
+Tenth Lua-only change (renders verified, untested on device): MIX page
+redesigned as TOWERS (doc/ux-feedback.md §15) — user-picked "2's towers
+with 4's master VU" from an 8-candidate rendered gallery. Two columns,
+height = each deck's REAL gain under the plateau law (both full at
+center), ENG tower = live static (hash dither), TAPE tower = the loop's
+actual waveform, knockout name plates at the tower feet, crossfader
+below, right-edge master VU with peak-hold kept. Only the three MIX
+shots changed; dist byte-identical (24 shots).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

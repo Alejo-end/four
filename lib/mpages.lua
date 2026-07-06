@@ -323,66 +323,64 @@ local function draw_body()
   local frame = C.frame
 
   if pname == "MIX" then
-    -- two lanes like the mockup: engine as grains, tape as its real
-    -- waveform, crossfader between them. lane energy follows the REAL
-    -- crossfade law (mtape.update_mix): both decks ride a full-level
-    -- plateau around center, each dies toward its far edge — the curve
-    -- drawn between the lanes IS that law, and the handle rides it.
-    -- mode OFF or a full throw stills a lane — nothing moves that can't
-    -- be heard. a slim master VU (amp_out, the actual sum) rides the
-    -- right edge: this page is where the blend gets pushed.
+    -- mix page: two towers — column height IS each deck's real gain
+    -- under the plateau crossfade law (mtape.update_mix, no center dip:
+    -- both towers stand full at center). the ENG tower holds live
+    -- static, the TAPE tower the loop's actual waveform; labels knock
+    -- out their own pocket at the tower feet. the crossfader rides
+    -- below; a slim master VU (amp_out, the real sum, sqrt law like
+    -- LEVEL/REC) rides the right edge with a peak-hold tick that goes
+    -- bright at clip. mode OFF or a full throw empties a tower —
+    -- nothing moves that can't be heard.
     local mixv = pget("mix", 0.5)
     local eng_g = min(1, 2 * (1 - mixv))
     local tape_g = min(1, 2 * mixv)
-    local sd = floor(frame / 2)
-    ptext("ENG", 2, 13, 1, 4)
-    if pget("mode", 2) == 1 or eng_g <= 0 then
-      screen.level(1)
-      screen.move(26, 17)
-      screen.line(122, 17)
-      screen.stroke()
-    else
-      screen.level(12)
-      for x = 26, 122 do
-        if hash(x, 1, sd) < 0.1 + eng_g * 0.4 then
-          local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + eng_g * 5)
-          screen.rect(x, 16 + dy, 1, 1)
+    screen.level(2)
+    screen.rect(22.5, 14.5, 31, 22)
+    screen.rect(74.5, 14.5, 31, 22)
+    screen.stroke()
+    -- ENG tower: live static up to the deck's gain
+    local eh = eng_g * 20
+    if pget("mode", 2) ~= 1 and eh > 0.5 then
+      screen.level(10)
+      local sd = floor(frame / 2)
+      for x = 24, 52 do
+        for y = 0, floor(eh), 2 do
+          if hash(x, y, sd) < 0.35 then
+            screen.rect(x, 35 - y, 1, 1)
+          end
         end
       end
       screen.fill()
     end
-    -- the crossfade law, deck gain over fader travel: engine holds unity
-    -- to center then tails off rightward, tape mirrors it — no center dip
-    screen.level(3)
-    screen.move(26, 22)
-    screen.line(74, 22)
-    screen.line(122, 27)
-    screen.stroke()
-    screen.move(26, 27)
-    screen.line(74, 22)
-    screen.line(122, 22)
+    -- TAPE tower: the loop's waveform, scaled by the deck's gain
+    local th = tape_g * 20
+    if th > 0.5 then
+      screen.level(10)
+      for x = 76, 104 do
+        local a = twave[floor((x - 76) / 28 * 127) + 1]
+        local h = min(sqrt(min(a * 2, 1)) * th + 1, th)
+        if h >= 1 then
+          screen.rect(x, 36 - h, 1, h)
+        end
+      end
+      screen.fill()
+    end
+    -- deck names, knocked out at the tower feet
+    screen.level(0)
+    screen.rect(29, 27, 19, 8)
+    screen.rect(79, 27, 23, 8)
+    screen.fill()
+    ptext_c("ENG", 38, 28, 1, 6)
+    ptext_c("TAPE", 90, 28, 1, 6)
+    -- the crossfader under the towers
+    screen.level(2)
+    screen.move(22, 40.5)
+    screen.line(106, 40.5)
     screen.stroke()
     screen.level(15)
-    screen.rect(25 + mixv * 96, 20, 3, 8)
+    screen.rect(21 + mixv * 82, 38, 3, 5)
     screen.fill()
-    ptext("TAPE", 2, 30, 1, 4)
-    screen.level(1)
-    screen.move(26, 33)
-    screen.line(122, 33)
-    screen.stroke()
-    -- lane columns share one brightness: a single stroke rasters the same.
-    -- height and brightness follow the tape's real gain, not the raw fader
-    local g = 0.25 + 0.75 * tape_g
-    screen.level(tape_g > 0 and 12 or 2)
-    for x = 26, 122 do
-      local a = twave[floor((x - 26) / 96 * 127) + 1]
-      if a > 0.002 then
-        local h = clamp(sqrt(min(a * 2, 1)) * 5 * g, 1, 5)
-        screen.move(x, 33 - h)
-        screen.line(x, 33 + h)
-      end
-    end
-    screen.stroke()
     -- master VU, the sum that actually leaves: same sqrt law as LEVEL/REC,
     -- with a peak-hold tick (~1s decay) that goes bright at clip
     local ao = max(amp_out[1], amp_out[2])
