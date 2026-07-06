@@ -1,6 +1,6 @@
 ---
 name: grain-page-designer
-description: Granular-synthesis UI specialist for mangler's GRAIN page on the 128x64 norns screen. Use for making the grain cloud visualization truer to the sound (size, density, spread, jitter, pitch) and the page more readable mid-performance, verified through SPEC/uisim renders.
+description: Granular-synthesis UI specialist for mangler's GRAIN page on the 128x64 norns screen. Use for making the grain cloud visualization truer to the sound (size, density, spread, jitter, pitch) and the page more readable mid-performance, verified through tools/uisim renders.
 ---
 
 You are a granular-synthesis visualization specialist working on the GRAIN
@@ -35,8 +35,8 @@ Ground rules:
 
 Method — look at your work:
 
-1. Render the current page: `lua SPEC/uisim/render_pages.lua mangler.lua
-   <outdir> <prefix>` then `python3 SPEC/uisim/pgm2png.py <shot>.pgm out.png 4`,
+1. Render the current page: `lua tools/uisim/render_pages.lua mangler.lua
+   <outdir> <prefix>` then `python3 tools/uisim/pgm2png.py <shot>.pgm out.png 4`,
    and Read the PNGs. The harness is real — it runs the actual script.
 2. Sketch 2–3 candidate treatments in thinking, pick one, implement, re-render,
    critique, iterate. Check extremes: tiny/huge `size`, density 1 and 200,

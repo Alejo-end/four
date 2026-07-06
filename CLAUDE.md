@@ -33,10 +33,58 @@ menu is open. No engine change, fingerprint count unaffected. On-device check:
 pads toggle/light correctly, slice spans work, note pads retune, and a pad
 press must NOT jump `pitch` to 0.25/4 (that means the note-input filter failed).
 
-Third Lua-only addition (verified in SPEC/uisim renders, untested on device):
+Third Lua-only addition (verified in tools/uisim renders, untested on device):
 a screen polish pass — grouped page dots, alt-aware LEVEL faders (MON/HP),
 FILTER/GRAIN top-right readouts, "EMPTY - K2 REC" on REC, the audibility rule
 (see Workflow), and per-mode STRETCH textures. All draw-code only.
+
+Fourth Lua-only change (verified pixel-identical in tools/uisim, untested on
+device): mangler.lua is split into script-internal modules — lib/mfont,
+lib/mparticles, lib/mtape, lib/minput, lib/mgrid, lib/mpages — loaded with
+`include("lib/<name>")` and sharing one `ctx` table built in mangler.lua;
+params stay the single source of truth. These are plain Lua modules, NOT
+engines (the one-engine-file invariant is untouched), and at lib/ depth they
+don't appear in norns SELECT. The seeded render suite matches the pre-split
+output byte-for-byte and the bench shows no cost (0.076 ms/tick, ~0 garbage).
+
+Fifth Lua-only change (renders verified, untested on device): performance +
+depth pass. The UI hot path is now allocation-free (byte-table font
+rendering, a pooled 32-slot particle system, static layout tables — ~0 KB
+garbage/tick, ~19% faster, proven pixel-identical at the time). The GRAIN
+cloud became a stereo-field plot (y = per-grain pan mirroring the engine's
+clip law, dot size = grain size, saturation = density). Navigation: K1+E1
+jumps between the dot families. Truth additions: grid row 3 glows the engine
+write head while recording, REC parks OVR% top-right when overdubbing,
+warp_rand shakes the WARP ghost (still at 0). README carries a rendered page
+gallery (doc/ui/, regenerate from tools/uisim after any screen change).
+
+Sixth Lua-only change (renders verified, untested on device): UX polish from
+first play-testing (feedback log: doc/ux-feedback.md). Every top-right
+readout knocks out its own pocket and the encoder flash draws in a framed
+black box (legible over any page); page dots sit on one straight pixel row
+(current page = wider dash, same row); footer hexagons became circular
+dials; FILTER draws the engine's real RLPF/RHPF/BPF magnitude (log-f axis,
+100/1k/10k + 0dB rails, filled passband, bright node dot at the cutoff);
+WINDOW parks slice length in seconds and scatters jitter ghosts around the
+playhead; REC badges RSMP when resample>0 and counts the take in seconds
+(ctx.rec_arm_phase); MIX parks the E/T balance; LEVEL hints signal flow.
+Every page now gives K2/K3 a job — MIX ENG/TAPE throws, LEVEL IN=0/OUT=0
+unity resets, WINDOW FLIP (negate scan), GRAIN OCT−/OCT+ (alt), FILTER
+OPEN, DELAY INF, REVERB WASH/KILL — all in the KEYS table, spec §10 updated.
+The render suite seeds math.random (deterministic, diffable) and grew a
+WINDOW_FLASH shot; dist rebuild byte-verified. Performance walkthroughs:
+doc/workflow-standalone.md (keys+encoders only) and doc/workflow-grid.md.
+
+Seventh Lua-only change (renders verified, untested on device): REVERB page
+depth, loop 2 of the UX feedback (doc/ux-feedback.md §11–12). REVERB gains
+a listener ring, a third ray (rays lengthen with size), and hash-dither air
+whose density rides the mix; dormant at mix 0. A DELAY echo-tap-plot rework
+was tried and **reverted on user request** — the bouncing-ball delay page
+is the keeper (see ux-feedback §11; don't re-attempt unasked). The suite
+grew DELAY_INF / DELAY_DRY / REVERB_DRY truth shots; dist re-verified
+byte-identical (22 shots). NOTE: the empty-state render invocation is
+`render_pages.lua mangler.lua <dir> base empty` — "empty" is the 4th arg;
+passing it 3rd just renders the base scenario under an "empty_" prefix.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
@@ -107,7 +155,7 @@ add_text` are **not** mappable.
 ## Build order (procedural, each ends in an on-device gate)
 
 Full per-stage design — param lists, SynthDef args, command tables, acceptance tests — lives
-in `SPEC/spec.md`. Summary:
+in `doc/spec.md`. Summary:
 
 - **S0** loadable skeleton (this ship): no-op pass-through engine + Lua router/params shell.
 - **S1** RECORD + GRANULAR + WINDOW — `RecordBuf` live capture, `GrainBuf` cloud, slice window.
@@ -174,14 +222,20 @@ xruns past ~60%).
 # static check (only one available locally)
 luac5.3 -p mangler.lua
 
-# render every UI page to PNGs with NO hardware: SPEC/uisim/render_pages.lua
-# stubs the norns env, runs the real mangler.lua redraw code against a fake
+# render every UI page to PNGs with NO hardware: tools/uisim/render_pages.lua
+# stubs the norns env (including include(), so the lib/*.lua modules resolve
+# from the repo), runs the real mangler.lua redraw code against a fake
 # framebuffer, and drives a scripted performance (a take, a tape loop, FX).
 # eyeball these before deploying any screen change — a redraw error on
 # device is a silent black screen.
-lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + variants
-lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base empty  # empty-buffer state
-python3 SPEC/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG, 4x
+lua tools/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + variants
+lua tools/uisim/render_pages.lua mangler.lua /tmp/shots base empty  # empty-buffer state
+python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG, 4x
+
+# single-file build: inlines lib/*.lua into dist/mangler_single.lua as
+# IIFEs (proven byte-identical via the seeded render suite). the dist file
+# is GENERATED — never edit it; rebuild after any lua change that ships.
+lua tools/amalgamate.lua
 
 # deploy to the norns (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
@@ -200,5 +254,5 @@ draws the active algorithm's own texture: grains / overlapped warp windows /
 spectral columns.
 
 **On-device gate per stage:** load the script, confirm no LOADING hang and no SC errors in
-maiden, then run that stage's acceptance test in `SPEC/spec.md`. Only then write the next
+maiden, then run that stage's acceptance test in `doc/spec.md`. Only then write the next
 stage. Update the **CURRENT STAGE** marker at the top of this file when a gate passes.

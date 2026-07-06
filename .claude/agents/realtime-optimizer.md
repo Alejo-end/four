@@ -29,7 +29,7 @@ The real-time constraints that define "better" here:
 Method — measure, change, prove:
 
 1. Benchmark headlessly with the repo's own harness:
-   `lua SPEC/uisim/render_pages.lua mangler.lua <outdir> <prefix>` runs the
+   `lua tools/uisim/render_pages.lua mangler.lua <outdir> <prefix>` runs the
    real script for ~500 ticks. Wrap runs with `time`, and instrument allocation
    with `collectgarbage("count")` deltas per tick (a scratch copy of the
    harness in your scratchpad is fine for benchmarking).
