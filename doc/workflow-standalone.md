@@ -98,8 +98,11 @@ records **what's at the outputs**, engine sound included.
 - **K3 `FRZ`** freezes the loop; **K1+K3 `CLR`** wipes the tape for a fresh
   start.
 - **MIX** (page 1): E2 crossfades engine ↔ tape (the balance parks top-right
-  as `E70 T30`). **K2 `ENG` / K3 `TAPE`** throw the fade hard to either deck.
-  **K1**+E2/E3 trim the master, engine, and tape levels.
+  as `E70 T30`). The fade is a **plateau law** — both decks run at full
+  level around center, each dies toward its far edge — and the page draws
+  exactly that curve, with the master VU on the right edge showing the sum
+  you're pushing. **K2 `ENG` / K3 `TAPE`** throw the fade hard to either
+  deck. E3 trims the engine; **K1**+E2 = master out, **K1**+E3 = tape trim.
 
 **The soundscape loop:** capture a phrase → granulate it → print the result
 to tape → throw MIX to TAPE → the engine is now free to capture and mangle

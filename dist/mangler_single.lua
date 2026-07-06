@@ -1091,6 +1091,22 @@ local reel_angle = 0        -- TAPE page reel rotation, driven by tape rate
 local delay_heights = {}    -- DELAY bounce peaks, slots reused every frame
 local delay_hop = 0         -- DELAY page ball position, in hops (1 hop = 1 repeat)
 
+local mix_peak = 0          -- MIX master VU peak-hold, ~1s decay at 15fps
+
+-- REVERB page statics: one unit half-arch (cos/sin over 0..pi) computed
+-- once; the vault's three ribs scale it per frame — no per-frame trig
+local ARCH_C, ARCH_S = {}, {}
+local ARCH_N = 0
+do
+  local a = 0
+  while a <= 3.1416 do
+    ARCH_N = ARCH_N + 1
+    ARCH_C[ARCH_N] = cos(a)
+    ARCH_S[ARCH_N] = sin(a)
+    a = a + 0.03
+  end
+end
+
 -- FILTER page statics: log-frequency axis 20Hz..20kHz over 128 columns,
 -- gridline columns at 100Hz/1k/10k, the 0dB reference row, and a reusable
 -- per-column response buffer (the curve is recomputed each frame from the
@@ -1120,13 +1136,19 @@ local function draw_body()
 
   if pname == "MIX" then
     -- two lanes like the mockup: engine as grains, tape as its real
-    -- waveform, crossfader between them. lane energy follows the mix.
-    -- mode OFF silences the engine, so its lane lies flat — nothing
-    -- moves that can't be heard.
+    -- waveform, crossfader between them. lane energy follows the REAL
+    -- crossfade law (mtape.update_mix): both decks ride a full-level
+    -- plateau around center, each dies toward its far edge — the curve
+    -- drawn between the lanes IS that law, and the handle rides it.
+    -- mode OFF or a full throw stills a lane — nothing moves that can't
+    -- be heard. a slim master VU (amp_out, the actual sum) rides the
+    -- right edge: this page is where the blend gets pushed.
     local mixv = pget("mix", 0.5)
+    local eng_g = min(1, 2 * (1 - mixv))
+    local tape_g = min(1, 2 * mixv)
     local sd = floor(frame / 2)
     ptext("ENG", 2, 13, 1, 4)
-    if pget("mode", 2) == 1 then
+    if pget("mode", 2) == 1 or eng_g <= 0 then
       screen.level(1)
       screen.move(26, 17)
       screen.line(122, 17)
@@ -1134,28 +1156,36 @@ local function draw_body()
     else
       screen.level(12)
       for x = 26, 122 do
-        if hash(x, 1, sd) < 0.1 + (1 - mixv) * 0.4 then
-          local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + (1 - mixv) * 5)
+        if hash(x, 1, sd) < 0.1 + eng_g * 0.4 then
+          local dy = (hash(x, 7, sd) - 0.5) * 2 * (1 + eng_g * 5)
           screen.rect(x, 16 + dy, 1, 1)
         end
       end
       screen.fill()
     end
-    screen.level(2)
-    screen.move(26, 24)
-    screen.line(122, 24)
+    -- the crossfade law, deck gain over fader travel: engine holds unity
+    -- to center then tails off rightward, tape mirrors it — no center dip
+    screen.level(3)
+    screen.move(26, 22)
+    screen.line(74, 22)
+    screen.line(122, 27)
+    screen.stroke()
+    screen.move(26, 27)
+    screen.line(74, 22)
+    screen.line(122, 22)
     screen.stroke()
     screen.level(15)
-    screen.rect(25 + mixv * 96, 21, 3, 7)
+    screen.rect(25 + mixv * 96, 20, 3, 8)
     screen.fill()
     ptext("TAPE", 2, 30, 1, 4)
     screen.level(1)
     screen.move(26, 33)
     screen.line(122, 33)
     screen.stroke()
-    -- lane columns share one brightness: a single stroke rasters the same
-    local g = 0.3 + 0.7 * mixv
-    screen.level(12)
+    -- lane columns share one brightness: a single stroke rasters the same.
+    -- height and brightness follow the tape's real gain, not the raw fader
+    local g = 0.25 + 0.75 * tape_g
+    screen.level(tape_g > 0 and 12 or 2)
     for x = 26, 122 do
       local a = twave[floor((x - 26) / 96 * 127) + 1]
       if a > 0.002 then
@@ -1165,6 +1195,25 @@ local function draw_body()
       end
     end
     screen.stroke()
+    -- master VU, the sum that actually leaves: same sqrt law as LEVEL/REC,
+    -- with a peak-hold tick (~1s decay) that goes bright at clip
+    local ao = max(amp_out[1], amp_out[2])
+    if ao > mix_peak then mix_peak = ao else mix_peak = mix_peak * 0.96 end
+    screen.level(1)
+    screen.move(125.5, 16)
+    screen.line(125.5, 40)
+    screen.stroke()
+    local vu = floor(clamp(sqrt(ao), 0, 1) * 24)
+    if vu > 0 then
+      screen.level(12)
+      screen.rect(125, 40 - vu, 3, vu)
+      screen.fill()
+    end
+    if mix_peak > 0.02 then
+      screen.level(mix_peak >= 1 and 15 or 6)
+      screen.rect(125, 40 - floor(clamp(sqrt(mix_peak), 0, 1) * 24) - 1, 3, 1)
+      screen.fill()
+    end
     -- the balance parks top-right: who you're hearing, at a glance
     topright(string.format("E%d T%d",
       floor((1 - mixv) * 100 + 0.5), floor(mixv * 100 + 0.5)))
@@ -1535,59 +1584,78 @@ local function draw_body()
       screen.fill()
     end
   elseif pname == "REVERB" then
-    -- reverb page: a room seen from above — size grows the walls, the
-    -- source (bright dot, left) rings a listener (open ring, right).
-    -- three rays are the early reflections, running longer in a bigger
-    -- room; the air itself carries a diffuse shimmer (hash dither) that
-    -- thickens with mix — the tail as a picture. at mix 0 the page goes
-    -- dormant: dim room, still air — nothing moves that can't be heard.
+    -- reverb page: a cathedral in cross-section. the vault (one bright
+    -- rib, two echo ribs) grows with size; the starry air inside thickens
+    -- with mix; two ray pulses arc from the source (left) to the listener
+    -- (right) under the dome. RT parks top-left — an estimate of the tail
+    -- (FreeVerb size -> seconds is approximate, but it moves the right
+    -- way). at mix 0 the page goes dormant: dim hall, still air — nothing
+    -- moves that can't be heard.
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
-    local w = 44 + size * 60
-    local hh = 14 + size * 12
-    local x0, x1 = 64 - w / 2, 64 + w / 2
-    local y0, y1 = 26 - hh / 2, 26 + hh / 2
-    screen.level(mixv > 0 and 8 or 2)
-    screen.rect(x0 + 0.5, y0 + 0.5, w, hh)
+    local hw = 26 + size * 36
+    local x0, x1 = 64 - hw, 64 + hw
+    local fy = 39
+    local ch = 12 + size * 11
+    screen.level(mixv > 0 and 10 or 2)
+    screen.move(x0, fy + 0.5)
+    screen.line(x1, fy + 0.5)
     screen.stroke()
-    local sx, sy = x0 + 7, 26
+    -- the vault: bright outer rib, two dotted echo ribs inside
+    for rib = 0, 2 do
+      local s = 1 - rib * 0.22
+      local step = rib == 0 and 1 or 2
+      screen.level(mixv > 0 and (rib == 0 and 8 or 3) or 2)
+      for i = 1, ARCH_N, step do
+        screen.rect(64 + ARCH_C[i] * hw * s, fy - ARCH_S[i] * ch * s, 1, 1)
+      end
+      screen.fill()
+    end
+    local sx, lx = x0 + 6, x1 - 6
     screen.level(mixv > 0 and 15 or 4)
-    screen.rect(sx - 1, sy - 1, 2, 2)
+    screen.rect(sx - 1, fy - 3, 3, 3)
     screen.fill()
     screen.level(mixv > 0 and 8 or 2)
-    screen.circle(x1 - 7, 26, 2)
+    screen.circle(lx, fy - 2, 2)
     screen.stroke()
     if mixv > 0 then
-      -- the diffuse field: air dots twinkling at 3Hz, density rides mix,
-      -- a bigger room simply holds more of them
-      screen.level(2)
+      -- the air: stars under the dome, density rides mix, 3Hz twinkle
+      screen.level(3)
       local sd = floor(frame * 0.2)
-      for gx = x0 + 3, x1 - 3, 5 do
-        for gy = y0 + 3, y1 - 3, 4 do
-          if hash(gx, gy, sd) < mixv * 0.45 then
+      local thr = mixv * 0.55
+      for gx = x0 + 5, x1 - 5, 5 do
+        for gy = fy - ch + 2, fy - 3, 4 do
+          local ex = (gx - 64) / hw
+          local ey = (gy - fy) / ch
+          if ex * ex + ey * ey < 0.8 and hash(gx, gy, sd) < thr then
             screen.rect(gx, gy, 1, 1)
           end
         end
       end
       screen.fill()
-      -- early reflections: three rays off the source, longer in a big room
-      screen.level(6)
-      local steps = floor(34 + size * 44)
-      for k = 0, 2 do
-        local a = k * 2.1 + frame * 0.03
-        local px2, py = sx, sy
-        local dx, dy = cos(a), sin(a)
-        for i = 0, steps do
-          px2 = px2 + dx
-          py = py + dy
-          if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end
-          if py <= y0 + 1 or py >= y1 - 1 then dy = -dy end
-          if i % 3 == 0 then screen.rect(px2, py, 1, 1) end
+      -- reflections in flight: two dotted arcs source -> listener...
+      screen.level(5)
+      local span = lx - sx
+      for k = 0, 1 do
+        local amp = ch * (0.8 - 0.3 * k)
+        for t = 0, 1, 0.05 do
+          if (floor(t * 20) + k) % 2 == 0 then
+            screen.rect(sx + t * span, fy - 3 - 4 * t * (1 - t) * amp, 1, 1)
+          end
         end
       end
       screen.fill()
+      -- ...and the pulses riding them
+      screen.level(15)
+      for k = 0, 1 do
+        local ph = (frame * 0.018 + k * 0.5) % 1
+        local amp = ch * (0.8 - 0.3 * k)
+        screen.rect(sx + ph * span - 1, fy - 4 - 4 * ph * (1 - ph) * amp, 2, 2)
+      end
+      screen.fill()
     end
-    -- readout last: a tall room's wall / rays must not paint over it
+    -- badges last: the estimated tail, then the parked mix
+    chip(string.format("RT %.1fS", 0.4 + size * 2.6), 2, 13)
     topright(string.format("MIX %d%%", floor(mixv * 100 + 0.5)),
       mixv > 0 and 10 or 3)
   end

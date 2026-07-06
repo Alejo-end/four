@@ -79,6 +79,28 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     The render suite grew three FX truth shots: `DELAY_INF`, `DELAY_DRY`,
     `REVERB_DRY` (dormancy + the INF badge are now diffable states).
 
+13. **(user-directed) REVERB page redesigned as CATHEDRAL.** The top-down
+    room never read ("I don't understand the reverb page"). Sixteen rendered
+    candidates over two gallery rounds later, the user picked the cathedral
+    cross-section: a vault (bright outer rib + two echo ribs, unit-arch
+    precomputed — no per-frame trig) that grows with size, starry air that
+    thickens with mix, two ray pulses arcing source→listener, an RT badge
+    (estimated seconds — FreeVerb size→RT is approximate), and full
+    dormancy at mix 0. Suite gained a REVERB_WASH shot.
+
+14. **(loop 3, user-directed) MIX page tells the truth about the crossfade.**
+    The engine↔tape fader is a plateau law (`min(1, 2(1−mix))` each side —
+    both decks at unity around center, no dip), but the page scaled lane
+    energy linearly with the fader, showing half-energy lanes at a
+    full-level center. Now: lane energy follows each deck's REAL gain, the
+    law itself is drawn between the lanes (unity plateau meeting at center,
+    tails at the edges) with the handle riding it, a full throw stills the
+    dead lane flat-dim, and a slim master VU (`amp_out`, same sqrt law as
+    LEVEL/REC) rides the right edge — this page is where the blend gets
+    pushed. Suite grew a `MIX_TAPE` full-throw truth shot. Loop 4 added a
+    peak-hold tick on the VU (~1s decay, bright at clip). Converged pending
+    on-device feedback.
+
 ## Still open / next loop iterations
 
 - On-device verification of everything above (all of it is uisim-verified

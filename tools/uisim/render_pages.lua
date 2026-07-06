@@ -478,7 +478,18 @@ else
   run_ticks(5)
   redraw()
   export(PREFIX .. "_10_REVERB_DRY")
+  params:set("rev_mix", 1)
+  run_ticks(6)
+  redraw()
+  export(PREFIX .. "_10_REVERB_WASH")
   params:set("rev_mix", 0.28)
+  -- MIX thrown full tape: the ENG lane must lie flat-dim (inaudible)
+  enc(1, -20)
+  params:set("mix", 1)
+  run_ticks(8)
+  redraw()
+  export(PREFIX .. "_01_MIX_TAPE")
+  params:set("mix", 0.5)
 end
 
 print("done: " .. TICK .. " ticks")

@@ -86,6 +86,27 @@ byte-identical (22 shots). NOTE: the empty-state render invocation is
 `render_pages.lua mangler.lua <dir> base empty` — "empty" is the 4th arg;
 passing it 3rd just renders the base scenario under an "empty_" prefix.
 
+Eighth Lua-only change (renders verified, untested on device): MIX page
+truth pass (doc/ux-feedback.md §14). The engine↔tape crossfade is a
+plateau law (mtape.update_mix: `min(1, 2(1−mix))` per side, both decks at
+unity around center); the page now scales lane energy by each deck's REAL
+gain instead of the raw fader, draws the law itself between the lanes
+(handle rides it), stills a fully-thrown-away lane flat-dim, and adds a
+slim master VU (amp_out, sqrt law like LEVEL/REC) on the right edge with
+a peak-hold tick (~1s decay, bright at clip — mix_peak module state).
+Suite grew a MIX_TAPE full-throw shot; dist byte-identical (23 shots).
+The MIX page is considered converged pending on-device feedback.
+
+Ninth Lua-only change (renders verified, untested on device): REVERB page
+redesigned as CATHEDRAL (doc/ux-feedback.md §13) — user-picked from 16
+rendered candidates across two gallery rounds. Cross-section vault (one
+bright rib + two dotted echo ribs, unit half-arch precomputed at load: no
+per-frame trig) grows with size; starry air (hash dither, 3Hz twinkle,
+inside-ellipse test) thickens with mix; two ray pulses arc source →
+listener on parabolic paths; RT badge top-left (0.4+size*2.6 s — an
+estimate, FreeVerb size→RT is not calibrated); dormant at mix 0. Suite
+gained REVERB_WASH; dist byte-identical (24 shots).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
