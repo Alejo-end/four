@@ -461,6 +461,24 @@ else
   run_ticks(2)
   redraw()
   export(PREFIX .. "_04_WINDOW_FLASH")
+  -- FX truth shots: INF pins a flat envelope + badge; mix 0 goes dormant
+  enc(1, 5)  -- WINDOW -> DELAY
+  params:set("delay_fb", 0.95)
+  run_ticks(20)  -- let the WINDOW flash expire: these shots want the parked readout
+  redraw()
+  export(PREFIX .. "_09_DELAY_INF")
+  params:set("delay_fb", 0.45)
+  params:set("delay_mix", 0)
+  run_ticks(5)
+  redraw()
+  export(PREFIX .. "_09_DELAY_DRY")
+  params:set("delay_mix", 0.35)
+  enc(1, 1)  -- REVERB
+  params:set("rev_mix", 0)
+  run_ticks(5)
+  redraw()
+  export(PREFIX .. "_10_REVERB_DRY")
+  params:set("rev_mix", 0.28)
 end
 
 print("done: " .. TICK .. " ticks")

@@ -1535,8 +1535,11 @@ local function draw_body()
       screen.fill()
     end
   elseif pname == "REVERB" then
-    -- mockup reverb page: a room seen from above — size grows the walls,
-    -- rays are the reflections bouncing off them. at mix 0 the page goes
+    -- reverb page: a room seen from above — size grows the walls, the
+    -- source (bright dot, left) rings a listener (open ring, right).
+    -- three rays are the early reflections, running longer in a bigger
+    -- room; the air itself carries a diffuse shimmer (hash dither) that
+    -- thickens with mix — the tail as a picture. at mix 0 the page goes
     -- dormant: dim room, still air — nothing moves that can't be heard.
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
@@ -1551,13 +1554,30 @@ local function draw_body()
     screen.level(mixv > 0 and 15 or 4)
     screen.rect(sx - 1, sy - 1, 2, 2)
     screen.fill()
+    screen.level(mixv > 0 and 8 or 2)
+    screen.circle(x1 - 7, 26, 2)
+    screen.stroke()
     if mixv > 0 then
+      -- the diffuse field: air dots twinkling at 3Hz, density rides mix,
+      -- a bigger room simply holds more of them
+      screen.level(2)
+      local sd = floor(frame * 0.2)
+      for gx = x0 + 3, x1 - 3, 5 do
+        for gy = y0 + 3, y1 - 3, 4 do
+          if hash(gx, gy, sd) < mixv * 0.45 then
+            screen.rect(gx, gy, 1, 1)
+          end
+        end
+      end
+      screen.fill()
+      -- early reflections: three rays off the source, longer in a big room
       screen.level(6)
-      for k = 0, 1 do
-        local a = k * 2.4 + frame * 0.03
+      local steps = floor(34 + size * 44)
+      for k = 0, 2 do
+        local a = k * 2.1 + frame * 0.03
         local px2, py = sx, sy
         local dx, dy = cos(a), sin(a)
-        for i = 0, 70 do
+        for i = 0, steps do
           px2 = px2 + dx
           py = py + dy
           if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end

@@ -37,7 +37,7 @@ Every frame below is real output — the actual script run through the offscreen
 | ![MIX page](doc/ui/mix.png)<br>**MIX** — engine ↔ tape crossfade; a silent engine lane lies flat | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
 | ![REC page](doc/ui/rec.png)<br>**REC** — capture into the loop; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
 | ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, node dot at the cutoff |
-| ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — the room grows with size, rays are reflections |
+| ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — the room grows with size, rays run longer in it, and the air shimmer thickens with mix |
 
 **STRETCH** draws the active algorithm's own texture — grains, an overlapped warp window,
 spectral columns — and lies flat when the voice is off:

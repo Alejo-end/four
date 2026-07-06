@@ -75,6 +75,17 @@ The render suite seeds math.random (deterministic, diffable) and grew a
 WINDOW_FLASH shot; dist rebuild byte-verified. Performance walkthroughs:
 doc/workflow-standalone.md (keys+encoders only) and doc/workflow-grid.md.
 
+Seventh Lua-only change (renders verified, untested on device): REVERB page
+depth, loop 2 of the UX feedback (doc/ux-feedback.md §11–12). REVERB gains
+a listener ring, a third ray (rays lengthen with size), and hash-dither air
+whose density rides the mix; dormant at mix 0. A DELAY echo-tap-plot rework
+was tried and **reverted on user request** — the bouncing-ball delay page
+is the keeper (see ux-feedback §11; don't re-attempt unasked). The suite
+grew DELAY_INF / DELAY_DRY / REVERB_DRY truth shots; dist re-verified
+byte-identical (22 shots). NOTE: the empty-state render invocation is
+`render_pages.lua mangler.lua <dir> base empty` — "empty" is the 4th arg;
+passing it 3rd just renders the base scenario under an "empty_" prefix.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

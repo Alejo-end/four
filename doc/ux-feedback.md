@@ -63,6 +63,22 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     → **DONE**: `doc/workflow-standalone.md` and `doc/workflow-grid.md`,
     linked from the README.
 
+11. **(loop 2) DELAY page echo-tap plot — tried, then REVERTED on request.**
+    An impulse+bars plot with a dotted feedback envelope and time/INF badges
+    replaced the bouncing ball; the user asked to revert, so the original
+    bouncing-ball page (arcs shrink with feedback, ball hops at the real
+    repeat cadence, dormant at mix 0) is back and is the keeper. Don't
+    re-attempt a bar-plot delay page without being asked.
+
+12. **(loop 2) REVERB page deepened.** The room keeps its walls, gains a
+    listener ring opposite the source, a third reflection ray (rays run
+    longer in a bigger room), and a diffuse air shimmer (deterministic hash
+    dither, twinkling at 3 Hz) whose density rides the mix — the tail as a
+    picture. Dormant at mix 0: dim room, still air.
+
+    The render suite grew three FX truth shots: `DELAY_INF`, `DELAY_DRY`,
+    `REVERB_DRY` (dormancy + the INF badge are now diffable states).
+
 ## Still open / next loop iterations
 
 - On-device verification of everything above (all of it is uisim-verified
@@ -71,5 +87,3 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
   question, low priority.
 - Watch whether the LEVEL `IN=0`/`OUT=0` resets feel right on hardware
   (system params are dB tapers there; 0 = unity).
-- Revisit DELAY page detail (ball/arc texture) if it still feels thin after
-  the readout pockets land.
