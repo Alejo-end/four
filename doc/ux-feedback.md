@@ -106,7 +106,29 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     (both stand full at center), ENG filled with live static, TAPE with
     the loop's actual waveform, knockout name plates at the tower feet,
     crossfader below, and the right-edge master VU with peak-hold kept
-    from the truth pass. Lanes + law-curve drawing retired.
+    from the truth pass. Lanes + law-curve drawing retired. **(Superseded
+    by §16.)**
+
+16. **(user-directed) MIX page changed again to VU PAIR; REC → REEL
+    COUNTER; WINDOW → LOUPE; LEVEL kept as-is.** After galleries of 8
+    MIX and 6-each LEVEL/REC/WINDOW candidates, the user's picks:
+    - **MIX = VU PAIR** — the DJ-mixer archetype: a needle VU per deck
+      (ENG/TAPE), crossfader between. Each needle rests at the deck's real
+      gain and lifts with the live output; a silenced deck (mode OFF /
+      thrown away) drops its needle to rest. Dial geometry precomputed
+      (VU_SC/VU_TK) — two cos/sin per frame. The towers' master-VU
+      peak-hold (mix_peak) is gone; that state was removed.
+      *Gotcha fixed in port:* `d==1 and eng_on or (tape_g>0)` made the
+      engine needle "on" whenever tape played — must be
+      `(d==1) and eng_on or (d==2 and tape_g>0)`.
+    - **REC = REEL COUNTER** — a tape-deck face: REC lamp, big seconds
+      counter, stereo input meter, 60s reel-usage bar with the write head
+      sweeping while recording. Suite gained a `REC_REC` armed-state shot.
+    - **WINDOW = LOUPE** — a waveform-editor overview+detail: full buffer
+      boxed up top, the slice zoomed full-width below, playhead tracking
+      inside; jitter fuzzes the detail playhead (alt-layer feedback).
+    - **LEVEL** — left exactly as shipped (twin faders + VU) per request.
+    Dist byte-identical (25 shots).
 
 ## Still open / next loop iterations
 

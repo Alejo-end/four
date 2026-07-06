@@ -1091,7 +1091,25 @@ local reel_angle = 0        -- TAPE page reel rotation, driven by tape rate
 local delay_heights = {}    -- DELAY bounce peaks, slots reused every frame
 local delay_hop = 0         -- DELAY page ball position, in hops (1 hop = 1 repeat)
 
-local mix_peak = 0          -- MIX master VU peak-hold, ~1s decay at 15fps
+-- MIX VU-pair dial geometry: the scale arc and its major ticks are static;
+-- only the two needles move. precompute the dot offsets once (dx,dy from a
+-- pivot at cy=39), so the page costs just two cos/sin per frame (the needles)
+local VU_R = 19
+local VU_SC, VU_TK = {}, {}
+do
+  local t = 0
+  while t <= 1.0001 do
+    local a = 2.67 - 2.2 * t
+    VU_SC[#VU_SC + 1] = cos(a) * VU_R
+    VU_SC[#VU_SC + 1] = -sin(a) * VU_R
+    t = t + 0.055
+  end
+  for _, tt in ipairs({ 0, 0.25, 0.5, 0.75, 1 }) do
+    local a = 2.67 - 2.2 * tt
+    VU_TK[#VU_TK + 1] = cos(a) * (VU_R + 2)
+    VU_TK[#VU_TK + 1] = -sin(a) * (VU_R + 2)
+  end
+end
 
 -- REVERB page statics: one unit half-arch (cos/sin over 0..pi) computed
 -- once; the vault's three ribs scale it per frame — no per-frame trig
@@ -1135,83 +1153,51 @@ local function draw_body()
   local frame = C.frame
 
   if pname == "MIX" then
-    -- mix page: two towers — column height IS each deck's real gain
-    -- under the plateau crossfade law (mtape.update_mix, no center dip:
-    -- both towers stand full at center). the ENG tower holds live
-    -- static, the TAPE tower the loop's actual waveform; labels knock
-    -- out their own pocket at the tower feet. the crossfader rides
-    -- below; a slim master VU (amp_out, the real sum, sqrt law like
-    -- LEVEL/REC) rides the right edge with a peak-hold tick that goes
-    -- bright at clip. mode OFF or a full throw empties a tower —
-    -- nothing moves that can't be heard.
+    -- mix page: the DJ-mixer archetype — a needle VU per deck (ENG left,
+    -- TAPE right) with the crossfader between them. each needle rests at
+    -- the deck's REAL gain under the plateau law (mtape.update_mix) and
+    -- lifts with the actual output; a silenced deck (mode OFF or a full
+    -- throw away) lies at rest and dim — nothing moves that can't be
+    -- heard. the balance parks top-right. (dial geometry is precomputed:
+    -- VU_SC/VU_TK, two cos/sin per frame for the needles.)
     local mixv = pget("mix", 0.5)
     local eng_g = min(1, 2 * (1 - mixv))
     local tape_g = min(1, 2 * mixv)
-    screen.level(2)
-    screen.rect(22.5, 14.5, 31, 22)
-    screen.rect(74.5, 14.5, 31, 22)
-    screen.stroke()
-    -- ENG tower: live static up to the deck's gain
-    local eh = eng_g * 20
-    if pget("mode", 2) ~= 1 and eh > 0.5 then
-      screen.level(10)
-      local sd = floor(frame / 2)
-      for x = 24, 52 do
-        for y = 0, floor(eh), 2 do
-          if hash(x, y, sd) < 0.35 then
-            screen.rect(x, 35 - y, 1, 1)
-          end
-        end
-      end
+    local ao = sqrt(min(max(amp_out[1], amp_out[2]), 1))
+    local eng_on = pget("mode", 2) ~= 1 and eng_g > 0
+    ptext("E", 18, 31, 1, 6)
+    ptext("T", 78, 31, 1, 6)
+    for d = 1, 2 do
+      local cx = d == 1 and 34 or 94
+      local g = d == 1 and eng_g or tape_g
+      local on = (d == 1) and eng_on or (d == 2 and tape_g > 0)
+      -- the scale arc (dim) and its major ticks
+      screen.level(2)
+      for i = 1, #VU_SC, 2 do screen.rect(cx + VU_SC[i], 39 + VU_SC[i + 1], 1, 1) end
+      screen.fill()
+      screen.level(6)
+      for i = 1, #VU_TK, 2 do screen.rect(cx + VU_TK[i], 39 + VU_TK[i + 1], 1, 1) end
+      screen.fill()
+      -- the needle: a live deck rests at its gain and lifts with real
+      -- output; a silenced one (mode OFF / thrown away) falls to zero
+      local gv = on and min(g * (0.8 + 0.35 * ao), 1.04) or 0
+      local a = 2.67 - 2.2 * gv
+      screen.level(on and 13 or 3)
+      screen.move(cx, 39)
+      screen.line(cx + cos(a) * (VU_R - 2), 39 - sin(a) * (VU_R - 2))
+      screen.stroke()
+      screen.level(on and 15 or 4)
+      screen.rect(cx - 1, 38, 3, 2)
       screen.fill()
     end
-    -- TAPE tower: the loop's waveform, scaled by the deck's gain
-    local th = tape_g * 20
-    if th > 0.5 then
-      screen.level(10)
-      for x = 76, 104 do
-        local a = twave[floor((x - 76) / 28 * 127) + 1]
-        local h = min(sqrt(min(a * 2, 1)) * th + 1, th)
-        if h >= 1 then
-          screen.rect(x, 36 - h, 1, h)
-        end
-      end
-      screen.fill()
-    end
-    -- deck names, knocked out at the tower feet
-    screen.level(0)
-    screen.rect(29, 27, 19, 8)
-    screen.rect(79, 27, 23, 8)
-    screen.fill()
-    ptext_c("ENG", 38, 28, 1, 6)
-    ptext_c("TAPE", 90, 28, 1, 6)
-    -- the crossfader under the towers
+    -- the crossfader between the meters
     screen.level(2)
-    screen.move(22, 40.5)
-    screen.line(106, 40.5)
+    screen.move(52, 40.5)
+    screen.line(76, 40.5)
     screen.stroke()
     screen.level(15)
-    screen.rect(21 + mixv * 82, 38, 3, 5)
+    screen.rect(51 + mixv * 22, 38, 3, 5)
     screen.fill()
-    -- master VU, the sum that actually leaves: same sqrt law as LEVEL/REC,
-    -- with a peak-hold tick (~1s decay) that goes bright at clip
-    local ao = max(amp_out[1], amp_out[2])
-    if ao > mix_peak then mix_peak = ao else mix_peak = mix_peak * 0.96 end
-    screen.level(1)
-    screen.move(125.5, 16)
-    screen.line(125.5, 40)
-    screen.stroke()
-    local vu = floor(clamp(sqrt(ao), 0, 1) * 24)
-    if vu > 0 then
-      screen.level(12)
-      screen.rect(125, 40 - vu, 3, vu)
-      screen.fill()
-    end
-    if mix_peak > 0.02 then
-      screen.level(mix_peak >= 1 and 15 or 6)
-      screen.rect(125, 40 - floor(clamp(sqrt(mix_peak), 0, 1) * 24) - 1, 3, 1)
-      screen.fill()
-    end
     -- the balance parks top-right: who you're hearing, at a glance
     topright(string.format("E%d T%d",
       floor((1 - mixv) * 100 + 0.5), floor(mixv * 100 + 0.5)))
@@ -1249,51 +1235,119 @@ local function draw_body()
     -- leaves it — the arrows say which fader is upstream
     ptext_c(">>", 64, 27, 1, 2)
   elseif pname == "REC" then
-    draw_strip(false)
-    particles_draw()
-    -- an empty buffer is an invitation, in the same voice as the TAPE page
-    if not C.wave_any and pget("rec", 0) == 0 then
-      ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+    -- rec page: a tape-deck face. a REC lamp (lit while armed), a big
+    -- seconds counter, a stereo input meter (what's coming in), and a
+    -- usage bar for the 60s reel with the write head sweeping it while
+    -- recording. an empty buffer is an invitation, same voice as TAPE.
+    local recording = pget("rec", 0) == 1 and pget("freeze", 0) == 0
+    -- used seconds of the reel, from filled display bins
+    local used = 0
+    for i = 1, 128 do if wave[i] > 0.002 then used = used + 1 end end
+    used = used / 128 * 60
+    -- REC lamp
+    if recording then
+      screen.level(15) screen.circle(13, 18, 3) screen.fill()
+    else
+      screen.level(3) screen.circle(13, 18, 3) screen.stroke()
     end
-    -- input meter rides the right edge so you can see what's being captured
-    local h = floor(clamp(sqrt(max(amp_in[1], amp_in[2])) * (BAND_B - BAND_T), 0, BAND_B - BAND_T))
-    screen.level(15)
-    if h > 0 then
-      screen.rect(125, BAND_B - h, 3, h)
-      screen.fill()
+    ptext("REC", 19, 16, 1, recording and 13 or 4)
+    -- the counter: take length while recording, else the reel's used time
+    local secs = recording and ((C.rec_phase - C.rec_arm_phase) % 1) * 60 or used
+    local clvl = (C.wave_any or recording) and 13 or 3
+    ptext(string.format("%04.1f", secs), 44, 15, 2, clvl)
+    ptext("SEC", 108, 14, 1, 4)
+    -- stereo input meter
+    for c = 0, 1 do
+      local a = c == 0 and amp_in[1] or amp_in[2]
+      local vu = floor(sqrt(clamp(a, 0, 1)) * 8)
+      local cx = 108 + c * 6
+      screen.level(2) screen.rect(cx, 22, 4, 8) screen.stroke()
+      if vu > 0 then screen.level(10) screen.rect(cx + 1, 30 - vu, 2, vu) screen.fill() end
     end
-    -- resample re-records the OUTPUT: state you must not forget while it
-    -- shapes what capture hears, so it badges the page while engaged
+    -- reel usage bar (60s), with the write head sweeping while recording
+    screen.level(2) screen.rect(6, 35, 116, 4) screen.stroke()
+    local uw = floor(used / 60 * 114)
+    if uw > 0 then screen.level(8) screen.rect(7, 36, uw, 2) screen.fill() end
+    if recording then
+      local wx = 7 + clamp(C.rec_phase, 0, 1) * 114
+      screen.level(15) screen.rect(wx, 34, 1, 6) screen.fill()
+    end
+    if not C.wave_any and not recording then
+      ptext_c("EMPTY - K2 REC", 64, 28, 1, 3)
+    end
+    -- resample re-records the OUTPUT: badge it while engaged
     if pget("resample", 0) > 0 then chip("RSMP", 2, 13) end
-    -- top-right: overdub level while it shapes the take, otherwise the
-    -- growing take length (real seconds of the 60s buffer) while recording
+    -- overdub parks its amount top-right while it shapes the take
     local ovr = pget("pre_level", 0)
-    if ovr > 0 then
-      topright(string.format("OVR %d%%", floor(ovr * 100 + 0.5)))
-    elseif pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
-      topright(string.format("REC %.1fS",
-        ((C.rec_phase - C.rec_arm_phase) % 1) * 60), 10)
-    end
+    if ovr > 0 then topright(string.format("OVR %d%%", floor(ovr * 100 + 0.5))) end
   elseif pname == "WINDOW" then
-    draw_strip(true)
-    local _, _, span = window_bounds()
-    -- jitter blurs the read position (that is what the engine's TRand
-    -- does): ghost dots scatter around the playhead, reaching ±jit·span
-    local jit = pget("pos_jitter", 0)
-    if jit > 0 and C.wave_any then
-      local phx = clamp(C.play_phase, 0, 1) * 127
-      local reach = jit * span * 127
-      local sd = floor(frame / 2)
-      screen.level(2)
-      for k = 1, 12 do
-        local gx = phx + (hash(k, 3, sd) - 0.5) * 2 * reach
-        if gx >= 0 and gx <= 127 then
-          screen.rect(gx, BAND_T + 2 + hash(k, 9, sd) * (BAND_B - BAND_T - 4), 1, 1)
-        end
+    -- window page: a waveform-editor loupe. the whole buffer up top with
+    -- the slice boxed; the slice itself zoomed to full width below, the
+    -- playhead tracking inside it. jitter (alt) fuzzes the detail playhead
+    -- — that blur is what the engine's TRand does to the read position.
+    -- the slice length parks top-right, in real seconds.
+    local lo, hi, span = window_bounds()
+    -- overview strip (thin), the full buffer
+    screen.level(1)
+    screen.move(0, 17.5) screen.line(128, 17.5)
+    screen.stroke()
+    screen.level(5)
+    for x = 0, 127 do
+      local aw = wave[x + 1]
+      if aw > 0.002 then
+        local h = clamp(sqrt(min(aw * 2, 1)) * 3, 1, 3)
+        screen.move(x, 17.5 - h) screen.line(x, 17.5 + h)
       end
-      screen.fill()
     end
-    -- the slice IS the page: its length parks top-right, in real seconds
+    screen.stroke()
+    -- the window, boxed on the overview
+    screen.level(12)
+    screen.rect(lo * 127, 13, max((hi - lo) * 127, 1), 9)
+    screen.stroke()
+    -- connectors fanning the box out to the detail lane below
+    screen.level(3)
+    screen.move(lo * 127, 22) screen.line(0, 25)
+    screen.move(hi * 127, 22) screen.line(128, 25)
+    screen.stroke()
+    -- detail lane: the slice stretched to full width
+    local dy = 33
+    screen.level(1)
+    screen.move(0, dy) screen.line(128, dy)
+    screen.stroke()
+    local blo = floor(lo * 127) + 1
+    local bhi = max(blo + 1, floor(hi * 127) + 1)
+    screen.level(11)
+    for x = 0, 127 do
+      local bi = floor(blo + x / 127 * (bhi - blo))
+      local aw = wave[min(bi, 128)] or 0
+      if aw > 0.002 then
+        local h = clamp(sqrt(min(aw * 2, 1)) * 7, 1, 7)
+        screen.move(x, dy - h) screen.line(x, dy + h)
+      end
+    end
+    screen.stroke()
+    if C.wave_any then
+      local pt = span > 0 and clamp((clamp(C.play_phase, 0, 1) - lo) / span, 0, 1) or 0
+      local px = pt * 127
+      -- jitter fuzz around the detail playhead (alt-layer feedback)
+      local jit = pget("pos_jitter", 0)
+      if jit > 0 then
+        local sd = floor(frame / 2)
+        screen.level(4)
+        for k = 1, 10 do
+          local gx = px + (hash(k, 3, sd) - 0.5) * 2 * jit * 40
+          if gx >= 0 and gx <= 127 then
+            screen.rect(gx, dy - 7 + hash(k, 9, sd) * 14, 1, 1)
+          end
+        end
+        screen.fill()
+      end
+      screen.level(15)
+      screen.move(px, dy - 8) screen.line(px, dy + 8)
+      screen.stroke()
+    else
+      ptext_c("EMPTY - K2 REC", 64, dy - 3, 1, 3)
+    end
     topright(string.format("%.2fS", span * 60))
   elseif pname == "GRAIN" then
     -- mockup grain page: thin sample strip up top with window brackets,

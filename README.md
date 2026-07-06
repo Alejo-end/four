@@ -30,12 +30,12 @@ grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**
 Every frame below is real output — the actual script run through the offscreen renderer
 (`tools/uisim/`) with a scripted take, tape loop, and live FX.
 
-![WINDOW page: a recorded take, slice handles, the slice length parked top-right](doc/ui/window.png)
+![WINDOW page: a waveform-editor loupe — the full buffer boxed up top, the slice zoomed to full width below, length parked top-right](doc/ui/window.png)
 
 | | |
 |---|---|
-| ![MIX page](doc/ui/mix.png)<br>**MIX** — two towers, height = each deck's real gain (both full at center — no dip); static vs the actual loop waveform, master VU with peak-hold at the right edge | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
-| ![REC page](doc/ui/rec.png)<br>**REC** — capture into the loop; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
+| ![MIX page](doc/ui/mix.png)<br>**MIX** — a needle VU per deck (ENG/TAPE): each rests at its real gain and lifts with output; a silenced deck's needle falls; crossfader between them | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
+| ![REC page](doc/ui/rec.png)<br>**REC** — a tape-deck face: REC lamp, seconds counter, stereo input meter, 60s reel-usage bar; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
 | ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, node dot at the cutoff |
 | ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — a cathedral in cross-section: the vault grows with size, starry air thickens with mix, ray pulses arc source → listener |
 

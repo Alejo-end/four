@@ -108,14 +108,24 @@ listener on parabolic paths; RT badge top-left (0.4+size*2.6 s — an
 estimate, FreeVerb size→RT is not calibrated); dormant at mix 0. Suite
 gained REVERB_WASH; dist byte-identical (24 shots).
 
-Tenth Lua-only change (renders verified, untested on device): MIX page
-redesigned as TOWERS (doc/ux-feedback.md §15) — user-picked "2's towers
-with 4's master VU" from an 8-candidate rendered gallery. Two columns,
-height = each deck's REAL gain under the plateau law (both full at
-center), ENG tower = live static (hash dither), TAPE tower = the loop's
-actual waveform, knockout name plates at the tower feet, crossfader
-below, right-edge master VU with peak-hold kept. Only the three MIX
-shots changed; dist byte-identical (24 shots).
+Tenth Lua-only change (superseded by the eleventh): MIX page as TOWERS
+(doc/ux-feedback.md §15). Replaced by VU PAIR below; the towers' master-VU
+peak-hold state (mix_peak) was removed with it.
+
+Eleventh Lua-only change (renders verified, untested on device): three
+user-picked page redesigns from candidate galleries (doc/ux-feedback.md
+§16). MIX → VU PAIR (a needle VU per deck, ENG/TAPE, crossfader between;
+each needle rests at the deck's real gain and lifts with output, a
+silenced deck's needle falls; dial geometry precomputed in VU_SC/VU_TK,
+two cos/sin per frame). REC → REEL COUNTER (tape-deck face: REC lamp,
+seconds counter, stereo input meter, 60s reel-usage bar, write head
+sweeping while armed; suite gained a REC_REC shot). WINDOW → LOUPE
+(waveform-editor overview+detail: buffer boxed up top, slice zoomed
+full-width below, jitter fuzzes the detail playhead). LEVEL left as-is
+per request. Dist byte-identical (25 shots). PORT GOTCHA: the VU-pair
+`on` test must be `(d==1) and eng_on or (d==2 and tape_g>0)` — the
+unguarded `d==1 and eng_on or (tape_g>0)` lights the engine needle
+whenever tape plays (and/or precedence).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

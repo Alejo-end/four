@@ -490,6 +490,18 @@ else
   redraw()
   export(PREFIX .. "_01_MIX_TAPE")
   params:set("mix", 0.5)
+  -- REC armed: the reel counter's recording state (lamp lit, write head
+  -- sweeping the usage bar, take counter running, input hot)
+  enc(1, -20)
+  enc(1, 2)  -- MIX -> REC
+  params:set("rec", 1)
+  push("rec_phase", 0.62)
+  push("rec_amp", 0.6)
+  push("amp_in_l", 0.7)
+  push("amp_in_r", 0.6)
+  redraw()
+  export(PREFIX .. "_03_REC_REC")
+  params:set("rec", 0)
 end
 
 print("done: " .. TICK .. " ticks")

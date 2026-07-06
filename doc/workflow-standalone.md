@@ -37,11 +37,13 @@ Plug the synth into the norns line inputs and play.
 
 Go to **REC** (page 3).
 
-- Play a phrase and hit **K2 `REC`**. The write head walks the strip, the
-  input meter rides the right edge, and the take length counts top-right
-  (`REC 4.2S`). The buffer is 60 seconds long.
-- Hit **K2** again to stop. **The window snaps to exactly what you just
-  played** — playback immediately loops your phrase, not a minute of silence.
+- The page is a **tape-deck face**: a REC lamp, a big seconds counter, a
+  stereo input meter, and a usage bar for the 60-second reel.
+- Play a phrase and hit **K2 `REC`**. The lamp lights, the counter runs,
+  the input meter dances, and the write head sweeps the reel bar. Hit
+  **K2** again to stop — **the window snaps to exactly what you just
+  played**, so playback immediately loops your phrase, not a minute of
+  silence.
 - **K3 `FRZ`** freezes capture without disarming; E2 = record level,
   **K1**+E2 = overdub (`OVR` parks top-right while it's non-zero — old
   material survives under new by that amount).
@@ -52,17 +54,22 @@ Go to **REC** (page 3).
 
 ## 2 · Shape the slice — WINDOW
 
-Go to **WINDOW** (page 4). The slice length parks top-right, in seconds.
+Go to **WINDOW** (page 4). It's a **waveform-editor loupe**: the whole
+buffer sits up top with your slice boxed, and that slice is zoomed to full
+width in the lane below — so you rough-cut on the overview and read the
+detail underneath. The slice length parks top-right, in seconds.
 
-- E2/E3 drag the window start/end. The encoder deltas scale with the window
+- E2/E3 drag the window start/end (the box on the overview, the whole
+  detail lane reshaping as you do). The encoder deltas scale with the window
   span — wide open they move fast, on a tight slice they nudge by ~10 ms.
   Everything downstream (grain cloud, stretch) reads only this slice.
 - **K2 `RST`** opens the window to the whole buffer; **K3 `FLIP`** reverses
   the scan direction — the classic throw-it-backwards move.
 - **K1**+E2 = scan rate (−2×…+2×; the playhead speed through the slice,
-  independent of pitch). **K1**+E3 = jitter — watch the ghost dots scatter
-  around the playhead; that blur is literally what the engine does to the
-  read position. Jitter high + tight window = smeared, unpitched texture.
+  independent of pitch). **K1**+E3 = jitter — watch the ghost dots fuzz the
+  playhead in the detail lane; that blur is literally what the engine does
+  to the read position. Jitter high + tight window = smeared, unpitched
+  texture.
 
 ## 3 · Grow the cloud — GRAIN + STRETCH
 
@@ -98,14 +105,14 @@ records **what's at the outputs**, engine sound included.
 - **K3 `FRZ`** freezes the loop; **K1+K3 `CLR`** wipes the tape for a fresh
   start.
 - **MIX** (page 1): E2 crossfades engine ↔ tape (the balance parks top-right
-  as `E70 T30`). The fade is a **plateau law** — both decks run at full
-  level around center, each dies toward its far edge — and the two towers
-  show exactly that: column height is each deck's *real* level (both stand
-  full at center), the ENG tower filled with live static, the TAPE tower
-  with the loop's actual waveform. The master VU on the right edge shows
-  the sum you're pushing, with a peak-hold tick that goes bright at clip.
-  **K2 `ENG` / K3 `TAPE`** throw the fade hard to either deck. E3 trims
-  the engine; **K1**+E2 = master out, **K1**+E3 = tape trim.
+  as `E70 T30`). The page is a **DJ-mixer pair** — a needle VU per deck
+  (ENG left, TAPE right) with the crossfader between them. The fade is a
+  **plateau law** (both decks at full around center, each dying toward its
+  far edge), and each needle rests at its deck's *real* gain and lifts with
+  the live output; a silenced deck (mode OFF, or thrown fully away) drops
+  its needle to rest. **K2 `ENG` / K3 `TAPE`** throw the fade hard to
+  either deck. E3 trims the engine; **K1**+E2 = master out, **K1**+E3 =
+  tape trim.
 
 **The soundscape loop:** capture a phrase → granulate it → print the result
 to tape → throw MIX to TAPE → the engine is now free to capture and mangle
