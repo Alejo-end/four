@@ -7,6 +7,7 @@
 --   variant "empty": empty-buffer states (REC + GRAIN)
 --   variant "grain": GRAIN page across its param extremes (size/density/
 --                    spread/jitter/pan edges, mode OFF)
+--   variant "filter": FILTER page across its types and resonance extremes
 
 local MANGLER = arg[1] or "mangler.lua"
 local OUTDIR = arg[2] or "."
@@ -14,6 +15,7 @@ local PREFIX = arg[3] or "shot"
 local VARIANT = arg[4]
 local EMPTY = VARIANT == "empty"
 local GRAINX = VARIANT == "grain"
+local FILTX = VARIANT == "filter"
 
 -- ============================================================================
 -- screen: 128x64, 16 levels, cairo-ish path model (overwrite paints)
@@ -293,6 +295,10 @@ end
 local REPO = MANGLER:match("^(.*)/") or "."
 include = function(p) return dofile(REPO .. "/" .. p .. ".lua") end
 
+-- deterministic renders: the particle cloud draws from math.random, and
+-- seeding here makes galleries diffable and the dist build byte-checkable
+math.randomseed(1)
+
 dofile(MANGLER)
 init()
 
@@ -400,6 +406,22 @@ elseif GRAINX then
     redraw()
     export(PREFIX .. "_05_GRAIN_" .. c[1])
   end
+elseif FILTX then
+  -- FILTER extremes: each type at a musical setting, plus the edges the
+  -- curve math must survive (max resonance peak, fully open)
+  local CASES = {
+    { "LP_RES1", { filt_type = 1, cutoff = 800, resonance = 1 } },
+    { "HP", { filt_type = 2, cutoff = 300, resonance = 0.3 } },
+    { "BP", { filt_type = 3, cutoff = 1000, resonance = 0.6 } },
+    { "LP_OPEN", { filt_type = 1, cutoff = 20000, resonance = 0 } },
+  }
+  enc(1, 7)  -- FILTER page
+  for _, c in ipairs(CASES) do
+    for id, v in pairs(c[2]) do params:set(id, v) end
+    run_ticks(5)
+    redraw()
+    export(PREFIX .. "_08_FILTER_" .. c[1])
+  end
 else
   for i, name in ipairs(PAGES) do
     if i > 1 then enc(1, 1) end
@@ -431,6 +453,14 @@ else
   redraw()
   export(PREFIX .. "_01_MIX_OFF")
   params:set("mode", 2)
+  -- the adjust flash over a busy page: nudge an encoder on WINDOW and
+  -- shoot while the framed readout is up — it must stay fully legible
+  enc(1, 3)  -- MIX -> WINDOW
+  run_ticks(5)
+  enc(2, 2)  -- nudge win start: the flash appears
+  run_ticks(2)
+  redraw()
+  export(PREFIX .. "_04_WINDOW_FLASH")
 end
 
 print("done: " .. TICK .. " ticks")

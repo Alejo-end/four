@@ -51,7 +51,6 @@ local PAGES = {
 local FPS = 15
 
 local held_gesture = {}    -- held_gesture[n] = param id to zero when key n releases
-local rec_arm_phase = 0    -- write-head position when rec was armed
 local tape_arm_phase = 0   -- head position when tape rec was armed
 local polls = {}
 local redraw_clock
@@ -123,6 +122,7 @@ local ctx = {
   -- engine/system signals
   play_phase = 0,            -- engine poll: normalized playhead in the buffer
   rec_phase = 0,             -- engine poll: normalized write-head position
+  rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
@@ -169,6 +169,20 @@ end
 -- come from the same definition, so they can never drift apart.
 -- all actions drive params, never locals, so MIDI mappings stay in lockstep.
 local KEYS = {
+  MIX = {
+    -- crossfade throws: snap hard to either deck; the encoder recovers
+    k2 = { label = "ENG",
+      act = function() params:set("mix", 0) end },
+    k3 = { label = "TAPE",
+      act = function() params:set("mix", 1) end },
+  },
+  LEVEL = {
+    -- unity resets: the system level params are dB tapers, 0 = 0 dB
+    k2 = { label = "IN=0",
+      act = function() params:set("input_level", 0) end },
+    k3 = { label = "OUT=0",
+      act = function() params:set("output_level", 0) end },
+  },
   REC = {
     k2 = { label = "REC", lit = "rec",
       act = function() ptoggle("rec") end },
@@ -178,8 +192,20 @@ local KEYS = {
   WINDOW = {
     k2 = { label = "RST",
       act = function() params:set("pos_start", 0) params:set("pos_end", 1) end },
+    -- reverse the scan direction — the classic throw-it-backwards move
+    k3 = { label = "FLIP",
+      act = function() params:set("scan", -params:get("scan")) end },
   },
   GRAIN = {
+    -- octave throws on the playable pitch (alt: up); K3 re-centers
+    k2 = { label = "OCT-",
+      act = function()
+        params:set("pitch", math.max(params:get("pitch") * 0.5, 0.25))
+      end },
+    k2_alt = { label = "OCT+",
+      act = function()
+        params:set("pitch", math.min(params:get("pitch") * 2, 4))
+      end },
     k3 = { label = "PT=1",
       act = function() params:set("pitch", 1.0) end },
   },
@@ -214,10 +240,26 @@ local KEYS = {
   FILTER = {
     k2 = { label = "TYPE",
       act = function() params:set("filt_type", (params:get("filt_type") % 3) + 1) end },
+    -- neutralize: open the filter as far as its type allows, kill the res
+    k3 = { label = "OPEN",
+      act = function()
+        local ft = params:get("filt_type")
+        params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+        params:set("resonance", 0)
+      end },
   },
   DELAY = {
+    -- dub throws: INF pins the loop at the (soft-clipped) edge, KILL drops it
+    k2 = { label = "INF",
+      act = function() params:set("delay_fb", 0.95) end },
     k3 = { label = "KILL",
       act = function() params:set("delay_fb", 0) end },
+  },
+  REVERB = {
+    k2 = { label = "WASH",
+      act = function() params:set("rev_mix", 1) end },
+    k3 = { label = "KILL",
+      act = function() params:set("rev_mix", 0) end },
   },
 }
 
@@ -311,11 +353,11 @@ local function init_params()
   params:set_action("rec", function(v)
     if engine.rec then engine.rec(v) end
     if v == 1 then
-      rec_arm_phase = ctx.rec_phase
-    elseif ctx.rec_phase > rec_arm_phase + 0.005 then
-      params:set("pos_start", rec_arm_phase)
+      ctx.rec_arm_phase = ctx.rec_phase
+    elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
+      params:set("pos_start", ctx.rec_arm_phase)
       params:set("pos_end", ctx.rec_phase)
-    elseif ctx.rec_phase < rec_arm_phase - 0.005 then
+    elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
       -- the write head wrapped past the buffer end mid-take. a wrapped
       -- window (start > end) would be SORTED into the wrong slice by
       -- window_bounds, so fall back to the whole buffer — the take is in

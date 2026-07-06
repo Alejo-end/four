@@ -58,6 +58,23 @@ write head while recording, REC parks OVR% top-right when overdubbing,
 warp_rand shakes the WARP ghost (still at 0). README carries a rendered page
 gallery (doc/ui/, regenerate from tools/uisim after any screen change).
 
+Sixth Lua-only change (renders verified, untested on device): UX polish from
+first play-testing (feedback log: doc/ux-feedback.md). Every top-right
+readout knocks out its own pocket and the encoder flash draws in a framed
+black box (legible over any page); page dots sit on one straight pixel row
+(current page = wider dash, same row); footer hexagons became circular
+dials; FILTER draws the engine's real RLPF/RHPF/BPF magnitude (log-f axis,
+100/1k/10k + 0dB rails, filled passband, bright node dot at the cutoff);
+WINDOW parks slice length in seconds and scatters jitter ghosts around the
+playhead; REC badges RSMP when resample>0 and counts the take in seconds
+(ctx.rec_arm_phase); MIX parks the E/T balance; LEVEL hints signal flow.
+Every page now gives K2/K3 a job — MIX ENG/TAPE throws, LEVEL IN=0/OUT=0
+unity resets, WINDOW FLIP (negate scan), GRAIN OCT−/OCT+ (alt), FILTER
+OPEN, DELAY INF, REVERB WASH/KILL — all in the KEYS table, spec §10 updated.
+The render suite seeds math.random (deterministic, diffable) and grew a
+WINDOW_FLASH shot; dist rebuild byte-verified. Performance walkthroughs:
+doc/workflow-standalone.md (keys+encoders only) and doc/workflow-grid.md.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

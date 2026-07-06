@@ -5,7 +5,7 @@
 -- layout: header y0..10  (title 2x pixel font, ALT chip, page dots, status)
 --         body   y12..41 (per-page visualization)
 --         footer y44..63 (labels row, then the hardware row mirroring the
---                         panel: E2 hexagon . K2 pill . K3 pill . E3 hexagon)
+--                         panel: E2 dial . K2 pill . K3 pill . E3 dial)
 -- values are not parked in the footer: turning an encoder flashes the value
 -- top-right for a second (like the mockup readouts), then it gets out of
 -- the way.
@@ -121,20 +121,11 @@ local function param_norm(id)
   return clamp(v, 0, 1)
 end
 
--- hexagon dial: dim outline, bright pointer sweeping 135..405 degrees.
--- the outline is a constant ring — its trig lives in a table, not the frame
-local HEX_DX, HEX_DY = {}, {}
-for i = 0, 6 do
-  local a = -math.pi / 2 + i * math.pi / 3
-  HEX_DX[i], HEX_DY[i] = math.cos(a), math.sin(a)
-end
-
-local function draw_hex_dial(cx, cy, r, val)
+-- circular dial: dim ring, bright needle sweeping 135..405 degrees — the
+-- classic knob throw. (the TAPE reels prove r≈7 circles raster fine here.)
+local function draw_dial(cx, cy, r, val)
   screen.level(4)
-  for i = 0, 6 do
-    local x, y = cx + HEX_DX[i] * r, cy + HEX_DY[i] * r
-    if i == 0 then screen.move(x, y) else screen.line(x, y) end
-  end
+  screen.circle(cx, cy, r)
   screen.stroke()
   if val then
     local a = math.pi * 0.75 + clamp(val, 0, 1) * math.pi * 1.5
@@ -168,7 +159,13 @@ local flash_on = false
 
 local function topright(str, lvl)
   if flash_on then return end
-  ptext_r(string.upper(str), 126, 13, 1, lvl or 4)
+  str = string.upper(str)
+  -- knock out a pocket first: the number must read over any picture
+  local w = text_w(str, 1)
+  screen.level(0)
+  screen.rect(124 - w, 11, w + 4, 9)
+  screen.fill()
+  ptext_r(str, 126, 13, 1, lvl or 4)
 end
 
 -- footer: labels row at y44, then hexagon . pill . pill . hexagon at the
@@ -179,8 +176,8 @@ local function draw_footer()
   ptext_c("K2", 51, 44, 1, 4)
   ptext_c("K3", 81, 44, 1, 4)
   ptext_c(SHORT[id3] or "--", 108, 44, 1, 4)
-  draw_hex_dial(20, 56, 7, param_norm(id2))
-  draw_hex_dial(108, 56, 7, param_norm(id3))
+  draw_dial(20, 56, 7, param_norm(id2))
+  draw_dial(108, 56, 7, param_norm(id3))
   local held = C.held
   for n = 2, 3 do
     local def = C.key_def(n)
@@ -282,6 +279,23 @@ local reel_angle = 0        -- TAPE page reel rotation, driven by tape rate
 local delay_heights = {}    -- DELAY bounce peaks, slots reused every frame
 local delay_hop = 0         -- DELAY page ball position, in hops (1 hop = 1 repeat)
 
+-- FILTER page statics: log-frequency axis 20Hz..20kHz over 128 columns,
+-- gridline columns at 100Hz/1k/10k, the 0dB reference row, and a reusable
+-- per-column response buffer (the curve is recomputed each frame from the
+-- real biquad magnitude — a few muls and one log per column, FILTER only)
+local FILT_FREQ, FILT_Y = {}, {}
+for x = 0, 127 do
+  FILT_FREQ[x + 1] = 20 * (1000 ^ (x / 127))
+  FILT_Y[x + 1] = 0
+end
+local FILT_GRID_X = {}
+for i, f in ipairs({ 100, 1000, 10000 }) do
+  FILT_GRID_X[i] = floor(log(f / 20) / log(1000) * 127 + 0.5)
+end
+local FILT_DB_TOP, FILT_DB_RANGE = 18, 48  -- +18dB at BAND_T .. -30dB at BAND_B
+local FILT_DB0_Y = floor(BAND_T
+  + FILT_DB_TOP * (BAND_B - BAND_T) / FILT_DB_RANGE + 0.5)
+
 -- STRETCH lane curve, shared by the mode textures (a closure built inside
 -- the frame would be gc churn at 15fps)
 local function stretch_wy(x, ph, rate)
@@ -339,6 +353,9 @@ local function draw_body()
       end
     end
     screen.stroke()
+    -- the balance parks top-right: who you're hearing, at a glance
+    topright(string.format("E%d T%d",
+      floor((1 - mixv) * 100 + 0.5), floor(mixv * 100 + 0.5)))
   elseif pname == "LEVEL" then
     -- mockup levels page: faders with live VU columns beside them. the
     -- faders track the alt layer, so they always show what E2/E3 grab:
@@ -369,6 +386,9 @@ local function draw_body()
         screen.fill()
       end
     end
+    -- this page is the I/O gain stage: input feeds the script, output
+    -- leaves it — the arrows say which fader is upstream
+    ptext_c(">>", 64, 27, 1, 2)
   elseif pname == "REC" then
     draw_strip(false)
     particles_draw()
@@ -383,19 +403,39 @@ local function draw_body()
       screen.rect(125, BAND_B - h, 3, h)
       screen.fill()
     end
-    -- overdub level parks top-right while it shapes the take (knockout
-    -- pocket over the strip, same treatment as GRAIN's pitch readout)
+    -- resample re-records the OUTPUT: state you must not forget while it
+    -- shapes what capture hears, so it badges the page while engaged
+    if pget("resample", 0) > 0 then chip("RSMP", 2, 13) end
+    -- top-right: overdub level while it shapes the take, otherwise the
+    -- growing take length (real seconds of the 60s buffer) while recording
     local ovr = pget("pre_level", 0)
     if ovr > 0 then
-      screen.level(0)
-      screen.rect(84, 11, 44, 9)
-      screen.fill()
       topright(string.format("OVR %d%%", floor(ovr * 100 + 0.5)))
+    elseif pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
+      topright(string.format("REC %.1fS",
+        ((C.rec_phase - C.rec_arm_phase) % 1) * 60), 10)
     end
   elseif pname == "WINDOW" then
     draw_strip(true)
-    local scan = pget("scan", 1)
-    topright((scan < 0 and "<< " or ">> ") .. string.format("%.2fX", abs(scan)))
+    local _, _, span = window_bounds()
+    -- jitter blurs the read position (that is what the engine's TRand
+    -- does): ghost dots scatter around the playhead, reaching ±jit·span
+    local jit = pget("pos_jitter", 0)
+    if jit > 0 and C.wave_any then
+      local phx = clamp(C.play_phase, 0, 1) * 127
+      local reach = jit * span * 127
+      local sd = floor(frame / 2)
+      screen.level(2)
+      for k = 1, 12 do
+        local gx = phx + (hash(k, 3, sd) - 0.5) * 2 * reach
+        if gx >= 0 and gx <= 127 then
+          screen.rect(gx, BAND_T + 2 + hash(k, 9, sd) * (BAND_B - BAND_T - 4), 1, 1)
+        end
+      end
+      screen.fill()
+    end
+    -- the slice IS the page: its length parks top-right, in real seconds
+    topright(string.format("%.2fS", span * 60))
   elseif pname == "GRAIN" then
     -- mockup grain page: thin sample strip up top with window brackets,
     -- grain cloud (the real particles) below, playhead tick between.
@@ -453,13 +493,10 @@ local function draw_body()
       screen.stroke()
     end
     particles_draw()
-    -- pitch parks top-right, in a quiet corner knocked out of the strip:
-    -- it's the one grain value you play from anywhere (MIDI, typing
-    -- keyboard, grid) without seeing this page
+    -- pitch parks top-right (topright cuts its own pocket out of the
+    -- strip): it's the one grain value you play from anywhere (MIDI,
+    -- typing keyboard, grid) without seeing this page
     local pv = pget("pitch", 1)
-    screen.level(0)
-    screen.rect(84, 11, 44, 9)
-    screen.fill()
     if pget("pitch_quant", 0) == 1 then
       topright(string.format("PT %+d ST", util.round(12 * log(pv, 2))))
     else
@@ -578,32 +615,63 @@ local function draw_body()
       ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
     end
   elseif pname == "FILTER" then
-    -- stylized response curve: cutoff on a log axis, resonance bump.
+    -- the engine's REAL response, not a sketch: RLPF/RHPF/BPF magnitude at
+    -- rq = 1 - res*0.85, on the log-f axis, passband filled, an EQ-node
+    -- dot riding the curve at the cutoff. dim rails: 100Hz/1k/10k and 0dB.
     -- the cutoff parks top-right — every page keeps its one number there
     local cut = pget("cutoff", 20000)
-    topright(cut >= 1000 and string.format("%.1fKHZ", cut / 1000)
-      or string.format("%dHZ", floor(cut + 0.5)))
     local ft = pget("filt_type", 1)
     local res = pget("resonance", 0)
-    local cx = clamp((log(cut / 20) / log(1000)) * 127, 0, 127)
-    local mid = 26
-    screen.level(8)
-    if ft == 1 then       -- LP
-      screen.move(0, mid)
-      screen.line(max(cx - 10, 0), mid)
-      screen.line(cx, mid - res * 10)
-      screen.line(min(cx + 14, 127), BAND_B)
-    elseif ft == 2 then   -- HP
-      screen.move(127, mid)
-      screen.line(min(cx + 10, 127), mid)
-      screen.line(cx, mid - res * 10)
-      screen.line(max(cx - 14, 0), BAND_B)
-    else                  -- BP
-      screen.move(max(cx - 26, 0), BAND_B)
-      screen.line(cx, mid - 6 - res * 6)
-      screen.line(min(cx + 26, 127), BAND_B)
+    screen.level(1)
+    for i = 1, 3 do
+      screen.move(FILT_GRID_X[i], BAND_T)
+      screen.line(FILT_GRID_X[i], BAND_B)
+    end
+    screen.move(0, FILT_DB0_Y)
+    screen.line(128, FILT_DB0_Y)
+    screen.stroke()
+    local rq = max(1 - res * 0.85, 0.1)
+    local rq2 = rq * rq
+    local bpg = (1 + res) * (1 + res)
+    local px_per_db = (BAND_B - BAND_T) / FILT_DB_RANGE
+    for x = 0, 127 do
+      local w = FILT_FREQ[x + 1] / cut
+      local w2 = w * w
+      local d = 1 - w2
+      d = d * d + w2 * rq2
+      local h2
+      if ft == 1 then h2 = 1 / d
+      elseif ft == 2 then h2 = (w2 * w2) / d
+      else h2 = (w2 * rq2) / d * bpg end
+      -- 4.3429*ln = 10*log10: h2 is the squared magnitude
+      local y = BAND_T + (FILT_DB_TOP - 4.342944819 * log(h2)) * px_per_db
+      if y < BAND_T then y = BAND_T elseif y > BAND_B then y = BAND_B end
+      FILT_Y[x + 1] = y
+    end
+    -- passband filled dim, then the curve bright on top
+    screen.level(2)
+    for x = 0, 127 do
+      local y = FILT_Y[x + 1]
+      if y < BAND_B then
+        screen.move(x, y)
+        screen.line(x, BAND_B)
+      end
     end
     screen.stroke()
+    screen.level(10)
+    for x = 1, 127 do
+      screen.move(x - 1, FILT_Y[x])
+      screen.line(x, FILT_Y[x + 1])
+    end
+    screen.stroke()
+    -- the cutoff as a grabbable EQ node: E2 moves exactly this dot
+    local nx = floor(clamp(log(cut / 20) / log(1000), 0, 1) * 127 + 0.5)
+    screen.level(15)
+    screen.rect(nx - 1, FILT_Y[nx + 1] - 1, 3, 3)
+    screen.fill()
+    -- readout + badge go last so a resonant peak can't paint over them
+    topright(cut >= 1000 and string.format("%.1fKHZ", cut / 1000)
+      or string.format("%dHZ", floor(cut + 0.5)))
     chip(params.lookup["filt_type"] and params:string("filt_type") or "?", 2, 13)
   elseif pname == "DELAY" then
     -- mockup delay page: the echo as a bouncing ball — impact spacing =
@@ -660,8 +728,6 @@ local function draw_body()
     -- dormant: dim room, still air — nothing moves that can't be heard.
     local size = pget("rev_size", 0.5)
     local mixv = pget("rev_mix", 0)
-    topright(string.format("MIX %d%%", floor(mixv * 100 + 0.5)),
-      mixv > 0 and 10 or 3)
     local w = 44 + size * 60
     local hh = 14 + size * 12
     local x0, x1 = 64 - w / 2, 64 + w / 2
@@ -689,6 +755,9 @@ local function draw_body()
       end
       screen.fill()
     end
+    -- readout last: a tall room's wall / rays must not paint over it
+    topright(string.format("MIX %d%%", floor(mixv * 100 + 0.5)),
+      mixv > 0 and 10 or 3)
   end
 end
 
@@ -720,11 +789,12 @@ local function draw_header()
   local w = ptext(PAGES[page], 2, 1, 2, 15)
   if C.alt then chip("ALT", 2 + w + 5, 1) end
 
-  -- page dots, top-right: current page is a 3x3 block, the rest are 1px
+  -- page dots, top-right: one straight pixel row — the current page is a
+  -- wider bright dash on the same baseline, never off the line
   for i = 1, #PAGES do
     if i == page then
       screen.level(15)
-      screen.rect(DOT_X[i] - 1, 1, 3, 3)
+      screen.rect(DOT_X[i] - 1, 2, 3, 1)
     else
       screen.level(2)
       screen.rect(DOT_X[i], 2, 1, 1)
@@ -758,8 +828,18 @@ function M.redraw()
   draw_footer()
 
   if flash_on then
-    ptext_r((SHORT[flash_id] or "") .. " " ..
-      string.upper(params:string(flash_id)), 126, 13, 1, 15)
+    -- the adjust readout owns its corner: black pocket + dim frame, so
+    -- the value stays fully legible over any page picture
+    local str = string.upper((SHORT[flash_id] or "") .. " " ..
+      params:string(flash_id))
+    local w = text_w(str, 1)
+    screen.level(0)
+    screen.rect(123 - w, 10, w + 5, 11)
+    screen.fill()
+    screen.level(4)
+    screen.rect(123.5 - w, 10.5, w + 5, 11)
+    screen.stroke()
+    ptext_r(str, 125, 13, 1, 15)
   end
 
   screen.update()

@@ -30,13 +30,13 @@ grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**
 Every frame below is real output — the actual script run through the offscreen renderer
 (`tools/uisim/`) with a scripted take, tape loop, and live FX.
 
-![WINDOW page: a recorded take, slice handles, scan readout](doc/ui/window.png)
+![WINDOW page: a recorded take, slice handles, the slice length parked top-right](doc/ui/window.png)
 
 | | |
 |---|---|
 | ![MIX page](doc/ui/mix.png)<br>**MIX** — engine ↔ tape crossfade; a silent engine lane lies flat | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
 | ![REC page](doc/ui/rec.png)<br>**REC** — capture into the loop; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
-| ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — response curve, cutoff parked top-right |
+| ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, node dot at the cutoff |
 | ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — the room grows with size, rays are reflections |
 
 **STRETCH** draws the active algorithm's own texture — grains, an overlapped warp window,
@@ -84,7 +84,12 @@ whole device.
 
 Pages cycle with E1:
 `MIX · LEVEL · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB`.
-A page reference per stage is in `doc/spec.md`.
+The full page → encoder/key map is in `doc/spec.md` (§10).
+
+Turning any encoder flashes the value top-right in a framed box — always
+legible, whatever the page is drawing — then it gets out of the way:
+
+![The framed value readout over a busy WINDOW page](doc/ui/window-flash.png)
 
 ### MIDI
 
@@ -130,6 +135,19 @@ Pads drive the same params as everything else, so grid, keys, encoders, and MIDI
 in lockstep. The grid controller's own MIDI is excluded from chromatic note input — its
 pads are pads, not notes. (The grid layer is new and not yet verified on hardware.)
 
+## Workflows
+
+Two complete performance walkthroughs — the same instrument, two surfaces:
+
+- **[Standalone — 3 keys + 3 encoders](doc/workflow-standalone.md).** The core
+  promise: synth in, nothing else attached. Gain-stage, chop a phrase, shape
+  the slice, grow a granular soundscape, print layers to the tape, ride the
+  FX, save the whole thing (tape audio included) as a PSET.
+- **[With a grid](doc/workflow-grid.md).** The optional pad layer: one-tap
+  transport, two-finger slicing over buffer and loop, two piano octaves to
+  play the sample chromatically — while the encoders stay on the deep
+  parameters. Unplug the grid and nothing is lost.
+
 ## Performance model (Pi 4)
 
 scsynth runs on a single core; xruns appear past roughly 60% load. mangler keeps **softcut**
@@ -156,6 +174,10 @@ Passing a stage's gate unlocks the next (current stage: see the top of `CLAUDE.m
 CLAUDE.md              agent manual: invariants, build order, current stage
 README.md              this file
 doc/spec.md           durable design contract (full per-stage detail)
+doc/workflow-standalone.md  performance walkthrough, keys + encoders only
+doc/workflow-grid.md   performance walkthrough for the optional grid layer
+doc/ux-feedback.md     play-testing feedback log driving the UI polish
+
 tools/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
 tools/amalgamate.lua    builds dist/mangler_single.lua from the modules
 dist/mangler_single.lua  GENERATED single-file drop-in (engine .sc still required)

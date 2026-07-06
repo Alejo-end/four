@@ -271,20 +271,21 @@ Reverb tail audible. All under CPU budget with a stretch mode active + tape runn
 
 ## 10. Page → control map (target, filled in per stage)
 
-| page    | E2 / E2-alt              | E3 / E3-alt             | K2            | K3            |
+| page    | E2 / E2-alt              | E3 / E3-alt             | K2 / K2-alt   | K3 / K3-alt   |
 |---------|--------------------------|-------------------------|---------------|---------------|
-| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| —             | —             |
-| REC     | `rec_level` / `pre_level`| `dry_wet` / `envscale`  | `rec` toggle  | `freeze` toggle |
-| WINDOW  | `pos_start` / `scan`     | `pos_end` / `pos_jitter`| reset window  | —             |
-| GRAIN   | `size` / `spread`        | `density` / `pan`       | —             | `pitch` reset |
-| STRETCH | `stretch_rate` / `warp_window` | `warp_overlaps` / `warp_rand` | cycle `mode` | `pv_freeze` toggle |
-| TAPE    | `tape_rate` / `tape_pre` | `loop_start` / `loop_end`| `tape_reverse`(mom) | `tape_freeze` toggle |
-| FILTER  | `cutoff` / `resonance`   | — / —                   | cycle `filt_type` | —         |
-| DELAY   | `delay_time` / `delay_fb`| `delay_mix` / —         | —             | —             |
-| REVERB  | `rev_size` / —           | `rev_mix` / —           | —             | —             |
+| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| ENG throw (`mix`=0) | TAPE throw (`mix`=1) |
+| LEVEL   | `input_level` / `monitor_level` | `output_level` / `headphone_gain` | IN=0 dB reset | OUT=0 dB reset |
+| REC     | `rec_level` / `pre_level`| `dry_wet` / `resample`  | `rec` toggle  | `freeze` toggle |
+| WINDOW  | `pos_start` / `scan`     | `pos_end` / `pos_jitter`| reset window  | FLIP (negate `scan`) |
+| GRAIN   | `size` / `spread`        | `density` / `grain_level`| OCT− / OCT+ (`pitch` ×½ / ×2) | `pitch` reset |
+| STRETCH | `scan` / `pitch`         | `warp_window` / `warp_rand` | cycle `mode` | `pv_freeze` toggle |
+| TAPE    | `tape_rate` / `tape_pre` | `loop_start` / `loop_end`| `tape_rec` / REV (mom) | `tape_freeze` / CLR |
+| FILTER  | `cutoff` / —             | `resonance` / —         | cycle `filt_type` | OPEN (neutralize) |
+| DELAY   | `delay_mix` / `delay_time`| `delay_fb` / —         | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
+| REVERB  | `rev_size` / —           | `rev_mix` / —           | WASH (`rev_mix`=1) | KILL (`rev_mix`=0) |
 
-(Action assignments are provisional and refined on hardware; encoders/keys always go through
-`params:*`.)
+(This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
+always go through `params:*`.)
 
 ## 11. Roadmap (post-v1)
 
