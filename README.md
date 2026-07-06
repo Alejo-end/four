@@ -25,6 +25,28 @@ grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**
 > (record/granular/window, stretch modes, tape looper) have passed on hardware. See
 > `CLAUDE.md` for the build order and `SPEC/spec.md` for the full design.
 
+## Screens
+
+Every frame below is real output — the actual script run through the offscreen renderer
+(`SPEC/uisim/`) with a scripted take, tape loop, and live FX.
+
+![WINDOW page: a recorded take, slice handles, scan readout](doc/ui/window.png)
+
+| | |
+|---|---|
+| ![MIX page](doc/ui/mix.png)<br>**MIX** — engine ↔ tape crossfade; a silent engine lane lies flat | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
+| ![REC page](doc/ui/rec.png)<br>**REC** — capture into the loop; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
+| ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — response curve, cutoff parked top-right |
+| ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — the room grows with size, rays are reflections |
+
+**STRETCH** draws the active algorithm's own texture — grains, an overlapped warp window,
+spectral columns — and lies flat when the voice is off:
+
+| | |
+|---|---|
+| ![STRETCH in GRAIN mode](doc/ui/stretch-grain.png)<br>**GRAIN** — the wave sampled as grains | ![STRETCH in WARP mode](doc/ui/stretch-warp.png)<br>**WARP** — a ghost window overlaps (warp rand shakes it) |
+| ![STRETCH in PV mode](doc/ui/stretch-pv.png)<br>**PV** — spectral columns; frozen, they stand still | ![STRETCH off](doc/ui/stretch-off.png)<br>**OFF** — voice freed, nothing moves |
+
 ## Install
 
 The git repo *is* the script. Copy it into the norns scripts folder:
@@ -41,7 +63,7 @@ stale copy of the engine from the device, which would otherwise hang every scrip
 
 | control | function |
 |---------|----------|
-| **E1**  | select page |
+| **E1**  | select page (**hold K1**: jump page family — source · shape · tape · fx) |
 | **E2 / E3** | the page's two parameters (**hold K1** for the alt parameter on each) |
 | **K1** (hold) | alt / shift modifier |
 | **K2 / K3** | the page's two actions (toggle or momentary) |
@@ -121,6 +143,7 @@ CLAUDE.md              agent manual: invariants, build order, current stage
 README.md              this file
 SPEC/spec.md           durable design contract (full per-stage detail)
 SPEC/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
+doc/ui/                rendered page gallery used by this README
 mangler.lua            orchestrator: state, params, keys/encoders (engine.name = 'Mangler')
 lib/mfont.lua          the 4x5 pixel font and type-setting routines
 lib/mparticles.lua     pooled grain-cloud particle system

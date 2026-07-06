@@ -47,6 +47,17 @@ engines (the one-engine-file invariant is untouched), and at lib/ depth they
 don't appear in norns SELECT. The seeded render suite matches the pre-split
 output byte-for-byte and the bench shows no cost (0.076 ms/tick, ~0 garbage).
 
+Fifth Lua-only change (renders verified, untested on device): performance +
+depth pass. The UI hot path is now allocation-free (byte-table font
+rendering, a pooled 32-slot particle system, static layout tables — ~0 KB
+garbage/tick, ~19% faster, proven pixel-identical at the time). The GRAIN
+cloud became a stereo-field plot (y = per-grain pan mirroring the engine's
+clip law, dot size = grain size, saturation = density). Navigation: K1+E1
+jumps between the dot families. Truth additions: grid row 3 glows the engine
+write head while recording, REC parks OVR% top-right when overdubbing,
+warp_rand shakes the WARP ghost (still at 0). README carries a rendered page
+gallery (doc/ui/, regenerate from SPEC/uisim after any screen change).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

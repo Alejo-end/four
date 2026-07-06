@@ -10,7 +10,7 @@
 --   row 1  engine: [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv frz]
 --   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  ·
 --   row 3  window slices: a pad = that eighth; hold one + press another
---          = the span between them
+--          = the span between them; the write head glows while recording
 --   row 4  tape loop slices: same gesture, driving loop start/end
 --   rows 5-8  two piano octaves, black row above its white row (same
 --          shape as the typing keyboard; upper pair is +1 octave).
@@ -154,6 +154,12 @@ function M.redraw()
     local a, b = (x - 1) / 8, x / 8
     gg:led(x, 3, (a < whi and b > wlo) and 6 or 1)
     gg:led(x, 4, (a < lhi and b > llo) and 6 or 1)
+  end
+  -- engine write head glows on the window row while capturing — you see
+  -- where the take is landing without looking at the screen (playhead is
+  -- drawn after, so it wins a shared pad)
+  if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
+    gg:led(floor(clamp(C.rec_phase, 0, 0.999) * 8) + 1, 3, 11)
   end
   gg:led(floor(clamp(C.play_phase, 0, 0.999) * 8) + 1, 3, 15)
   gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, 15)

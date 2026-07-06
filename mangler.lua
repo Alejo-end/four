@@ -4,7 +4,7 @@
 --
 -- 3 keys + 3 encoders. every parameter is MIDI-mappable (PARAMS menu).
 --
--- E1 : page select
+-- E1 : page select (hold K1: jump page family)
 -- E2 : primary param   (hold K1 -> alt param)
 -- E3 : secondary param (hold K1 -> alt param)
 -- K1 : alt / shift modifier (hold)
@@ -563,9 +563,21 @@ function cleanup()
   Mtape.cleanup()
 end
 
+-- K1+E1 leaps between the page families the header dots draw:
+-- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx
+local PAGE_GROUPS = { 1, 4, 7, 8 }
+
 function enc(n, d)
   if n == 1 then
-    ctx.page = clamp(ctx.page + d, 1, #PAGES)
+    if ctx.alt then
+      local gi = 1
+      for i = 1, #PAGE_GROUPS do
+        if ctx.page >= PAGE_GROUPS[i] then gi = i end
+      end
+      ctx.page = PAGE_GROUPS[clamp(gi + (d > 0 and 1 or -1), 1, #PAGE_GROUPS)]
+    else
+      ctx.page = clamp(ctx.page + d, 1, #PAGES)
+    end
   else
     local id = enc_param(n)
     -- params.lookup guard: a missing param must not throw

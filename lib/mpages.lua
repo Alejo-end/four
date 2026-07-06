@@ -383,6 +383,15 @@ local function draw_body()
       screen.rect(125, BAND_B - h, 3, h)
       screen.fill()
     end
+    -- overdub level parks top-right while it shapes the take (knockout
+    -- pocket over the strip, same treatment as GRAIN's pitch readout)
+    local ovr = pget("pre_level", 0)
+    if ovr > 0 then
+      screen.level(0)
+      screen.rect(84, 11, 44, 9)
+      screen.fill()
+      topright(string.format("OVR %d%%", floor(ovr * 100 + 0.5)))
+    end
   elseif pname == "WINDOW" then
     draw_strip(true)
     local scan = pget("scan", 1)
@@ -486,9 +495,12 @@ local function draw_body()
       end
       screen.fill()
     elseif mode == 3 then      -- WARP: an overlapped window ghosts behind
+      -- warp_rand shakes the ghost: the engine's window-position jitter is
+      -- audible shimmer, so its picture may move (and stands still at 0)
+      local off = 9 + sin(frame * 0.9) * 6 * pget("warp_rand", 0)
       screen.level(2)
       for x = 0, 127 do
-        screen.rect(x, stretch_wy(x + 9, ph, rate), 1, 1)
+        screen.rect(x, stretch_wy(x + off, ph, rate), 1, 1)
       end
       screen.fill()
       screen.level(8)
