@@ -48,7 +48,8 @@ local header = [[
 
 ]]
 
-os.execute("mkdir -p " .. OUT:match("^(.*)/") )
+local out_dir = OUT:match("^(.*)/")
+if out_dir then os.execute(("mkdir -p %q"):format(out_dir)) end
 local f = assert(io.open(OUT, "w"))
 f:write(header, body)
 f:close()
