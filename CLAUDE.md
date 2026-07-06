@@ -33,12 +33,12 @@ menu is open. No engine change, fingerprint count unaffected. On-device check:
 pads toggle/light correctly, slice spans work, note pads retune, and a pad
 press must NOT jump `pitch` to 0.25/4 (that means the note-input filter failed).
 
-Third Lua-only addition (verified in SPEC/uisim renders, untested on device):
+Third Lua-only addition (verified in tools/uisim renders, untested on device):
 a screen polish pass — grouped page dots, alt-aware LEVEL faders (MON/HP),
 FILTER/GRAIN top-right readouts, "EMPTY - K2 REC" on REC, the audibility rule
 (see Workflow), and per-mode STRETCH textures. All draw-code only.
 
-Fourth Lua-only change (verified pixel-identical in SPEC/uisim, untested on
+Fourth Lua-only change (verified pixel-identical in tools/uisim, untested on
 device): mangler.lua is split into script-internal modules — lib/mfont,
 lib/mparticles, lib/mtape, lib/minput, lib/mgrid, lib/mpages — loaded with
 `include("lib/<name>")` and sharing one `ctx` table built in mangler.lua;
@@ -56,7 +56,7 @@ clip law, dot size = grain size, saturation = density). Navigation: K1+E1
 jumps between the dot families. Truth additions: grid row 3 glows the engine
 write head while recording, REC parks OVR% top-right when overdubbing,
 warp_rand shakes the WARP ghost (still at 0). README carries a rendered page
-gallery (doc/ui/, regenerate from SPEC/uisim after any screen change).
+gallery (doc/ui/, regenerate from tools/uisim after any screen change).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
@@ -127,7 +127,7 @@ add_text` are **not** mappable.
 ## Build order (procedural, each ends in an on-device gate)
 
 Full per-stage design — param lists, SynthDef args, command tables, acceptance tests — lives
-in `SPEC/spec.md`. Summary:
+in `doc/spec.md`. Summary:
 
 - **S0** loadable skeleton (this ship): no-op pass-through engine + Lua router/params shell.
 - **S1** RECORD + GRANULAR + WINDOW — `RecordBuf` live capture, `GrainBuf` cloud, slice window.
@@ -194,15 +194,20 @@ xruns past ~60%).
 # static check (only one available locally)
 luac5.3 -p mangler.lua
 
-# render every UI page to PNGs with NO hardware: SPEC/uisim/render_pages.lua
+# render every UI page to PNGs with NO hardware: tools/uisim/render_pages.lua
 # stubs the norns env (including include(), so the lib/*.lua modules resolve
 # from the repo), runs the real mangler.lua redraw code against a fake
 # framebuffer, and drives a scripted performance (a take, a tape loop, FX).
 # eyeball these before deploying any screen change — a redraw error on
 # device is a silent black screen.
-lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + variants
-lua SPEC/uisim/render_pages.lua mangler.lua /tmp/shots base empty  # empty-buffer state
-python3 SPEC/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG, 4x
+lua tools/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + variants
+lua tools/uisim/render_pages.lua mangler.lua /tmp/shots base empty  # empty-buffer state
+python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG, 4x
+
+# single-file build: inlines lib/*.lua into dist/mangler_single.lua as
+# IIFEs (proven byte-identical via the seeded render suite). the dist file
+# is GENERATED — never edit it; rebuild after any lua change that ships.
+lua tools/amalgamate.lua
 
 # deploy to the norns (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
@@ -221,5 +226,5 @@ draws the active algorithm's own texture: grains / overlapped warp windows /
 spectral columns.
 
 **On-device gate per stage:** load the script, confirm no LOADING hang and no SC errors in
-maiden, then run that stage's acceptance test in `SPEC/spec.md`. Only then write the next
+maiden, then run that stage's acceptance test in `doc/spec.md`. Only then write the next
 stage. Update the **CURRENT STAGE** marker at the top of this file when a gate passes.

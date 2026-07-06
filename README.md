@@ -23,12 +23,12 @@ grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**
 
 > **Status:** Stage 4 (filter + delay + reverb), on-device gate pending. Stages 1–3
 > (record/granular/window, stretch modes, tape looper) have passed on hardware. See
-> `CLAUDE.md` for the build order and `SPEC/spec.md` for the full design.
+> `CLAUDE.md` for the build order and `doc/spec.md` for the full design.
 
 ## Screens
 
 Every frame below is real output — the actual script run through the offscreen renderer
-(`SPEC/uisim/`) with a scripted take, tape loop, and live FX.
+(`tools/uisim/`) with a scripted take, tape loop, and live FX.
 
 ![WINDOW page: a recorded take, slice handles, scan readout](doc/ui/window.png)
 
@@ -59,6 +59,20 @@ Then on the norns, `;restart` (or SELECT > mangler). `--delete` is important: it
 stale copy of the engine from the device, which would otherwise hang every script on
 "LOADING".
 
+A **private repo changes nothing** here: rsync (or scp, or Finder → Go → Connect to Server →
+`smb://norns.local`) copies from your machine over the local network — GitHub is never
+involved. maiden's `;install <url>` is only for when the repo is public (or you embed an
+access token in the URL, which then sits in plaintext on the device — avoid).
+
+### Single-file build
+
+`dist/mangler_single.lua` is the whole control layer amalgamated into one file — handy for
+pasting into maiden's editor or dropping in as `dust/code/mangler/mangler.lua` without
+syncing `lib/*.lua`. It is **generated** (`lua tools/amalgamate.lua`, verified byte-identical
+to the modular build by the render suite) — edit the modules, not this file. The engine is
+not inlined: `lib/Engine_Mangler.sc` must still be present, and exactly **once** on the
+whole device.
+
 ## Controls (3 keys + 3 encoders)
 
 | control | function |
@@ -70,7 +84,7 @@ stale copy of the engine from the device, which would otherwise hang every scrip
 
 Pages cycle with E1:
 `MIX · LEVEL · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB`.
-A page reference per stage is in `SPEC/spec.md`.
+A page reference per stage is in `doc/spec.md`.
 
 ### MIDI
 
@@ -127,12 +141,12 @@ worst case ≈ 35–45% of one core.
 
 ## Testing checklist
 
-Each stage has an on-device acceptance test in `SPEC/spec.md`. The gate, every stage:
+Each stage has an on-device acceptance test in `doc/spec.md`. The gate, every stage:
 
 1. `luac5.3 -p mangler.lua` passes locally.
 2. Deploy, `;restart`. The script loads to its home page with **no LOADING hang** and **no SC
    errors** in maiden.
-3. Run the current stage's acceptance test from `SPEC/spec.md`.
+3. Run the current stage's acceptance test from `doc/spec.md`.
 
 Passing a stage's gate unlocks the next (current stage: see the top of `CLAUDE.md`).
 
@@ -141,8 +155,10 @@ Passing a stage's gate unlocks the next (current stage: see the top of `CLAUDE.m
 ```
 CLAUDE.md              agent manual: invariants, build order, current stage
 README.md              this file
-SPEC/spec.md           durable design contract (full per-stage detail)
-SPEC/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
+doc/spec.md           durable design contract (full per-stage detail)
+tools/uisim/            offscreen UI renderer: see every page as a PNG, no hardware
+tools/amalgamate.lua    builds dist/mangler_single.lua from the modules
+dist/mangler_single.lua  GENERATED single-file drop-in (engine .sc still required)
 doc/ui/                rendered page gallery used by this README
 mangler.lua            orchestrator: state, params, keys/encoders (engine.name = 'Mangler')
 lib/mfont.lua          the 4x5 pixel font and type-setting routines

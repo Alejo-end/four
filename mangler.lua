@@ -12,7 +12,7 @@
 -- K3 : secondary action
 --
 -- STAGE 4 — record + granular + window + time-stretch modes + softcut TAPE
--- + filter/delay/reverb. See SPEC/spec.md.
+-- + filter/delay/reverb. See doc/spec.md.
 --
 -- MIDI notes play the sample chromatically: note-ons retune `pitch`
 -- relative to the root note (PARAMS > keys). a USB typing keyboard works
