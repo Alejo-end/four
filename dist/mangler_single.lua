@@ -55,7 +55,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB",
+  "FILTER", "DELAY", "REVERB", "PADS",
 }
 
 local FPS = 15
@@ -140,6 +140,14 @@ local ctx = {
   -- display-model flags (mpages paints them, mparticles gates on them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
+  -- S8 pad bank: 8 slice pads, per-pad type (0 grain / 1 slice), a screen
+  -- cursor for standalone select/audition. shared by the PADS page + the
+  -- MIDI/grid note routing (they map an incoming note to a pad index).
+  pad_type = { [0] = 0, [1] = 0, [2] = 0, [3] = 0,
+    [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  pad_cursor = 0,
+  pad_n = 8,
+  pad_held = {},             -- voice id -> true while sounding (matches note_off)
 }
 
 local Mfont = (function()  -- inlined lib/mfont.lua
@@ -543,11 +551,22 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
-  if msg.type ~= "note_on" or (msg.vel or 0) == 0 then return end
   if pget("keys_enable", 1) == 0 then return end
   local ch = pget("midi_channel", 0)
   if ch > 0 and msg.ch ~= ch then return end
-  params:set("pitch", 2 ^ ((msg.note - pget("root_note", 60)) / 12))
+  -- both edges: note-on gates a voice / retunes the drone, note-off releases
+  -- a voice (the drone is last-note, so it ignores the release)
+  local z, note
+  if msg.type == "note_on" and (msg.vel or 0) > 0 then
+    z, note = 1, msg.note
+  elseif msg.type == "note_off" or (msg.type == "note_on" and (msg.vel or 0) == 0) then
+    z, note = 0, msg.note
+  else
+    return
+  end
+  -- route_note decides drone vs pad from `pad_input`; id offset by 1000 so
+  -- MIDI voice ids never collide with grid/screen pad ids
+  C.route_note(1000 + note, 2 ^ ((note - pget("root_note", 60)) / 12), note, z)
 end
 
 -- USB typing keyboard: ableton-style musical typing. the A-row is the white
@@ -676,7 +695,6 @@ local function slice_key(kind, x, z)
 end
 
 local function grid_note_key(x, y, z)
-  if z ~= 1 then return end
   if pget("keys_enable", 1) == 0 then return end
   local st
   if y == 6 or y == 8 then
@@ -684,22 +702,28 @@ local function grid_note_key(x, y, z)
   else
     st = GRID_BLACK[x]
     if not st then
-      -- the black rows' gap pads carry the utility functions
-      if y == 7 and (x == 1 or x == 8) then
-        params:delta("kb_octave", x == 8 and 1 or -1)
-        C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
-      elseif y == 5 and x == 1 then
-        params:set("pitch", 1.0)
-        C.flash_id, C.flash_until = "pitch", C.frame + FPS
-      elseif y == 5 and x == 8 then
-        ptoggle("pitch_quant")
+      -- the black rows' gap pads carry the utility functions (press only)
+      if z == 1 then
+        if y == 7 and (x == 1 or x == 8) then
+          params:delta("kb_octave", x == 8 and 1 or -1)
+          C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
+        elseif y == 5 and x == 1 then
+          params:set("pitch", 1.0)
+          C.flash_id, C.flash_until = "pitch", C.frame + FPS
+        elseif y == 5 and x == 8 then
+          ptoggle("pitch_quant")
+        end
       end
       return
     end
   end
+  if st == nil then return end
+  -- a note pad: route to the drone `pitch` or a polyphonic voice, per
+  -- pad_input. both edges, so a voice releases on lift. id 2000+ keeps grid
+  -- voice ids distinct from MIDI (1000+) and the screen bank (0..8).
   local oct = pget("kb_octave", 0) + (y <= 6 and 1 or 0)
-  params:set("pitch", 2 ^ ((st + 12 * oct) / 12))
-  C.flash_id, C.flash_until = "pitch", C.frame + FPS
+  C.route_note(2000 + (y * 8 + x), 2 ^ ((st + 12 * oct) / 12), st, z)
+  if z == 1 then C.flash_id, C.flash_until = "pitch", C.frame + FPS end
 end
 
 local function grid_key(x, y, z)
@@ -910,11 +934,13 @@ local SHORT = {
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
+  grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
   pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "MIX",
+  voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -952,9 +978,11 @@ local function fmt_value(id)
   elseif id == "delay_time" then
     local v = params:get(id)
     return v >= 0.9995 and "1.0S" or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "size" then
-    return string.format("%dMS", floor(params:get(id) * 1000 + 0.5))
-  elseif id == "density" then
+  elseif id == "size" or id == "voice_atk" then
+    local v = params:get(id)
+    return v >= 1 and string.format("%.1fS", v)
+      or string.format("%dMS", floor(v * 1000 + 0.5))
+  elseif id == "density" or id == "voices" then
     return tostring(floor(params:get(id) + 0.5))
   end
   local p = params:lookup_param(id)
@@ -1148,11 +1176,13 @@ end
 -- GRAIN stereo-field pool: preallocated flat arrays (no per-frame alloc),
 -- spawned/aged in draw_grain_field, capped at GR_MAX
 local GR_MAX = 110
-local gr_x, gr_y0, gr_age, gr_life, gr_len = {}, {}, {}, {}, {}
+-- gr_dj = per-grain drift jitter (grain_pitch_spread, S7): grains scatter
+-- apart vertically instead of drifting as one
+local gr_x, gr_y0, gr_age, gr_life, gr_len, gr_dj = {}, {}, {}, {}, {}, {}
 local gr_n = 0
 local gr_last_frame = -1
 for i = 1, GR_MAX do
-  gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i] = 0, 0, 0, 0, 0
+  gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i], gr_dj[i] = 0, 0, 0, 0, 0, 0
 end
 
 -- LEVEL meter statics: one slow-decaying peak per bar (IN, OUT), and the
@@ -1160,6 +1190,10 @@ end
 local lvl_peak = { 0, 0 }
 local lvl_last_frame = -1
 local LVL_TICKS = { 0.25, 0.5, 0.75 }
+
+-- PADS page: per-pad "a voice is sounding" flags, refilled each frame from
+-- ctx.pad_held (static so the hot path allocates nothing)
+local pad_lit = {}
 
 -- FILTER page statics: log-frequency axis 20Hz..20kHz over 128 columns,
 -- gridline columns at 100Hz/1k/10k, the 0dB reference row, and a reusable
@@ -1338,8 +1372,10 @@ local function draw_body()
   elseif pname == "GRAIN" then
     -- grain page (toy): a thin source ruler up top; the hero is a stereo
     -- grain field. grains spawn at the playhead (scattered by jitter),
-    -- their ticks STRETCH with size, FILL with density, and DRIFT
-    -- vertically with pitch. centerline y30, lanes +/-10.
+    -- their ticks STRETCH with size, FILL with density, DRIFT vertically
+    -- with pitch. S7 character: GJIT (grain_jitter) varies per-grain tick
+    -- length, DTUN (grain_pitch_spread) fans grains apart vertically, and
+    -- the active envelope SHAPE (K1+K3) reads top-left. centerline y30.
     local lo, hi = window_bounds()
     local playing = C.wave_any and pget("mode", 2) ~= 1
     -- source ruler at y12: window span, handles, playhead
@@ -1364,8 +1400,8 @@ local function draw_body()
         if gr_age[i] < gr_life[i] then
           w = w + 1
           if w ~= i then
-            gr_x[w], gr_y0[w], gr_age[w], gr_life[w], gr_len[w] =
-              gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i]
+            gr_x[w], gr_y0[w], gr_age[w], gr_life[w], gr_len[w], gr_dj[w] =
+              gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i], gr_dj[i]
           end
         end
       end
@@ -1376,6 +1412,8 @@ local function draw_body()
         local jit = pget("pos_jitter", 0)
         local _, _, span = window_bounds()
         local spr = pget("spread", 0.5)
+        local gj = pget("grain_jitter", 0)
+        local gps = pget("grain_pitch_spread", 0)
         local px = clamp(C.play_phase, 0, 1)
         local p = 0.06 + dN * 0.62
         for _ = 1, (dN > 0.7 and 2 or 1) do
@@ -1385,7 +1423,14 @@ local function draw_body()
             gr_y0[gr_n] = 30 + (math.random() * 2 - 1) * spr * 10
             gr_age[gr_n] = 0
             gr_life[gr_n] = 12 + sN * 26
-            gr_len[gr_n] = 1 + sN * 9
+            -- per-grain size jitter (guarded so default 0 keeps the RNG
+            -- stream — and the renders — identical)
+            gr_len[gr_n] = (1 + sN * 9) *
+              (1 + (gj > 0 and (math.random() * 2 - 1) * gj or 0))
+            -- per-grain detune -> its own drift rate (semitones -> the same
+            -- log2 mapping the base drift uses: st/12 * 0.35 * 0.5)
+            gr_dj[gr_n] = gps > 0
+              and (math.random() * 2 - 1) * gps / 12 * 0.35 * 0.5 or 0
           end
         end
       end
@@ -1394,17 +1439,22 @@ local function draw_body()
     screen.level(1)
     screen.move(0, 30) screen.line(128, 30)
     screen.stroke()
-    -- draw the grains: pitch tilts the vertical drift over each grain's age
+    -- draw the grains: pitch tilts the vertical drift; each grain's own
+    -- detune (gr_dj) adds to that so a spread cloud fans apart over its life
     local drift = log(pget("pitch", 1)) / log(2) * 0.35 * 0.5
     for i = 1, gr_n do
       local lv = floor(12 - gr_age[i] / gr_life[i] * 11 + 0.5)
       if lv >= 1 then
-        local y = gr_y0[i] + drift * gr_age[i]
+        local y = gr_y0[i] + (drift + gr_dj[i]) * gr_age[i]
         if y < 20 then y = 20 elseif y > 40 then y = 40 end
         screen.level(lv)
         screen.rect(gr_x[i] - gr_len[i] / 2, y, gr_len[i], 1)
         screen.fill()
       end
+    end
+    -- the active grain envelope shape, dim top-left (K1+K3 cycles it)
+    if params.lookup["grain_shape"] then
+      ptext(params:string("grain_shape"), 2, 15, 1, 4)
     end
   elseif pname == "STRETCH" then
     -- mockup stretch page: inverted mode badge, speed readout, real
@@ -1696,6 +1746,36 @@ local function draw_body()
         end
       end
     end
+  elseif pname == "PADS" then
+    -- pads page: an 8-slice pad bank (4x2). each cell shows its type
+    -- (GRN/SLC) and lights while a voice for it sounds; the cursor (bright
+    -- border) marks the pad K1+K2 auditions and K3 retypes. top row: whether
+    -- MIDI/grid notes route here (PAD) or to the drone (DRN), and voices used.
+    for i = 0, 7 do pad_lit[i] = false end
+    local used = 0
+    for _, padi in pairs(C.pad_held) do
+      if pad_lit[padi] == false then pad_lit[padi] = true end
+      used = used + 1
+    end
+    local routed = pget("pad_input", 0) == 1
+    ptext(routed and "PAD" or "DRN", 2, 13, 1, routed and 9 or 3)
+    ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5), 126, 13, 1, 4)
+    for i = 0, 7 do
+      local cx = 8 + (i % 4) * 30
+      local cy = 18 + floor(i / 4) * 11
+      local cur = i == C.pad_cursor
+      local lit = pad_lit[i]
+      screen.level(cur and 15 or 4)
+      screen.rect(cx + 0.5, cy + 0.5, 24, 10)
+      screen.stroke()
+      if lit then
+        screen.level(cur and 15 or 10)
+        screen.rect(cx + 2, cy + 2, 21, 7)
+        screen.fill()
+      end
+      ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", cx + 12, cy + 3, 1,
+        lit and 0 or (cur and 15 or 6))
+    end
   end
 end
 
@@ -1743,9 +1823,11 @@ local function draw_header()
     if fx + text_w(str, 1) > 76 then str = STATUS_ABBR[m] end
     ptext(str, fx, 2, 1, 8)
   end
-  -- page dots, top-right: first x=81, 5px pitch; current = rounded 4x4
+  -- page dots, top-right: pitch fits all pages under x~125 (5px normally,
+  -- tightens to 4 once PADS makes it 11); current = rounded 4x4
+  local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   for i = 1, #PAGES do
-    local dx = 81 + (i - 1) * 5
+    local dx = 81 + (i - 1) * dpitch
     if i == page then
       screen.level(15)
       screen.rect(dx, 3, 4, 4)
@@ -1857,6 +1939,11 @@ local KEYS = {
       end },
     k3 = { label = "PT=1",
       act = function() params:set("pitch", 1.0) end },
+    -- alt: cycle the grain envelope shape (HANN -> WELCH -> PERC)
+    k3_alt = { label = "SHP",
+      act = function()
+        params:set("grain_shape", (params:get("grain_shape") % 3) + 1)
+      end },
   },
   STRETCH = {
     -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
@@ -1910,6 +1997,21 @@ local KEYS = {
     k3 = { label = "KILL",
       act = function() params:set("rev_mix", 0) end },
   },
+  PADS = {
+    -- K2 steps the cursor through the 8 pads; K1+K2 auditions the selected
+    -- pad (momentary voice); K3 toggles the selected pad's grain/slice type
+    k2 = { label = "SEL",
+      act = function() ctx.pad_cursor = (ctx.pad_cursor + 1) % ctx.pad_n end },
+    -- audition the cursor pad while held (fixed voice id 8, closed on any
+    -- K2 release in the key handler so an alt-release can't strand it)
+    k2_alt = { label = "PLAY",
+      act = function() ctx.pad_trigger(8, ctx.pad_cursor, 1) end },
+    k3 = { label = "TYPE",
+      act = function()
+        local i = ctx.pad_cursor
+        ctx.pad_type[i] = (ctx.pad_type[i] == 0) and 1 or 0
+      end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware; alt falls
@@ -1942,6 +2044,7 @@ local ENC_MAP = {
   FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
   DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
+  PADS    = { "voices", "voice_atk", "voice_rel", nil },
 }
 
 -- the param id addressed by encoder n (2 or 3) on the current page, alt-aware.
@@ -1956,6 +2059,48 @@ end
 -- the footer draws what the encoders and keys currently address
 ctx.enc_param = enc_param
 ctx.key_def = key_def
+
+-- ============================================================================
+-- S8 polyphonic pad voices
+-- ============================================================================
+-- a pad's slice point + rate. 8 pads spread evenly across the buffer; rate
+-- fixed at 1 for now (per-pad rate is a later knob). type is per-pad.
+local function pad_pos(i) return (i + 0.5) / ctx.pad_n end
+
+-- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
+-- the note_on that started it). z=1 press, z=0 release.
+function ctx.pad_trigger(id, i, z)
+  if z == 1 then
+    if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
+    if engine.note_on then
+      engine.note_on(id, pad_pos(i), 1.0, ctx.pad_type[i] or 0)
+    end
+    ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
+  elseif ctx.pad_held[id] then
+    if engine.note_off then engine.note_off(id) end
+    ctx.pad_held[id] = nil
+  end
+end
+
+-- MIDI/grid note routing: in pad mode a note plays pad (note mod 8) as a
+-- polyphonic voice (note_off on release); otherwise it retunes the mono
+-- drone `pitch` exactly as before. `pitch` is the chromatic rate the caller
+-- already computed for the drone path.
+function ctx.route_note(id, pitch, pad_idx, z)
+  if pget("pad_input", 0) == 1 then
+    ctx.pad_trigger(id, pad_idx % ctx.pad_n, z)
+  elseif z == 1 then
+    params:set("pitch", pitch)
+  end
+end
+
+-- release every sounding pad voice (leaving pad mode, cleanup, panic)
+function ctx.pads_all_off()
+  for id in pairs(ctx.pad_held) do
+    if engine.note_off then engine.note_off(id) end
+    ctx.pad_held[id] = nil
+  end
+end
 
 -- ============================================================================
 -- params  (single source of truth: keys, encoders, and MIDI all drive these)
@@ -2043,7 +2188,7 @@ local function init_params()
   add_eng_control("pos_jitter", "jitter",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_grain", "grain", 6)
+  params:add_group("grp_grain", "grain", 9)
   add_eng_control("size", "size",
     controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
   add_eng_control("density", "density",
@@ -2072,6 +2217,18 @@ local function init_params()
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+  -- S7 granular character: per-grain size jitter + detune spread (both
+  -- continuous from 0 = off), and a 3-way grain-envelope shape. shape is
+  -- an option (engine wants 0/1/2, norns options are 1-based, so -1 in the
+  -- action — same trick as `mode`).
+  add_eng_control("grain_jitter", "grain jitter",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("grain_pitch_spread", "pitch spread",
+    controlspec.new(0, 12, "lin", 0, 0.0, "st"))
+  params:add_option("grain_shape", "grain shape", { "HANN", "WELCH", "PERC" }, 1)
+  params:set_action("grain_shape", function(v)
+    if engine.grain_shape then engine.grain_shape(v - 1) end
+  end)
 
   params:add_group("grp_stretch", "stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
@@ -2165,6 +2322,24 @@ local function init_params()
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
+  -- S8 polyphonic voices: the per-note/per-pad layer that coexists with the
+  -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
+  -- the mono drone pitch (default OFF = existing behavior). voices = poly
+  -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
+  params:add_group("grp_voice", "voices", 4)
+  params:add_binary("pad_input", "pad input", "toggle", 0)
+  params:set_action("pad_input", function(v)
+    if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
+  end)
+  params:add_number("voices", "poly voices", 1, 16, 8)
+  params:set_action("voices", function(v)
+    if engine.voices then engine.voices(v) end
+  end)
+  add_eng_control("voice_atk", "voice attack",
+    controlspec.new(0.001, 1, "exp", 0, 0.005, "s"))
+  add_eng_control("voice_rel", "voice release",
+    controlspec.new(0.01, 4, "exp", 0, 0.6, "s"))
+
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
   params:add_group("grp_keys", "keys", 5)
@@ -2254,6 +2429,7 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
@@ -2296,6 +2472,9 @@ function key(n, z)
       if def and def.act then def.act() end
     else
       gesture_release(n)
+      -- close the PADS-page audition voice (id 8) on K2 release, whatever
+      -- the alt state is now — momentary holds must never strand a voice
+      if n == 2 and ctx.pad_held[8] then ctx.pad_trigger(8, 0, 0) end
     end
   end
   redraw()

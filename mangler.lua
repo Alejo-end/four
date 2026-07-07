@@ -45,7 +45,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB",
+  "FILTER", "DELAY", "REVERB", "PADS",
 }
 
 local FPS = 15
@@ -130,6 +130,14 @@ local ctx = {
   -- display-model flags (mpages paints them, mparticles gates on them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
+  -- S8 pad bank: 8 slice pads, per-pad type (0 grain / 1 slice), a screen
+  -- cursor for standalone select/audition. shared by the PADS page + the
+  -- MIDI/grid note routing (they map an incoming note to a pad index).
+  pad_type = { [0] = 0, [1] = 0, [2] = 0, [3] = 0,
+    [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  pad_cursor = 0,
+  pad_n = 8,
+  pad_held = {},             -- voice id -> true while sounding (matches note_off)
 }
 
 local Mfont = include "lib/mfont"
@@ -208,6 +216,11 @@ local KEYS = {
       end },
     k3 = { label = "PT=1",
       act = function() params:set("pitch", 1.0) end },
+    -- alt: cycle the grain envelope shape (HANN -> WELCH -> PERC)
+    k3_alt = { label = "SHP",
+      act = function()
+        params:set("grain_shape", (params:get("grain_shape") % 3) + 1)
+      end },
   },
   STRETCH = {
     -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
@@ -261,6 +274,21 @@ local KEYS = {
     k3 = { label = "KILL",
       act = function() params:set("rev_mix", 0) end },
   },
+  PADS = {
+    -- K2 steps the cursor through the 8 pads; K1+K2 auditions the selected
+    -- pad (momentary voice); K3 toggles the selected pad's grain/slice type
+    k2 = { label = "SEL",
+      act = function() ctx.pad_cursor = (ctx.pad_cursor + 1) % ctx.pad_n end },
+    -- audition the cursor pad while held (fixed voice id 8, closed on any
+    -- K2 release in the key handler so an alt-release can't strand it)
+    k2_alt = { label = "PLAY",
+      act = function() ctx.pad_trigger(8, ctx.pad_cursor, 1) end },
+    k3 = { label = "TYPE",
+      act = function()
+        local i = ctx.pad_cursor
+        ctx.pad_type[i] = (ctx.pad_type[i] == 0) and 1 or 0
+      end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware; alt falls
@@ -293,6 +321,7 @@ local ENC_MAP = {
   FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
   DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
+  PADS    = { "voices", "voice_atk", "voice_rel", nil },
 }
 
 -- the param id addressed by encoder n (2 or 3) on the current page, alt-aware.
@@ -307,6 +336,48 @@ end
 -- the footer draws what the encoders and keys currently address
 ctx.enc_param = enc_param
 ctx.key_def = key_def
+
+-- ============================================================================
+-- S8 polyphonic pad voices
+-- ============================================================================
+-- a pad's slice point + rate. 8 pads spread evenly across the buffer; rate
+-- fixed at 1 for now (per-pad rate is a later knob). type is per-pad.
+local function pad_pos(i) return (i + 0.5) / ctx.pad_n end
+
+-- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
+-- the note_on that started it). z=1 press, z=0 release.
+function ctx.pad_trigger(id, i, z)
+  if z == 1 then
+    if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
+    if engine.note_on then
+      engine.note_on(id, pad_pos(i), 1.0, ctx.pad_type[i] or 0)
+    end
+    ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
+  elseif ctx.pad_held[id] then
+    if engine.note_off then engine.note_off(id) end
+    ctx.pad_held[id] = nil
+  end
+end
+
+-- MIDI/grid note routing: in pad mode a note plays pad (note mod 8) as a
+-- polyphonic voice (note_off on release); otherwise it retunes the mono
+-- drone `pitch` exactly as before. `pitch` is the chromatic rate the caller
+-- already computed for the drone path.
+function ctx.route_note(id, pitch, pad_idx, z)
+  if pget("pad_input", 0) == 1 then
+    ctx.pad_trigger(id, pad_idx % ctx.pad_n, z)
+  elseif z == 1 then
+    params:set("pitch", pitch)
+  end
+end
+
+-- release every sounding pad voice (leaving pad mode, cleanup, panic)
+function ctx.pads_all_off()
+  for id in pairs(ctx.pad_held) do
+    if engine.note_off then engine.note_off(id) end
+    ctx.pad_held[id] = nil
+  end
+end
 
 -- ============================================================================
 -- params  (single source of truth: keys, encoders, and MIDI all drive these)
@@ -394,7 +465,7 @@ local function init_params()
   add_eng_control("pos_jitter", "jitter",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_grain", "grain", 6)
+  params:add_group("grp_grain", "grain", 9)
   add_eng_control("size", "size",
     controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
   add_eng_control("density", "density",
@@ -423,6 +494,18 @@ local function init_params()
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+  -- S7 granular character: per-grain size jitter + detune spread (both
+  -- continuous from 0 = off), and a 3-way grain-envelope shape. shape is
+  -- an option (engine wants 0/1/2, norns options are 1-based, so -1 in the
+  -- action — same trick as `mode`).
+  add_eng_control("grain_jitter", "grain jitter",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("grain_pitch_spread", "pitch spread",
+    controlspec.new(0, 12, "lin", 0, 0.0, "st"))
+  params:add_option("grain_shape", "grain shape", { "HANN", "WELCH", "PERC" }, 1)
+  params:set_action("grain_shape", function(v)
+    if engine.grain_shape then engine.grain_shape(v - 1) end
+  end)
 
   params:add_group("grp_stretch", "stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
@@ -516,6 +599,24 @@ local function init_params()
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
+  -- S8 polyphonic voices: the per-note/per-pad layer that coexists with the
+  -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
+  -- the mono drone pitch (default OFF = existing behavior). voices = poly
+  -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
+  params:add_group("grp_voice", "voices", 4)
+  params:add_binary("pad_input", "pad input", "toggle", 0)
+  params:set_action("pad_input", function(v)
+    if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
+  end)
+  params:add_number("voices", "poly voices", 1, 16, 8)
+  params:set_action("voices", function(v)
+    if engine.voices then engine.voices(v) end
+  end)
+  add_eng_control("voice_atk", "voice attack",
+    controlspec.new(0.001, 1, "exp", 0, 0.005, "s"))
+  add_eng_control("voice_rel", "voice release",
+    controlspec.new(0.01, 4, "exp", 0, 0.6, "s"))
+
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
   params:add_group("grp_keys", "keys", 5)
@@ -605,6 +706,7 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
@@ -647,6 +749,9 @@ function key(n, z)
       if def and def.act then def.act() end
     else
       gesture_release(n)
+      -- close the PADS-page audition voice (id 8) on K2 release, whatever
+      -- the alt state is now — momentary holds must never strand a voice
+      if n == 2 and ctx.pad_held[8] then ctx.pad_trigger(8, 0, 0) end
     end
   end
   redraw()

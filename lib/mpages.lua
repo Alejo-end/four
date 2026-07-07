@@ -98,11 +98,13 @@ local SHORT = {
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
+  grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
   pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "MIX",
+  voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -140,9 +142,11 @@ local function fmt_value(id)
   elseif id == "delay_time" then
     local v = params:get(id)
     return v >= 0.9995 and "1.0S" or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "size" then
-    return string.format("%dMS", floor(params:get(id) * 1000 + 0.5))
-  elseif id == "density" then
+  elseif id == "size" or id == "voice_atk" then
+    local v = params:get(id)
+    return v >= 1 and string.format("%.1fS", v)
+      or string.format("%dMS", floor(v * 1000 + 0.5))
+  elseif id == "density" or id == "voices" then
     return tostring(floor(params:get(id) + 0.5))
   end
   local p = params:lookup_param(id)
@@ -336,11 +340,13 @@ end
 -- GRAIN stereo-field pool: preallocated flat arrays (no per-frame alloc),
 -- spawned/aged in draw_grain_field, capped at GR_MAX
 local GR_MAX = 110
-local gr_x, gr_y0, gr_age, gr_life, gr_len = {}, {}, {}, {}, {}
+-- gr_dj = per-grain drift jitter (grain_pitch_spread, S7): grains scatter
+-- apart vertically instead of drifting as one
+local gr_x, gr_y0, gr_age, gr_life, gr_len, gr_dj = {}, {}, {}, {}, {}, {}
 local gr_n = 0
 local gr_last_frame = -1
 for i = 1, GR_MAX do
-  gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i] = 0, 0, 0, 0, 0
+  gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i], gr_dj[i] = 0, 0, 0, 0, 0, 0
 end
 
 -- LEVEL meter statics: one slow-decaying peak per bar (IN, OUT), and the
@@ -348,6 +354,10 @@ end
 local lvl_peak = { 0, 0 }
 local lvl_last_frame = -1
 local LVL_TICKS = { 0.25, 0.5, 0.75 }
+
+-- PADS page: per-pad "a voice is sounding" flags, refilled each frame from
+-- ctx.pad_held (static so the hot path allocates nothing)
+local pad_lit = {}
 
 -- FILTER page statics: log-frequency axis 20Hz..20kHz over 128 columns,
 -- gridline columns at 100Hz/1k/10k, the 0dB reference row, and a reusable
@@ -526,8 +536,10 @@ local function draw_body()
   elseif pname == "GRAIN" then
     -- grain page (toy): a thin source ruler up top; the hero is a stereo
     -- grain field. grains spawn at the playhead (scattered by jitter),
-    -- their ticks STRETCH with size, FILL with density, and DRIFT
-    -- vertically with pitch. centerline y30, lanes +/-10.
+    -- their ticks STRETCH with size, FILL with density, DRIFT vertically
+    -- with pitch. S7 character: GJIT (grain_jitter) varies per-grain tick
+    -- length, DTUN (grain_pitch_spread) fans grains apart vertically, and
+    -- the active envelope SHAPE (K1+K3) reads top-left. centerline y30.
     local lo, hi = window_bounds()
     local playing = C.wave_any and pget("mode", 2) ~= 1
     -- source ruler at y12: window span, handles, playhead
@@ -552,8 +564,8 @@ local function draw_body()
         if gr_age[i] < gr_life[i] then
           w = w + 1
           if w ~= i then
-            gr_x[w], gr_y0[w], gr_age[w], gr_life[w], gr_len[w] =
-              gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i]
+            gr_x[w], gr_y0[w], gr_age[w], gr_life[w], gr_len[w], gr_dj[w] =
+              gr_x[i], gr_y0[i], gr_age[i], gr_life[i], gr_len[i], gr_dj[i]
           end
         end
       end
@@ -564,6 +576,8 @@ local function draw_body()
         local jit = pget("pos_jitter", 0)
         local _, _, span = window_bounds()
         local spr = pget("spread", 0.5)
+        local gj = pget("grain_jitter", 0)
+        local gps = pget("grain_pitch_spread", 0)
         local px = clamp(C.play_phase, 0, 1)
         local p = 0.06 + dN * 0.62
         for _ = 1, (dN > 0.7 and 2 or 1) do
@@ -573,7 +587,14 @@ local function draw_body()
             gr_y0[gr_n] = 30 + (math.random() * 2 - 1) * spr * 10
             gr_age[gr_n] = 0
             gr_life[gr_n] = 12 + sN * 26
-            gr_len[gr_n] = 1 + sN * 9
+            -- per-grain size jitter (guarded so default 0 keeps the RNG
+            -- stream — and the renders — identical)
+            gr_len[gr_n] = (1 + sN * 9) *
+              (1 + (gj > 0 and (math.random() * 2 - 1) * gj or 0))
+            -- per-grain detune -> its own drift rate (semitones -> the same
+            -- log2 mapping the base drift uses: st/12 * 0.35 * 0.5)
+            gr_dj[gr_n] = gps > 0
+              and (math.random() * 2 - 1) * gps / 12 * 0.35 * 0.5 or 0
           end
         end
       end
@@ -582,17 +603,22 @@ local function draw_body()
     screen.level(1)
     screen.move(0, 30) screen.line(128, 30)
     screen.stroke()
-    -- draw the grains: pitch tilts the vertical drift over each grain's age
+    -- draw the grains: pitch tilts the vertical drift; each grain's own
+    -- detune (gr_dj) adds to that so a spread cloud fans apart over its life
     local drift = log(pget("pitch", 1)) / log(2) * 0.35 * 0.5
     for i = 1, gr_n do
       local lv = floor(12 - gr_age[i] / gr_life[i] * 11 + 0.5)
       if lv >= 1 then
-        local y = gr_y0[i] + drift * gr_age[i]
+        local y = gr_y0[i] + (drift + gr_dj[i]) * gr_age[i]
         if y < 20 then y = 20 elseif y > 40 then y = 40 end
         screen.level(lv)
         screen.rect(gr_x[i] - gr_len[i] / 2, y, gr_len[i], 1)
         screen.fill()
       end
+    end
+    -- the active grain envelope shape, dim top-left (K1+K3 cycles it)
+    if params.lookup["grain_shape"] then
+      ptext(params:string("grain_shape"), 2, 15, 1, 4)
     end
   elseif pname == "STRETCH" then
     -- mockup stretch page: inverted mode badge, speed readout, real
@@ -884,6 +910,36 @@ local function draw_body()
         end
       end
     end
+  elseif pname == "PADS" then
+    -- pads page: an 8-slice pad bank (4x2). each cell shows its type
+    -- (GRN/SLC) and lights while a voice for it sounds; the cursor (bright
+    -- border) marks the pad K1+K2 auditions and K3 retypes. top row: whether
+    -- MIDI/grid notes route here (PAD) or to the drone (DRN), and voices used.
+    for i = 0, 7 do pad_lit[i] = false end
+    local used = 0
+    for _, padi in pairs(C.pad_held) do
+      if pad_lit[padi] == false then pad_lit[padi] = true end
+      used = used + 1
+    end
+    local routed = pget("pad_input", 0) == 1
+    ptext(routed and "PAD" or "DRN", 2, 13, 1, routed and 9 or 3)
+    ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5), 126, 13, 1, 4)
+    for i = 0, 7 do
+      local cx = 8 + (i % 4) * 30
+      local cy = 18 + floor(i / 4) * 11
+      local cur = i == C.pad_cursor
+      local lit = pad_lit[i]
+      screen.level(cur and 15 or 4)
+      screen.rect(cx + 0.5, cy + 0.5, 24, 10)
+      screen.stroke()
+      if lit then
+        screen.level(cur and 15 or 10)
+        screen.rect(cx + 2, cy + 2, 21, 7)
+        screen.fill()
+      end
+      ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", cx + 12, cy + 3, 1,
+        lit and 0 or (cur and 15 or 6))
+    end
   end
 end
 
@@ -931,9 +987,11 @@ local function draw_header()
     if fx + text_w(str, 1) > 76 then str = STATUS_ABBR[m] end
     ptext(str, fx, 2, 1, 8)
   end
-  -- page dots, top-right: first x=81, 5px pitch; current = rounded 4x4
+  -- page dots, top-right: pitch fits all pages under x~125 (5px normally,
+  -- tightens to 4 once PADS makes it 11); current = rounded 4x4
+  local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   for i = 1, #PAGES do
-    local dx = 81 + (i - 1) * 5
+    local dx = 81 + (i - 1) * dpitch
     if i == page then
       screen.level(15)
       screen.rect(dx, 3, 4, 4)

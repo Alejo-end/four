@@ -285,11 +285,18 @@ First-play feedback: the wet path was too faint and the FX too subtle. Fixes, al
 - **Resonance widened** — rq = 1 − res·0.92, floor 0.05 (was 0.85/0.1); the Lua FILTER
   curve mirrors the same constants.
 
+Tone (same pass, no new commands): GrainBuf/Warp1 interpolation 2 → **4 (cubic)** for
+cleaner pitched playback; delay feedback **low-passed at 3.5 kHz** so repeats darken
+(dub/tape feel, no high-frequency fizz buildup); a master **Limiter** (0.98, 10 ms
+lookahead) before RecordBuf/out so the boosts + drive can run hot without clipping and
+resample can't run away. All still core SC.
+
 ### S5 gate
 Grain cloud at size 30ms/density 8 clearly audible against the dry synth. DRIVE at 50%
-unmistakably saturates. Delay mix 30% reads as a real echo, reverb mix 30% as a real
-room, with no level drop when engaging either. Resonance at max self-emphasizes near
-oscillation. No xruns with a stretch mode + tape + all FX engaged.
+unmistakably saturates. Delay mix 30% reads as a real echo (repeats audibly darkening),
+reverb mix 30% as a real room, with no level drop when engaging either. Resonance at max
+self-emphasizes near oscillation. Master stays clean and loud with everything pushed —
+no clipping, no xruns with a stretch mode + tape + all FX engaged.
 
 ---
 
@@ -307,11 +314,103 @@ oscillation. No xruns with a stretch mode + tape + all FX engaged.
 | FILTER  | `cutoff` / `dry_wet`     | `resonance` / `grain_level` | cycle `filt_type` | OPEN (neutralize) |
 | DELAY   | `delay_mix` / `delay_time`| `delay_fb` / `drive`   | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
 | REVERB  | `rev_size` / `delay_mix` | `rev_mix` / `dry_wet`   | WASH (`rev_mix`=1) | KILL (`rev_mix`=0) |
+| PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) |
 
 (This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
-always go through `params:*`.)
+always go through `params:*`. PADS keys are the exception — SEL/PLAY/TYPE drive the pad
+cursor/audition/type in `ctx`, not a param, since a pad bank isn't a single value.)
 
 ## 11. Roadmap (post-v1)
 
 Scene snapshots; clock-quantized gestures (freeze/stutter/reverse snapped to a division).
 MIDI is **core** (PMAP, from S0) — not a roadmap item.
+
+### "Better sounding" engine options (needs a device audit first)
+
+S5 wrung the loudness/tone out of the **stock/core** UGens. The next tier of sound
+quality means swapping UGens for ones in optional plugin packs — which **must be
+confirmed installed on the device first** (`Quarks.installed` / just try compiling a
+one-liner), because a missing UGen hangs *every* script on LOADING. In rough order of
+audible payoff:
+
+1. **Reverb → JPverb or Greyhole** (sc3-plugins). FreeVerb is the cheap-sounding link;
+   JPverb (lush plate/hall, `t60`/`damp`/`size`/`earlyDiff`/`modDepth`) or Greyhole
+   (diffuse, pitch-shifting, dub-space) is the single biggest upgrade. ~2–3× the CPU of
+   FreeVerb — measure headroom with a stretch mode + tape running.
+   **→ DONE (S6, chosen): JPverb, guarded by a build-time `.asClass` check** so a
+   missing plugin falls back to FreeVerb instead of bricking loading. `rev_size` → t60
+   for now; exposing JPverb's damp/size/mod as params is the follow-up once it's
+   confirmed live on device (and CPU headroom is measured). If confirmed present, next
+   consider the same treatment for the filter (2) and granular (3) below.
+2. **Filter → DFM1** (sc3-plugins) or **MoogFF** (core, LP-only). DFM1 folds
+   cutoff+resonance+**drive**+self-oscillation into one musical UGen (would absorb the
+   S5 `drive` param). MoogFF is core and safe but lowpass-only, so it can't cover the
+   HP/BP arithmetic-select — LP path only.
+3. **Granular → MiClouds** (mi-UGens, the Mutable Clouds port). Best-in-class granular
+   texture/pitch/spectral; would replace the GrainBuf voice and remap size/density/
+   texture/pitch/spread/feedback/reverb. Big rewrite + hard dependency; highest ceiling.
+   **→ STILL OPEN, user decision.** S7 (below) took the GrainBuf voice a long way with
+   stock UGens; MiClouds is only worth the dependency + rewrite if S7 still doesn't get
+   there. Deferred until the S7 gate is heard on device.
+4. Cheaper, no-dependency polish still on the table: **stereo width** via a small
+   inter-channel grain-time offset, a **ping-pong** delay, waveshaper saturation
+   (`Shaper` + Cheby table) instead of tanh. (Per-grain **envelope shaping** — item done
+   in S7.)
+
+Path forward: audit installed plugins + CPU headroom on the device, then pick a tier.
+
+### S7 — granular character pass (engine, gate pending, fingerprint 31 → 34)
+
+Stock-UGen-only (cannot brick loading). Changes confined to `SynthDef(\mangler_grain)`
+plus two envelope buffers in `alloc` (and their frees); WARP/PV get the new args in their
+lists only so `setMode`'s uniform pass doesn't warn.
+
+- **Triggers `Impulse.kr` → `Dust.kr`** (both channels) — kills the periodic comb/buzz
+  locked to `density` in sparse clouds, and decorrelates L/R (independent Poisson).
+- **`grain_jitter`** (0..1) — per-grain size randomisation, latched per onset. 0 = off.
+- **`grain_pitch_spread`** (0..12 st) — per-grain detune, latched per onset. 0 = off.
+- **`grain_shape`** (option HANN / WELCH / PERC → engine 0/1/2) — grain envelope; 0 uses
+  GrainBuf's built-in Hann (`envbufnum -1`, zero cost, identical to S6).
+
+UI (all in `grp_grain` + on the GRAIN page): `grain_jitter` and `grain_pitch_spread` are
+params + visualised on the grain field (tick-length variance / vertical fan); `grain_shape`
+cycles on **K1+K3** (`SHP` pill) and reads top-left. GRAIN's 4 encoder slots stay as-is
+(size/spread/density/grain_level); the two continuous params sit in PARAMS like `pan`
+already does. Suite gained a `GRAIN_CHAR` shot.
+
+**S7 gate:** load clean, SC tab error-free, **command count 34** (was 31). With
+`grain_shape`=HANN, `grain_jitter`=0, `grain_pitch_spread`=0 the cloud sounds like S6 apart
+from the (intended) Dust trigger — the periodic buzz in a sparse cloud (e.g. size 40ms /
+density 6) should be gone. Jitter → grains audibly vary in size; pitch spread → shimmer /
+chorus; WELCH → smoother pads, PERC → pointillist clicks. No xruns with a stretch mode +
+tape + FX.
+
+### S8 — polyphonic voice engine (engine + Lua, gate pending, fingerprint 34 → 40)
+
+Stock/core UGens + the guarded JPverb only. A per-note voice layer that coexists with the
+drone: voices spawn into `playGroup` and `Out.ar`-add onto `play_bus`, so they mix with the
+drone and pass through the io FX chain. +6 commands (`note_on`, `note_off`, `note_one_shot`,
+`voices`, `voice_atk`, `voice_rel`).
+
+- **Two voice defs**, the allocator picks by per-pad type (the switch): `mangler_voice_grain`
+  (S7 grain cloud at `note_pos`, tracks the drone's grain params) / `mangler_voice_slice`
+  (clean `PlayBuf` from `note_pos`). Env.asr gated, `doneAction:2` frees on release so grain
+  gaps can't strand a voice; one-shots self-terminate via an internal `Trig`. Poly cap =
+  `voices`; at cap the **oldest** held voice is release-stolen.
+- **Lua (this stage): a PADS page** (page 11, additive — drone pages untouched). An 8-slice
+  pad bank: pad `i` → `pos = (i+0.5)/8`, rate 1, per-pad `type` (GRN/SLC). Screen: cursor +
+  **K1+K2** audition + **K3** type toggle; **E2** `voices`, **K1+E2** `voice_atk`, **E3**
+  `voice_rel`. A **`pad input`** toggle (default OFF) reroutes **MIDI notes + grid note-pads**
+  to polyphonic voices (`note_on` on press / `note_off` on release, stable ids: screen 0..8,
+  MIDI 1000+, grid 2000+) instead of the mono drone `pitch`; OFF = exactly the old behavior.
+  `note_one_shot` is wired in the engine and available but unused by the current pad model
+  (held note_on/off, which rings out on release via `voice_rel`).
+
+**S8 gate:** load clean, SC tab error-free, **command count 40** (was 34). (a) drone behaves
+exactly as before with `pad input` OFF; (b) a pad press (screen K1+K2, or MIDI/grid with
+`pad input` ON) sounds instantly and rings out on release; (c) GRN vs SLC pads audibly
+differ (cloud vs clean slice); (d) holding more than `voices` pads steals the oldest. No
+xruns with the drone + several voices + FX.
+
+**MiClouds granular (§11 item 3) is still an open user decision** — S7+S8 took GrainBuf a
+long way; MiClouds is only worth its dependency + rewrite if this still doesn't get there.

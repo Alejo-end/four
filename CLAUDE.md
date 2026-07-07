@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S5 — engine gain pass, on-device gate pending (fingerprint 31)**
+## CURRENT STAGE: **S5–S8 — engine gain/tone + JPverb + granular character + polyphonic voices, on-device gate pending (fingerprint 40)**
 
 S1 PASSED, S2 PASSED (stretch modes), S3 PASSED with UX iterations (tape looper:
 one-button take workflow, K1+K3 clear). S4 adds the FX chain to the io synth's wet
@@ -173,14 +173,86 @@ Lua: `drive` param in grp_filter (count 3 → 4), DELAY E3-alt = drive
 (SHORT "DRV"), FILTER-curve constants mirrored in lib/mpages.lua. The Lua
 side no-ops against an old engine (`if engine[id]` guard), but the page
 curve then overstates resonance until the new .sc is live — deploy both
-together. Gate criteria in spec §9b.
+together. Same pass, a TONE half (no new commands, fingerprint still 31):
+GrainBuf/Warp1 interp 2 → 4 (cubic); delay feedback LPF'd at 3.5k (repeats
+darken); master Limiter(0.98) before RecordBuf/out. ALL core SC — no plugin
+deps, cannot brick loading. Gate criteria in spec §9b. The bigger
+"better sounding" swings (DFM1/MoogFF filter, MiClouds granular) need
+sc3-plugins / mi-UGens confirmed-installed first (a missing UGen hangs every
+script on LOADING) — parked as spec §11 options, a user decision.
+
+Fourteenth change — **ENGINE (S6 reverb), same untested batch as S5,
+fingerprint still 31**: user picked "reverb → JPverb" from the §11 menu.
+FreeVerb → **JPverb** (sc3-plugins) for a lush hall/plate. THE SAFETY
+PATTERN (reusable for any plugin UGen): detect at SynthDef-BUILD time with
+`"JPverb".asSymbol.asClass` — the `.if` runs in sclang when the def is
+`.add`ed, so only ONE branch's UGens compile into the graph; a missing
+plugin picks the FreeVerb fallback instead of failing to compile (which
+hangs every script on LOADING). `jpClass.ar(wet.sum*0.5, t60, damp, size)`
+uses positional args (keyword args don't survive perform-dispatch on a
+var-held Class). rev_size → t60 (0.4..6.4s); JPverb damp/size/mod fixed for
+now (exposing them as params is the follow-up once confirmed live). No new
+command, so the fingerprint stays 31. UNTESTED — if JPverb IS installed and
+the arg order is wrong it errors in the SC tab; if it's absent you get
+FreeVerb (louder, from S5).
+
+Fifteenth change — **ENGINE (S7 granular character), user-supplied .sc
+confirmed + wired, fingerprint 31 → 34, UNTESTED**: the user rebuilt
+`SynthDef(\mangler_grain)` (+ two envelope buffers filled BEFORE s.sync in
+alloc, + their frees). Reviewed against intent — matches, all stock UGens
+(Dust/TRand/Select/Env), no plugin deps. Impulse.kr → **Dust.kr** (both
+channels: kills the periodic buzz + decorrelates L/R). THREE new commands
+in playParams (grain_jitter, grain_pitch_spread, grain_shape) → count
+31→34. NB the Dust swap means defaults are NOT byte-identical to S6 (that's
+change #1, intended); the "identical to before" regression guard is about
+the three NEW params being true no-ops at 0 (durL=size, pchL=pitch,
+envSel=-1=built-in Hann). WARP/PV only got the new args in their lists so
+setMode's uniform pass doesn't warn. DO NOT move the pre-sync buffer fill.
+Lua wiring: grp_grain 6→9 (grain_jitter/grain_pitch_spread add_eng_control,
+grain_shape add_option HANN/WELCH/PERC with `-1` in set_action like `mode`);
+grain_shape cycles on GRAIN **K1+K3** (k3_alt "SHP", the free key slot);
+the two continuous params are PARAMS-only (like `pan`) + VISUALISED on the
+grain field (GJIT = per-grain tick-length variance, DTUN = per-grain
+vertical fan via a new gr_dj pool array) — both guarded `> 0 and … or 0` so
+at default they make NO extra math.random call and the seeded GRAIN renders
+stay position-identical. Shape reads top-left. Suite gained GRAIN_CHAR;
+dist byte-identical (44 shots). I CANNOT run the device — command count 34
+is a STATIC trace (ioKeys 17 ∪ playParams 18, −2 shared, + mode); the user
+must restart and confirm.
+
+Sixteenth change — **ENGINE + LUA (S8 polyphonic voices), user-supplied
+.sc applied + a NEW Lua layer built, fingerprint 34 → 40, UNTESTED (no SC
+compiler, no device here)**. Engine (source of truth, reviewed correct):
+two voice defs (mangler_voice_grain / mangler_voice_slice), an allocator
+(noteOn/noteOff/noteOneShot, oldest-steal at `voices` cap), voices spawn
+into playGroup + Out.ar-add onto play_bus (mix with drone, through io FX).
++6 commands (note_on/note_off/note_one_shot/voices/voice_atk/voice_rel) →
+count 40 (STATIC trace: 33 union + 7 explicit). io/drone defs untouched.
+LUA (built here): **PADS page = page 11** (PAGES/ENC_MAP/KEYS all extended;
+header dot pitch now fits >10 pages via `min(5, floor(45/(#PAGES-1)))`).
+grp_voice params: `pad_input` (binary, default 0), `voices` (add_number
+1..16), `voice_atk`/`voice_rel` (add_eng_control). 8-slice pad bank in
+`ctx` (pad_type[0..7], pad_cursor, pad_held id→padidx). Dispatch in
+mangler.lua: `ctx.route_note(id,pitch,pad_idx,z)` sends notes to the mono
+drone `pitch` (default) OR polyphonic voices (`pad_input`=1); minput +
+mgrid.grid_note_key both refactored to call it on BOTH edges (were
+press-only) — DEFAULT-OFF so drone behavior is byte-preserved. Stable ids:
+screen 0..8 (audition=8), MIDI 1000+note, grid 2000+(y*8+x). GOTCHA:
+momentary K1+K2 audition (id 8) is closed in `key()` on any K2 release,
+NOT via a def.release callback (release is alt-sensitive and would strand
+the voice). `pad_input`→0 and cleanup both call `ctx.pads_all_off()`. PADS
+body: 4×2 cells (GRN/SLC per pad, lit when a voice sounds, cursor border),
+PAD/DRN routing + used/cap readout. Suite gained PADS + PADS_LIVE; dist
+byte-identical (46 shots). RESERVED-ID watch: `voices`/`voice_*`/`pad_input`
+aren't in the known system-param list, but confirm no "refusing to clobber"
+on device. note_one_shot is available but unused (pad model is held).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
-   expected fingerprint (S2 = 22, S4 = 30, S5 = **31**). Wrong count = old engine
-   still live.
+   expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8 = **40**). Wrong
+   count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

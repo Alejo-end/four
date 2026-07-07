@@ -30,11 +30,22 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
-  if msg.type ~= "note_on" or (msg.vel or 0) == 0 then return end
   if pget("keys_enable", 1) == 0 then return end
   local ch = pget("midi_channel", 0)
   if ch > 0 and msg.ch ~= ch then return end
-  params:set("pitch", 2 ^ ((msg.note - pget("root_note", 60)) / 12))
+  -- both edges: note-on gates a voice / retunes the drone, note-off releases
+  -- a voice (the drone is last-note, so it ignores the release)
+  local z, note
+  if msg.type == "note_on" and (msg.vel or 0) > 0 then
+    z, note = 1, msg.note
+  elseif msg.type == "note_off" or (msg.type == "note_on" and (msg.vel or 0) == 0) then
+    z, note = 0, msg.note
+  else
+    return
+  end
+  -- route_note decides drone vs pad from `pad_input`; id offset by 1000 so
+  -- MIDI voice ids never collide with grid/screen pad ids
+  C.route_note(1000 + note, 2 ^ ((note - pget("root_note", 60)) / 12), note, z)
 end
 
 -- USB typing keyboard: ableton-style musical typing. the A-row is the white

@@ -43,6 +43,7 @@ the value lives in the footer.
 | ![REC page](doc/ui/rec.png)<br>**REC** — the buffer strip with the grain cloud; the write head lays material with an afterglow trail; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — a stereo grain field: ticks stretch with size, fill with density, and drift with pitch; source ruler up top |
 | ![TAPE page](doc/ui/tape.png)<br>**TAPE** — two reels spinning at the real rate (hubs + spokes), tape guides between, loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, shimmering spectrum ticks, node dot at the cutoff (hold K1: D/W + GRN) |
 | ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — a room seen from above: walls grow with size, rays bounce to the listener, a ping pulses from the source (hold K1: MIX + D/W) |
+| ![PADS page](doc/ui/pads.png)<br>**PADS** — an 8-slice polyphonic pad bank: each cell's type (GRN cloud / SLC slice), lit while sounding, cursor for K1+K2 audition + K3 retype. `pad input` routes MIDI + grid notes here | |
 
 **STRETCH** draws the active algorithm's own texture — grains, an overlapped warp window,
 spectral columns — and lies flat when the voice is off:
@@ -88,7 +89,7 @@ whole device.
 | **K2 / K3** | the page's two actions (toggle or momentary) — the footer pills invert while active |
 
 Pages cycle with E1:
-`MIX · LEVEL · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB`.
+`MIX · LEVEL · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB · PADS`.
 The full page → encoder/key map is in `doc/spec.md` (§10).
 
 Turning any encoder flashes the value top-right in a framed box — always

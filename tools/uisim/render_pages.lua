@@ -377,7 +377,7 @@ run_ticks(EMPTY and 30 or 200)
 
 -- walk pages and shoot each one
 local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB" }
+  "FILTER", "DELAY", "REVERB", "PADS" }
 
 enc(1, -20)  -- rewind to page 1
 if EMPTY then
@@ -540,6 +540,33 @@ else
   redraw()
   export(PREFIX .. "_05_GRAIN_PITCH")
   params:set("pitch", 1)
+  -- GRAIN character (S7): jitter varies tick lengths, pitch spread fans the
+  -- cloud apart, PERC shape shows top-left
+  params:set("grain_jitter", 0.8)
+  params:set("grain_pitch_spread", 7)
+  params:set("grain_shape", 3)
+  run_ticks(24)
+  redraw()
+  export(PREFIX .. "_05_GRAIN_CHAR")
+  params:set("grain_jitter", 0)
+  params:set("grain_pitch_spread", 0)
+  params:set("grain_shape", 1)
+  -- PADS live: route to pads, two slice-type pads, cursor on pad 2 with an
+  -- audition voice held (cell lit)
+  enc(1, -20)
+  enc(1, 10)  -- PADS (page 11)
+  params:set("pad_input", 1)
+  key(3, 1) key(3, 0)  -- pad 0 -> SLC
+  key(2, 1) key(2, 0)  -- cursor -> 1
+  key(2, 1) key(2, 0)  -- cursor -> 2
+  key(3, 1) key(3, 0)  -- pad 2 -> SLC
+  key(1, 1)            -- alt
+  key(2, 1)            -- K1+K2 PLAY: audition the cursor pad (held)
+  run_ticks(3)
+  redraw()
+  export(PREFIX .. "_11_PADS_LIVE")
+  key(2, 0) key(1, 0)  -- release audition + alt
+  params:set("pad_input", 0)
 end
 
 print("done: " .. TICK .. " ticks")
