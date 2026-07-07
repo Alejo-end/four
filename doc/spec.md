@@ -269,6 +269,30 @@ Reverb tail audible. All under CPU budget with a stretch mode active + tape runn
 
 ---
 
+## 9b. Stage 5 — GAIN PASS (engine, gate pending)
+
+First-play feedback: the wet path was too faint and the FX too subtle. Fixes, all in
+`Engine_Mangler.sc` (fingerprint 30 → **31**):
+
+- **Grain overlap compensation** — sparse clouds (density×size < 1) boosted up to 2×,
+  dense clouds untouched.
+- **`drive`** (new command + param, 0..1) — post-filter tanh saturation with makeup:
+  louder *and* dirtier as it rises; doubles as the wet-path safety stage. Lives on
+  DELAY's E3-alt slot (hold K1) and in PARAMS > filter.
+- **Equal-power FX mixes** — delay and reverb crossfades were linear (cut the direct
+  path −6 dB at center while barely adding effect).
+- **Reverb return +6 dB** makeup, damp 0.5 → 0.35 (brighter tail).
+- **Resonance widened** — rq = 1 − res·0.92, floor 0.05 (was 0.85/0.1); the Lua FILTER
+  curve mirrors the same constants.
+
+### S5 gate
+Grain cloud at size 30ms/density 8 clearly audible against the dry synth. DRIVE at 50%
+unmistakably saturates. Delay mix 30% reads as a real echo, reverb mix 30% as a real
+room, with no level drop when engaging either. Resonance at max self-emphasizes near
+oscillation. No xruns with a stretch mode + tape + all FX engaged.
+
+---
+
 ## 10. Page → control map (target, filled in per stage)
 
 | page    | E2 / E2-alt              | E3 / E3-alt             | K2 / K2-alt   | K3 / K3-alt   |
@@ -280,9 +304,9 @@ Reverb tail audible. All under CPU budget with a stretch mode active + tape runn
 | GRAIN   | `size` / `spread`        | `density` / `grain_level`| OCT− / OCT+ (`pitch` ×½ / ×2) | `pitch` reset |
 | STRETCH | `scan` / `pitch`         | `warp_window` / `warp_rand` | cycle `mode` | `pv_freeze` toggle |
 | TAPE    | `tape_rate` / `tape_pre` | `loop_start` / `loop_end`| `tape_rec` / REV (mom) | `tape_freeze` / CLR |
-| FILTER  | `cutoff` / —             | `resonance` / —         | cycle `filt_type` | OPEN (neutralize) |
-| DELAY   | `delay_mix` / `delay_time`| `delay_fb` / —         | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
-| REVERB  | `rev_size` / —           | `rev_mix` / —           | WASH (`rev_mix`=1) | KILL (`rev_mix`=0) |
+| FILTER  | `cutoff` / `dry_wet`     | `resonance` / `grain_level` | cycle `filt_type` | OPEN (neutralize) |
+| DELAY   | `delay_mix` / `delay_time`| `delay_fb` / `drive`   | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
+| REVERB  | `rev_size` / `delay_mix` | `rev_mix` / `dry_wet`   | WASH (`rev_mix`=1) | KILL (`rev_mix`=0) |
 
 (This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
 always go through `params:*`.)

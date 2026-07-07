@@ -912,7 +912,7 @@ local SHORT = {
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
-  cutoff = "CUT", resonance = "RES",
+  cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "MIX",
 }
@@ -1522,9 +1522,9 @@ local function draw_body()
     end
   elseif pname == "FILTER" then
     -- the engine's REAL response, not a sketch: RLPF/RHPF/BPF magnitude at
-    -- rq = 1 - res*0.85, on the log-f axis, passband filled, an EQ-node
+    -- rq = 1 - res*0.92 (floor 0.05 — S5 constants, keep in sync with
+    -- Engine_Mangler.sc), on the log-f axis, passband filled, an EQ-node
     -- dot riding the curve at the cutoff. dim rails: 100Hz/1k/10k and 0dB.
-    -- the cutoff parks top-right — every page keeps its one number there
     local cut = pget("cutoff", 20000)
     local ft = pget("filt_type", 1)
     local res = pget("resonance", 0)
@@ -1536,7 +1536,7 @@ local function draw_body()
     screen.move(0, FILT_DB0_Y)
     screen.line(128, FILT_DB0_Y)
     screen.stroke()
-    local rq = max(1 - res * 0.85, 0.1)
+    local rq = max(1 - res * 0.92, 0.05)
     local rq2 = rq * rq
     local bpg = (1 + res) * (1 + res)
     local px_per_db = (BAND_B - BAND_T) / FILT_DB_RANGE
@@ -1940,7 +1940,7 @@ local ENC_MAP = {
   -- FILTER/REVERB gain an ALT layer (K1): the wet-path controls the filter
   -- itself can't expose (RLPF/RHPF/BPF are freq+rq only)
   FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
-  DELAY   = { "delay_mix", "delay_time", "delay_fb", nil },
+  DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
 }
 
@@ -2138,7 +2138,7 @@ local function init_params()
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
 
-  params:add_group("grp_filter", "filter", 3)
+  params:add_group("grp_filter", "filter", 4)
   params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   params:set_action("filt_type", function(v)
     if engine.filt_type then engine.filt_type(v - 1) end
@@ -2146,6 +2146,9 @@ local function init_params()
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
   add_eng_control("resonance", "resonance",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- post-filter tanh saturation with makeup (S5): louder AND dirtier up
+  add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
   params:add_group("grp_delay", "delay", 3)

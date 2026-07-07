@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S4 — filter + delay + reverb, on-device gate pending**
+## CURRENT STAGE: **S5 — engine gain pass, on-device gate pending (fingerprint 31)**
 
 S1 PASSED, S2 PASSED (stretch modes), S3 PASSED with UX iterations (tape looper:
 one-button take workflow, K1+K3 clear). S4 adds the FX chain to the io synth's wet
@@ -161,11 +161,26 @@ approved in an HTML recreation, chosen over keeping the piecemeal picks
   rendered blank). Suite gained FILTER_ALT / REVERB_ALT / GRAIN_PITCH shots;
   dist byte-identical (42 shots across base/empty/filter/grain).
 
+Thirteenth change — **ENGINE CHANGE (S5 gain pass), deploy ritual required,
+completely untested (no SC compiler here)**: first-play feedback was "audio
+changes too subtle, volume too faint" (doc/ux-feedback.md §18, spec §9b).
+In Engine_Mangler.sc: grain overlap compensation (boost-only ≤2× below
+overlap 1); new `drive` command — post-filter tanh with pre.sqrt makeup
+(ioKeys + io arg, fingerprint 30 → **31**); delay/reverb mixes linear →
+equal-power (linear cut the direct path −6dB at center); reverb return ×2,
+damp 0.5 → 0.35; resonance rq = 1−res·0.92 floor 0.05 (was 0.85/0.1).
+Lua: `drive` param in grp_filter (count 3 → 4), DELAY E3-alt = drive
+(SHORT "DRV"), FILTER-curve constants mirrored in lib/mpages.lua. The Lua
+side no-ops against an old engine (`if engine[id]` guard), but the page
+curve then overstates resonance until the new .sc is live — deploy both
+together. Gate criteria in spec §9b.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
-   expected fingerprint (S2 = 22, S4 = **30**). Wrong count = old engine still live.
+   expected fingerprint (S2 = 22, S4 = 30, S5 = **31**). Wrong count = old engine
+   still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

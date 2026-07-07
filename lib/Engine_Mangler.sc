@@ -16,11 +16,21 @@
 // HARD RULE: there must be exactly one `Engine_Mangler` class under dust/code.
 // A duplicate makes every norns script hang forever on "LOADING".
 //
+// S5 GAIN PASS (on-device gate pending): the wet path was too faint and
+// the FX too subtle —
+//   * grain voice: overlap compensation (sparse clouds no longer vanish)
+//   * filter: resonance range widened (rq floor 0.05) — mirrored in the
+//     Lua FILTER curve (lib/mpages.lua), keep the two in sync
+//   * new `drive` command: post-filter tanh saturation with makeup — the
+//     wet path can now be pushed HOT safely (this also soft-limits it)
+//   * delay/reverb mixes: equal-power (linear cut the direct path -6dB
+//     while barely adding effect), reverb return +6dB makeup, damp opened
+//
 // NB (learned in S0/S1): context.in_b is an ARRAY of two mono busses;
 // out_b is one stereo bus. An error inside alloc means the doneCallback
 // never fires and every load hangs on "loading" — errors land in maiden's
 // SC tab. After editing this file: SYSTEM > RESTART, then check the
-// command count in the load log (S4 fingerprint: count 30).
+// command count in the load log (S5 fingerprint: count 31).
 
 Engine_Mangler : CroneEngine {
 	var <ioSynth, <playSynth;
@@ -66,7 +76,7 @@ Engine_Mangler : CroneEngine {
 		];
 		ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
 			\dry_wet, \resample, \grain_level,
-			\filt_type, \cutoff, \resonance,
+			\filt_type, \cutoff, \resonance, \drive,
 			\delay_time, \delay_fb, \delay_mix,
 			\rev_size, \rev_mix];
 
@@ -79,7 +89,7 @@ Engine_Mangler : CroneEngine {
 				size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
 				warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
 			var lo, hi, span, incr, phase, winPos, look;
-			var trigL, trigR, posL, posR, panL, panR, sig;
+			var trigL, trigR, posL, posR, panL, panR, sig, comp;
 			lo = pos_start.min(pos_end);
 			hi = pos_start.max(pos_end);
 			span = (hi - lo).max(0.001);
@@ -96,8 +106,12 @@ Engine_Mangler : CroneEngine {
 			posR = winPos - look + TRand.kr((pos_jitter * span).neg, pos_jitter * span, trigR);
 			panL = (pan + TRand.kr(spread.neg, spread, trigL)).clip(-1, 1);
 			panR = (pan + TRand.kr(spread.neg, spread, trigR)).clip(-1, 1);
-			sig = GrainBuf.ar(2, trigL, size, buf_l, pitch, posL.wrap(0, 1), 2, panL)
-				+ GrainBuf.ar(2, trigR, size, buf_r, pitch, posR.wrap(0, 1), 2, panR);
+			// overlap compensation: grain loudness ~ density*size; sparse
+			// clouds (overlap < 1) got inaudibly quiet. boost-only — up to
+			// 2x below overlap 1, unity above — so dense clouds are untouched
+			comp = (density * size).clip(0.25, 1).sqrt.reciprocal;
+			sig = (GrainBuf.ar(2, trigL, size, buf_l, pitch, posL.wrap(0, 1), 2, panL)
+				+ GrainBuf.ar(2, trigR, size, buf_r, pitch, posR.wrap(0, 1), 2, panR)) * comp;
 			Out.ar(play_bus, sig);
 		}).add;
 
@@ -154,20 +168,22 @@ Engine_Mangler : CroneEngine {
 			arg in1, in2, out, buf_l, buf_r, play_bus, rec_phase_out, rec_amp_out,
 				level = 1.0, rec = 0, rec_level = 1.0, pre_level = 0.0,
 				freeze = 0, dry_wet = 0.5, resample = 0.0, grain_level = 1.0,
-				filt_type = 0, cutoff = 20000, resonance = 0,
+				filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
 				delay_time = 0.3, delay_fb = 0.3, delay_mix = 0.0,
 				rev_size = 0.5, rev_mix = 0.0;
 			var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
-			var cf, rq, lp, hp, bp, isLp, isHp, isBp, fbIn, dIn, dOut, rv;
+			var cf, rq, lp, hp, bp, isLp, isHp, isBp, pre, fbIn, dIn, dOut, rv;
 			inL = In.ar(in1, 1);
 			inR = In.ar(in2, 1);
 			// 1.5x makeup: grain envelopes lose energy vs the source
 			wet = In.ar(play_bus, 2) * grain_level * 1.5;
 
 			// FILTER: lp/hp/bp on the wet path; arithmetic select keeps
-			// multichannel expansion simple, and filters are cheap
+			// multichannel expansion simple, and filters are cheap.
+			// resonance slope/floor widened (S5) — mirrored in the Lua
+			// FILTER curve, keep in sync
 			cf = cutoff.clip(20, 20000).lag(0.05);
-			rq = (1 - (resonance * 0.85)).max(0.1);
+			rq = (1 - (resonance * 0.92)).max(0.05);
 			lp = RLPF.ar(wet, cf, rq);
 			hp = RHPF.ar(wet, cf, rq);
 			bp = BPF.ar(wet, cf, rq) * (1 + resonance);
@@ -176,20 +192,28 @@ Engine_Mangler : CroneEngine {
 			isBp = (filt_type > 1.5);
 			wet = (lp * isLp) + (hp * isHp) + (bp * isBp);
 
+			// DRIVE (S5): push the filtered wet into tanh, partial makeup —
+			// net louder AND saturated as it rises; doubles as the safety
+			// stage that lets the gain boosts elsewhere run hot. at drive 0
+			// tanh only rounds peaks above ~0.5.
+			pre = 1 + (drive * 6);
+			wet = (wet * pre).tanh * pre.sqrt.reciprocal;
+
 			// DELAY: feedback loop, soft-clipped so it builds without blowing
-			// up; own dry/wet
+			// up; own mix, equal-power (linear cut the direct path)
 			fbIn = LocalIn.ar(2);
 			dIn = wet + (fbIn * delay_fb);
 			dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));
 			LocalOut.ar(dOut.softclip);
-			wet = (wet * (1 - delay_mix)) + (dOut * delay_mix);
+			wet = (wet * (1 - delay_mix).sqrt) + (dOut * delay_mix.sqrt);
 
-			// REVERB: FreeVerb per channel (cheap), own dry/wet
+			// REVERB: FreeVerb per channel (cheap); equal-power mix, +6dB
+			// return makeup (FreeVerb's tail sits low), brighter damp
 			rv = [
-				FreeVerb.ar(wet[0], 1.0, rev_size, 0.5),
-				FreeVerb.ar(wet[1], 1.0, rev_size, 0.5)
+				FreeVerb.ar(wet[0], 1.0, rev_size, 0.35),
+				FreeVerb.ar(wet[1], 1.0, rev_size, 0.35)
 			];
-			wet = (wet * (1 - rev_mix)) + (rv * rev_mix);
+			wet = (wet * (1 - rev_mix).sqrt) + (rv * 2 * rev_mix.sqrt);
 
 			dry = [inL, inR];
 			// equal-power crossfade: linear lost 6dB at the center

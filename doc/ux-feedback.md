@@ -153,6 +153,18 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
       Suite gained FILTER_ALT / REVERB_ALT / GRAIN_PITCH shots; dist
       byte-identical (42 shots).
 
+18. **(user, first sound-check) "the audio changes are too subtle, the
+    volume is too faint — engine improvements to be done."** Diagnosis in
+    the engine, not the UI: FX mixes were linear crossfades (engaging
+    delay .35 + reverb .28 left 0.47× of the direct wet path while adding
+    polite tails), sparse grain clouds sat far below the dry input
+    (loudness ∝ density×size), FreeVerb's return is inherently quiet, and
+    there was no drive stage to push into. S5 gain pass (spec §9b,
+    fingerprint 30 → 31): overlap compensation, equal-power FX mixes,
+    reverb return ×2 + brighter damp, wider resonance, and a new `drive`
+    param (DELAY page, hold K1, E3) — tanh saturation with makeup.
+    **Engine change: needs the on-device deploy ritual; gate pending.**
+
 ## Still open / next loop iterations
 
 - On-device verification of everything above (all of it is uisim-verified

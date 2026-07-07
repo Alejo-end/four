@@ -291,7 +291,7 @@ local ENC_MAP = {
   -- FILTER/REVERB gain an ALT layer (K1): the wet-path controls the filter
   -- itself can't expose (RLPF/RHPF/BPF are freq+rq only)
   FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
-  DELAY   = { "delay_mix", "delay_time", "delay_fb", nil },
+  DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
 }
 
@@ -489,7 +489,7 @@ local function init_params()
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
 
-  params:add_group("grp_filter", "filter", 3)
+  params:add_group("grp_filter", "filter", 4)
   params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   params:set_action("filt_type", function(v)
     if engine.filt_type then engine.filt_type(v - 1) end
@@ -497,6 +497,9 @@ local function init_params()
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
   add_eng_control("resonance", "resonance",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- post-filter tanh saturation with makeup (S5): louder AND dirtier up
+  add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
   params:add_group("grp_delay", "delay", 3)

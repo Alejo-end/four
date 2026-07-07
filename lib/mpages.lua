@@ -100,7 +100,7 @@ local SHORT = {
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
-  cutoff = "CUT", resonance = "RES",
+  cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "MIX",
 }
@@ -710,9 +710,9 @@ local function draw_body()
     end
   elseif pname == "FILTER" then
     -- the engine's REAL response, not a sketch: RLPF/RHPF/BPF magnitude at
-    -- rq = 1 - res*0.85, on the log-f axis, passband filled, an EQ-node
+    -- rq = 1 - res*0.92 (floor 0.05 — S5 constants, keep in sync with
+    -- Engine_Mangler.sc), on the log-f axis, passband filled, an EQ-node
     -- dot riding the curve at the cutoff. dim rails: 100Hz/1k/10k and 0dB.
-    -- the cutoff parks top-right — every page keeps its one number there
     local cut = pget("cutoff", 20000)
     local ft = pget("filt_type", 1)
     local res = pget("resonance", 0)
@@ -724,7 +724,7 @@ local function draw_body()
     screen.move(0, FILT_DB0_Y)
     screen.line(128, FILT_DB0_Y)
     screen.stroke()
-    local rq = max(1 - res * 0.85, 0.1)
+    local rq = max(1 - res * 0.92, 0.05)
     local rq2 = rq * rq
     local bpg = (1 + res) * (1 + res)
     local px_per_db = (BAND_B - BAND_T) / FILT_DB_RANGE

@@ -520,7 +520,13 @@ else
   redraw()
   export(PREFIX .. "_08_FILTER_ALT")
   key(1, 0)
-  enc(1, 2)  -- FILTER -> REVERB
+  enc(1, 1)  -- FILTER -> DELAY: alt exposes TIME + DRIVE (S5)
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(PREFIX .. "_09_DELAY_ALT")
+  key(1, 0)
+  enc(1, 1)  -- DELAY -> REVERB
   key(1, 1)
   run_ticks(3)
   redraw()
