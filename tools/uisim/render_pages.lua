@@ -83,6 +83,16 @@ function screen.fill()
       for xx = x0, x0 + w - 1 do px(xx, yy, cur_level) end
     end
   end
+  -- filled discs (norns fills a circle path; the pixel sim must too)
+  for _, c in ipairs(path.circles) do
+    local xc, yc, r = c[1], c[2], c[3]
+    local ri = math.floor(r + 0.5)
+    for yy = -ri, ri do
+      for xx = -ri, ri do
+        if xx * xx + yy * yy <= r * r then px(xc + xx, yc + yy, cur_level) end
+      end
+    end
+  end
   reset_path()
 end
 
@@ -490,8 +500,8 @@ else
   redraw()
   export(PREFIX .. "_01_MIX_TAPE")
   params:set("mix", 0.5)
-  -- REC armed: the reel counter's recording state (lamp lit, write head
-  -- sweeping the usage bar, take counter running, input hot)
+  -- REC armed: write head laying material with its afterglow trail, input
+  -- hot, the status dot + REC flag beside the title
   enc(1, -20)
   enc(1, 2)  -- MIX -> REC
   params:set("rec", 1)
@@ -502,6 +512,28 @@ else
   redraw()
   export(PREFIX .. "_03_REC_REC")
   params:set("rec", 0)
+  -- ALT layer on FILTER/REVERB: the new wet-path encoder targets
+  enc(1, -20)
+  enc(1, 7)  -- FILTER
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(PREFIX .. "_08_FILTER_ALT")
+  key(1, 0)
+  enc(1, 2)  -- FILTER -> REVERB
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(PREFIX .. "_10_REVERB_ALT")
+  key(1, 0)
+  -- GRAIN pitched up an octave: footer reads +12ST, grains drift
+  enc(1, -20)
+  enc(1, 4)  -- GRAIN
+  params:set("pitch", 2)
+  run_ticks(20)
+  redraw()
+  export(PREFIX .. "_05_GRAIN_PITCH")
+  params:set("pitch", 1)
 end
 
 print("done: " .. TICK .. " ticks")

@@ -288,9 +288,11 @@ local ENC_MAP = {
   GRAIN   = { "size", "spread", "density", "grain_level" },
   STRETCH = { "scan", "pitch", "warp_window", "warp_rand" },
   TAPE    = { "tape_rate", "tape_pre", "loop_start", "loop_end" },
-  FILTER  = { "cutoff", nil, "resonance", nil },
+  -- FILTER/REVERB gain an ALT layer (K1): the wet-path controls the filter
+  -- itself can't expose (RLPF/RHPF/BPF are freq+rq only)
+  FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
   DELAY   = { "delay_mix", "delay_time", "delay_fb", nil },
-  REVERB  = { "rev_size", nil, "rev_mix", nil },
+  REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
 }
 
 -- the param id addressed by encoder n (2 or 3) on the current page, alt-aware.
@@ -625,7 +627,8 @@ function enc(n, d)
     -- params.lookup guard: a missing param must not throw
     if id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
-      ctx.flash_id, ctx.flash_until = id, ctx.frame + FPS  -- show the value for ~1s
+      -- mark the param actively-turning: its footer knob fills for ~1.2s
+      ctx.flash_id, ctx.flash_until = id, ctx.frame + math.floor(FPS * 1.2)
     end
   end
   redraw()

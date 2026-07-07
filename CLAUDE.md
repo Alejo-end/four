@@ -127,6 +127,40 @@ per request. Dist byte-identical (25 shots). PORT GOTCHA: the VU-pair
 unguarded `d==1 and eng_on or (tape_g>0)` lights the engine needle
 whenever tape plays (and/or precedence).
 
+Twelfth Lua-only change (renders verified, untested on device): the
+**"Toy" UI** — a whole-instrument screen redesign the user prototyped and
+approved in an HTML recreation, chosen over keeping the piecemeal picks
+(doc/ux-feedback.md §17). It supersedes the eighth–eleventh page bodies.
+- CHROME (all pages): small 1x title top-left that never disappears; the
+  status flags (REC/FZ/TR/TFZ) moved BESIDE the title as a blinking 3x3 dot
+  + text (single glyphs R/F/T/Z if they'd cross x76); uniform page dots
+  (first x=81, pitch 5, current = rounded 4x4). The **top-right readout
+  pocket is gone** — E2/E3 values live in the footer row (fmt_value: cutoff
+  kHz, pitch ST, rates x, times ms/s, 0..1 as %, else params:string; labels
+  drop when the four strings would cross ~85px). Footer knobs are r8
+  double-rings that flip to a FILLED disc (pointer knocked out) while their
+  param is turning — the flash window is now ~1.2s (mangler.lua enc()).
+- ALT MAP: FILTER+K1 → dry_wet / grain_level (D/W, GRN); REVERB+K1 →
+  delay_mix / dry_wet (MIX, D/W) — filled into ENC_MAP alt slots (RLPF/RHPF/
+  BPF expose only freq+rq, so the wet-path controls live here).
+- BODIES reverted/rebuilt to the Toy spec: MIX = two lanes (ENG scatter +
+  TAPE mirrored synthetic preview, TAPE_PREVIEW static buffer); LEVEL =
+  two stereo meter bars (L/R segments, peak-hold pip decay 0.0045/frame,
+  clip lamp >0.93, gain tab); GRAIN = pooled stereo grain field (GR_MAX 110,
+  spawn p=0.06+densityN*0.62, life 12+sizeN*26, len 1+sizeN*9, pitch tilts
+  vertical drift); TAPE = fixed reels (hub + 3 spokes r2.5→6.5, guides
+  y16/y32); REVERB = top-down room + bouncing rays + a periodic source
+  ping (period 56f); FILTER = response curve + shimmering spectrum ticks
+  (reseeded every 4f); REC = strip + cloud + 14px write-head afterglow;
+  WINDOW = strip + jitter ghosts; DELAY/STRETCH unchanged but de-topright.
+  Removed the VU/ARCH precompute + DOT_X + topright/flash-pocket.
+- Allocation-free hot path preserved (LEVEL uses static LVL_TICKS + the
+  preallocated grain pool; no per-frame table literals in draw_body).
+- SIM FIX: tools/uisim `screen.fill()` now fills circle paths too (norns
+  fills a circle; the pixel sim previously dropped it, so filled knobs
+  rendered blank). Suite gained FILTER_ALT / REVERB_ALT / GRAIN_PITCH shots;
+  dist byte-identical (42 shots across base/empty/filter/grain).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

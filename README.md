@@ -30,14 +30,19 @@ grid via midigrid) adds a pad surface. Built for **shield XL on Raspberry Pi 4**
 Every frame below is real output — the actual script run through the offscreen renderer
 (`tools/uisim/`) with a scripted take, tape loop, and live FX.
 
-![WINDOW page: a waveform-editor loupe — the full buffer boxed up top, the slice zoomed to full width below, length parked top-right](doc/ui/window.png)
+The **"Toy" UI**: a small title that never disappears, the armed-status flags beside it,
+uniform page dots top-right, and a footer that mirrors the panel — two knobs (they fill
+solid while you turn them), the live E2/E3 values, and the K2/K3 pills. No top-right pocket;
+the value lives in the footer.
+
+![WINDOW page: the buffer strip with slice handles, the length + scan in the footer](doc/ui/window.png)
 
 | | |
 |---|---|
-| ![MIX page](doc/ui/mix.png)<br>**MIX** — a needle VU per deck (ENG/TAPE): each rests at its real gain and lifts with output; a silenced deck's needle falls; crossfader between them | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — IN/OUT faders with live VU (hold K1: MON/HP) |
-| ![REC page](doc/ui/rec.png)<br>**REC** — a tape-deck face: REC lamp, seconds counter, stereo input meter, 60s reel-usage bar; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — the cloud is a stereo-field plot: height = spread, dot size = grain size, x = read position |
-| ![TAPE page](doc/ui/tape.png)<br>**TAPE** — reels spin at the real rate; loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, node dot at the cutoff |
-| ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — a cathedral in cross-section: the vault grows with size, starry air thickens with mix, ray pulses arc source → listener |
+| ![MIX page](doc/ui/mix.png)<br>**MIX** — two lanes with the crossfader between: ENG scatter (thickens toward the engine, flat when off) over the TAPE waveform (height rides the fade) | ![LEVEL page](doc/ui/level.png)<br>**LEVEL** — two stereo meter bars (L/R), peak-hold pips and a clip lamp; the tab under each bar is the gain (hold K1: MON/HP) |
+| ![REC page](doc/ui/rec.png)<br>**REC** — the buffer strip with the grain cloud; the write head lays material with an afterglow trail; empty buffer says `EMPTY - K2 REC` | ![GRAIN page](doc/ui/grain.png)<br>**GRAIN** — a stereo grain field: ticks stretch with size, fill with density, and drift with pitch; source ruler up top |
+| ![TAPE page](doc/ui/tape.png)<br>**TAPE** — two reels spinning at the real rate (hubs + spokes), tape guides between, loop + head below | ![FILTER page](doc/ui/filter.png)<br>**FILTER** — the engine's real response: filled passband, shimmering spectrum ticks, node dot at the cutoff (hold K1: D/W + GRN) |
+| ![DELAY page](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat; feedback shrinks the arcs | ![REVERB page](doc/ui/reverb.png)<br>**REVERB** — a room seen from above: walls grow with size, rays bounce to the listener, a ping pulses from the source (hold K1: MIX + D/W) |
 
 **STRETCH** draws the active algorithm's own texture — grains, an overlapped warp window,
 spectral columns — and lies flat when the voice is off:
@@ -78,9 +83,9 @@ whole device.
 | control | function |
 |---------|----------|
 | **E1**  | select page (**hold K1**: jump page family — source · shape · tape · fx) |
-| **E2 / E3** | the page's two parameters (**hold K1** for the alt parameter on each) |
+| **E2 / E3** | the page's two parameters — value + knob live in the footer; the knob fills while you turn it (**hold K1** for the alt parameter on each: e.g. FILTER → D/W + GRN, REVERB → MIX + D/W) |
 | **K1** (hold) | alt / shift modifier |
-| **K2 / K3** | the page's two actions (toggle or momentary) |
+| **K2 / K3** | the page's two actions (toggle or momentary) — the footer pills invert while active |
 
 Pages cycle with E1:
 `MIX · LEVEL · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB`.

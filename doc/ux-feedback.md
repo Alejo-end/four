@@ -130,6 +130,29 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     - **LEVEL** — left exactly as shipped (twin faders + VU) per request.
     Dist byte-identical (25 shots).
 
+17. **(user-directed) the "Toy" whole-screen redesign — supersedes §8–16
+    bodies.** The user prototyped and approved a full UI direction ("D ·
+    Toy") in a separate HTML recreation and asked for it verbatim, choosing
+    "Full Toy, revert bodies" when told it conflicted with the recent picks.
+    - **New chrome, every page:** a small title that never disappears; the
+      armed-status flags moved beside it (blinking dot + text, single-glyph
+      fallback); uniform page dots (current = rounded 4×4). The **top-right
+      readout pocket is gone** — the encoder values live in the footer row,
+      and each footer knob (a double-ring) fills into a solid disc while its
+      param is being turned (~1.2s). That — plus a key inverting its pill —
+      is the entire animation language.
+    - **New ALT layer** on FILTER (D/W, GRN) and REVERB (MIX, D/W): the
+      wet-path controls the filter itself can't expose.
+    - **Bodies:** MIX → two lanes; LEVEL → stereo meter bars (peak-hold +
+      clip lamp); GRAIN → a pooled stereo grain field (size stretches ticks,
+      density fills, pitch tilts the drift); TAPE → fixed reels; REVERB →
+      top-down room + rays + a source ping; FILTER → curve + spectrum ticks;
+      REC → strip + write-head afterglow; WINDOW → strip + jitter.
+    - Found + fixed a **uisim gap**: `screen.fill()` didn't fill circle
+      paths, so filled knobs rendered blank in the sim (fine on hardware).
+      Suite gained FILTER_ALT / REVERB_ALT / GRAIN_PITCH shots; dist
+      byte-identical (42 shots).
+
 ## Still open / next loop iterations
 
 - On-device verification of everything above (all of it is uisim-verified
