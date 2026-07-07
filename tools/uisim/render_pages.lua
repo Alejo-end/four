@@ -565,6 +565,17 @@ else
   run_ticks(3)
   redraw()
   export(pfx("GRAIN", "_BANK"))
+  -- S11: each Clouds mode draws its OWN picture (the K3 option becomes the
+  -- visualization). feedback set first so LOOP shows its echo ghosts.
+  params:set("clouds_fb", 0.55)
+  for i, name in ipairs({ "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }) do
+    params:set("clouds_mode", i)
+    run_ticks(20)
+    redraw()
+    export(pfx("GRAIN", "_CL_" .. name))
+  end
+  params:set("clouds_fb", 0)
+  params:set("clouds_mode", 1)
   -- PADS live: route to pads, two slice-type pads, cursor on pad 2 with an
   -- audition voice held (cell lit)
   goto_page("PADS")

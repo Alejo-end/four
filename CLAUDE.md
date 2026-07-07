@@ -355,6 +355,35 @@ byte-identical (48 shots). NB the reverb "no audible difference" report is
 almost certainly JPverb-absent → FreeVerb fallback (only decay/damp/mix respond,
 the other 9 params are no-ops) — a plugin-install issue, not a bug.
 
+Twenty-third change — **GRAIN page = mode-aware drawing (Lua-only, fingerprint
+STAYS 55)**: the GRAIN visualization now branches on `clouds_mode` (K3) so the
+chosen option BECOMES the picture — GRANULAR = the discrete grain cloud (kept
+byte-identical, still the only path that spawns from the seeded pool), STRETCH
+= overlapping elongated fade-ended windows (density=layers, size=length,
+tex=core fill, pos=center, lofi=dash), LOOP = a loop bar with boundary caps +
+a read head + echo ghosts (fb=ghost count & `fb^i` persistence, pos=position),
+SPECTRAL = vertical FFT columns around a centroid (pos=centroid, size=width,
+tex=roughness, lofi=quantize). The 3 non-granular modes are FULLY PROCEDURAL
+(frame + the existing `hash()` helper — no math.random, no per-frame tables/
+closures), so GRANULAR's RNG stream and its seeded render stay byte-identical.
+Silence (drone OFF / empty buffer) collapses every mode to a flat dim
+centerline. Suite gained GRAIN_CL_GRANULAR/STRETCH/LOOP/SPECTRAL shots (52
+total). dist byte-identical. (Done via the grain-page-designer subagent.)
+
+Twenty-fourth change — **REVERB + PADS page redesigns (Lua-only, fingerprint
+STAYS 55)**: user feedback — the REVERB top-down "room box" didn't read, and
+PADS still wasn't landing. (a) REVERB is now a **decay tail / impulse
+response**: a bright onset spike at t=0, then reflections decaying left→right,
+under a dim envelope-curve guide + a decay-end tick. tail length = rev_decay
+(t60), rev_damp = decay exponent (steeper), rev_size = reflection spacing, mix
+= density/height; dormant flat at mix 0. All procedural (hash+frame), no room/
+rays/ping. (b) PADS split into **the recording on top** (thin wave + 8 slice
+dividers + playhead) and **8 pad BUTTONS below, aligned under their slices**
+(so pad n = slice n is visible), each GRN/SLC, lit while sounding, cursor
+bordered; header now "PLAY>PADS" / "PLAY>DRONE". dist byte-identical (52
+shots). Both were reruns of prior designs the user rejected (top-down room,
+8-boxes-on-the-wave) — don't restore those unasked.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

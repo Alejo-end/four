@@ -1402,14 +1402,17 @@ local function draw_body()
       screen.fill()
     end
   elseif pname == "GRAIN" then
-    -- grain page (toy): a thin source ruler up top; the hero is a stereo
-    -- grain field. grains spawn at the playhead (scattered by jitter),
-    -- their ticks STRETCH with size, FILL with density, DRIFT vertically
-    -- with pitch. S7 character: GJIT (grain_jitter) varies per-grain tick
-    -- length, DTUN (grain_pitch_spread) fans grains apart vertically, and
-    -- the active envelope SHAPE (K1+K3) reads top-left. centerline y30.
+    -- grain page (toy): a thin source ruler up top, then the granular cloud
+    -- drawn AS THE CHOSEN CLOUDS MODE — the K3 option becomes the picture.
+    -- GRANULAR = a field of discrete grains (density=count, size=tick len,
+    -- spread=scatter, pitch=drift, jitter=x-scatter). STRETCH = overlapping
+    -- elongated windows (size=length, density=layers, tex=smoothness). LOOP =
+    -- a loop bar with echo ghosts (fb=ghosts, pos=position). SPECTRAL =
+    -- vertical frequency columns (size/tex shape the profile). shared: pos
+    -- shifts center, lofi coarsens, and a silent voice lies flat + dim.
     local lo, hi = window_bounds()
     local playing = C.wave_any and pget("mode", 2) ~= 1
+    local cm = pget("clouds_mode", 1)
     -- source ruler at y12: window span, handles, playhead
     screen.level(6)
     screen.move(lo * 127, 12) screen.line(hi * 127, 12)
@@ -1423,7 +1426,9 @@ local function draw_body()
       screen.rect(clamp(C.play_phase, 0, 1) * 127, 10, 1, 5)
       screen.fill()
     end
-    -- update the grain pool once per frame: age + compact, then spawn
+    -- age the grain pool every frame (particles always decay out); spawn
+    -- only in GRANULAR while playing — the other modes draw procedurally, so
+    -- mode 1's seeded RNG stream (and its render) stays byte-identical
     if C.frame ~= gr_last_frame then
       gr_last_frame = C.frame
       local w = 0
@@ -1438,7 +1443,7 @@ local function draw_body()
         end
       end
       gr_n = w
-      if playing then
+      if playing and cm == 1 then
         local dN = param_norm("density") or 0
         local sN = param_norm("size") or 0
         local jit = pget("pos_jitter", 0)
@@ -1467,25 +1472,134 @@ local function draw_body()
         end
       end
     end
-    -- centerline
-    screen.level(1)
-    screen.move(0, 30) screen.line(128, 30)
-    screen.stroke()
-    -- draw the grains: pitch tilts the vertical drift; each grain's own
-    -- detune (gr_dj) adds to that so a spread cloud fans apart over its life
-    local drift = log(pget("pitch", 1)) / log(2) * 0.35 * 0.5
-    for i = 1, gr_n do
-      local lv = floor(12 - gr_age[i] / gr_life[i] * 11 + 0.5)
-      if lv >= 1 then
-        local y = gr_y0[i] + (drift + gr_dj[i]) * gr_age[i]
-        if y < 20 then y = 20 elseif y > 40 then y = 40 end
-        screen.level(lv)
-        screen.rect(gr_x[i] - gr_len[i] / 2, y, gr_len[i], 1)
+    if cm == 1 then
+      -- GRANULAR: discrete grains over the centerline. pitch tilts the drift;
+      -- each grain's own detune (gr_dj) adds so a spread cloud fans apart.
+      screen.level(1)
+      screen.move(0, 30) screen.line(128, 30)
+      screen.stroke()
+      local drift = log(pget("pitch", 1)) / log(2) * 0.35 * 0.5
+      for i = 1, gr_n do
+        local lv = floor(12 - gr_age[i] / gr_life[i] * 11 + 0.5)
+        if lv >= 1 then
+          local y = gr_y0[i] + (drift + gr_dj[i]) * gr_age[i]
+          if y < 20 then y = 20 elseif y > 40 then y = 40 end
+          screen.level(lv)
+          screen.rect(gr_x[i] - gr_len[i] / 2, y, gr_len[i], 1)
+          screen.fill()
+        end
+      end
+    elseif not playing then
+      -- silence: mode OFF or an empty buffer — the cloud lies flat and dim
+      -- (the mode name still says which algorithm is armed)
+      screen.level(1)
+      screen.move(0, 30) screen.line(128, 30)
+      screen.stroke()
+    elseif cm == 2 then
+      -- STRETCH: grains stretched into sustained, OVERLAPPING windows. each
+      -- layer is a three-step brightness envelope (dim full tail -> mid ->
+      -- bright dashed core) so it reads as a fade-ended window, not a bare
+      -- line. density = layer count, size = length, clouds_tex = core
+      -- density (smoothness), clouds_pos = center, clouds_lofi = dash chunk.
+      local dN = param_norm("density") or 0
+      local sN = param_norm("size") or 0
+      local tex = pget("clouds_tex", 0.5)
+      local pos = pget("clouds_pos", 0.5)
+      local lofi = pget("clouds_lofi", 0)
+      local layers = 2 + floor(dN * 5)
+      local len = 24 + sN * 96
+      local cx = pos * 127
+      local sd = floor(frame / 3)
+      local dy = 16 / max(layers - 1, 1)
+      -- tails (level 3, full length) then mid (level 7, 65%): two batched
+      -- fills, brightening toward each layer's center for the window shape
+      for pass = 1, 2 do
+        local frac = pass == 1 and len or len * 0.65
+        screen.level(pass == 1 and 3 or 7)
+        for l = 1, layers do
+          local ly = 22 + (l - 1) * dy
+          local dr = sin(frame * 0.06 + l * 1.3) * 5
+          local x0 = clamp(cx - frac / 2 + dr, 0, 127)
+          local x1 = clamp(cx + frac / 2 + dr, 0, 127)
+          if x1 > x0 then screen.rect(x0, ly, x1 - x0, 1) end
+        end
         screen.fill()
       end
+      -- cores: bright dashed centers (tex = fill density, lofi = chunk size)
+      local dash = 2 + floor(lofi * 6)
+      screen.level(12)
+      for l = 1, layers do
+        local ly = 22 + (l - 1) * dy
+        local core = len * 0.38
+        local x0 = cx - core / 2 + sin(frame * 0.06 + l * 1.3) * 5
+        for u = 0, core, dash do
+          if tex > 0.97 or hash(floor(u), l, sd) < 0.2 + tex * 0.8 then
+            local x = x0 + u
+            if x >= 0 and x <= 127 then screen.rect(x, ly, max(dash - 1, 1), 1) end
+          end
+        end
+      end
+      screen.fill()
+    elseif cm == 3 then
+      -- LOOP: a bright loop segment with echo GHOSTS trailing behind it.
+      -- clouds_fb = ghost count + persistence, clouds_pos = loop position,
+      -- size = loop length. a read head sweeps the live loop.
+      local sN = param_norm("size") or 0
+      local pos = pget("clouds_pos", 0.5)
+      local fb = pget("clouds_fb", 0)
+      local w = 20 + sN * 60
+      local cx = pos * 127
+      local ngh = floor(fb * 6 + 0.5)
+      -- echoes: trailing left + down, fb^i persistence (dim, drawn behind)
+      for i = ngh, 1, -1 do
+        local lv = floor(3 + fb ^ i * 9 + 0.5)
+        if lv >= 1 then
+          screen.level(lv)
+          screen.rect(cx - i * 11 - w / 2, 30 + i * 1.5, w, 2)
+          screen.fill()
+        end
+      end
+      -- the live loop bar
+      screen.level(13)
+      screen.rect(cx - w / 2, 28, w, 3)
+      screen.fill()
+      -- boundary caps + a read head sweeping the loop
+      screen.level(15)
+      screen.rect(cx - w / 2, 25, 1, 9)
+      screen.rect(cx + w / 2, 25, 1, 9)
+      screen.rect(cx - w / 2 + (frame * 2) % max(w, 1), 24, 1, 11)
+      screen.fill()
+    else
+      -- SPECTRAL: an FFT view — vertical FREQUENCY columns across x. clouds_pos
+      -- = spectral centroid, size = width, clouds_tex = roughness, clouds_lofi
+      -- = chunkier bins. the columns shimmer (animated); tall/central = bright.
+      local sN = param_norm("size") or 0
+      local pos = pget("clouds_pos", 0.5)
+      local tex = pget("clouds_tex", 0.5)
+      local lofi = pget("clouds_lofi", 0)
+      local cx = pos * 127
+      local width = 12 + sN * 46
+      local step = 3 + floor(lofi * 5)
+      local bw = max(step - 1, 1)
+      local q = 1 + floor(lofi * 4)
+      local sd = floor(frame / 2)
+      for x = 0, 127, step do
+        local d = (x - cx) / width
+        local bell = 1 / (1 + d * d)
+        local jag = 0.55 + 0.45 * hash(x, 1, 0)
+        local shim = 0.6 + 0.4 * sin(frame * 0.3 + x * 0.35)
+        local rough = tex > 0 and (1 + (hash(x, 7, sd) * 2 - 1) * tex * 0.6) or 1
+        local h = floor(bell * jag * shim * rough * 20 / q) * q
+        if h > 20 then h = 20 end
+        if h >= 1 then
+          screen.level(floor(2 + bell * 10))
+          screen.rect(x, 41 - h, bw, h)
+          screen.fill()
+        end
+      end
     end
-    -- S11: the Clouds mode top-left (dim; K3 cycles it) and a bank chip
-    -- top-right for which granular pair E2/E3 are editing (K2 pages banks)
+    -- the Clouds mode top-left (dim; K3 cycles it) and a bank chip top-right
+    -- for which granular pair E2/E3 are editing (K2 pages banks)
     if params.lookup["clouds_mode"] then
       ptext(params:string("clouds_mode"), 2, 15, 1, 5)
     end
@@ -1727,68 +1841,52 @@ local function draw_body()
       screen.fill()
     end
   elseif pname == "REVERB" then
-    -- reverb page (toy): a room seen from above — the walls grow with
-    -- size, the source (bright dot, left) sends rays bouncing to a
-    -- listener ring (right), and the air fills with diffuse dither as mix
-    -- rises. a ping ring pulses out of the source on a slow cycle. at mix
-    -- 0 the page goes dormant: dim room, still air, no ping. S10: the full
-    -- JPverb attribute set is edited in banks (K2), decay ping-rate; the
-    -- bank + decay chip up top says which pair E2/E3 hold now.
-    local size = param_norm("rev_size") or 0.5
+    -- reverb page: the DECAY TAIL (impulse response) — the reverb's real
+    -- shape. a bright onset spike at t=0 (left), then reflections decaying
+    -- over time to the right. the tail LENGTH is the decay (rev_decay/t60);
+    -- rev_damp steepens the fade (energy dies faster); rev_size spaces the
+    -- reflections; mix sets their density/height. a dim envelope guide traces
+    -- the decay curve, and a tick marks where the tail ends. dormant (flat,
+    -- dim baseline) at mix 0. K2 pages the JPverb param banks (BK chip).
     local mixv = pget("rev_mix", 0)
-    local w = 44 + size * 60
-    local hh = 14 + size * 12
-    local x0, x1 = 64 - w / 2, 64 + w / 2
-    local y0, y1 = 26 - hh / 2, 26 + hh / 2
-    screen.level(mixv > 0 and 8 or 2)
-    screen.rect(x0 + 0.5, y0 + 0.5, w, hh)
-    screen.stroke()
-    local sx, sy = x0 + 7, 26
-    screen.level(mixv > 0 and 15 or 4)
-    screen.rect(sx - 1, sy - 1, 2, 2)
-    screen.fill()
-    screen.level(mixv > 0 and 8 or 2)
-    screen.circle(x1 - 7, 26, 2)
-    screen.stroke()
-    if mixv > 0 then
-      -- diffuse air, density rides mix
-      screen.level(2)
-      local sd = floor(frame * 0.2)
-      for gx = x0 + 3, x1 - 3, 5 do
-        for gy = y0 + 3, y1 - 3, 4 do
-          if hash(gx, gy, sd) < mixv * 0.45 then screen.rect(gx, gy, 1, 1) end
+    local decN = param_norm("rev_decay") or 0.3
+    local damp = pget("rev_damp", 0.3)
+    local sizeN = param_norm("rev_size") or 0.3
+    local live = mixv > 0.01
+    local base, maxh, x0 = 38, 21, 8
+    local tail = 26 + decN * 92
+    local x1 = min(x0 + tail, 125)
+    -- time-axis baseline
+    screen.level(live and 3 or 1)
+    screen.move(2, base) screen.line(126, base) screen.stroke()
+    if live then
+      -- the onset: a bright full-height spike at t=0
+      screen.level(15)
+      screen.rect(x0, base - maxh, 1, maxh) screen.fill()
+      -- reflections: vertical bars decaying across the tail. damp sets the
+      -- decay exponent, size the spacing, mix the height/density.
+      local sd = floor(frame / 3)
+      local step = 2 + floor(sizeN * 3)
+      local expo = 1 + damp * 4
+      for x = x0 + step, x1, step do
+        local t = (x - x0) / tail
+        local env = (1 - t) ^ expo
+        local h = env * (0.35 + 0.65 * hash(x, 1, sd)) * maxh * (0.4 + mixv * 0.6)
+        if h >= 1 then
+          screen.level(floor(2 + env * 11))
+          screen.rect(x, base - h, 1, h) screen.fill()
         end
+      end
+      -- envelope guide: the decay curve the reflections sit under
+      screen.level(4)
+      for x = x0, x1, 2 do
+        screen.rect(x, base - (1 - (x - x0) / tail) ^ expo * maxh, 1, 1)
       end
       screen.fill()
-      -- three rays bouncing off the walls, longer in a bigger room
-      screen.level(6)
-      local steps = floor(34 + size * 44)
-      for k = 0, 2 do
-        local a = k * 2.1 + frame * 0.03
-        local px2, py = sx, sy
-        local dx, dy = cos(a), sin(a)
-        for i = 0, steps do
-          px2 = px2 + dx
-          py = py + dy
-          if px2 <= x0 + 1 or px2 >= x1 - 1 then dx = -dx end
-          if py <= y0 + 1 or py >= y1 - 1 then dy = -dy end
-          if i % 3 == 0 then screen.rect(px2, py, 1, 1) end
-        end
-      end
-      screen.fill()
-      -- the ping: an expanding ring from the source, slow cycle
-      local pmax = hh / 2 - 3
-      if pmax > 2 then
-        local pph = (frame % 56) / 56
-        local plv = floor(9 - pph * 7 + 0.5)
-        if plv >= 2 then
-          screen.level(plv)
-          screen.circle(sx, sy, 2 + pph * (pmax - 2))
-          screen.stroke()
-        end
-      end
+      -- decay-end tick: how long the tail runs
+      screen.level(7)
+      screen.rect(x1, base - 4, 1, 4) screen.fill()
     end
-    -- which JPverb bank E2/E3 are editing (K2 pages through them)
     chip("BK" .. (C.rev_bank or 1), 2, 13)
   elseif pname == "PADS" then
     -- PADS page: your recording, chopped into 8 playable slices. each pad
@@ -1802,41 +1900,50 @@ local function draw_body()
     local used = 0
     for _, padi in pairs(C.pad_held) do pad_lit[padi] = true; used = used + 1 end
     local routed = pget("pad_input", 0) == 1
-    -- header: where do notes go, and how many voices are sounding
-    ptext(routed and "NOTES>PADS" or "NOTES>DRONE", 2, 13, 1, routed and 12 or 3)
+    -- header: does a note/grid press PLAY a pad, or retune the DRONE? + count
+    ptext(routed and "PLAY>PADS" or "PLAY>DRONE", 2, 13, 1, routed and 12 or 3)
     ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 13, 1, 4)
     if not C.wave_any and pget("rec", 0) == 0 then
-      ptext_c("EMPTY - K2 REC", 64, 27, 1, 6)
+      ptext_c("EMPTY - K2 REC", 64, 28, 1, 6)
     else
-      local x0, x1, wy0, wy1 = 4, 123, 20, 35
-      local mid = (wy0 + wy1) / 2
-      local half = (wy1 - wy0) / 2 - 1
-      local sw = (x1 - x0) / 8
-      -- faint waveform of the whole buffer under the slices
+      -- TOP: the recording, divided into 8 slices (thin wave + dividers + a
+      -- live playhead) — the source the pads chop up.
+      local bx0, bx1, by = 4, 124, 23
+      local sw = (bx1 - bx0) / 8
       screen.level(2)
-      for x = x0, x1 do
-        local a = wave[floor((x - x0) / (x1 - x0) * 127) + 1] or 0
+      for x = bx0, bx1 do
+        local a = wave[floor((x - bx0) / (bx1 - bx0) * 127) + 1] or 0
         if a > 0.002 then
-          local h = clamp(sqrt(min(a * 2, 1)) * half, 1, half)
-          screen.move(x, mid - h)
-          screen.line(x, mid + h)
+          local h = clamp(sqrt(min(a * 2, 1)) * 4, 1, 4)
+          screen.move(x, by - h)
+          screen.line(x, by + h)
         end
       end
       screen.stroke()
-      -- 8 slice boxes: cursor bright-bordered, lit filled while its pad sounds
+      screen.level(4)
+      for i = 0, 8 do screen.rect(bx0 + i * sw, by - 5, 1, 10) end
+      screen.fill()
+      if pget("mode", 5) ~= 1 then
+        screen.level(13)
+        screen.rect(bx0 + clamp(C.play_phase, 0, 1) * (bx1 - bx0), by - 5, 1, 10)
+        screen.fill()
+      end
+      -- BOTTOM: 8 pad BUTTONS, one under each slice — pad n plays slice n.
+      -- each shows its type (GRN/SLC); lit while its voice sounds; the cursor
+      -- (K2) has a bright border and is the pad K1+K2 auditions / K3 retypes.
       for i = 0, 7 do
-        local sx = x0 + i * sw
+        local px = bx0 + i * sw
         local cur = i == C.pad_cursor
         local lit = pad_lit[i]
         screen.level(cur and 15 or 4)
-        screen.rect(sx + 0.5, wy0 + 0.5, sw - 1, wy1 - wy0)
+        screen.rect(px + 1.5, 30.5, sw - 3, 9)
         screen.stroke()
         if lit then
           screen.level(cur and 15 or 9)
-          screen.rect(sx + 1.5, wy0 + 1.5, sw - 2, wy1 - wy0 - 1)
+          screen.rect(px + 3, 32, sw - 6, 6)
           screen.fill()
         end
-        ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", sx + sw / 2, mid - 2, 1,
+        ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", px + sw / 2, 33, 1,
           lit and 0 or (cur and 15 or 6))
       end
     end

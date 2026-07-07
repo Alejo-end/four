@@ -48,10 +48,10 @@ two knobs (they fill solid while you turn them), the live E2/E3 values, and the 
 | | |
 |---|---|
 | ![REC](doc/ui/rec.png)<br>**REC** — the buffer with the write head laying material; empty says `EMPTY - K2 REC` | ![MIX](doc/ui/mix.png)<br>**MIX** — crossfade the engine against the tape deck |
-| ![GRAIN](doc/ui/grain.png)<br>**GRAIN** — the granular editor: a live grain field; K2 banks the params, K3 cycles the modes | ![LEVEL](doc/ui/level.png)<br>**LEVEL** — stereo I/O meters with peak-hold + clip lamps |
-| ![FILTER](doc/ui/filter.png)<br>**FILTER** — the engine's real LP/HP/BP response, node dot at the cutoff | ![REVERB](doc/ui/reverb.png)<br>**REVERB** — a room from above; K2 banks the full reverb controls |
+| ![GRAIN](doc/ui/grain.png)<br>**GRAIN** — the granular editor; the drawing *is* the chosen Clouds mode (K3): GRANULAR cloud · STRETCH windows · LOOP + echoes · SPECTRAL columns. K2 banks the params | ![LEVEL](doc/ui/level.png)<br>**LEVEL** — stereo I/O meters with peak-hold + clip lamps |
+| ![FILTER](doc/ui/filter.png)<br>**FILTER** — the engine's real LP/HP/BP response, node dot at the cutoff | ![REVERB](doc/ui/reverb.png)<br>**REVERB** — the decay tail: onset → reflections dying over time (tail length = decay); K2 banks the full JPverb controls |
 | ![DELAY](doc/ui/delay.png)<br>**DELAY** — one bounce per repeat, arcs shrink with feedback (starts dry) | ![TAPE](doc/ui/tape.png)<br>**TAPE** — a parallel loop deck; reels spin at the real rate |
-| ![PADS](doc/ui/pads.png)<br>**PADS** — your recording as **8 playable slices** (GRN cloud / SLC slice each); the header says where notes go, `NOTES>PADS` or `NOTES>DRONE` | ![STRETCH](doc/ui/stretch-play.png)<br>**STRETCH** — pick the drone engine: **PLAY** (clean loop, default) · GRAIN · WARP · PV; each draws its own texture, flat when off |
+| ![PADS](doc/ui/pads.png)<br>**PADS** — your recording up top (8 slice divisions), and **8 pad buttons below, one per slice** (GRN cloud / SLC slice, lit while sounding, cursor). Header: `PLAY>PADS` / `PLAY>DRONE` (K1+K3) | ![STRETCH](doc/ui/stretch-play.png)<br>**STRETCH** — pick the drone engine: **PLAY** (clean loop, default) · GRAIN · WARP · PV; each draws its own texture, flat when off |
 
 ---
 
