@@ -1,33 +1,52 @@
--- mangler
--- live stereo sample-mangling instrument for external gear
--- (synth, drum machine, anything line-level)
+-- mangler — a live stereo sampler + mangler for norns
+-- =====================================================
 --
--- 3 keys + 3 encoders. every parameter is MIDI-mappable (PARAMS menu).
+-- record external gear (synth, drum machine, anything line-level), then play
+-- it back and mangle it. a fresh take loops back DRY — exactly what you
+-- recorded. you ADD effects on top; they are never forced on.
 --
--- E1 : page select (hold K1: jump page family)
--- E2 : primary param   (hold K1 -> alt param)
--- E3 : secondary param (hold K1 -> alt param)
--- K1 : alt / shift modifier (hold)
--- K2 : primary action
--- K3 : secondary action
+--   IN -> REC -> [ DRONE  +  PADS ] -> FILTER -> DELAY -> REVERB -> OUT
+--                  clean loop /        (filter open, drive/delay/reverb
+--                  granular /           all start at zero — dial them in)
+--                  stretch / spectral
 --
--- STAGE 4 — record + granular + window + time-stretch modes + softcut TAPE
--- + filter/delay/reverb. See doc/spec.md.
+-- the drone defaults to CLEAN PLAY — a straight loop of your take, exactly as
+-- recorded. GRAIN / WARP / PV are mangling modes you switch on from STRETCH.
 --
--- MIDI notes play the sample chromatically: note-ons retune `pitch`
--- relative to the root note (PARAMS > keys). a USB typing keyboard works
--- too: ableton-style musical typing (A-row = white keys, W-row = black,
--- Z/X = octave down/up). see lib/minput.lua.
+-- PLAY IT
+--   LEVEL   set input so the meters peak just below the top
+--   REC     K2, play a phrase, K2 — the window snaps to your take and loops it
+--   STRETCH pick the drone engine (PLAY clean · GRAIN · WARP · PV) · GRAIN tunes it
+--   DELAY / REVERB   start dry (mix 0); turn E2 up to add them
+--   PADS    K1+K3 -> NOTES>PADS: MIDI/grid notes play 8 slices over the drone
 --
--- a grid is optional, never required: a monome grid — or a launchpad-style
--- MIDI grid controller via the midigrid library — adds note pads, window/
--- loop slice pads, and transport toggles. see lib/mgrid.lua.
+-- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
+--   E1     select page          (hold K1: jump between page families)
+--   E2/E3  the page's two knobs  (hold K1: the alt pair; footer shows values)
+--   K1     alt / shift (hold)
+--   K2/K3  the page's two actions (on banked pages K2 pages E2/E3 through
+--          the parameter pairs — e.g. all of REVERB and GRAIN)
 --
--- this file is the orchestrator: state + params + key/encoder handlers.
--- everything else lives in lib/ modules (script-internal, not norns
--- engines): mfont (pixel font), mparticles (grain cloud), mtape (softcut),
--- minput (midi/keyboard notes), mgrid (grid surface), mpages (the screen).
--- they share one `ctx` table — params stay the single source of truth.
+-- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
+--
+-- NOTES   a MIDI keyboard (or USB typing keyboard, ableton-style: A-row =
+--   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
+--   with pad input on they trigger the PADS slices instead. PARAMS > keys.
+--
+-- GRID (optional, never required)   a monome grid — or a launchpad-style
+--   controller via the midigrid library — adds transport toggles, window/loop
+--   slice pads, and two piano octaves. see lib/mgrid.lua.
+--
+-- BEST SOUND (optional, auto-detected)   JPverb (sc3-plugins) reverb + MiClouds
+--   (mi-UGens) granular are used when installed, else stock FreeVerb / GrainBuf.
+--   guarded at build time — a missing plugin can never hang loading.
+--
+-- -----------------------------------------------------------------------------
+-- this file is the orchestrator: state + params + key/encoder handlers. the
+-- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
+-- font), mparticles (grain cloud), mtape (softcut tape), minput (midi/keyboard
+-- notes), mgrid (grid surface), mpages (the screen). they share one `ctx` table
+-- and params are the single source of truth. full design: doc/spec.md.
 
 engine.name = "Mangler"
 
@@ -138,6 +157,8 @@ local ctx = {
   pad_cursor = 0,
   pad_n = 8,
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
+  rev_bank = 1,              -- S10: which REVERB param pair E2/E3 edit
+  grain_bank = 1,            -- S11: which GRAIN param pair E2/E3 edit
 }
 
 local Mfont = include "lib/mfont"
@@ -205,27 +226,27 @@ local KEYS = {
       act = function() params:set("scan", -params:get("scan")) end },
   },
   GRAIN = {
-    -- octave throws on the playable pitch (alt: up); K3 re-centers
-    k2 = { label = "OCT-",
+    -- S11: BANK pages E2/E3 through the granular attributes (like REVERB);
+    -- MODE cycles the four Clouds modes. octave throws move to the alt layer.
+    k2 = { label = "BANK",
+      act = function() ctx.grain_next_bank() end },
+    k2_alt = { label = "OCT-",
       act = function()
         params:set("pitch", math.max(params:get("pitch") * 0.5, 0.25))
       end },
-    k2_alt = { label = "OCT+",
+    k3 = { label = "MODE",
+      act = function()
+        params:set("clouds_mode", (params:get("clouds_mode") % 4) + 1)
+      end },
+    k3_alt = { label = "OCT+",
       act = function()
         params:set("pitch", math.min(params:get("pitch") * 2, 4))
       end },
-    k3 = { label = "PT=1",
-      act = function() params:set("pitch", 1.0) end },
-    -- alt: cycle the grain envelope shape (HANN -> WELCH -> PERC)
-    k3_alt = { label = "SHP",
-      act = function()
-        params:set("grain_shape", (params:get("grain_shape") % 3) + 1)
-      end },
   },
   STRETCH = {
-    -- K2 cycles OFF -> GRAIN -> WARP -> PV -> OFF; K3 toggles spectral freeze
+    -- K2 cycles OFF -> GRAIN -> WARP -> PV -> PLAY -> OFF; K3 spectral freeze
     k2 = { label = "MODE",
-      act = function() params:set("mode", (params:get("mode") % 4) + 1) end },
+      act = function() params:set("mode", (params:get("mode") % 5) + 1) end },
     k3 = { label = "PVFZ", lit = "pv_freeze",
       act = function() ptoggle("pv_freeze") end },
   },
@@ -269,8 +290,9 @@ local KEYS = {
       act = function() params:set("delay_fb", 0) end },
   },
   REVERB = {
-    k2 = { label = "WASH",
-      act = function() params:set("rev_mix", 1) end },
+    -- BANK pages E2/E3 through the JPverb param pairs; KILL dries it out
+    k2 = { label = "BANK",
+      act = function() ctx.rev_next_bank() end },
     k3 = { label = "KILL",
       act = function() params:set("rev_mix", 0) end },
   },
@@ -288,6 +310,10 @@ local KEYS = {
         local i = ctx.pad_cursor
         ctx.pad_type[i] = (ctx.pad_type[i] == 0) and 1 or 0
       end },
+    -- alt: route MIDI/grid notes to the pads (vs the drone) — the header
+    -- flips NOTES>DRONE / NOTES>PADS
+    k3_alt = { label = "ROUTE", lit = "pad_input",
+      act = function() ptoggle("pad_input") end },
   },
 }
 
@@ -304,6 +330,23 @@ local function key_def(n)
   return defs.k3
 end
 
+-- S10: REVERB has more (JPverb) attributes than 4 encoder slots, so E2/E3
+-- edit one PAIR at a time and K2 (BANK) pages through them. the KEYS.REVERB
+-- BANK action rewrites ENC_MAP.REVERB[1]/[3] in place, so the footer + encoder
+-- resolver keep working unchanged.
+-- Banked editors (REVERB, GRAIN): each bank holds FOUR params — E2/E3 plus
+-- their alt (hold K1) pair — so K2 pages through half as many banks and the
+-- alt layer earns its keep. entry order: { E2, E3, E2_alt, E3_alt }.
+local REVERB_BANKS = {
+  { "rev_decay", "rev_mix", "rev_damp", "rev_size" },      -- SPACE
+  { "rev_low", "rev_mid", "rev_high", "rev_early" },        -- TONE + diffusion
+  { "rev_moddepth", "rev_modfreq", "rev_lowcut", "rev_highcut" },  -- MOD + cuts
+}
+local GRAIN_BANKS = {
+  { "size", "density", "spread", "clouds_tex" },
+  { "clouds_pos", "clouds_fb", "grain_level", "clouds_lofi" },
+}
+
 -- which params each page's encoders address: { e2, e2_alt, e3, e3_alt }.
 -- nil entries draw as "--" until the owning stage wires them.
 local ENC_MAP = {
@@ -313,16 +356,35 @@ local ENC_MAP = {
   LEVEL   = { "input_level", "monitor_level", "output_level", "headphone_gain" },
   REC     = { "rec_level", "pre_level", "dry_wet", "resample" },
   WINDOW  = { "pos_start", "scan", "pos_end", "pos_jitter" },
-  GRAIN   = { "size", "spread", "density", "grain_level" },
+  -- GRAIN/REVERB track the current bank; BANK (K2) rewrites all four slots.
+  -- seed with bank 1. format {e2, e2_alt, e3, e3_alt}.
+  GRAIN   = { "size", "spread", "density", "clouds_tex" },
   STRETCH = { "scan", "pitch", "warp_window", "warp_rand" },
   TAPE    = { "tape_rate", "tape_pre", "loop_start", "loop_end" },
   -- FILTER/REVERB gain an ALT layer (K1): the wet-path controls the filter
   -- itself can't expose (RLPF/RHPF/BPF are freq+rq only)
   FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
   DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
-  REVERB  = { "rev_size", "delay_mix", "rev_mix", "dry_wet" },
+  REVERB  = { "rev_decay", "rev_damp", "rev_mix", "rev_size" },
   PADS    = { "voices", "voice_atk", "voice_rel", nil },
 }
+
+-- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
+-- place so the footer/encoder resolver stay unchanged). called by KEYS.REVERB.
+-- bank entry {E2,E3,E2alt,E3alt} maps to ENC_MAP {e2, e2_alt, e3, e3_alt}
+function ctx.rev_next_bank()
+  ctx.rev_bank = (ctx.rev_bank % #REVERB_BANKS) + 1
+  local b = REVERB_BANKS[ctx.rev_bank]
+  ENC_MAP.REVERB[1], ENC_MAP.REVERB[2], ENC_MAP.REVERB[3], ENC_MAP.REVERB[4] =
+    b[1], b[3], b[2], b[4]
+end
+
+function ctx.grain_next_bank()
+  ctx.grain_bank = (ctx.grain_bank % #GRAIN_BANKS) + 1
+  local b = GRAIN_BANKS[ctx.grain_bank]
+  ENC_MAP.GRAIN[1], ENC_MAP.GRAIN[2], ENC_MAP.GRAIN[3], ENC_MAP.GRAIN[4] =
+    b[1], b[3], b[2], b[4]
+end
 
 -- the param id addressed by encoder n (2 or 3) on the current page, alt-aware.
 local function enc_param(n)
@@ -507,10 +569,33 @@ local function init_params()
     if engine.grain_shape then engine.grain_shape(v - 1) end
   end)
 
+  -- S11: MiClouds granular controls (GRAIN mode uses the Clouds voice when
+  -- mi-UGens are installed; on the GrainBuf fallback these are stored but
+  -- ignored — same guarded philosophy as the JPverb-only reverb params). the
+  -- shared size/density/spread/pitch already remap to Clouds; these are the
+  -- Clouds-specific attributes. edited on the GRAIN page + PARAMS.
+  params:add_group("grp_clouds", "clouds", 5)
+  add_eng_control("clouds_pos", "grain position",
+    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  add_eng_control("clouds_tex", "grain texture",
+    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  add_eng_control("clouds_fb", "grain feedback",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_option("clouds_mode", "clouds mode",
+    { "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }, 1)
+  params:set_action("clouds_mode", function(v)
+    if engine.clouds_mode then engine.clouds_mode(v - 1) end
+  end)
+  add_eng_control("clouds_lofi", "grain lofi",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+
   params:add_group("grp_stretch", "stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
   -- costs CPU; OFF frees the SC voice entirely
-  params:add_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV" }, 2)
+  -- S14: PLAY (clean straight loop = the exact recorded sample) is the
+  -- DEFAULT so a fresh take plays back untouched; GRAIN/WARP/PV are switched
+  -- on for mangling. appended (not reordered) so 1..4 keep their meaning.
+  params:add_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 5)
   params:set_action("mode", function(v)
     if engine.mode then engine.mode(v - 1) end
   end)
@@ -593,9 +678,32 @@ local function init_params()
   add_eng_control("delay_mix", "delay mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_reverb", "reverb", 2)
+  -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
+  -- fallback in the engine). every knob maps to a real JPverb arg — nothing
+  -- hardcoded. edited on the REVERB page in banks (K2 pages through them).
+  params:add_group("grp_reverb", "reverb", 12)
+  add_eng_control("rev_decay", "reverb decay",
+    controlspec.new(0.1, 30, "exp", 0, 2.0, "s"))
+  add_eng_control("rev_damp", "reverb damp",
+    controlspec.new(0, 1, "lin", 0, 0.3, ""))
   add_eng_control("rev_size", "reverb size",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+    controlspec.new(0.5, 5, "lin", 0, 1.0, ""))
+  add_eng_control("rev_early", "early diffusion",
+    controlspec.new(0, 1, "lin", 0, 0.7, ""))
+  add_eng_control("rev_moddepth", "mod depth",
+    controlspec.new(0, 1, "lin", 0, 0.1, ""))
+  add_eng_control("rev_modfreq", "mod freq",
+    controlspec.new(0, 10, "lin", 0, 2.0, "hz"))
+  add_eng_control("rev_low", "low decay",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  add_eng_control("rev_mid", "mid decay",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  add_eng_control("rev_high", "high decay",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  add_eng_control("rev_lowcut", "low crossover",
+    controlspec.new(20, 2000, "exp", 0, 500, "hz"))
+  add_eng_control("rev_highcut", "high crossover",
+    controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 

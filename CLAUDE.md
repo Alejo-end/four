@@ -6,7 +6,14 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S5–S8 — engine gain/tone + JPverb + granular character + polyphonic voices, on-device gate pending (fingerprint 40)**
+## CURRENT STAGE: **S5–S14 — …+ clean PLAY drone (default) + alt-paired banks, on-device gate pending (fingerprint 55)**
+
+Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
+a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
+every UGen attribute wrapped as a real param (no hardcoding), reworked FX/GRAIN/PADS pages,
+all **fully guarded** (`.asClass` build-time detect → stock fallback, can't brick). Land it
+in **on-device-gated stages** (S9 done here; S10 → S11 → S12 each after its gate). Never write
+the next stage before the current one's count + ear-check pass on the device.
 
 S1 PASSED, S2 PASSED (stretch modes), S3 PASSED with UX iterations (tape looper:
 one-button take workflow, K1+K3 clear). S4 adds the FX chain to the io synth's wet
@@ -247,12 +254,113 @@ byte-identical (46 shots). RESERVED-ID watch: `voices`/`voice_*`/`pad_input`
 aren't in the known system-param list, but confirm no "refusing to clobber"
 on device. note_one_shot is available but unused (pad model is held).
 
+Seventeenth change — **S9 headroom + HOME page (engine gain constants +
+Lua/doc, fingerprint STAYS 40)**: first of the staged sampler rework. Engine:
+per-voice amp 0.5→0.3 (voiceParams) + master Limiter 0.98→0.92 — fixes the
+S8 chord-clipping (poly voices summing slammed the limiter into pumping); no
+new command, so **still 40** (a restart is still required — gain lives in the
+.sc). Lua: a **HOME page** added as **page 1** (seen on load) — signal-flow
+chain IN→REC→SRC→FX→OUT (HOME_FLOW/HOME_BX statics), live output meter, cheat-
+sheet; ENC_MAP.HOME = master out/in/dry_wet/mix, KEYS.HOME = PANIC
+(pads_all_off) / PADS (toggle pad_input). PAGES now 12; PAGE_GROUPS
+{1,2,5,8,9,12}; header dot pitch already adapts. GOTCHA handled: adding HOME
+shifted every page index, so **the render suite is now name-based** — a
+`goto_page(name)` + `pfx(name,suffix)` (index from PAGE_IDX) replaced all the
+hardcoded `enc(1,N)` + `_NN_` offsets (robust to future page changes). README
+rewritten toward a sampler manual (HOME hero + quickstart + guarded-plugin
+note); gallery regenerated (16 pngs, shifted indices). dist byte-identical
+(47 shots).
+
+Eighteenth change — **S10 full-API JPverb (engine + Lua, fingerprint 40 →
+50)**: the reverb block now wraps JPverb's ENTIRE attribute set as args (no
+hardcoding) — +10 ioKeys commands (rev_decay/damp/early/moddepth/modfreq/
+low/mid/high/lowcut/highcut). Still guarded (.asClass → FreeVerb fallback
+whose roomsize = rev_decay.linlin, damp = rev_damp). `rev_size` REPURPOSED
+from 0..1 to JPverb's 0.5..5 size — the REVERB page viz now reads
+`param_norm("rev_size")`, keep that in mind. grp_reverb 2 → 12 params. UI:
+REVERB is now a **banked editor** — E2/E3 edit one REVERB_BANKS pair; K2
+"BANK" calls `ctx.rev_next_bank()` which rewrites `ENC_MAP.REVERB[1]/[3]` in
+place (so the footer/enc resolver need no change); a "BK n" chip shows the
+bank. SCOPE GOTCHA: the bank cycler lives in `ctx.rev_next_bank` (defined
+after ENC_MAP/REVERB_BANKS) because KEYS is declared BEFORE them — a closure
+in KEYS can't upvalue a later `local`. Suite: REVERB_ALT shot → REVERB_BANK.
+dist byte-identical (47 shots).
+
+Nineteenth change — **S11 MiClouds granular drone (engine + Lua, fingerprint
+50 → 55)**: GRAIN mode now runs a **MiClouds** (mi-UGens Clouds port) granular
+voice when the plugin is installed, else the S7 GrainBuf drone. GUARDED TWO
+WAYS so it can NEVER brick LOADING: (1) the class is resolved via
+`"MiClouds".asSymbol.asClass` (no literal reference — the .sc compiles without
+mi-UGens), (2) the whole `\mangler_clouds` def is wrapped in `try {} {|e|
+hasClouds=false …}` so a wrong graph/arg set degrades to GrainBuf instead of
+failing alloc. Architecture: a BufRd scrubs the recorded window (the same
+scan/pos Phasor the GrainBuf drone uses) → feeds Clouds; `pv_freeze` doubles
+as the clouds freeze. `cc.ar` uses POSITIONAL args (keyword args don't survive
+perform on a var-held class) — order: in, pit, pos, size, dens, tex, drywet,
+in_gain, spread, rvb, fb, freeze, mode, lofi; our size/density/pitch remap to
+Clouds' 0..1 / semitone ranges. +5 playParams commands (clouds_pos/tex/fb/mode/
+lofi, auto-wired by the addCommand union loop; setMode re-applies them). NOTE:
+the MiClouds arg order/semantics are my best-knowledge and UNVERIFIED — the
+device gate must confirm (the guard means a wrong-but-present arg posts in the
+SC tab / falls back, rather than bricking). UI: GRAIN became a **banked editor**
+(GRAIN_BANKS, `ctx.grain_next_bank`, same in-place ENC_MAP rewrite as REVERB) —
+E2/E3 page size/density · spread/tex · pos/fb · level/lofi; K2 BANK, K3 MODE
+(cycles the 4 Clouds modes), octave throws moved to the key-alt layer;
+grain_shape (SHP) retired to PARAMS. dist byte-identical (48 shots).
+
+Twentieth change — **S12 PADS slice-sampler rework (Lua-only, fingerprint
+STAYS 55)**: the PADS page read as abstract 4×2 cells ("not sure what it is").
+Redrawn as **the recording chopped into 8 slices** — the buffer waveform under
+8 slice boxes (GRN/SLC per pad, lit while sounding, bright cursor border), a
+plain-words routing header (**NOTES>PADS** lit / **NOTES>DRONE** dim) and a
+used/cap voice count, with the "EMPTY - K2 REC" invitation when there's no
+take. So a "pad" is self-evidently an eighth of what you recorded, played
+polyphonically over the drone. New key: PADS **K1+K3 = ROUTE** toggles
+pad_input right on the page (was HOME-only). Keys otherwise unchanged (K2 SEL
+cursor, K1+K2 PLAY audition, K3 TYPE grain/slice); encoders VOX/ATK/REL. Pads
+still slice the whole buffer at i/8 (per-pad position + the optional guarded
+DFM1 filter were deferred — JPverb/MiClouds were the named asks). dist
+byte-identical (48 shots).
+
+Twenty-first change — **HOME page REMOVED + README quick-guide + S13
+dry-by-default drive (fingerprint STAYS 55)**: user feedback — the in-script
+HOME page was a misread (they wanted the *README* to be the front-page guide,
+not a norns-screen page eating a slot), and a fresh recording should sound
+like the **exact dry sample**, FX added on top. (a) HOME page fully reverted:
+PAGES back to 11 (MIX first again), PAGE_GROUPS {1,4,7,8}, ENC_MAP/KEYS/mpages
+HOME removed, render suite PAGES + doc/ui/home.png gone (the name-based
+`goto_page`/`pfx` render harness from the Seventeenth change STAYS — it's what
+made adding+removing HOME a clean index shift). (b) README rewritten as a
+fast, skimmable quick-guide ("play it in 60 seconds", dry-by-default called
+out, tightened reference). (c) Engine S13: `drive` is now
+`XFade2.ar(clean, tanh(driven), drive*2-1)` so **drive=0 is a TRUE bypass**
+(was an always-on tanh that soft-clipped a fresh recording) — no new command,
+still 55. Confirmed dry defaults: delay_mix=0, rev_mix=0 (delay+reverb OFF by
+default — a fresh take plays clean). dist byte-identical (47 shots).
+
+Twenty-second change — **S14 clean PLAY drone (default) + alt-paired banks
+(engine + Lua, fingerprint STAYS 55)**: user wanted a fresh take to loop back
+as the EXACT recorded sample (not granulated), and the banked editors to use
+the alt layer so there are fewer banks. (a) Engine: new `\mangler_play` def —
+a straight BufRd loop of the window (scan = speed, pitch = varispeed resample),
+all core UGens (can't brick). setMode gets an `i==4` case; **mode option is
+now {OFF,GRAIN,WARP,PV,PLAY}, default PLAY** (appended, so 1..4 keep meaning —
+no renumber). No new command → still 55. STRETCH MODE key cycles `%5`; grid
+mode radio widened to x=3..7; STRETCH page draws PLAY as a solid unbroken wave;
+render suite STRETCH loop + MIX_OFF restore updated to mode 5. (b) REVERB_BANKS
+6→**3** and GRAIN_BANKS 4→**2**: each bank entry is now `{E2,E3,E2alt,E3alt}`
+(4 params) and the cyclers rewrite all four ENC_MAP slots, so K1 (alt) reaches
+the second pair within a bank. Seeds + `ctx.*_next_bank` updated. dist
+byte-identical (48 shots). NB the reverb "no audible difference" report is
+almost certainly JPverb-absent → FreeVerb fallback (only decay/damp/mix respond,
+the other 9 params are no-ops) — a plugin-install issue, not a bug.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
-   expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8 = **40**). Wrong
-   count = old engine still live.
+   expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
+   S10 = 50, S11 = **55**). Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

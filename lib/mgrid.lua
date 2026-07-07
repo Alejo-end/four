@@ -112,7 +112,7 @@ local function grid_key(x, y, z)
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
     elseif x == 2 then ptoggle("freeze")
-    elseif x >= 4 and x <= 7 then params:set("mode", x - 3)
+    elseif x >= 3 and x <= 7 then params:set("mode", x - 2)  -- OFF/GRAIN/WARP/PV/PLAY
     elseif x == 8 then ptoggle("pv_freeze") end
   elseif y == 2 then
     if x == 3 then
@@ -143,7 +143,7 @@ function M.redraw()
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)
   gg:led(2, 1, pget("freeze", 0) == 1 and 15 or 2)
   local mode = pget("mode", 2)
-  for x = 4, 7 do gg:led(x, 1, (x - 3) == mode and 15 or 3) end
+  for x = 3, 7 do gg:led(x, 1, (x - 2) == mode and 15 or 3) end
   gg:led(8, 1, pget("pv_freeze", 0) == 1 and 15 or 2)
 
   -- row 2: tape transport

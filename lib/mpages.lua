@@ -99,11 +99,16 @@ local SHORT = {
   pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
+  clouds_pos = "POS", clouds_tex = "TEX", clouds_fb = "FB", clouds_lofi = "LOFI",
+  clouds_mode = "MODE",
   pitch = "PTCH", warp_window = "WIN", warp_rand = "RAND", kb_octave = "OCT",
   tape_rate = "RATE", tape_pre = "OVR", loop_start = "STRT", loop_end = "END",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "MIX", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "MIX",
+  rev_decay = "DEC", rev_damp = "DMP", rev_early = "DIFF",
+  rev_moddepth = "MOD", rev_modfreq = "MRAT", rev_low = "LOW",
+  rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
 }
 
@@ -130,10 +135,16 @@ end
 local RATE_IDS = { scan = true, tape_rate = true }
 local function fmt_value(id)
   if not (id and params.lookup[id]) then return "--" end
-  if id == "cutoff" then
+  if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut" then
     local v = params:get(id)
     return v >= 1000 and string.format("%.1fKHZ", v / 1000)
       or string.format("%dHZ", floor(v + 0.5))
+  elseif id == "rev_decay" then
+    return string.format("%.1fS", params:get(id))
+  elseif id == "rev_modfreq" then
+    return string.format("%.1fHZ", params:get(id))
+  elseif id == "rev_size" then
+    return string.format("%.1f", params:get(id))
   elseif id == "pitch" then
     local st = floor(12 * log(params:get(id)) / log(2) + 0.5)
     return (st >= 0 and "+" or "") .. st .. "ST"
@@ -616,10 +627,12 @@ local function draw_body()
         screen.fill()
       end
     end
-    -- the active grain envelope shape, dim top-left (K1+K3 cycles it)
-    if params.lookup["grain_shape"] then
-      ptext(params:string("grain_shape"), 2, 15, 1, 4)
+    -- S11: the Clouds mode top-left (dim; K3 cycles it) and a bank chip
+    -- top-right for which granular pair E2/E3 are editing (K2 pages banks)
+    if params.lookup["clouds_mode"] then
+      ptext(params:string("clouds_mode"), 2, 15, 1, 5)
     end
+    chip("BK" .. (C.grain_bank or 1), 108, 13)
   elseif pname == "STRETCH" then
     -- mockup stretch page: inverted mode badge, speed readout, real
     -- playhead, window bar — and the wave drawn in the active algorithm's
@@ -662,11 +675,17 @@ local function draw_body()
         screen.rect(x, stretch_wy(x, ph, rate), 1, 1)
       end
       screen.fill()
-    else                       -- PV: spectral columns under the same curve
+    elseif mode == 4 then      -- PV: spectral columns under the same curve
       screen.level(6)
       for x = 0, 127, 4 do
         local h = abs(sin((x + ph) * 0.35 * rate)) * 11 + 1
         screen.rect(x, 38 - h, 2, h)
+      end
+      screen.fill()
+    else                       -- PLAY: the exact sample, drawn as a solid
+      screen.level(9)          -- unbroken wave (no grains/columns = untouched)
+      for x = 0, 127 do
+        screen.rect(x, stretch_wy(x, ph, rate), 1, 1)
       end
       screen.fill()
     end
@@ -855,8 +874,10 @@ local function draw_body()
     -- size, the source (bright dot, left) sends rays bouncing to a
     -- listener ring (right), and the air fills with diffuse dither as mix
     -- rises. a ping ring pulses out of the source on a slow cycle. at mix
-    -- 0 the page goes dormant: dim room, still air, no ping.
-    local size = pget("rev_size", 0.5)
+    -- 0 the page goes dormant: dim room, still air, no ping. S10: the full
+    -- JPverb attribute set is edited in banks (K2), decay ping-rate; the
+    -- bank + decay chip up top says which pair E2/E3 hold now.
+    local size = param_norm("rev_size") or 0.5
     local mixv = pget("rev_mix", 0)
     local w = 44 + size * 60
     local hh = 14 + size * 12
@@ -910,35 +931,57 @@ local function draw_body()
         end
       end
     end
+    -- which JPverb bank E2/E3 are editing (K2 pages through them)
+    chip("BK" .. (C.rev_bank or 1), 2, 13)
   elseif pname == "PADS" then
-    -- pads page: an 8-slice pad bank (4x2). each cell shows its type
-    -- (GRN/SLC) and lights while a voice for it sounds; the cursor (bright
-    -- border) marks the pad K1+K2 auditions and K3 retypes. top row: whether
-    -- MIDI/grid notes route here (PAD) or to the drone (DRN), and voices used.
+    -- PADS page: your recording, chopped into 8 playable slices. each pad
+    -- plays from its slice of the buffer as a grain cloud (GRN) or a clean
+    -- slice (SLC), POLYPHONICALLY and OVER the drone. play them from MIDI
+    -- notes / grid pads when "NOTES>PADS" is lit (K1+K3 toggles it here),
+    -- or audition the cursor pad with K1+K2. K2 moves the cursor, K3 flips
+    -- the cursor pad's type. drawn as the buffer sliced into 8 so it's
+    -- obvious what a "pad" is: an eighth of what you recorded.
     for i = 0, 7 do pad_lit[i] = false end
     local used = 0
-    for _, padi in pairs(C.pad_held) do
-      if pad_lit[padi] == false then pad_lit[padi] = true end
-      used = used + 1
-    end
+    for _, padi in pairs(C.pad_held) do pad_lit[padi] = true; used = used + 1 end
     local routed = pget("pad_input", 0) == 1
-    ptext(routed and "PAD" or "DRN", 2, 13, 1, routed and 9 or 3)
-    ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5), 126, 13, 1, 4)
-    for i = 0, 7 do
-      local cx = 8 + (i % 4) * 30
-      local cy = 18 + floor(i / 4) * 11
-      local cur = i == C.pad_cursor
-      local lit = pad_lit[i]
-      screen.level(cur and 15 or 4)
-      screen.rect(cx + 0.5, cy + 0.5, 24, 10)
-      screen.stroke()
-      if lit then
-        screen.level(cur and 15 or 10)
-        screen.rect(cx + 2, cy + 2, 21, 7)
-        screen.fill()
+    -- header: where do notes go, and how many voices are sounding
+    ptext(routed and "NOTES>PADS" or "NOTES>DRONE", 2, 13, 1, routed and 12 or 3)
+    ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 13, 1, 4)
+    if not C.wave_any and pget("rec", 0) == 0 then
+      ptext_c("EMPTY - K2 REC", 64, 27, 1, 6)
+    else
+      local x0, x1, wy0, wy1 = 4, 123, 20, 35
+      local mid = (wy0 + wy1) / 2
+      local half = (wy1 - wy0) / 2 - 1
+      local sw = (x1 - x0) / 8
+      -- faint waveform of the whole buffer under the slices
+      screen.level(2)
+      for x = x0, x1 do
+        local a = wave[floor((x - x0) / (x1 - x0) * 127) + 1] or 0
+        if a > 0.002 then
+          local h = clamp(sqrt(min(a * 2, 1)) * half, 1, half)
+          screen.move(x, mid - h)
+          screen.line(x, mid + h)
+        end
       end
-      ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", cx + 12, cy + 3, 1,
-        lit and 0 or (cur and 15 or 6))
+      screen.stroke()
+      -- 8 slice boxes: cursor bright-bordered, lit filled while its pad sounds
+      for i = 0, 7 do
+        local sx = x0 + i * sw
+        local cur = i == C.pad_cursor
+        local lit = pad_lit[i]
+        screen.level(cur and 15 or 4)
+        screen.rect(sx + 0.5, wy0 + 0.5, sw - 1, wy1 - wy0)
+        screen.stroke()
+        if lit then
+          screen.level(cur and 15 or 9)
+          screen.rect(sx + 1.5, wy0 + 1.5, sw - 2, wy1 - wy0 - 1)
+          screen.fill()
+        end
+        ptext_c(C.pad_type[i] == 0 and "GRN" or "SLC", sx + sw / 2, mid - 2, 1,
+          lit and 0 or (cur and 15 or 6))
+      end
     end
   end
 end

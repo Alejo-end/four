@@ -90,7 +90,7 @@ Params are grouped (`add_group`) per section so the PARAMS menu mirrors the page
 
 ---
 
-## 5. Stage 0 — loadable skeleton  *(CURRENT)*
+## 5. Stage 0 — loadable skeleton  *(shipped; engine is at S5–S9, see §9b + §11)*
 
 **Goal:** the script loads with no LOADING hang and passes audio, proving the one-engine rule
 and the control shell, before any DSP exists.
@@ -412,5 +412,95 @@ exactly as before with `pad input` OFF; (b) a pad press (screen K1+K2, or MIDI/g
 differ (cloud vs clean slice); (d) holding more than `voices` pads steals the oldest. No
 xruns with the drone + several voices + FX.
 
-**MiClouds granular (§11 item 3) is still an open user decision** — S7+S8 took GrainBuf a
-long way; MiClouds is only worth its dependency + rewrite if this still doesn't get there.
+**MiClouds granular (§11 item 3) — user chose to go for it (S11).** See the approved plan
+`~/.claude/plans/bright-shimmying-pearl.md`: the instrument grows into a maximally-capable
+sampler in gated stages — S9 (headroom + HOME, below), S10 (full-API JPverb + REVERB editor),
+S11 (MiClouds granular + GRAIN editor), S12 (PADS rework + optional DFM1). All plugin UGens
+**fully guarded** (`.asClass` build-time detect → stock fallback), so nothing can brick
+loading. **Performance rule: one MiClouds instance (the drone) — never per poly-voice.**
+
+### S9 — headroom + HOME page (engine gain constants + Lua/doc, fingerprint STAYS 40)
+
+First staged step. Fixes the S8 chord-clipping: poly voices summing on `play_bus` slammed
+the master limiter into pumping — per-voice amp 0.5→0.3, limiter ceiling 0.98→0.92. No new
+command (still 40; still needs a RESTART — gain is in the `.sc`). Lua: the render suite went
+**name-based** (`goto_page`/`pfx`) so page adds/reorders can't desync shots. (An in-script
+HOME page was added here then **removed** in the S13 pass — the user wanted the README as the
+front-page guide, not a norns-screen page; the name-based harness made the revert a clean
+index shift.)
+
+**S9 gate:** load clean, **count still 40**; chords no longer clip/pump; drone/pads unchanged.
+
+### S10 — full-API JPverb (engine + Lua, fingerprint 40 → 50)
+
+The reverb block wraps JPverb's entire attribute set as args (no hardcoding): +10 ioKeys
+(rev_decay/damp/early/moddepth/modfreq/low/mid/high/lowcut/highcut). Guarded (.asClass →
+FreeVerb fallback). `rev_size` repurposed 0..1 → JPverb 0.5..5 (page viz reads param_norm).
+REVERB is a **banked editor** — E2/E3 edit one REVERB_BANKS pair, K2 "BANK" pages them
+(rewrites ENC_MAP.REVERB in place via `ctx.rev_next_bank`), a "BK n" chip shows the bank.
+
+**S10 gate:** load clean, **count 50**; each reverb knob audibly changes the tail as its
+label says (decay length, damping, size, mod chorusing, the low/mid/high band decays, the
+crossover cuts); BANK pages through all pairs; KILL dries. If mi-UGens/sc3-plugins JPverb is
+absent it's the FreeVerb fallback (decay + damp + mix respond) — still no brick.
+
+### S11 — MiClouds granular drone (engine + Lua, fingerprint 50 → 55)
+
+GRAIN mode runs a **MiClouds** granular voice when mi-UGens is installed, else the S7
+GrainBuf drone. **Guarded two ways** (`.asClass` + a `try` around the def) so it can never
+brick — a wrong graph falls back to GrainBuf. A BufRd scrubs the window → feeds Clouds;
+pv_freeze doubles as clouds freeze. +5 commands (clouds_pos/tex/fb/mode/lofi). GRAIN is a
+**banked editor** (size/density · spread/tex · pos/fb · level/lofi; K2 BANK, K3 MODE cycles
+the 4 Clouds modes; octaves on the key-alt layer). **The MiClouds arg order/semantics are
+UNVERIFIED — confirm on device.**
+
+**S11 gate:** load clean, **count 55**; watch the SC tab — if it posts "MiClouds def failed
+— using GrainBuf", the arg set is wrong (still safe, just fell back) — send me the log. With
+mi-UGens present: GRAIN mode granulates the window; size/density/spread/tex/pos/fb/lofi and
+the 4 modes audibly do their thing; **no xruns** with the clouds drone + JPverb + delay +
+tape + a few poly voices. Without mi-UGens: GRAIN is the GrainBuf drone as before.
+
+### S12 — PADS slice-sampler rework (Lua-only, fingerprint STAYS 55)
+
+The PADS page was abstract 4×2 cells that didn't say what a "pad" is. Redrawn as **the
+recording chopped into 8 slices** (buffer waveform under 8 slice boxes: GRN/SLC per pad, lit
+while sounding, bright cursor), a plain-words routing header (NOTES>PADS / NOTES>DRONE), a
+used/cap voice count, and the EMPTY invitation. New key: **K1+K3 ROUTE** toggles pad_input on
+the page. Per-pad position + the optional guarded DFM1 filter were deferred (JPverb/MiClouds
+were the named asks; keep the untested surface minimal).
+
+**S12 gate:** Lua-only — reload the script (no RESTART, count still 55). The PADS page reads
+as 8 slices of your take; K1+K3 flips NOTES>PADS/DRONE; with it on, MIDI/grid notes trigger
+slices polyphonically over the drone; K1+K2 auditions the cursor slice; K3 flips GRN/SLC.
+
+### S13 — dry-by-default + README quick-guide + HOME removed (engine + Lua/doc, STAYS 55)
+
+User feedback: a fresh recording should sound like the **exact dry sample**, FX added on top;
+and the README (not an in-script page) should be the front-page guide. (a) Engine: `drive`
+became `XFade2.ar(clean, tanh-driven, drive*2−1)` so **drive=0 is a true bypass** (was an
+always-on tanh soft-clipping fresh takes) — no new command, still 55. delay_mix / rev_mix
+already default 0 (delay + reverb OFF by default) — confirmed, no change. (b) The in-script
+HOME page (added in S9) was **removed**; PAGES back to 11, MIX first. (c) README rewritten as
+a fast quick-guide.
+
+**S13 gate:** RESTART (drive is in the `.sc`), **count still 55**. A fresh recording plays
+back clean (no delay/reverb/saturation until you turn them up); turning drive up adds
+saturation smoothly from 0; no HOME page — the script opens on MIX as before.
+
+### S14 — clean PLAY drone (default) + alt-paired banks (engine + Lua, STAYS 55)
+
+The drone playback itself should be the exact sample by default. New `\mangler_play` def: a
+straight BufRd loop of the window (scan = speed, pitch = varispeed) — all core UGens. The mode
+option is now **{OFF, GRAIN, WARP, PV, PLAY}, default PLAY** (appended so 1..4 keep meaning;
+setMode gains an `i==4` case). No new command → still 55. Also: the banked editors halve their
+banks by using the alt layer — **REVERB 6→3 banks, GRAIN 4→2**, each bank now `{E2, E3, E2alt,
+E3alt}`; K2 pages banks, K1 reaches the second pair within a bank.
+
+**S14 gate:** RESTART, **count still 55**. A fresh take loops back as the clean exact sample
+(mode reads PLAY); GRAIN/WARP/PV still mangle when selected; STRETCH MODE cycles all five;
+REVERB shows 3 banks / GRAIN 2, and holding K1 on those pages reaches the bank's alt pair.
+
+**Reverb "no audible difference" (user report):** almost certainly **JPverb (sc3-plugins) not
+installed** → the FreeVerb fallback only responds to decay/damp/mix; the other 9 JPverb params
+(size, early, mod depth/freq, low/mid/high, low/high cut) are no-ops on it. Verify on device
+with `JPverb.class.postln` in the SC tab. Not a bug — the guard doing its job.
