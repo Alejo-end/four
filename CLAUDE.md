@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-## CURRENT STAGE: **S5–S14 — …+ clean PLAY drone (default) + alt-paired banks, on-device gate pending (fingerprint 55)**
+## CURRENT STAGE: **S5–S15 — …+ shimmer reverb (pitch-shifted feedback), on-device gate pending (fingerprint 58)**
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -384,12 +384,47 @@ bordered; header now "PLAY>PADS" / "PLAY>DRONE". dist byte-identical (52
 shots). Both were reruns of prior designs the user rejected (top-down room,
 8-boxes-on-the-wave) — don't restore those unasked.
 
+Twenty-fifth change — **draw_body dispatch-table refactor (Lua-only, no
+behavior change)**: the ~700-line `if pname == "X" … elseif …` chain in
+lib/mpages.lua became 11 named `local function body_<PAGE>(frame)` + a
+module-scope `local BODY = { MIX = body_MIX, … }` map; `draw_body()` is now
+`local f = BODY[PAGES[C.page]]; if f then f(C.frame) end`. Idiomatic Lua
+"switch", O(1) dispatch, each page self-contained. The BODY table is built ONCE
+at load (redraw stays allocation-free); `frame` is passed as a param (single
+C.frame read preserved). Verified pre/post renders **byte-identical (52 shots)**
++ dist byte-identical. (Done via a fork with a before/after byte-gate.)
+
+Twenty-sixth change — **S15 SHIMMER reverb (engine + Lua + UI, fingerprint 55
+→ 58)**: pitch-shifted reverb feedback — the tail recirculates through
+PitchShift(+pitch) → HPF120 → LPF(tone) back into the reverb input, climbing in
+octaves into a pad. +3 commands (shimmer/shimmer_pitch/shimmer_tone).
+**KEY DSP GOTCHA the spec missed: SC allows ONE LocalIn/LocalOut per SynthDef,
+and the DELAY already uses it** — so I MERGED both loops into one
+`LocalIn.ar(4)` (delay ch 0-1, shimmer ch 2-3) with a single DEFERRED
+`LocalOut.ar(delayFb ++ shimOut)` at the block end. Also SC needs all `var` at
+the function top (spec's mid-block `var` would error) — added to the io var
+line. Wraps the guarded JPverb/FreeVerb (feeds `revIn = wet + shimFb*shimmer`).
+shimmer=0 is bit-identical to the old dry reverb (revIn==wet, output gated 0)
+— BUT PitchShift still runs (small always-on CPU cost, watch xruns). Lua:
+grp_reverb 12→15, a 4th REVERB bank "SHIMMER" (shimmer/OCT · tone/mix), a SHMR
+bloom key (K1+K3, remembers last amount via ctx.shimmer_mem). UI: REVERB
+decay-tail gained upward-drifting motes (density=shimmer, speed=shimmer_pitch,
+gated shimmer>0) + a +ST cue top-right. NB the spec was written against S4-era
+code (count 30, FreeVerb, room page) — all adapted to current. dist
+byte-identical (53 shots).
+
+Twenty-seventh change — **header page-dots spacing (Lua-only)**: the current
+dot is a 4px block vs 2px others, so it sat flush against its RIGHT neighbour
+while gapped on its left. Every dot after the current one now nudges right 2px
+(`+ (i > page and 2 or 0)`) for matching breathing room. Still fits (11 pages,
+dpitch 4, max x 123 < 128). Touches every page header → whole gallery regen.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = **55**). Wrong count = old engine still live.
+   S10 = 50, S11–S14 = 55, S15 = **58**). Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

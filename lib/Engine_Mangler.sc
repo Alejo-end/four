@@ -69,6 +69,13 @@
 // wraps JPverb's ENTIRE attribute set as args (no hardcoding) — +10 commands
 // (rev_decay/damp/early/moddepth/modfreq/low/mid/high/lowcut/highcut). Still
 // guarded (.asClass) so a missing sc3-plugins -> FreeVerb fallback, no brick.
+//
+// S11 -> 55 (clouds), S14 stays 55 (PLAY drone adds no command). S15 SHIMMER
+// (gate pending, fingerprint 55 -> 58): +3 commands (shimmer/shimmer_pitch/
+// shimmer_tone). the reverb gained a pitch-shifted feedback loop; the delay's
+// LocalIn/LocalOut MERGED into ONE LocalIn.ar(4) (SC allows one pair) — delay
+// on ch 0-1, shimmer on ch 2-3, a single deferred LocalOut. shimmer=0 is
+// bit-identical to the old dry reverb (PitchShift still runs, output gated 0).
 
 Engine_Mangler : CroneEngine {
     var <ioSynth, <playSynth;
@@ -208,7 +215,9 @@ Engine_Mangler : CroneEngine {
             \rev_size, \rev_mix,
             // S10 full-JPverb attributes
             \rev_decay, \rev_damp, \rev_early, \rev_moddepth, \rev_modfreq,
-            \rev_low, \rev_mid, \rev_high, \rev_lowcut, \rev_highcut];
+            \rev_low, \rev_mid, \rev_high, \rev_lowcut, \rev_highcut,
+            // S15 shimmer: pitch-shifted reverb feedback
+            \shimmer, \shimmer_pitch, \shimmer_tone];
 
         // ---- drone playback defs: ONE runs at a time. all share the full
         // arg set (unused args ignored) so spawn/set stays uniform.
@@ -453,9 +462,12 @@ Engine_Mangler : CroneEngine {
                 rev_decay = 2.0, rev_damp = 0.3, rev_early = 0.7,
                 rev_moddepth = 0.1, rev_modfreq = 2.0,
                 rev_low = 1.0, rev_mid = 1.0, rev_high = 1.0,
-                rev_lowcut = 500, rev_highcut = 2000;
+                rev_lowcut = 500, rev_highcut = 2000,
+                // S15 shimmer: pitch-shifted reverb feedback
+                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0;
             var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
             var cf, rq, lp, hp, bp, isLp, isHp, isBp, pre, fbIn, dIn, dOut, rv, jpClass;
+            var delayFb, shimFb, revIn, ratio, pitched, shimOut;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
@@ -479,29 +491,48 @@ Engine_Mangler : CroneEngine {
             wet = XFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
 
-            fbIn = LocalIn.ar(2);
-            dIn = wet + (fbIn * delay_fb);
+            // S15: ONE feedback bus for BOTH loops. SC allows a single
+            // LocalIn/LocalOut pair per SynthDef, so the delay (channels 0-1)
+            // and the shimmer recirculation (channels 2-3) share it, and the
+            // single LocalOut is DEFERRED to the end of the block (after the
+            // shimmer signal exists). delay writeback is computed here.
+            fbIn = LocalIn.ar(4);
+            dIn = wet + (fbIn[0..1] * delay_fb);
             dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));
-            LocalOut.ar(LPF.ar(dOut, 3500).softclip);
+            delayFb = LPF.ar(dOut, 3500).softclip;
             wet = (wet * (1 - delay_mix).sqrt) + (dOut * delay_mix.sqrt);
 
-            // S10: FULL JPverb (guarded). every attribute is an arg — no
-            // hardcoding. missing plugin -> FreeVerb fallback (roomsize from
-            // decay, damp direct, +6dB return). detected at build time so a
-            // missing plugin can't hang LOADING.
+            // S10/S15: FULL JPverb (guarded) wrapped in a SHIMMER feedback
+            // loop — the reverb tail, pitched up and band-limited, recirculates
+            // into the reverb INPUT, so it climbs in octaves into a pad. gated
+            // so shimmer=0 is bit-for-bit the old dry reverb (loop writes 0,
+            // revIn==wet). missing plugin -> FreeVerb fallback, no brick.
+            shimFb = fbIn[2..3];
+            revIn = wet + (shimFb * shimmer.clip(0, 0.95));
             jpClass = "JPverb".asSymbol.asClass;
             rv = jpClass.notNil.if({
                 // in, t60, damp, size, earlyDiff, modDepth, modFreq,
                 // low, mid, high, lowcut, highcut
-                jpClass.ar(wet.sum * 0.5, rev_decay, rev_damp, rev_size,
+                jpClass.ar(revIn.sum * 0.5, rev_decay, rev_damp, rev_size,
                     rev_early, rev_moddepth, rev_modfreq,
                     rev_low, rev_mid, rev_high, rev_lowcut, rev_highcut)
             }, {
                 var rs = rev_decay.linlin(0.1, 30, 0.1, 0.97);
-                [FreeVerb.ar(wet[0], 1.0, rs, rev_damp),
-                    FreeVerb.ar(wet[1], 1.0, rs, rev_damp)] * 2
+                [FreeVerb.ar(revIn[0], 1.0, rs, rev_damp),
+                    FreeVerb.ar(revIn[1], 1.0, rs, rev_damp)] * 2
             });
+            // pitch the tail (semitones -> ratio), band-limit so the octave
+            // stack stays a halo (HPF kills DC/rumble build-up, LPF tames the
+            // metallic hiss), softclip bounds runaway like the delay's writeback
+            ratio = (shimmer_pitch.round(1) / 12.0);
+            ratio = (2 ** ratio).clip(0.25, 4);
+            pitched = PitchShift.ar(rv, 0.2, ratio, 0, 0.01);
+            pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
+            shimOut = (pitched * (shimmer > 0)).softclip;
             wet = (wet * (1 - rev_mix).sqrt) + (rv * rev_mix.sqrt);
+
+            // close BOTH feedback loops with the one allowed LocalOut
+            LocalOut.ar(delayFb ++ shimOut);
 
             dry = [inL, inR];
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);

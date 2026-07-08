@@ -159,6 +159,7 @@ local ctx = {
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
   rev_bank = 1,              -- S10: which REVERB param pair E2/E3 edit
   grain_bank = 1,            -- S11: which GRAIN param pair E2/E3 edit
+  shimmer_mem = 0.6,         -- S15: last shimmer amount, for the SHMR bloom key
 }
 
 local Mfont = include "lib/mfont"
@@ -295,6 +296,16 @@ local KEYS = {
       act = function() ctx.rev_next_bank() end },
     k3 = { label = "KILL",
       act = function() params:set("rev_mix", 0) end },
+    -- S15 alt: SHMR blooms the shimmer on/off, remembering the last amount
+    k3_alt = { label = "SHMR",
+      act = function()
+        if pget("shimmer", 0) > 0.001 then
+          ctx.shimmer_mem = pget("shimmer", 0)
+          params:set("shimmer", 0)
+        else
+          params:set("shimmer", ctx.shimmer_mem or 0.6)
+        end
+      end },
   },
   PADS = {
     -- K2 steps the cursor through the 8 pads; K1+K2 auditions the selected
@@ -341,6 +352,7 @@ local REVERB_BANKS = {
   { "rev_decay", "rev_mix", "rev_damp", "rev_size" },      -- SPACE
   { "rev_low", "rev_mid", "rev_high", "rev_early" },        -- TONE + diffusion
   { "rev_moddepth", "rev_modfreq", "rev_lowcut", "rev_highcut" },  -- MOD + cuts
+  { "shimmer", "shimmer_pitch", "shimmer_tone", "rev_mix" },  -- SHIMMER (S15)
 }
 local GRAIN_BANKS = {
   { "size", "density", "spread", "clouds_tex" },
@@ -681,7 +693,7 @@ local function init_params()
   -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
   -- hardcoded. edited on the REVERB page in banks (K2 pages through them).
-  params:add_group("grp_reverb", "reverb", 12)
+  params:add_group("grp_reverb", "reverb", 15)
   add_eng_control("rev_decay", "reverb decay",
     controlspec.new(0.1, 30, "exp", 0, 2.0, "s"))
   add_eng_control("rev_damp", "reverb damp",
@@ -706,6 +718,13 @@ local function init_params()
     controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- S15 shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
+  add_eng_control("shimmer", "shimmer",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("shimmer_pitch", "shimmer pitch",
+    controlspec.new(-12, 24, "lin", 1, 12, "st"))
+  add_eng_control("shimmer_tone", "shimmer tone",
+    controlspec.new(500, 12000, "exp", 0, 4500, "hz"))
 
   -- S8 polyphonic voices: the per-note/per-pad layer that coexists with the
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of

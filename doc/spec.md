@@ -500,6 +500,25 @@ E3alt}`; K2 pages banks, K1 reaches the second pair within a bank.
 (mode reads PLAY); GRAIN/WARP/PV still mangle when selected; STRETCH MODE cycles all five;
 REVERB shows 3 banks / GRAIN 2, and holding K1 on those pages reaches the bank's alt pair.
 
+### S15 — shimmer reverb (engine + Lua + UI, fingerprint 55 → 58)
+
+Pitch-shifted reverb feedback: the tail recirculates through `PitchShift(+shimmer_pitch)` →
+`HPF120` → `LPF(shimmer_tone)` back into the reverb input, scaled by `shimmer` — so it climbs
+in octaves into an ethereal pad. +3 commands (shimmer/shimmer_pitch/shimmer_tone). **The
+delay + shimmer feedback loops MERGE into one `LocalIn.ar(4)`** (SC allows one LocalIn/LocalOut
+per SynthDef) — delay ch 0-1, shimmer ch 2-3, one deferred `LocalOut(delayFb ++ shimOut)`.
+Wraps the guarded JPverb/FreeVerb. Lua: grp_reverb 12→15, a 4th REVERB bank SHIMMER, a SHMR
+bloom key (K1+K3). UI: the decay-tail gains upward motes (density=shimmer, speed=pitch, gated
+shimmer>0) + a +ST cue.
+
+**S15 gate:** RESTART, **count 58**. (1) `shimmer=0`: reverb sounds + looks exactly as before
+(loop muted, no motes). (2) raise shimmer on a sustained sound: the tail climbs octaves and
+blooms; at 0.9 it swells but the softclip holds it — no runaway/harsh clip. (3) shimmer_pitch
++12 = octave, -12 = down, +7 = a fifth stack. (4) shimmer_tone down = darker halo, up =
+brighter without hiss blowing up. (5) motes drift upward only when shimmer>0, faster at higher
+pitch. **Watch xruns** — PitchShift runs even at shimmer=0 (gated output, not gated UGen), a
+small always-on cost on top of clouds+JPverb+delay+tape+voices.
+
 **Reverb "no audible difference" (user report):** almost certainly **JPverb (sc3-plugins) not
 installed** → the FreeVerb fallback only responds to decay/damp/mix; the other 9 JPverb params
 (size, early, mod depth/freq, low/mid/high, low/high cut) are no-ops on it. Verify on device

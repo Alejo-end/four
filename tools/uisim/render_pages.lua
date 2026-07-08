@@ -540,6 +540,15 @@ else
   run_ticks(3)
   redraw()
   export(pfx("REVERB", "_BANK"))
+  -- S15 shimmer: mix up + shimmer up -> motes drift over the tail; the
+  -- SHIMMER bank (4) reads shimmer/OCT; a +ST cue sits top-right
+  key(2, 1) key(2, 0)  -- BANK -> 4 (shimmer)
+  params:set("shimmer", 0.7)
+  params:set("shimmer_pitch", 12)
+  run_ticks(6)
+  redraw()
+  export(pfx("REVERB", "_SHIMMER"))
+  params:set("shimmer", 0)
   params:set("rev_mix", 0.28)
   -- GRAIN pitched up an octave: footer reads +12ST, grains drift
   goto_page("GRAIN")
