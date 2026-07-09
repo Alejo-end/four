@@ -131,16 +131,10 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     Dist byte-identical (25 shots).
 
 17. **(user-directed) the "Toy" whole-screen redesign — supersedes §8–16
-    bodies.** The user prototyped and approved a full UI direction ("D ·
-    Toy") in a separate HTML recreation and asked for it verbatim, choosing
-    "Full Toy, revert bodies" when told it conflicted with the recent picks.
-    - **New chrome, every page:** a small title that never disappears; the
-      armed-status flags moved beside it (blinking dot + text, single-glyph
-      fallback); uniform page dots (current = rounded 4×4). The **top-right
-      readout pocket is gone** — the encoder values live in the footer row,
-      and each footer knob (a double-ring) fills into a solid disc while its
-      param is being turned (~1.2s). That — plus a key inverting its pill —
-      is the entire animation language.
+    bodies.** (Notes above capture earlier iterations; some points marked DONE
+    refer to UI elements that were later replaced by this Toy chrome.) The user
+    prototyped and approved a full UI direction ("D · Toy") in a separate HTML
+    recreation and asked for it verbatim, choosing "Full Toy, revert bodies" when told it conflicted with the recent picks.
     - **New ALT layer** on FILTER (D/W, GRN) and REVERB (MIX, D/W): the
       wet-path controls the filter itself can't expose.
     - **Bodies:** MIX → two lanes; LEVEL → stereo meter bars (peak-hold +
