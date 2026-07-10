@@ -100,9 +100,11 @@ local function grid_note_key(x, y, z)
   if st == nil then return end
   -- a note pad: route to the drone `pitch` or a polyphonic voice, per
   -- pad_input. both edges, so a voice releases on lift. id 2000+ keeps grid
-  -- voice ids distinct from MIDI (1000+) and the screen bank (0..8).
+  -- voice ids distinct from MIDI (1000+) and the screen bank (0..8). pad_idx
+  -- is the full semitone offset (st + octave), so pad selection tracks the
+  -- played note like MIDI (minput passes the absolute note number).
   local oct = pget("kb_octave", 0) + (y <= 6 and 1 or 0)
-  C.route_note(2000 + (y * 8 + x), 2 ^ ((st + 12 * oct) / 12), st, z)
+  C.route_note(2000 + (y * 8 + x), 2 ^ ((st + 12 * oct) / 12), st + 12 * oct, z)
   if z == 1 then C.flash_id, C.flash_until = "pitch", C.frame + FPS end
 end
 
