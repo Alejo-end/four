@@ -79,6 +79,86 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
     The render suite grew three FX truth shots: `DELAY_INF`, `DELAY_DRY`,
     `REVERB_DRY` (dormancy + the INF badge are now diffable states).
 
+13. **(user-directed) REVERB page redesigned as CATHEDRAL.** The top-down
+    room never read ("I don't understand the reverb page"). Sixteen rendered
+    candidates over two gallery rounds later, the user picked the cathedral
+    cross-section: a vault (bright outer rib + two echo ribs, unit-arch
+    precomputed — no per-frame trig) that grows with size, starry air that
+    thickens with mix, two ray pulses arcing source→listener, an RT badge
+    (estimated seconds — FreeVerb size→RT is approximate), and full
+    dormancy at mix 0. Suite gained a REVERB_WASH shot.
+
+14. **(loop 3, user-directed) MIX page tells the truth about the crossfade.**
+    The engine↔tape fader is a plateau law (`min(1, 2(1−mix))` each side —
+    both decks at unity around center, no dip), but the page scaled lane
+    energy linearly with the fader, showing half-energy lanes at a
+    full-level center. Now: lane energy follows each deck's REAL gain, the
+    law itself is drawn between the lanes (unity plateau meeting at center,
+    tails at the edges) with the handle riding it, a full throw stills the
+    dead lane flat-dim, and a slim master VU (`amp_out`, same sqrt law as
+    LEVEL/REC) rides the right edge — this page is where the blend gets
+    pushed. Suite grew a `MIX_TAPE` full-throw truth shot. Loop 4 added a
+    peak-hold tick on the VU (~1s decay, bright at clip).
+
+15. **(user-directed) MIX page redesigned as TOWERS.** From an 8-candidate
+    rendered gallery the user picked "2's towers with 4's master VU": two
+    columns whose height IS each deck's real gain under the plateau law
+    (both stand full at center), ENG filled with live static, TAPE with
+    the loop's actual waveform, knockout name plates at the tower feet,
+    crossfader below, and the right-edge master VU with peak-hold kept
+    from the truth pass. Lanes + law-curve drawing retired. **(Superseded
+    by §16.)**
+
+16. **(user-directed) MIX page changed again to VU PAIR; REC → REEL
+    COUNTER; WINDOW → LOUPE; LEVEL kept as-is.** After galleries of 8
+    MIX and 6-each LEVEL/REC/WINDOW candidates, the user's picks:
+    - **MIX = VU PAIR** — the DJ-mixer archetype: a needle VU per deck
+      (ENG/TAPE), crossfader between. Each needle rests at the deck's real
+      gain and lifts with the live output; a silenced deck (mode OFF /
+      thrown away) drops its needle to rest. Dial geometry precomputed
+      (VU_SC/VU_TK) — two cos/sin per frame. The towers' master-VU
+      peak-hold (mix_peak) is gone; that state was removed.
+      *Gotcha fixed in port:* `d==1 and eng_on or (tape_g>0)` made the
+      engine needle "on" whenever tape played — must be
+      `(d==1) and eng_on or (d==2 and tape_g>0)`.
+    - **REC = REEL COUNTER** — a tape-deck face: REC lamp, big seconds
+      counter, stereo input meter, 60s reel-usage bar with the write head
+      sweeping while recording. Suite gained a `REC_REC` armed-state shot.
+    - **WINDOW = LOUPE** — a waveform-editor overview+detail: full buffer
+      boxed up top, the slice zoomed full-width below, playhead tracking
+      inside; jitter fuzzes the detail playhead (alt-layer feedback).
+    - **LEVEL** — left exactly as shipped (twin faders + VU) per request.
+    Dist byte-identical (25 shots).
+
+17. **(user-directed) the "Toy" whole-screen redesign — supersedes §8–16
+    bodies.** (Notes above capture earlier iterations; some points marked DONE
+    refer to UI elements that were later replaced by this Toy chrome.) The user
+    prototyped and approved a full UI direction ("D · Toy") in a separate HTML
+    recreation and asked for it verbatim, choosing "Full Toy, revert bodies" when told it conflicted with the recent picks.
+    - **New ALT layer** on FILTER (D/W, GRN) and REVERB (MIX, D/W): the
+      wet-path controls the filter itself can't expose.
+    - **Bodies:** MIX → two lanes; LEVEL → stereo meter bars (peak-hold +
+      clip lamp); GRAIN → a pooled stereo grain field (size stretches ticks,
+      density fills, pitch tilts the drift); TAPE → fixed reels; REVERB →
+      top-down room + rays + a source ping; FILTER → curve + spectrum ticks;
+      REC → strip + write-head afterglow; WINDOW → strip + jitter.
+    - Found + fixed a **uisim gap**: `screen.fill()` didn't fill circle
+      paths, so filled knobs rendered blank in the sim (fine on hardware).
+      Suite gained FILTER_ALT / REVERB_ALT / GRAIN_PITCH shots; dist
+      byte-identical (42 shots).
+
+18. **(user, first sound-check) "the audio changes are too subtle, the
+    volume is too faint — engine improvements to be done."** Diagnosis in
+    the engine, not the UI: FX mixes were linear crossfades (engaging
+    delay .35 + reverb .28 left 0.47× of the direct wet path while adding
+    polite tails), sparse grain clouds sat far below the dry input
+    (loudness ∝ density×size), FreeVerb's return is inherently quiet, and
+    there was no drive stage to push into. S5 gain pass (spec §9b,
+    fingerprint 30 → 31): overlap compensation, equal-power FX mixes,
+    reverb return ×2 + brighter damp, wider resonance, and a new `drive`
+    param (DELAY page, hold K1, E3) — tanh saturation with makeup.
+    **Engine change: needs the on-device deploy ritual; gate pending.**
+
 ## Still open / next loop iterations
 
 - On-device verification of everything above (all of it is uisim-verified

@@ -83,6 +83,16 @@ function screen.fill()
       for xx = x0, x0 + w - 1 do px(xx, yy, cur_level) end
     end
   end
+  -- filled discs (norns fills a circle path; the pixel sim must too)
+  for _, c in ipairs(path.circles) do
+    local xc, yc, r = c[1], c[2], c[3]
+    local ri = math.floor(r + 0.5)
+    for yy = -ri, ri do
+      for xx = -ri, ri do
+        if xx * xx + yy * yy <= r * r then px(xc + xx, yc + yy, cur_level) end
+      end
+    end
+  end
   reset_path()
 end
 
@@ -365,20 +375,27 @@ end
 -- settle: record the take, snap the window, set FX character
 run_ticks(EMPTY and 30 or 200)
 
--- walk pages and shoot each one
-local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB" }
+-- walk pages and shoot each one. navigation is BY NAME (goto_page) and the
+-- export filenames derive their NN index from the page's position, so adding
+-- or reordering pages never desyncs the shots.
+local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH",
+  "TAPE", "FILTER", "DELAY", "REVERB", "PADS" }
+local PAGE_IDX = {}
+for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
+local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
+local function pfx(name, suffix)
+  return string.format("%s_%02d_%s%s", PREFIX, PAGE_IDX[name], name, suffix or "")
+end
 
-enc(1, -20)  -- rewind to page 1
 if EMPTY then
-  enc(1, 2)  -- REC page
+  goto_page("REC")
   run_ticks(10)
   redraw()
-  export(PREFIX .. "_03_REC_EMPTY")
-  enc(1, 2)  -- GRAIN page: no cloud, no needle — silence lies dim and flat
+  export(pfx("REC", "_EMPTY"))
+  goto_page("GRAIN")  -- no cloud, no needle — silence lies dim and flat
   run_ticks(10)
   redraw()
-  export(PREFIX .. "_05_GRAIN_EMPTY")
+  export(pfx("GRAIN", "_EMPTY"))
 elseif GRAINX then
   -- GRAIN extremes: pin the cloud's params to one edge per shot, settle to
   -- steady state (longest grain life is ~2s = 30 ticks), then shoot. BASE
@@ -398,13 +415,13 @@ elseif GRAINX then
     { "PAN_L", { pan = -1 } },
     { "MODE_OFF", { mode = 1 } },
   }
-  enc(1, 4)  -- GRAIN page
+  goto_page("GRAIN")
   for _, c in ipairs(CASES) do
     for id, v in pairs(BASE) do params:set(id, v) end
     for id, v in pairs(c[2]) do params:set(id, v) end
     run_ticks(60)
     redraw()
-    export(PREFIX .. "_05_GRAIN_" .. c[1])
+    export(pfx("GRAIN", "_" .. c[1]))
   end
 elseif FILTX then
   -- FILTER extremes: each type at a musical setting, plus the edges the
@@ -415,70 +432,174 @@ elseif FILTX then
     { "BP", { filt_type = 3, cutoff = 1000, resonance = 0.6 } },
     { "LP_OPEN", { filt_type = 1, cutoff = 20000, resonance = 0 } },
   }
-  enc(1, 7)  -- FILTER page
+  goto_page("FILTER")
   for _, c in ipairs(CASES) do
     for id, v in pairs(c[2]) do params:set(id, v) end
     run_ticks(5)
     redraw()
-    export(PREFIX .. "_08_FILTER_" .. c[1])
+    export(pfx("FILTER", "_" .. c[1]))
   end
 else
+  enc(1, -20)  -- ensure we start the walk on page 1
   for i, name in ipairs(PAGES) do
     if i > 1 then enc(1, 1) end
     run_ticks(25)
     redraw()
     export(string.format("%s_%02d_%s", PREFIX, i, name))
   end
-  -- extra shots: LEVEL with alt held, STRETCH per mode
-  enc(1, -20)
-  enc(1, 1)  -- LEVEL
+  -- extra shots. LEVEL with alt held
+  goto_page("LEVEL")
   key(1, 1)
   run_ticks(3)
   redraw()
-  export(PREFIX .. "_02_LEVEL_ALT")
+  export(pfx("LEVEL", "_ALT"))
   key(1, 0)
-  enc(1, 4)  -- STRETCH
-  for m, label in ipairs({ "OFF", "GRAIN", "WARP", "PV" }) do
+  -- STRETCH per mode (PLAY is the clean-loop default)
+  goto_page("STRETCH")
+  for m, label in ipairs({ "OFF", "GRAIN", "WARP", "PV", "PLAY" }) do
     params:set("mode", m)
     if m == 4 then params:set("pv_freeze", 1) end
     run_ticks(12)
     redraw()
-    export(PREFIX .. "_06_STRETCH_" .. label)
+    export(pfx("STRETCH", "_" .. label))
   end
   params:set("pv_freeze", 0)
+  params:set("mode", 5)  -- restore the PLAY default for later shots
   -- MIX with the engine off: the ENG lane should lie flat
   params:set("mode", 1)
-  enc(1, -20)
+  goto_page("MIX")
   run_ticks(8)
   redraw()
-  export(PREFIX .. "_01_MIX_OFF")
-  params:set("mode", 2)
-  -- the adjust flash over a busy page: nudge an encoder on WINDOW and
-  -- shoot while the framed readout is up — it must stay fully legible
-  enc(1, 3)  -- MIX -> WINDOW
+  export(pfx("MIX", "_OFF"))
+  params:set("mode", 5)
+  -- the adjust flash over a busy page: nudge win start on WINDOW and shoot
+  -- while the framed readout is up — it must stay fully legible
+  goto_page("WINDOW")
   run_ticks(5)
   enc(2, 2)  -- nudge win start: the flash appears
   run_ticks(2)
   redraw()
-  export(PREFIX .. "_04_WINDOW_FLASH")
+  export(pfx("WINDOW", "_FLASH"))
   -- FX truth shots: INF pins a flat envelope + badge; mix 0 goes dormant
-  enc(1, 5)  -- WINDOW -> DELAY
+  goto_page("DELAY")
   params:set("delay_fb", 0.95)
   run_ticks(20)  -- let the WINDOW flash expire: these shots want the parked readout
   redraw()
-  export(PREFIX .. "_09_DELAY_INF")
+  export(pfx("DELAY", "_INF"))
   params:set("delay_fb", 0.45)
   params:set("delay_mix", 0)
   run_ticks(5)
   redraw()
-  export(PREFIX .. "_09_DELAY_DRY")
+  export(pfx("DELAY", "_DRY"))
   params:set("delay_mix", 0.35)
-  enc(1, 1)  -- REVERB
+  goto_page("REVERB")
   params:set("rev_mix", 0)
   run_ticks(5)
   redraw()
-  export(PREFIX .. "_10_REVERB_DRY")
+  export(pfx("REVERB", "_DRY"))
+  params:set("rev_mix", 1)
+  run_ticks(6)
+  redraw()
+  export(pfx("REVERB", "_WASH"))
   params:set("rev_mix", 0.28)
+  -- MIX thrown full tape: the ENG lane must lie flat-dim (inaudible)
+  goto_page("MIX")
+  params:set("mix", 1)
+  run_ticks(8)
+  redraw()
+  export(pfx("MIX", "_TAPE"))
+  params:set("mix", 0.5)
+  -- REC armed: write head laying material with its afterglow trail, input
+  -- hot, the status dot + REC flag beside the title
+  goto_page("REC")
+  params:set("rec", 1)
+  push("rec_phase", 0.62)
+  push("rec_amp", 0.6)
+  push("amp_in_l", 0.7)
+  push("amp_in_r", 0.6)
+  redraw()
+  export(pfx("REC", "_REC"))
+  params:set("rec", 0)
+  -- ALT layer on FILTER/DELAY/REVERB: the wet-path encoder targets
+  goto_page("FILTER")
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(pfx("FILTER", "_ALT"))
+  key(1, 0)
+  goto_page("DELAY")
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(pfx("DELAY", "_ALT"))
+  key(1, 0)
+  goto_page("REVERB")
+  key(2, 1) key(2, 0)  -- BANK -> 2 (damp/size)
+  key(2, 1) key(2, 0)  -- BANK -> 3 (early/moddepth)
+  params:set("rev_mix", 0.4)
+  run_ticks(3)
+  redraw()
+  export(pfx("REVERB", "_BANK"))
+  -- S15 shimmer: mix up + shimmer up -> motes drift over the tail; the
+  -- SHIMMER bank (4) reads shimmer/OCT; a +ST cue sits top-right
+  key(2, 1) key(2, 0)  -- BANK -> 4 (shimmer)
+  params:set("shimmer", 0.7)
+  params:set("shimmer_pitch", 12)
+  run_ticks(6)
+  redraw()
+  export(pfx("REVERB", "_SHIMMER"))
+  params:set("shimmer", 0)
+  params:set("rev_mix", 0.28)
+  -- GRAIN pitched up an octave: footer reads +12ST, grains drift
+  goto_page("GRAIN")
+  params:set("pitch", 2)
+  run_ticks(20)
+  redraw()
+  export(pfx("GRAIN", "_PITCH"))
+  params:set("pitch", 1)
+  -- GRAIN character (S7): jitter varies tick lengths, pitch spread fans the
+  -- cloud apart, PERC shape shows top-left
+  params:set("grain_jitter", 0.8)
+  params:set("grain_pitch_spread", 7)
+  params:set("grain_shape", 3)
+  run_ticks(24)
+  redraw()
+  export(pfx("GRAIN", "_CHAR"))
+  params:set("grain_jitter", 0)
+  params:set("grain_pitch_spread", 0)
+  params:set("grain_shape", 1)
+  -- S11: GRAIN bank 2 (spread/texture) + a Clouds mode change (STRETCH)
+  key(2, 1) key(2, 0)  -- BANK -> 2
+  key(3, 1) key(3, 0)  -- MODE -> STRETCH
+  run_ticks(3)
+  redraw()
+  export(pfx("GRAIN", "_BANK"))
+  -- S11: each Clouds mode draws its OWN picture (the K3 option becomes the
+  -- visualization). feedback set first so LOOP shows its echo ghosts.
+  params:set("clouds_fb", 0.55)
+  for i, name in ipairs({ "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }) do
+    params:set("clouds_mode", i)
+    run_ticks(20)
+    redraw()
+    export(pfx("GRAIN", "_CL_" .. name))
+  end
+  params:set("clouds_fb", 0)
+  params:set("clouds_mode", 1)
+  -- PADS live: route to pads, two slice-type pads, cursor on pad 2 with an
+  -- audition voice held (cell lit)
+  goto_page("PADS")
+  params:set("pad_input", 1)
+  key(3, 1) key(3, 0)  -- pad 0 -> SLC
+  key(2, 1) key(2, 0)  -- cursor -> 1
+  key(2, 1) key(2, 0)  -- cursor -> 2
+  key(3, 1) key(3, 0)  -- pad 2 -> SLC
+  key(1, 1)            -- alt
+  key(2, 1)            -- K1+K2 PLAY: audition the cursor pad (held)
+  run_ticks(3)
+  redraw()
+  export(pfx("PADS", "_LIVE"))
+  key(2, 0) key(1, 0)  -- release audition + alt
+  params:set("pad_input", 0)
 end
 
 print("done: " .. TICK .. " ticks")

@@ -75,7 +75,6 @@ local function slice_key(kind, x, z)
 end
 
 local function grid_note_key(x, y, z)
-  if z ~= 1 then return end
   if pget("keys_enable", 1) == 0 then return end
   local st
   if y == 6 or y == 8 then
@@ -83,22 +82,30 @@ local function grid_note_key(x, y, z)
   else
     st = GRID_BLACK[x]
     if not st then
-      -- the black rows' gap pads carry the utility functions
-      if y == 7 and (x == 1 or x == 8) then
-        params:delta("kb_octave", x == 8 and 1 or -1)
-        C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
-      elseif y == 5 and x == 1 then
-        params:set("pitch", 1.0)
-        C.flash_id, C.flash_until = "pitch", C.frame + FPS
-      elseif y == 5 and x == 8 then
-        ptoggle("pitch_quant")
+      -- the black rows' gap pads carry the utility functions (press only)
+      if z == 1 then
+        if y == 7 and (x == 1 or x == 8) then
+          params:delta("kb_octave", x == 8 and 1 or -1)
+          C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
+        elseif y == 5 and x == 1 then
+          params:set("pitch", 1.0)
+          C.flash_id, C.flash_until = "pitch", C.frame + FPS
+        elseif y == 5 and x == 8 then
+          ptoggle("pitch_quant")
+        end
       end
       return
     end
   end
+  if st == nil then return end
+  -- a note pad: route to the drone `pitch` or a polyphonic voice, per
+  -- pad_input. both edges, so a voice releases on lift. id 2000+ keeps grid
+  -- voice ids distinct from MIDI (1000+) and the screen bank (0..8). pad_idx
+  -- is the full semitone offset (st + octave), so pad selection tracks the
+  -- played note like MIDI (minput passes the absolute note number).
   local oct = pget("kb_octave", 0) + (y <= 6 and 1 or 0)
-  params:set("pitch", 2 ^ ((st + 12 * oct) / 12))
-  C.flash_id, C.flash_until = "pitch", C.frame + FPS
+  C.route_note(2000 + (y * 8 + x), 2 ^ ((st + 12 * oct) / 12), st + 12 * oct, z)
+  if z == 1 then C.flash_id, C.flash_until = "pitch", C.frame + FPS end
 end
 
 local function grid_key(x, y, z)
@@ -107,7 +114,7 @@ local function grid_key(x, y, z)
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
     elseif x == 2 then ptoggle("freeze")
-    elseif x >= 4 and x <= 7 then params:set("mode", x - 3)
+    elseif x >= 3 and x <= 7 then params:set("mode", x - 2)  -- OFF/GRAIN/WARP/PV/PLAY
     elseif x == 8 then ptoggle("pv_freeze") end
   elseif y == 2 then
     if x == 3 then
@@ -138,7 +145,7 @@ function M.redraw()
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)
   gg:led(2, 1, pget("freeze", 0) == 1 and 15 or 2)
   local mode = pget("mode", 2)
-  for x = 4, 7 do gg:led(x, 1, (x - 3) == mode and 15 or 3) end
+  for x = 3, 7 do gg:led(x, 1, (x - 2) == mode and 15 or 3) end
   gg:led(8, 1, pget("pv_freeze", 0) == 1 and 15 or 2)
 
   -- row 2: tape transport
