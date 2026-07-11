@@ -36,6 +36,13 @@
 --   K1     alt / shift (hold)
 --   K2/K3  the page's two actions (on banked pages K2 pages E2/E3 through
 --          the parameter pairs — e.g. all of REVERB and GRAIN)
+--   K1+K2  STOP / START: mute everything, press again for the exact mix back
+--          (also SPACE on a typing keyboard · grid (8,2) · MIDI-map). global,
+--          except pages whose alt-K2 has a job (GRAIN, TAPE, PADS)
+--   K1+K3  DRY: throw the playback path clean — delay/reverb/shimmer/drive/
+--          clouds-fb to zero, filter open. the take is always recorded clean;
+--          DRY makes what you HEAR the bare sample (also grid (7,2)). global,
+--          except GRAIN / TAPE / REVERB / PADS
 --
 -- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
 --
@@ -420,7 +427,9 @@ end
 -- both, each side keeps its own trim. center keeps both at full trim.
 function M.update_mix()
   local mixv = pget("mix", 0.5)
-  local out = pget("out_level", 1)
+  -- stop_all (the master STOP) chokes both decks right here; levels slew,
+  -- so stop/start are click-free and START restores the exact mix
+  local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local sc_l = pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out
   local tp_l = pget("cut_level", 1) * math.min(1, 2 * mixv) * out
   if engine.level then engine.level(sc_l) end
@@ -553,7 +562,7 @@ local Minput = (function()  -- inlined lib/minput.lua
 local midi_devices = {}
 
 local C     -- shared ctx, bound at init
-local pget, FPS
+local pget, ptoggle, FPS
 
 -- true when vport i holds the device midigrid adopted as the grid: its
 -- note-ons are grid pads, not notes. norns dispatches midi to BOTH the
@@ -605,10 +614,16 @@ local M = {}
 
 function M.init(ctx)
   C = ctx
-  pget, FPS = ctx.pget, ctx.FPS
+  pget, ptoggle, FPS = ctx.pget, ctx.ptoggle, ctx.FPS
   keyboard.code = function(code, value)
     if value ~= 1 then return end           -- key-down only (2 = autorepeat)
     if norns.menu.status() then return end  -- the menu owns typing (PSET names)
+    -- SPACE = master stop/start, ableton muscle memory. it's transport, not
+    -- note input, so it works even with keys_enable off
+    if code == "SPACE" then
+      ptoggle("stop_all")
+      return
+    end
     if pget("keys_enable", 1) == 0 then return end
     if code == "Z" or code == "X" then
       params:delta("kb_octave", code == "X" and 1 or -1)
@@ -650,7 +665,7 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 -- encoders, and MIDI CCs.
 --
 --   row 1  engine: [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv frz]
---   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  ·
+--   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  [DRY] [STOP all]
 --   row 3  window slices: a pad = that eighth; hold one + press another
 --          = the span between them; the write head glows while recording
 --   row 4  tape loop slices: same gesture, driving loop start/end
@@ -763,7 +778,9 @@ local function grid_key(x, y, z)
       params:set("tape_reverse", z)  -- momentary, like K1+K2 on TAPE
     elseif z == 1 then
       if x == 1 then ptoggle("tape_rec")
-      elseif x == 2 then ptoggle("tape_freeze") end
+      elseif x == 2 then ptoggle("tape_freeze")
+      elseif x == 7 then C.fx_dry()                -- DRY throw (mangler.lua)
+      elseif x == 8 then ptoggle("stop_all") end   -- master STOP, right edge
     end
   elseif y == 3 or y == 4 then
     slice_key(y == 3 and "win" or "loop", x, z)
@@ -790,10 +807,14 @@ function M.redraw()
   for x = 3, 7 do gg:led(x, 1, (x - 2) == mode and 15 or 3) end
   gg:led(8, 1, pget("pv_freeze", 0) == 1 and 15 or 2)
 
-  -- row 2: tape transport
+  -- row 2: tape transport + the master STOP on the right edge (blinks
+  -- while stopped, same urgency as the header's STP flag)
   gg:led(1, 2, pget("tape_rec", 0) == 1 and 15 or 2)
   gg:led(2, 2, pget("tape_freeze", 0) == 1 and 15 or 2)
   gg:led(3, 2, pget("tape_reverse", 0) == 1 and 15 or 2)
+  gg:led(7, 2, 3)  -- DRY: a plain action pad, no state to claim
+  gg:led(8, 2, pget("stop_all", 0) == 1
+    and ((C.frame % FPS) < (FPS / 2) and 15 or 8) or 2)
 
   -- rows 3/4: slices lit across the active region, head pad brightest
   local wlo, whi = window_bounds()
@@ -2005,15 +2026,15 @@ local function draw_body()
   if f then f(C.frame) end
 end
 
--- status flag text + single-glyph fallback for each of the 16 combos,
+-- status flag text + single-glyph fallback for each of the 32 combos,
 -- built once: the header redraws every frame, only the combo index changes
 local STATUS_STR, STATUS_ABBR = {}, {}
 do
-  local flags = { "REC", "FZ", "TR", "TFZ" }
-  local abbr = { "R", "F", "T", "Z" }
-  for m = 0, 15 do
+  local flags = { "REC", "FZ", "TR", "TFZ", "STP" }
+  local abbr = { "R", "F", "T", "Z", "S" }
+  for m = 0, 31 do
     local t, a = {}, {}
-    for b = 1, 4 do
+    for b = 1, 5 do
       if m & (1 << (b - 1)) ~= 0 then
         t[#t + 1] = flags[b]
         a[#a + 1] = abbr[b]
@@ -2039,6 +2060,7 @@ local function draw_header()
     + (pget("freeze", 0) == 1 and 2 or 0)
     + (pget("tape_rec", 0) == 1 and 4 or 0)
     + (pget("tape_freeze", 0) == 1 and 8 or 0)
+    + (pget("stop_all", 0) == 1 and 16 or 0)
   if m > 0 and not C.alt then
     local dotx = 2 + text_w(PAGES[page], 1) + 4
     screen.level((frame % FPS) < (FPS / 2) and 12 or 2)
@@ -2135,6 +2157,7 @@ local KEYS = {
       act = function() params:set("mix", 0) end },
     k3 = { label = "TAPE",
       act = function() params:set("mix", 1) end },
+    -- (the alt layer here is the global STOP/DRY pair — see key_def)
   },
   LEVEL = {
     -- unity resets: the system level params are dB tapers, 0 = 0 dB
@@ -2258,16 +2281,24 @@ local KEYS = {
   },
 }
 
--- the key def addressed by key n on the current page, alt-aware; alt falls
--- back to the un-alt def so a page needn't define both layers
+-- the key def addressed by key n on the current page, alt-aware. any alt
+-- slot a page doesn't claim carries the GLOBAL transport pair instead:
+-- K1+K2 = STOP (master mute) and K1+K3 = DRY (throw playback clean) — the
+-- two rescue keys work on every page except where the alt layer already
+-- has a job (GRAIN octaves, TAPE rev/clear, PADS play/route, REVERB shmr).
+-- hold K1 anywhere: the footer pills SHOW which pair you have.
+local ALT_STOP = { label = "STOP", lit = "stop_all",
+  act = function() ptoggle("stop_all") end }
+local ALT_DRY = { label = "DRY",
+  act = function() ctx.fx_dry() end }
 local function key_def(n)
   local defs = KEYS[PAGES[ctx.page]]
   if not defs then return nil end
   if n == 2 then
-    if ctx.alt then return defs.k2_alt or defs.k2 end
+    if ctx.alt then return defs.k2_alt or ALT_STOP end
     return defs.k2
   end
-  if ctx.alt then return defs.k3_alt or defs.k3 end
+  if ctx.alt then return defs.k3_alt or ALT_DRY end
   return defs.k3
 end
 
@@ -2383,6 +2414,22 @@ function ctx.pads_all_off()
   end
 end
 
+-- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
+-- sample — every "on top" color to zero (delay, reverb, shimmer, drive,
+-- clouds feedback — the one wash the REVERB page can't kill) and the
+-- filter thrown open (type-aware, same law as FILTER's OPEN key). the
+-- take itself is always recorded clean; this clears the playback path.
+function ctx.fx_dry()
+  params:set("delay_mix", 0)
+  params:set("rev_mix", 0)
+  params:set("shimmer", 0)
+  params:set("drive", 0)
+  params:set("clouds_fb", 0)
+  local ft = params:get("filt_type")
+  params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+  params:set("resonance", 0)
+end
+
 -- ============================================================================
 -- params  (single source of truth: keys, encoders, and MIDI all drive these)
 -- ============================================================================
@@ -2408,7 +2455,7 @@ local function init_params()
 
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
-  params:add_group("grp_mix", "mix", 4)
+  params:add_group("grp_mix", "mix", 5)
   params:add_control("mix", "eng <> tape",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   params:set_action("mix", Mtape.update_mix)
@@ -2422,6 +2469,16 @@ local function init_params()
   params:add_control("cut_level", "tape level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
   params:set_action("cut_level", Mtape.update_mix)
+  -- master transport: STOP chokes both decks at the one place their levels
+  -- are computed (update_mix), so START restores the exact mix. everything
+  -- keeps running silently — mode, loops, heads — and held pad voices are
+  -- released. MIDI-map it for a stop pedal; SPACE on a typing keyboard and
+  -- grid (8,2) drive it too.
+  params:add_binary("stop_all", "stop all", "toggle", 0)
+  params:set_action("stop_all", function(v)
+    if v == 1 then ctx.pads_all_off() end
+    Mtape.update_mix()
+  end)
 
   params:add_group("grp_rec", "rec", 6)
   add_eng_binary("rec", "record")
@@ -2722,6 +2779,14 @@ function init()
   Minput.init_midi()
   Mgrid.connect()
   print("mangler: init() done, params built")
+
+  -- the norns SYSTEM aux reverb sits after the engine and colors everything;
+  -- if another script left it on, "dry" playback isn't — say so at load
+  if params.lookup["reverb"]
+      and tostring(params:string("reverb")):lower() ~= "off" then
+    print("mangler: NOTE — the SYSTEM reverb is ON; it adds reverb mangler"
+      .. " does not control (turn it off under PARAMS > REVERB)")
+  end
 
   local function watch(name, fn)
     -- poll.set returns nil when the engine doesn't expose the poll (stale

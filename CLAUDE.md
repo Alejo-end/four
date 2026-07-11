@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **S5–S14 — …+ clean PLAY drone (default) + alt-paired banks, on-device gate pending (fingerprint 55)**
+         ## CURRENT STAGE: **S5–S15 (fingerprint 58) — loads + plays on device (2026-07-11, after the duplicate-mi-UGens fix); count-58 check + S11 MiClouds / S15 shimmer ear gates still to confirm explicitly**
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -384,12 +384,71 @@ bordered; header now "PLAY>PADS" / "PLAY>DRONE". dist byte-identical (52
 shots). Both were reruns of prior designs the user rejected (top-down room,
 8-boxes-on-the-wave) — don't restore those unasked.
 
+Twenty-fifth change — **S15 shimmer reverb (engine + Lua + UI, fingerprint
+55 → 58) — landed earlier but never logged here; full detail in spec §S15**:
+pitch-shifted reverb feedback (PitchShift(+shimmer_pitch) → HPF120 →
+LPF(shimmer_tone) back into the verb, scaled by `shimmer`), +3 commands
+(shimmer/shimmer_pitch/shimmer_tone). The delay + shimmer feedback loops
+MERGE into one LocalIn.ar(4) (SC allows one LocalIn/LocalOut per SynthDef).
+Lua: grp_reverb 12→15, a 4th REVERB bank SHIMMER, SHMR bloom key (K1+K3),
+upward motes on the decay tail. Suite: REVERB_SHIMMER (53 shots). Gate:
+count **58**. DEVICE NOTE (2026-07-11): mi-UGens are now properly installed
+— the user's `dust/code/mi-UGens` clone had duplicated the classes paracosms
+already keeps in `~/.local/share/SuperCollider/Extensions/supercollider-
+plugins/`, hanging EVERY script (DUPLICATE ENGINES); deleting the clone fixed
+it. NEVER install .sc class files under dust/code outside an `ignore/`
+folder. Also: stock norns ships sc3-plugins, so JPverb is likely PRESENT —
+recheck the old "reverb sounds the same" report before blaming the fallback.
+
+Twenty-sixth change — **master STOP/START (Lua-only, fingerprint STAYS 58)**:
+user asked for a start/stop key. New `stop_all` binary param (grp_mix 4→5,
+MIDI-mappable — map a pedal): STOP chokes BOTH decks inside Mtape.update_mix
+(the one place engine.level + the softcut voice levels are computed; levels
+slew, so stop/start are click-free) and releases the pad voices
+(pads_all_off); everything else keeps running silently — mode, tape head,
+loops — so START restores the exact mix instantly. Surfaces: **MIX K1+K2**
+(STOP pill, lit while stopped — from anywhere: hold K1, E1 hard left, tap
+K2), **SPACE** on the typing keyboard (handled BEFORE the keys_enable gate —
+it's transport, not note input — but AFTER the menu gate so typing spaces
+into a PSET name can't stop sound), **grid (8,2)** (blinks while stopped),
+and a blinking **STP header flag** on every page (STATUS_STR/ABBR grew to
+5 bits / 32 combos). Suite: MIX_STOP + MIX_STOP_ALT (55 shots), all prior
+shots byte-identical; dist rebuilt + byte-verified. Untested on device
+(Lua-only: save + reload).
+
+Twenty-seventh change — **dry-guarantee engine review + DRY throw + global
+alt STOP/DRY (Lua-only, fingerprint STAYS 58)**: user reported "reverb mixed
+into the dry recording". ENGINE REVIEW VERDICT (read, not run): the record
+path CANNOT capture FX — \mangler_io records `in*(1-resample) +
+sig*resample`, so at resample=0 the take is the raw ADC tapped before the
+whole chain; every wet mix is a true zero at 0 (equal-power .sqrt laws,
+shimmer output-gated, drive an XFade2 bypass); the MiClouds positional args
+were VERIFIED against v7b1's MiClouds.sc (in, pit, pos, size, dens, tex,
+drywet, in_gain, spread, rvb, fb, freeze, mode, lofi) — rvb (Clouds'
+internal reverb) is hard 0. Reverb heard on "dry" playback is therefore:
+(a) rev_mix/delay_mix left up in the session (JPverb going live makes old
+barely-audible values lush, decay to 30s), (b) **clouds_fb** (GRAIN bank 2
+E3 — washes like a reverb, the REVERB page can't kill it), (c) the norns
+SYSTEM aux reverb (PARAMS > REVERB — init() now prints a maiden NOTE when
+it's on), or (d) recording with resample>0 (bakes FX into the take, by
+design). Fixes: **ctx.fx_dry()** zeroes delay_mix/rev_mix/shimmer/drive/
+clouds_fb + throws the filter open (FILTER OPEN law), on **K1+K3** + grid
+(7,2); and after "start/stop not working" feedback the alt transport pair
+went GLOBAL — key_def's alt fallback is now ALT_STOP/ALT_DRY (was
+fall-back-to-unalt), so **K1+K2 = STOP / K1+K3 = DRY on every page whose
+alt slot is unclaimed** (all but GRAIN/TAPE/PADS for K2; plus REVERB for
+K3) — hold K1 anywhere and the pills show which pair you have. Suite:
+LEVEL_ALT/FILTER_ALT/DELAY_ALT intentionally re-rendered (STOP/DRY pills),
+MIX_STOP + MIX_STOP_ALT added (55 shots); dist rebuilt + byte-verified.
+REMEMBER: none of this exists on the device until the repo is rsync'd and
+the script reloaded.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = **55**). Wrong count = old engine still live.
+   S10 = 50, S11 = 55, S15 = **58**). Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

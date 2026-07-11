@@ -304,21 +304,46 @@ no clipping, no xruns with a stretch mode + tape + all FX engaged.
 
 | page    | E2 / E2-alt              | E3 / E3-alt             | K2 / K2-alt   | K3 / K3-alt   |
 |---------|--------------------------|-------------------------|---------------|---------------|
-| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| ENG throw (`mix`=0) | TAPE throw (`mix`=1) |
+| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| ENG throw (`mix`=0) / **STOP** (`stop_all`) | TAPE throw (`mix`=1) / **DRY** (`ctx.fx_dry`) |
 | LEVEL   | `input_level` / `monitor_level` | `output_level` / `headphone_gain` | IN=0 dB reset | OUT=0 dB reset |
 | REC     | `rec_level` / `pre_level`| `dry_wet` / `resample`  | `rec` toggle  | `freeze` toggle |
 | WINDOW  | `pos_start` / `scan`     | `pos_end` / `pos_jitter`| reset window  | FLIP (negate `scan`) |
-| GRAIN   | `size` / `spread`        | `density` / `grain_level`| OCT− / OCT+ (`pitch` ×½ / ×2) | `pitch` reset |
+| GRAIN   | banked (2 banks × 4)     | banked                  | BANK / OCT− (`pitch` ×½) | MODE (Clouds) / OCT+ (`pitch` ×2) |
 | STRETCH | `scan` / `pitch`         | `warp_window` / `warp_rand` | cycle `mode` | `pv_freeze` toggle |
 | TAPE    | `tape_rate` / `tape_pre` | `loop_start` / `loop_end`| `tape_rec` / REV (mom) | `tape_freeze` / CLR |
 | FILTER  | `cutoff` / `dry_wet`     | `resonance` / `grain_level` | cycle `filt_type` | OPEN (neutralize) |
 | DELAY   | `delay_mix` / `delay_time`| `delay_fb` / `drive`   | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
-| REVERB  | `rev_size` / `delay_mix` | `rev_mix` / `dry_wet`   | WASH (`rev_mix`=1) | KILL (`rev_mix`=0) |
-| PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) |
+| REVERB  | banked (4 banks × 4)     | banked                  | BANK | KILL (`rev_mix`=0) / SHMR (shimmer bloom) |
+| PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) / ROUTE (`pad_input`) |
 
 (This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
 always go through `params:*`. PADS keys are the exception — SEL/PLAY/TYPE drive the pad
 cursor/audition/type in `ctx`, not a param, since a pad bank isn't a single value.)
+
+**Master STOP (`stop_all`, Lua-only).** A binary param that chokes both decks inside
+`Mtape.update_mix` — the one place the engine `level` and the softcut voice levels are
+computed — and releases the pad voices. Levels slew, so stop/start are click-free, and
+everything else (mode, tape head, loops) keeps running silently: START restores the exact
+mix. Surfaces: **K1+K2** (the GLOBAL alt-K2 fallback — every page whose alt-K2 is
+unclaimed, i.e. all but GRAIN/TAPE/PADS; the STOP pill lights while stopped), **SPACE** on
+a USB typing keyboard (transport, so it works even with `keys_enable` off; the menu still
+owns typing), **grid pad (8,2)** (blinks while stopped), and MIDI-map it for a stop pedal.
+A blinking **STP** flag sits by the title on every page while stopped. Alt slots a page
+doesn't claim in `KEYS` carry this global pair (`ALT_STOP`/`ALT_DRY` in `key_def`).
+
+**DRY throw (`ctx.fx_dry`, Lua-only) + the dry guarantee.** The record path CANNOT capture
+FX: `\mangler_io` records `in*(1-resample) + sig*resample`, so at `resample`=0 the take is
+the raw ADC input, tapped before the whole chain (`resample`>0 bakes the output in — that's
+its job). Every playback mix is a true zero at 0 (equal-power `.sqrt` laws, shimmer is
+output-gated, drive is an XFade2 bypass), and the MiClouds call passes `rvb`=0 (its internal
+reverb) — positional args verified against v7b1's `MiClouds.sc`. So "reverb on a dry take"
+is always one of: `rev_mix`/`delay_mix` left up, `clouds_fb` (a reverb-like wash the REVERB
+page can't kill), the norns SYSTEM aux reverb (mangler prints a maiden NOTE at load when
+it's on), or FX baked in by recording with `resample`>0. **DRY** (MIX K1+K3, grid (7,2))
+throws the playback path clean in one gesture: `delay_mix`/`rev_mix`/`shimmer`/`drive`/
+`clouds_fb` to 0 and the filter open (FILTER OPEN's type-aware law). It leaves the source
+alone (mode/pitch/window), so PLAY mode + DRY = exactly the recorded sample. DRY rides the
+global alt-K3 fallback (every page but GRAIN/TAPE/REVERB/PADS).
 
 ## 11. Roadmap (post-v1)
 

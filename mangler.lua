@@ -26,6 +26,13 @@
 --   K1     alt / shift (hold)
 --   K2/K3  the page's two actions (on banked pages K2 pages E2/E3 through
 --          the parameter pairs — e.g. all of REVERB and GRAIN)
+--   K1+K2  STOP / START: mute everything, press again for the exact mix back
+--          (also SPACE on a typing keyboard · grid (8,2) · MIDI-map). global,
+--          except pages whose alt-K2 has a job (GRAIN, TAPE, PADS)
+--   K1+K3  DRY: throw the playback path clean — delay/reverb/shimmer/drive/
+--          clouds-fb to zero, filter open. the take is always recorded clean;
+--          DRY makes what you HEAR the bare sample (also grid (7,2)). global,
+--          except GRAIN / TAPE / REVERB / PADS
 --
 -- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
 --
@@ -205,6 +212,7 @@ local KEYS = {
       act = function() params:set("mix", 0) end },
     k3 = { label = "TAPE",
       act = function() params:set("mix", 1) end },
+    -- (the alt layer here is the global STOP/DRY pair — see key_def)
   },
   LEVEL = {
     -- unity resets: the system level params are dB tapers, 0 = 0 dB
@@ -328,16 +336,24 @@ local KEYS = {
   },
 }
 
--- the key def addressed by key n on the current page, alt-aware; alt falls
--- back to the un-alt def so a page needn't define both layers
+-- the key def addressed by key n on the current page, alt-aware. any alt
+-- slot a page doesn't claim carries the GLOBAL transport pair instead:
+-- K1+K2 = STOP (master mute) and K1+K3 = DRY (throw playback clean) — the
+-- two rescue keys work on every page except where the alt layer already
+-- has a job (GRAIN octaves, TAPE rev/clear, PADS play/route, REVERB shmr).
+-- hold K1 anywhere: the footer pills SHOW which pair you have.
+local ALT_STOP = { label = "STOP", lit = "stop_all",
+  act = function() ptoggle("stop_all") end }
+local ALT_DRY = { label = "DRY",
+  act = function() ctx.fx_dry() end }
 local function key_def(n)
   local defs = KEYS[PAGES[ctx.page]]
   if not defs then return nil end
   if n == 2 then
-    if ctx.alt then return defs.k2_alt or defs.k2 end
+    if ctx.alt then return defs.k2_alt or ALT_STOP end
     return defs.k2
   end
-  if ctx.alt then return defs.k3_alt or defs.k3 end
+  if ctx.alt then return defs.k3_alt or ALT_DRY end
   return defs.k3
 end
 
@@ -453,6 +469,22 @@ function ctx.pads_all_off()
   end
 end
 
+-- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
+-- sample — every "on top" color to zero (delay, reverb, shimmer, drive,
+-- clouds feedback — the one wash the REVERB page can't kill) and the
+-- filter thrown open (type-aware, same law as FILTER's OPEN key). the
+-- take itself is always recorded clean; this clears the playback path.
+function ctx.fx_dry()
+  params:set("delay_mix", 0)
+  params:set("rev_mix", 0)
+  params:set("shimmer", 0)
+  params:set("drive", 0)
+  params:set("clouds_fb", 0)
+  local ft = params:get("filt_type")
+  params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+  params:set("resonance", 0)
+end
+
 -- ============================================================================
 -- params  (single source of truth: keys, encoders, and MIDI all drive these)
 -- ============================================================================
@@ -478,7 +510,7 @@ local function init_params()
 
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
-  params:add_group("grp_mix", "mix", 4)
+  params:add_group("grp_mix", "mix", 5)
   params:add_control("mix", "eng <> tape",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   params:set_action("mix", Mtape.update_mix)
@@ -492,6 +524,16 @@ local function init_params()
   params:add_control("cut_level", "tape level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
   params:set_action("cut_level", Mtape.update_mix)
+  -- master transport: STOP chokes both decks at the one place their levels
+  -- are computed (update_mix), so START restores the exact mix. everything
+  -- keeps running silently — mode, loops, heads — and held pad voices are
+  -- released. MIDI-map it for a stop pedal; SPACE on a typing keyboard and
+  -- grid (8,2) drive it too.
+  params:add_binary("stop_all", "stop all", "toggle", 0)
+  params:set_action("stop_all", function(v)
+    if v == 1 then ctx.pads_all_off() end
+    Mtape.update_mix()
+  end)
 
   params:add_group("grp_rec", "rec", 6)
   add_eng_binary("rec", "record")
@@ -792,6 +834,14 @@ function init()
   Minput.init_midi()
   Mgrid.connect()
   print("mangler: init() done, params built")
+
+  -- the norns SYSTEM aux reverb sits after the engine and colors everything;
+  -- if another script left it on, "dry" playback isn't — say so at load
+  if params.lookup["reverb"]
+      and tostring(params:string("reverb")):lower() ~= "off" then
+    print("mangler: NOTE — the SYSTEM reverb is ON; it adds reverb mangler"
+      .. " does not control (turn it off under PARAMS > REVERB)")
+  end
 
   local function watch(name, fn)
     -- poll.set returns nil when the engine doesn't expose the poll (stale
