@@ -8,7 +8,7 @@
 -- encoders, and MIDI CCs.
 --
 --   row 1  engine: [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv frz]
---   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  [STOP all]
+--   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  [DRY] [STOP all]
 --   row 3  window slices: a pad = that eighth; hold one + press another
 --          = the span between them; the write head glows while recording
 --   row 4  tape loop slices: same gesture, driving loop start/end
@@ -122,6 +122,7 @@ local function grid_key(x, y, z)
     elseif z == 1 then
       if x == 1 then ptoggle("tape_rec")
       elseif x == 2 then ptoggle("tape_freeze")
+      elseif x == 7 then C.fx_dry()                -- DRY throw (mangler.lua)
       elseif x == 8 then ptoggle("stop_all") end   -- master STOP, right edge
     end
   elseif y == 3 or y == 4 then
@@ -154,6 +155,7 @@ function M.redraw()
   gg:led(1, 2, pget("tape_rec", 0) == 1 and 15 or 2)
   gg:led(2, 2, pget("tape_freeze", 0) == 1 and 15 or 2)
   gg:led(3, 2, pget("tape_reverse", 0) == 1 and 15 or 2)
+  gg:led(7, 2, 3)  -- DRY: a plain action pad, no state to claim
   gg:led(8, 2, pget("stop_all", 0) == 1
     and ((C.frame % FPS) < (FPS / 2) and 15 or 8) or 2)
 

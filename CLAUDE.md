@@ -416,6 +416,33 @@ and a blinking **STP header flag** on every page (STATUS_STR/ABBR grew to
 shots byte-identical; dist rebuilt + byte-verified. Untested on device
 (Lua-only: save + reload).
 
+Twenty-seventh change — **dry-guarantee engine review + DRY throw + global
+alt STOP/DRY (Lua-only, fingerprint STAYS 58)**: user reported "reverb mixed
+into the dry recording". ENGINE REVIEW VERDICT (read, not run): the record
+path CANNOT capture FX — \mangler_io records `in*(1-resample) +
+sig*resample`, so at resample=0 the take is the raw ADC tapped before the
+whole chain; every wet mix is a true zero at 0 (equal-power .sqrt laws,
+shimmer output-gated, drive an XFade2 bypass); the MiClouds positional args
+were VERIFIED against v7b1's MiClouds.sc (in, pit, pos, size, dens, tex,
+drywet, in_gain, spread, rvb, fb, freeze, mode, lofi) — rvb (Clouds'
+internal reverb) is hard 0. Reverb heard on "dry" playback is therefore:
+(a) rev_mix/delay_mix left up in the session (JPverb going live makes old
+barely-audible values lush, decay to 30s), (b) **clouds_fb** (GRAIN bank 2
+E3 — washes like a reverb, the REVERB page can't kill it), (c) the norns
+SYSTEM aux reverb (PARAMS > REVERB — init() now prints a maiden NOTE when
+it's on), or (d) recording with resample>0 (bakes FX into the take, by
+design). Fixes: **ctx.fx_dry()** zeroes delay_mix/rev_mix/shimmer/drive/
+clouds_fb + throws the filter open (FILTER OPEN law), on **K1+K3** + grid
+(7,2); and after "start/stop not working" feedback the alt transport pair
+went GLOBAL — key_def's alt fallback is now ALT_STOP/ALT_DRY (was
+fall-back-to-unalt), so **K1+K2 = STOP / K1+K3 = DRY on every page whose
+alt slot is unclaimed** (all but GRAIN/TAPE/PADS for K2; plus REVERB for
+K3) — hold K1 anywhere and the pills show which pair you have. Suite:
+LEVEL_ALT/FILTER_ALT/DELAY_ALT intentionally re-rendered (STOP/DRY pills),
+MIX_STOP + MIX_STOP_ALT added (55 shots); dist rebuilt + byte-verified.
+REMEMBER: none of this exists on the device until the repo is rsync'd and
+the script reloaded.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
