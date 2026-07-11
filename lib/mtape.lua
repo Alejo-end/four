@@ -19,7 +19,9 @@ end
 -- both, each side keeps its own trim. center keeps both at full trim.
 function M.update_mix()
   local mixv = pget("mix", 0.5)
-  local out = pget("out_level", 1)
+  -- stop_all (the master STOP) chokes both decks right here; levels slew,
+  -- so stop/start are click-free and START restores the exact mix
+  local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local sc_l = pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out
   local tp_l = pget("cut_level", 1) * math.min(1, 2 * mixv) * out
   if engine.level then engine.level(sc_l) end

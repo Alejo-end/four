@@ -81,6 +81,7 @@ E2/E3 values, and the K2/K3 pills.
 | **E2 / E3** | The page's two knobs. Value and dial live in the footer. Hold K1 for the alt pair. |
 | **K1** (hold) | Alt / shift. |
 | **K2 / K3** | The page's two actions. The footer pills invert while they are active. |
+| **K1+K2 on MIX** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. From anywhere: hold K1, twist E1 hard left, tap K2. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
 
 The pages are MIX, LEVEL, REC, WINDOW, GRAIN, STRETCH, TAPE, FILTER, DELAY, REVERB and PADS.
 The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages E2/E3 through the

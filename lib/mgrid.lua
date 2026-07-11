@@ -8,7 +8,7 @@
 -- encoders, and MIDI CCs.
 --
 --   row 1  engine: [rec] [freeze]  ·  [OFF][GRAIN][WARP][PV]  [pv frz]
---   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  ·
+--   row 2  tape:   [rec] [freeze] [reverse, hold]  ·  ·  ·  ·  [STOP all]
 --   row 3  window slices: a pad = that eighth; hold one + press another
 --          = the span between them; the write head glows while recording
 --   row 4  tape loop slices: same gesture, driving loop start/end
@@ -121,7 +121,8 @@ local function grid_key(x, y, z)
       params:set("tape_reverse", z)  -- momentary, like K1+K2 on TAPE
     elseif z == 1 then
       if x == 1 then ptoggle("tape_rec")
-      elseif x == 2 then ptoggle("tape_freeze") end
+      elseif x == 2 then ptoggle("tape_freeze")
+      elseif x == 8 then ptoggle("stop_all") end   -- master STOP, right edge
     end
   elseif y == 3 or y == 4 then
     slice_key(y == 3 and "win" or "loop", x, z)
@@ -148,10 +149,13 @@ function M.redraw()
   for x = 3, 7 do gg:led(x, 1, (x - 2) == mode and 15 or 3) end
   gg:led(8, 1, pget("pv_freeze", 0) == 1 and 15 or 2)
 
-  -- row 2: tape transport
+  -- row 2: tape transport + the master STOP on the right edge (blinks
+  -- while stopped, same urgency as the header's STP flag)
   gg:led(1, 2, pget("tape_rec", 0) == 1 and 15 or 2)
   gg:led(2, 2, pget("tape_freeze", 0) == 1 and 15 or 2)
   gg:led(3, 2, pget("tape_reverse", 0) == 1 and 15 or 2)
+  gg:led(8, 2, pget("stop_all", 0) == 1
+    and ((C.frame % FPS) < (FPS / 2) and 15 or 8) or 2)
 
   -- rows 3/4: slices lit across the active region, head pad brightest
   local wlo, whi = window_bounds()

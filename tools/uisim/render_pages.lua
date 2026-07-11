@@ -600,6 +600,19 @@ else
   export(pfx("PADS", "_LIVE"))
   key(2, 0) key(1, 0)  -- release audition + alt
   params:set("pad_input", 0)
+  -- master STOP: the STP flag blinks by the title on every page; with alt
+  -- held on MIX the STOP pill (the key that toggles it) reads inverted
+  goto_page("MIX")
+  params:set("stop_all", 1)
+  run_ticks(3)
+  redraw()
+  export(pfx("MIX", "_STOP"))
+  key(1, 1)
+  run_ticks(3)
+  redraw()
+  export(pfx("MIX", "_STOP_ALT"))
+  key(1, 0)
+  params:set("stop_all", 0)
 end
 
 print("done: " .. TICK .. " ticks")

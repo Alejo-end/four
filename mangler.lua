@@ -26,6 +26,8 @@
 --   K1     alt / shift (hold)
 --   K2/K3  the page's two actions (on banked pages K2 pages E2/E3 through
 --          the parameter pairs — e.g. all of REVERB and GRAIN)
+--   K1+K2 on MIX   STOP / START: mute everything, press again for the exact
+--          mix back (also SPACE on a typing keyboard · grid (8,2) · MIDI-map)
 --
 -- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
 --
@@ -205,6 +207,10 @@ local KEYS = {
       act = function() params:set("mix", 0) end },
     k3 = { label = "TAPE",
       act = function() params:set("mix", 1) end },
+    -- alt: the master transport. from anywhere: hold K1, E1 hard left
+    -- (family jump lands on MIX), tap K2 — sound stops; again, it's back
+    k2_alt = { label = "STOP", lit = "stop_all",
+      act = function() ptoggle("stop_all") end },
   },
   LEVEL = {
     -- unity resets: the system level params are dB tapers, 0 = 0 dB
@@ -478,7 +484,7 @@ local function init_params()
 
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
-  params:add_group("grp_mix", "mix", 4)
+  params:add_group("grp_mix", "mix", 5)
   params:add_control("mix", "eng <> tape",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   params:set_action("mix", Mtape.update_mix)
@@ -492,6 +498,16 @@ local function init_params()
   params:add_control("cut_level", "tape level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
   params:set_action("cut_level", Mtape.update_mix)
+  -- master transport: STOP chokes both decks at the one place their levels
+  -- are computed (update_mix), so START restores the exact mix. everything
+  -- keeps running silently — mode, loops, heads — and held pad voices are
+  -- released. MIDI-map it for a stop pedal; SPACE on a typing keyboard and
+  -- grid (8,2) drive it too.
+  params:add_binary("stop_all", "stop all", "toggle", 0)
+  params:set_action("stop_all", function(v)
+    if v == 1 then ctx.pads_all_off() end
+    Mtape.update_mix()
+  end)
 
   params:add_group("grp_rec", "rec", 6)
   add_eng_binary("rec", "record")

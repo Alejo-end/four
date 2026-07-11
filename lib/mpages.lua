@@ -1145,15 +1145,15 @@ local function draw_body()
   if f then f(C.frame) end
 end
 
--- status flag text + single-glyph fallback for each of the 16 combos,
+-- status flag text + single-glyph fallback for each of the 32 combos,
 -- built once: the header redraws every frame, only the combo index changes
 local STATUS_STR, STATUS_ABBR = {}, {}
 do
-  local flags = { "REC", "FZ", "TR", "TFZ" }
-  local abbr = { "R", "F", "T", "Z" }
-  for m = 0, 15 do
+  local flags = { "REC", "FZ", "TR", "TFZ", "STP" }
+  local abbr = { "R", "F", "T", "Z", "S" }
+  for m = 0, 31 do
     local t, a = {}, {}
-    for b = 1, 4 do
+    for b = 1, 5 do
       if m & (1 << (b - 1)) ~= 0 then
         t[#t + 1] = flags[b]
         a[#a + 1] = abbr[b]
@@ -1179,6 +1179,7 @@ local function draw_header()
     + (pget("freeze", 0) == 1 and 2 or 0)
     + (pget("tape_rec", 0) == 1 and 4 or 0)
     + (pget("tape_freeze", 0) == 1 and 8 or 0)
+    + (pget("stop_all", 0) == 1 and 16 or 0)
   if m > 0 and not C.alt then
     local dotx = 2 + text_w(PAGES[page], 1) + 4
     screen.level((frame % FPS) < (FPS / 2) and 12 or 2)

@@ -10,7 +10,7 @@
 local midi_devices = {}
 
 local C     -- shared ctx, bound at init
-local pget, FPS
+local pget, ptoggle, FPS
 
 -- true when vport i holds the device midigrid adopted as the grid: its
 -- note-ons are grid pads, not notes. norns dispatches midi to BOTH the
@@ -62,10 +62,16 @@ local M = {}
 
 function M.init(ctx)
   C = ctx
-  pget, FPS = ctx.pget, ctx.FPS
+  pget, ptoggle, FPS = ctx.pget, ctx.ptoggle, ctx.FPS
   keyboard.code = function(code, value)
     if value ~= 1 then return end           -- key-down only (2 = autorepeat)
     if norns.menu.status() then return end  -- the menu owns typing (PSET names)
+    -- SPACE = master stop/start, ableton muscle memory. it's transport, not
+    -- note input, so it works even with keys_enable off
+    if code == "SPACE" then
+      ptoggle("stop_all")
+      return
+    end
     if pget("keys_enable", 1) == 0 then return end
     if code == "Z" or code == "X" then
       params:delta("kb_octave", code == "X" and 1 or -1)
