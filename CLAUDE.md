@@ -478,12 +478,59 @@ MIDI-mapped CC moves get captured** (pmap CC should route through paramset:set �
 if a firmware path bypasses it, notify from the add_eng_control action closures);
 no runaway (loop 10×, lane count constant); watch xruns/GC.
 
+Twenty-ninth change — **S17 self-resampling / regen (ENGINE + Lua, fingerprint
+58 → 59, UNTESTED — no sclang here, gate pending)**: the self-resampling half of
+the innovation brainstorm — the sampler eats itself. `resample` already blends
+the post-FX output into the record buffer but ONLY during an armed `rec` pass;
+S17 adds **`regen`** (new ioKeys command → **59**): the io record head runs
+CONTINUOUSLY when manual `rec` is off + not frozen, crossfading the processed
+OUTPUT back into the buffer so the granular/FX engine slowly re-mangles its own
+sound (Basinski decay). THE SAFETY (three guards, full detail doc/spec.md §S17):
+(1) BOUNDED — a convex crossfade `preLvl+recLvl=1` (both ≤1) + output
+Limiter(0.92) + `LeakDC` on the feedback source → the buffer can't run away;
+(2) BIT-IDENTICAL at regen=0 — `regenRun = (regen>0)*(1-rec)*(1-freeze)`; at 0 →
+`runW==recRun`, `src==recL/R`, levels unchanged → the exact old RecordBuf (the
+`×0` term is exactly 0); (3) can't brick — all core UGens (RecordBuf/LeakDC), no
+plugin deps. manual `rec` (the `(1-rec)` factor) and `freeze` both suspend regen.
+Lua: `regen` in grp_rec (6→7); **REC page** E3/E3-alt are now `resample`/`regen`
+(the two "output→buffer" controls; `dry_wet` left REC — still on FILTER+K1); a
+**REGN badge** lights beside RSMP while regen>0 (SHORT `REGN`). Suite: REC_REGEN
+shot, rec.png regenerated (footer now RSMP not D/W); dist rebuilt + byte-verified
+(source==dist, 176 shots ×4 variants). KNOWN LIMITS (device follow-ups, don't
+pre-build): the record head traverses the whole 60s buffer so the take is
+re-touched ~once/minute (slow ambient decay by design; a window-synced BufWr
+variant is faster); `wave[]` only repaints on `rec` so the morphing buffer isn't
+drawn (badge signals it's live); a Lua-only alt route is `audio.level_eng_cut`
+(tape loops the output). DEPLOY: this is an ENGINE change — **RESTART + confirm
+count 59**, then run the §S17 gate (regen=0 identical; regen up on a take → it
+evolves without runaway even at 1; rec/freeze suspend it).
+
+Thirtieth change — **S16 capture bugfix: wrap → polling (Lua-only, fingerprint
+STAYS 58/59)**: DEVICE REPORT — "motion doesn't work, it doesn't play the
+recording." Root cause: the S16 gesture looper CAPTURED by wrapping
+`params.set`/`params.delta`. That passed the offscreen sim (which only drives
+`params:set`), but on the real norns an **encoder** turn goes through
+`params:delta` → the individual param's `delta`, which never re-enters the
+wrapped paramset `set` — so a knob gesture recorded NOTHING (no lanes → PLAY
+never armed → silence). FIX: `lib/mmotion.lua` now captures by **POLLING** —
+each frame while armed, `tick()` reads every `MOTION_IDS` param and appends an
+event when its value changed vs `last_val` (baselined by `snapshot()` on arm).
+Robust to ALL drivers (encoder/key/MIDI/typing) because it only reads resolved
+values. No wrap, no `cleanup` restore, no `replaying` flag; runaway is prevented
+by writing the fired value into `last_val` right after playback sets it (so the
+poll skips the loop's own output). Data model / page / transport unchanged.
+Renders still show the CUT/MIX lanes + sweeping playhead; dist rebuilt +
+byte-verified (source==dist). LESSON for the render sim: its `params:set` stub
+does NOT model that `paramset:delta` bypasses `paramset:set` on hardware — a
+capture mechanism that intercepts calls can pass the sim yet miss the encoder
+path on device. Save + reload (Lua-only).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = 55, S15 = **58**). Wrong count = old engine still live.
+   S10 = 50, S11 = 55, S15 = 58, S17 = **59**). Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

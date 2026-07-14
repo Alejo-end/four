@@ -76,6 +76,15 @@
 // LocalIn/LocalOut MERGED into ONE LocalIn.ar(4) (SC allows one pair) — delay
 // on ch 0-1, shimmer on ch 2-3, a single deferred LocalOut. shimmer=0 is
 // bit-identical to the old dry reverb (PitchShift still runs, output gated 0).
+//
+// S17 SELF-RESAMPLING / REGEN (gate pending, fingerprint 58 -> 59): +1 command
+// (`regen`). the io record head can now run CONTINUOUSLY (independent of the
+// manual `rec` arm), crossfading the processed OUTPUT back into the buffer so
+// the granular/FX engine slowly re-mangles its own sound (Basinski decay).
+// BOUNDED (convex crossfade preLvl+recLvl=1, output Limiter-capped, LeakDC on
+// the feedback source) so it can't run away; all core UGens so it can't brick;
+// GATED so regen=0 is bit-identical to S15 (regenRun 0 -> the exact old
+// RecordBuf). manual rec and freeze both suspend regen.
 
 Engine_Mangler : CroneEngine {
     var <ioSynth, <playSynth;
@@ -209,7 +218,7 @@ Engine_Mangler : CroneEngine {
             \clouds_mode -> 0, \clouds_lofi -> 0.0
         ];
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
-            \dry_wet, \resample, \grain_level,
+            \dry_wet, \resample, \regen, \grain_level,
             \filt_type, \cutoff, \resonance, \drive,
             \delay_time, \delay_fb, \delay_mix,
             \rev_size, \rev_mix,
@@ -454,7 +463,8 @@ Engine_Mangler : CroneEngine {
         SynthDef(\mangler_io, {
             arg in1, in2, out, buf_l, buf_r, play_bus, rec_phase_out, rec_amp_out,
                 level = 1.0, rec = 0, rec_level = 1.0, pre_level = 0.0,
-                freeze = 0, dry_wet = 0.5, resample = 0.0, grain_level = 1.0,
+                freeze = 0, dry_wet = 0.5, resample = 0.0, regen = 0.0,
+                grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
                 delay_time = 0.3, delay_fb = 0.3, delay_mix = 0.0,
                 rev_size = 1.0, rev_mix = 0.0,
@@ -468,6 +478,7 @@ Engine_Mangler : CroneEngine {
             var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
             var cf, rq, lp, hp, bp, isLp, isHp, isBp, pre, fbIn, dIn, dOut, rv, jpClass;
             var delayFb, shimFb, revIn, ratio, pitched, shimOut;
+            var regenRun, runW, srcL, srcR, recLvl, preLvl;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
@@ -543,8 +554,23 @@ Engine_Mangler : CroneEngine {
             Out.kr(rec_phase_out, A2K.kr(recPhase));
             recL = (inL * (1 - resample)) + (sig[0] * resample);
             recR = (inR * (1 - resample)) + (sig[1] * resample);
-            RecordBuf.ar(recL, buf_l, 0, rec_level, pre_level, recRun, 1);
-            RecordBuf.ar(recR, buf_r, 0, rec_level, pre_level, recRun, 1);
+            // S17 self-resampling: when manual rec is OFF and not frozen, run the
+            // record head CONTINUOUSLY and crossfade the processed OUTPUT back
+            // into the buffer, so the granular/FX engine slowly re-mangles its
+            // own sound (Basinski-style decay). BOUNDED: preLvl+recLvl=1 (a convex
+            // crossfade), output is Limiter-capped, LeakDC stops DC building over
+            // passes — the buffer can't run away. GATED: regen=0 -> regenRun=0 ->
+            // src==recL/R, levels==rec_level/pre_level, runW==recRun -> the writes
+            // are bit-identical to pre-S17. manual rec (the (1-rec) factor) and
+            // freeze both suspend regen.
+            regenRun = (regen > 0) * (1 - rec) * (1 - freeze);
+            runW = recRun.max(regenRun);
+            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
+            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
+            recLvl = (rec_level * (1 - regenRun)) + (regen * regenRun);
+            preLvl = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
+            RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
+            RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
             Out.kr(rec_amp_out,
                 Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
             Out.ar(out, sig);

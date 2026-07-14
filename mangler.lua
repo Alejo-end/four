@@ -400,7 +400,10 @@ local ENC_MAP = {
   -- LEVEL drives the SYSTEM params directly (they share the script paramset);
   -- never ADD params with these ids — referencing them is fine
   LEVEL   = { "input_level", "monitor_level", "output_level", "headphone_gain" },
-  REC     = { "rec_level", "pre_level", "dry_wet", "resample" },
+  -- REC E3/E3-alt are the two "output -> buffer" controls: resample (bake the
+  -- output into an armed take) and regen (S17 continuous self-resampling).
+  -- dry_wet moved off REC (still reachable on FILTER + K1).
+  REC     = { "rec_level", "pre_level", "resample", "regen" },
   WINDOW  = { "pos_start", "scan", "pos_end", "pos_jitter" },
   -- GRAIN/REVERB track the current bank; BANK (K2) rewrites all four slots.
   -- seed with bank 1. format {e2, e2_alt, e3, e3_alt}.
@@ -556,7 +559,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "rec", 6)
+  params:add_group("grp_rec", "rec", 7)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -585,6 +588,12 @@ local function init_params()
   add_eng_control("dry_wet", "dry/wet",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   add_eng_control("resample", "resample (in<>out)",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- S17 self-resampling: continuous feedback of the processed OUTPUT back into
+  -- the record buffer (Basinski-style regenerative decay). 0 = off (a fresh
+  -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
+  -- convex crossfade so it can't run away.
+  add_eng_control("regen", "regen (self-resample)",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
   params:add_group("grp_window", "window", 4)
@@ -929,7 +938,7 @@ function cleanup()
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
-  Mmotion.cleanup()    -- restore the wrapped params.set/delta
+  Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
 end
 
 -- K1+E1 leaps between the page families the header dots draw:

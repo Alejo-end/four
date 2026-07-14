@@ -520,6 +520,15 @@ else
   redraw()
   export(pfx("REC", "_REC"))
   params:set("rec", 0)
+  -- S17 self-resampling: REGN (+ RSMP) badges lit, footer reads RSMP/REGEN
+  goto_page("REC")
+  params:set("resample", 0.4)
+  params:set("regen", 0.5)
+  run_ticks(4)
+  redraw()
+  export(pfx("REC", "_REGEN"))
+  params:set("resample", 0)
+  params:set("regen", 0)
   -- ALT layer on FILTER/DELAY/REVERB: the wet-path encoder targets
   goto_page("FILTER")
   key(1, 1)

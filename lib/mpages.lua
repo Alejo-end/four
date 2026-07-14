@@ -96,6 +96,7 @@ local SHORT = {
   input_level = "IN", monitor_level = "MON",
   output_level = "OUT", headphone_gain = "HP",
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
+  regen = "REGN",
   pos_start = "STRT", scan = "SCAN", pos_end = "END", pos_jitter = "JIT",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
@@ -555,8 +556,11 @@ local function body_REC(frame)
       end
     end
   end
-  -- resample re-records the OUTPUT: badge it while engaged
-  if pget("resample", 0) > 0 then chip("RSMP", 2, 13) end
+  -- resample bakes the OUTPUT into an armed take; regen (S17) feeds it back
+  -- continuously (self-resampling). badge whichever is engaged, side by side.
+  local bx = 2
+  if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 13) + 2 end
+  if pget("regen", 0) > 0 then chip("REGN", bx, 13) end
 end
 
 local function body_WINDOW(frame)

@@ -579,22 +579,27 @@ surfaced by keys/grid.
   overdub); touching a new param adds a lane without disturbing the others. One growing loop you
   keep overdubbing into — no track objects, no mute matrix.
 
-**Capture hook.** `mmotion` wraps the paramset methods `params.set` and `params.delta` (restored in
-`cleanup`): call the original, then, while armed, log `{ctx.frame − rec_start, id, params:get(id)}`
-into `lane[id]` — reading `params:get` *after* the call captures the absolute value whether the
-driver was a set or a delta. Only ids in a whitelist `MOTION_IDS` are captured — the performance /
-mangle params (the page `ENC_MAP` + `KEYS` targets: `mix`, `cutoff`, `resonance`, `drive`,
-`delay_*`, `rev_*`, `shimmer*`, `size`, `density`, `spread`, `clouds_*`, `scan`, `pitch`, `pos_*`,
-`warp_*`, `mode`, `freeze`, `pv_freeze`…). **Excluded:** system levels (`input/output/monitor_level`,
-`headphone_gain`), `keys_*`, PSET, and the transports `stop_all` / `rec` / `tape_rec` (a loop must
-never re-arm recording or fight STOP). *Device-gate check:* confirm MIDI-mapped (CC) moves land in a
-lane — norns pmap CC dispatch should route through paramset `set`; if a firmware path bypasses it,
-the fallback is to also notify from the `add_eng_control` action closures.
+**Capture by POLLING (not by wrapping calls).** Every frame while armed, `tick()` reads the
+current value of each `MOTION_IDS` param and, if it changed since last frame, appends
+`{offset, value}` to `lane[id]` (offset = `ctx.frame − rec_start` on the first pass, else the
+playhead). This catches **every** driver — encoder (`params:delta`), key throw, MIDI CC, typing
+keyboard — because it only ever *reads* values; it never depends on how they changed. `snapshot()`
+on arm baselines `last_val` so only moves made *after* arming record. Only ids in `MOTION_IDS` are
+watched — the performance / mangle params (the page `ENC_MAP` + `KEYS` targets: `mix`, `cutoff`,
+`resonance`, `drive`, `delay_*`, `rev_*`, `shimmer*`, `size`, `density`, `spread`, `clouds_*`,
+`scan`, `pitch`, `pos_*`, `warp_*`, `mode`, `freeze`, `pv_freeze`…). **Excluded:** system levels
+(`input/output/monitor_level`, `headphone_gain`), `keys_*`, PSET, and the transports `stop_all` /
+`rec` / `tape_rec` (a loop must never re-arm recording or fight STOP).
 
-**The replay guard (no runaway).** Playback fires `params:set` for owned lanes every frame; those
-must NOT be re-captured or the loop grows unbounded. `mmotion` raises an internal `replaying` flag
-around its own fire calls, and the capture hook ignores any change while it is set — so only genuinely
-live moves (enc/key/MIDI) enter a lane. Gate check: record a sweep, loop it 10×, lane event count
+> **WHY POLLING (the S16 bug, fixed).** The first cut *wrapped* `params.set` / `params.delta`. That
+> looked right and passed the offscreen sim — but the sim only ever drove `params:set`, while on the
+> real norns an **encoder** turn goes through `params:delta` → the individual param's delta, which
+> never re-enters the wrapped paramset `set`, so **nothing recorded on device**. Polling reads the
+> resolved value each frame and is immune to all of it (no wrap, no `cleanup` restore).
+
+**No runaway.** When playback fires `params:set(id, v)` for an owned lane it writes `v` straight
+into `last_val[id]`, so the next poll sees no change and doesn't re-capture the loop's own output —
+only genuinely-live moves enter a lane. Gate check: record a sweep, loop it 10×, lane event count
 stays constant.
 
 **Playback.** Inside the existing `redraw_clock` loop in `init()` (add `Mmotion.tick()` next to
@@ -654,3 +659,61 @@ shots.
 6. MIDI-map `motion_rec` to a footswitch → stomping punches record.
 7. No runaway: record a sweep, loop 10×, lane event count constant (replay guard holds).
 8. No new xruns / GC hitch from playback (dev check with a stretch mode + tape running).
+
+### S17 — self-resampling / regen (engine + Lua, fingerprint 58 → 59, UNTESTED)
+
+The self-resampling half of the innovation brainstorm: the sampler **eats itself**. `resample`
+already blends the post-FX output into the record buffer — but **only during an armed `rec`
+pass** (`recL = in·(1−resample) + sig·resample`, written when `recRun = rec·(1−freeze)`). S17
+adds **`regen`**: a continuous feedback that runs the record head on its own, crossfading the
+processed output back into the buffer so the granular/FX engine slowly **re-mangles its own
+sound** — Basinski-style generative decay. (Distinct from the tape deck's overdub, which loops
+the *input*, and from `resample`, which needs a manual write.)
+
+**Engine (`\mangler_io`), one new arg `regen` (0..1, default 0):**
+```
+regenRun = (regen > 0) * (1 - rec) * (1 - freeze);   // continuous, unless manually recording/frozen
+runW     = recRun.max(regenRun);
+srcL     = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);   // regen source = the OUTPUT
+srcR     = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
+recLvl   = (rec_level * (1 - regenRun)) + (regen       * regenRun);
+preLvl   = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
+RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);   // (recL/recR still feed the rec_amp poll)
+RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
+```
+
+**Why it's safe (the three guards):**
+- **Bounded — can't run away.** The regen write is a **convex crossfade**: `preLvl + recLvl = 1`,
+  both in [0,1]. Each pass a buffer sample becomes `(1−regen)·old + regen·output`; since `old`
+  and `output` are both ≤1 (output is capped by the master `Limiter(0.92)`), the result stays
+  ≤1. No geometric growth. `LeakDC` on the regen source stops DC building over passes.
+- **True no-op at `regen=0`.** `regenRun=0` ⇒ `runW=recRun`, `srcL=recL` (the `×0` term is
+  exactly 0), `recLvl=rec_level`, `preLvl=pre_level` — the `RecordBuf` call is **bit-identical**
+  to today's. Manual recording is also unaffected whenever `regen>0` (the `(1−rec)` factor zeroes
+  `regenRun` during a real take; `freeze` halts regen too, so freeze still locks the buffer).
+- **Can't brick loading.** All core UGens (`RecordBuf`/`LeakDC`), no plugin deps.
+
+`\regen` joins `ioKeys` (auto-registered) → **fingerprint 58 → 59**.
+
+**Lua:** `regen` in `grp_rec` (6 → 7); **REC page** E3/E3-alt become `resample`/`regen` (the two
+"output → buffer" controls, thematically paired) — `dry_wet` leaves REC (still on FILTER+K1).
+A **REGN badge** lights on REC while regen>0 (beside RSMP), SHORT `REGN`.
+
+**Known limits (device follow-ups, don't pre-build):** the record head traverses the **whole
+60s buffer**, so the window (the take) is re-touched about **once per minute** — a slow, ambient
+decay by design; a **window-synced/faster** variant (BufWr at the playhead) is a follow-up. The
+`wave[]` display only repaints on `rec`, so the morphing buffer isn't drawn (the badge signals
+it's live). A complementary **Lua-only** self-resampling exists too — route engine output into
+softcut (`audio.level_eng_cut`) so the **tape** loops the processed output — parked as an option.
+
+**S17 gate (RESTART — `regen` is in the `.sc`; count 59):**
+1. Loads clean, `count: 59`, no SC-tab errors.
+2. `regen=0`: everything sounds and records exactly as before (bit-identical guard).
+3. Record a short take, set mode PLAY/GRAIN, raise `regen` (~0.3–0.6): over ~a minute the loop
+   visibly/audibly evolves — the sound feeds on itself, thickening then decaying — and the REGN
+   badge is lit. **No runaway / no clipping blowup** even at `regen=1` (the crossfade + limiter
+   hold it).
+4. Arming manual `rec` while `regen>0` records the input normally (regen pauses); `freeze` halts
+   the evolution and locks the current buffer.
+5. Watch xrun headroom with GRAIN + tape + a full reverb also running (RecordBuf feedback is
+   cheap, but confirm).
