@@ -556,6 +556,44 @@ don't pre-build): per-step pitch (scale) + per-step slice, grid step-editing,
 multiple tracks + CC/param-lock lanes, patterns + chaining, more generation
 (probability/ratchets/rotation). Gate: doc/spec.md §S18. Save + reload (Lua-only).
 
+Thirty-second change — **S18 bugfix: sequencer was silent (note_one_shot →
+note_on, Lua-only)**: DEVICE REPORT — "the sequencer doesn't work, it plays
+nothing." Root cause: S18 fired `engine.note_one_shot`, which the S8 log itself
+flags "available but unused" — the one-shot voice path was NEVER tested, and its
+gate (`Trig.kr(Impulse.kr(0), sustain)`) produced no sound on device. Secondary:
+it triggered WHOLE-buffer slices `(slice+0.5)/8`, silent for a short take (the
+pads' known whole-buffer-slice limitation). FIX (lib/mseq.lua, no engine change):
+fire a **MONO voice via the TESTED `note_on`/`note_off`** path (what PADS use) at
+a **window-relative** position `pos = lo + (seq_slice+0.5)/pad_n · span` (via
+`ctx.window_bounds`), so it always lands on the recorded take. note_off releases
+the previous voice before note_on (no leak — the engine's noteOn doesn't self-
+steal a reused id); rests release; `M.stop` + cleanup release the last voice.
+Voice id 2500 (clear of screen 0-8 / MIDI 1000+ / grid 2000+). SEQ page/params/
+clock unchanged; renders byte-identical, dist rebuilt + verified. LESSON: don't
+build on an engine command that's never been ear-confirmed — note_one_shot
+looked right but was dead. DIAGNOSTIC recorded in §S18 (playhead moving ⇒ clock
+OK ⇒ audio-path bug; not moving ⇒ clock). Save + reload (Lua-only).
+
+Thirty-third change — **S18 grid support: page-aware SEQ view (Lua-only)**:
+DEVICE FEEDBACK — "no mini grid support, I can't see the sequence on the grid
+like snu." Made mangler's grid **page-aware** (it was a fixed page-independent
+surface): `is_seq_page()` in lib/mgrid.lua → while the SEQ screen page is
+active the grid becomes the sequencer, otherwise it's the normal mangler
+layout (like snu, whose grid follows the page). Layout: rows 1-2 = the 16
+steps (tap toggles via new `Mseq.toggle_step`; playhead brightest, active mid,
+rest dim, beyond-length dark), row 7 = slice select, row 8 = play/clear
+(`Mseq.clear`). Euclid is the GENERATOR, grid taps edit steps on top; with
+seq_euclid=0 you can hand-draw a pattern (body_SEQ now counts ACTIVE steps, not
+just hits, so a grid-built pattern shows; empty invite → "TURN E2 - OR TAP
+GRID"). Works with midigrid launchpads (the user's "mini grid") the same as the
+rest of mangler's grid. NO engine change; renders byte-identical (grid is
+stubbed in the uisim, so the grid code is UNTESTED here — device gate). dist
+rebuilt + verified. Save + reload (Lua-only). AUDIO CLARITY (the other half of
+the report — "don't know what it does to the audio"): v1 retriggers ONE slice
+(seq_slice) of the take as a MONO note in the Euclidean rhythm, OVER the drone —
+so to hear it distinctly, drop the drone (STRETCH mode OFF / mix) or shorten
+voice_rel (PADS E3); per-step pitch/slice (melodic sequencing) is the follow-up.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

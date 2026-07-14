@@ -108,8 +108,62 @@ local function grid_note_key(x, y, z)
   if z == 1 then C.flash_id, C.flash_until = "pitch", C.frame + FPS end
 end
 
+-- SEQ page (S18): the grid becomes the step sequencer while the SEQ screen
+-- page is active (page-aware, like snu) — otherwise it's the normal mangler
+-- surface. rows 1-2 are the 16 steps (tap to toggle), row 7 picks the slice,
+-- row 8 is transport (play / clear).
+local function is_seq_page()
+  return C.PAGES[C.page] == "SEQ"
+end
+
+-- a pad on rows 1-2 -> a step index 1..16 (row 1 = steps 1-8, row 2 = 9-16)
+local function seq_step_at(x, y)
+  if y == 1 then return x
+  elseif y == 2 then return x + 8 end
+  return nil
+end
+
+local function seq_grid_key(x, y, z)
+  if z ~= 1 then return end
+  local step = seq_step_at(x, y)
+  if step then
+    C.seq.toggle_step(step)                       -- tap a step: toggle it
+  elseif y == 7 and x >= 1 and x <= 8 then
+    params:set("seq_slice", x - 1)                -- row 7: pick the slice
+  elseif y == 8 then
+    if x == 1 then ptoggle("seq_play")            -- transport: play / stop
+    elseif x == 8 then C.seq.clear() end          -- clear the pattern
+  end
+end
+
+local function seq_redraw()
+  local sq = C.seq
+  local len = pget("seq_len", 16)
+  local pos = sq.pos
+  local playing = pget("seq_play", 0) == 1
+  -- rows 1-2: the 16 steps. playhead brightest, active mid, rest dim, steps
+  -- beyond the length dark.
+  for i = 1, 16 do
+    local x = ((i - 1) % 8) + 1
+    local y = i <= 8 and 1 or 2
+    local lvl
+    if i > len then lvl = 0
+    elseif playing and i == pos then lvl = 15
+    elseif sq.pattern[i] then lvl = 8
+    else lvl = 2 end
+    gg:led(x, y, lvl)
+  end
+  -- row 7: slice select (current lit)
+  local slice = pget("seq_slice", 0)
+  for x = 1, 8 do gg:led(x, 7, (x - 1) == slice and 15 or 3) end
+  -- row 8: transport — play/stop (left, lit while running), clear (right)
+  gg:led(1, 8, playing and 15 or 4)
+  gg:led(8, 8, 4)
+end
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
+  if is_seq_page() then return seq_grid_key(x, y, z) end
   if y == 1 then
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
@@ -142,6 +196,9 @@ end
 function M.redraw()
   if not (gg and gg.device) then return end
   gg:all(0)
+
+  -- SEQ page takes over the whole grid (page-aware, like snu)
+  if is_seq_page() then seq_redraw() gg:refresh() return end
 
   -- row 1: engine transport + mode radio
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)

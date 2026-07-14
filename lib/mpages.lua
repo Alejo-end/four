@@ -1277,8 +1277,11 @@ local function body_SEQ(frame)
   ptext_r(hits .. "/" .. len, 126, 13, 1, 4)
   ptext("SLICE " .. slice, 2, 13, 1, playing and 12 or 5)
 
-  if hits == 0 then
-    ptext_c("EUCLID: TURN E2 FOR HITS", 64, 28, 1, 5)
+  -- active steps: from the Euclidean fill OR manual grid taps
+  local active = 0
+  for i = 1, len do if sq.pattern[i] then active = active + 1 end end
+  if active == 0 then
+    ptext_c("TURN E2 - OR TAP GRID", 64, 28, 1, 5)
     return
   end
 
