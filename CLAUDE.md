@@ -443,6 +443,41 @@ MIX_STOP + MIX_STOP_ALT added (55 shots); dist rebuilt + byte-verified.
 REMEMBER: none of this exists on the device until the repo is rsync'd and
 the script reloaded.
 
+Twenty-eighth change — **S16 gesture looper / motion recording (Lua-only,
+fingerprint STAYS 58, renders verified, untested on device)**: the "fourth
+driver" from the innovation brainstorm — records the param stream and replays
+it, a modulation loop pedal for a 3-knob box (full design: doc/spec.md §S16).
+NEW module **lib/mmotion.lua** (7th lib; amalgamate assert 6→7). It wraps
+`params.set`/`params.delta` (restored in cleanup) so every key/encoder/MIDI/
+typing move flows through `on_change`; captures only `MOTION_IDS` (the
+performance/mangle params — NOT levels/keys/transport/motion_*). Data model:
+ONE loop, per-param **lanes** (`lanes[id]={f,v,n,cur,last_fire}` flat arrays,
+`loop_len` in FRAMES on the 15fps grid — no new clock), **punch-in replace**
+(first touch of a param in a pass clears its lane). A **`replaying` guard**
+around the playback fires stops the loop re-recording itself (no runaway).
+`Mmotion.tick()` runs in the redraw clock: advances the playhead, fires each
+lane's events at `f==playhead`, wraps, auto-disarms an overdub after one full
+loop. `motion_depth` (E3) scales continuous lanes toward their baseline (living
+loops); discrete params pass through. Transports are **binary params**
+(`motion_rec`/`motion_play`, MIDI-mappable → footswitch overdubs); `motion_lane`
+(E2) browses lanes. Lua wiring: **MOTION = page 12** (PAGES/PAGE_GROUPS
+{1,4,7,8,**12**}/ENC_MAP/KEYS), grp_motion (4 params), `ctx.motion`,
+`Mmotion.tick()` in the clock, `Mmotion.cleanup()` restores the wrapped methods.
+KEYS.MOTION claims its alt slots (K2 REC / K3 PLAY / **K1+K2 CLR-L** /
+**K1+K3 CLR**) so global STOP/DRY aren't on MOTION (like GRAIN/TAPE/PADS). UI:
+body_MOTION = loop timeline + sweeping playhead + one lane-row per param (name +
+events plotted low..high, selected/just-fired brighten); empty-state invitation;
+FULLY PROCEDURAL (no math.random → other pages' seeded renders stay byte-
+identical). Adding page 12 legitimately adds a 12th header dot to EVERY page, so
+the whole doc/ui gallery was regenerated (+ motion.png). Suite: MOTION_EMPTY/
+_REC/_PLAY + base_12_MOTION; dist rebuilt + byte-verified (source==dist across
+all 172 shots ×4 variants). DEVICE GATE (doc/spec.md §S16): save + reload, count
+still 58; K2 arms, sweep a knob, K2 stops → it loops hands-free; overdub a 2nd
+param; re-record replaces one lane; CLR-L/CLR; footswitch maps motion_rec; **check
+MIDI-mapped CC moves get captured** (pmap CC should route through paramset:set —
+if a firmware path bypasses it, notify from the add_eng_control action closures);
+no runaway (loop 10×, lane count constant); watch xruns/GC.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

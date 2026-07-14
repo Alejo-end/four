@@ -71,7 +71,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS",
+  "FILTER", "DELAY", "REVERB", "PADS", "MOTION",
 }
 
 local FPS = 15
@@ -174,16 +174,19 @@ local Mparticles = include "lib/mparticles"
 local Mtape = include "lib/mtape"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
+local Mmotion = include "lib/mmotion"
 local Mpages = include "lib/mpages"
 
 ctx.font = Mfont
 ctx.particles = Mparticles
 ctx.grid = Mgrid
+ctx.motion = Mmotion
 
 Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
+Mmotion.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -334,6 +337,21 @@ local KEYS = {
     k3_alt = { label = "ROUTE", lit = "pad_input",
       act = function() ptoggle("pad_input") end },
   },
+  MOTION = {
+    -- the gesture looper (S16). K2 arms recording of the param stream (a
+    -- fresh loop from empty, or a punch-in overdub onto the running loop);
+    -- K3 starts/stops playback. the page claims its alt slots (like GRAIN/
+    -- TAPE/PADS) so K1+K2 = CLR-L (clear the selected lane) and K1+K3 = CLR
+    -- (wipe all lanes); clearing leaves every param at its last value.
+    k2 = { label = "REC", lit = "motion_rec",
+      act = function() ptoggle("motion_rec") end },
+    k3 = { label = "PLAY", lit = "motion_play",
+      act = function() ptoggle("motion_play") end },
+    k2_alt = { label = "CLR-L",
+      act = function() ctx.motion.clear_lane() end },
+    k3_alt = { label = "CLR",
+      act = function() ctx.motion.clear_all() end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware. any alt
@@ -395,6 +413,9 @@ local ENC_MAP = {
   DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_decay", "rev_damp", "rev_mix", "rev_size" },
   PADS    = { "voices", "voice_atk", "voice_rel", nil },
+  -- MOTION (S16): E2 browses lanes, E3 is the global automation amount.
+  -- no alt pair — the page claims K1 for CLR-L/CLR instead.
+  MOTION  = { "motion_lane", nil, "motion_depth", nil },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -806,6 +827,26 @@ local function init_params()
     params:lookup_param("pitch"):bang()
   end)
 
+  -- S16 gesture looper: records the param stream (MOTION_IDS) and replays it
+  -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
+  -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
+  -- no engine command, so the fingerprint is unchanged.
+  params:add_group("grp_motion", "motion", 4)
+  params:add_binary("motion_rec", "motion record", "toggle", 0)
+  params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
+  params:add_binary("motion_play", "motion play", "toggle", 0)
+  params:set_action("motion_play", function(v) ctx.motion.set_playing(v == 1) end)
+  params:add_number("motion_lane", "motion lane", 0, 16, 0,
+    function(p)
+      local ids = ctx.motion.lane_ids
+      local n = #ids
+      local v = math.min(p:get(), n)
+      if n == 0 or v == 0 then return "-" end
+      return ids[v]
+    end)
+  params:add_control("motion_depth", "motion depth",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
   -- round-trip the softcut buffers (see mtape). the granular engine's
   -- record buffer would need a matching save command on the SC side to
@@ -870,6 +911,7 @@ function init()
       Mpages.update_wave()
       Mpages.update_tape_wave()
       Mparticles.update()
+      Mmotion.tick()   -- S16: advance + replay the gesture loop
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -887,11 +929,12 @@ function cleanup()
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
+  Mmotion.cleanup()    -- restore the wrapped params.set/delta
 end
 
 -- K1+E1 leaps between the page families the header dots draw:
--- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx
-local PAGE_GROUPS = { 1, 4, 7, 8 }
+-- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion
+local PAGE_GROUPS = { 1, 4, 7, 8, 12 }
 
 function enc(n, d)
   if n == 1 then

@@ -315,10 +315,12 @@ no clipping, no xruns with a stretch mode + tape + all FX engaged.
 | DELAY   | `delay_mix` / `delay_time`| `delay_fb` / `drive`   | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
 | REVERB  | banked (4 banks × 4)     | banked                  | BANK | KILL (`rev_mix`=0) / SHMR (shimmer bloom) |
 | PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) / ROUTE (`pad_input`) |
+| MOTION  | LANE select / —          | LEN (`motion_len`) / —  | REC (`motion_rec`) / CLR-L | PLAY (`motion_play`) / CLR |
 
 (This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
 always go through `params:*`. PADS keys are the exception — SEL/PLAY/TYPE drive the pad
-cursor/audition/type in `ctx`, not a param, since a pad bank isn't a single value.)
+cursor/audition/type in `ctx`, not a param, since a pad bank isn't a single value; MOTION's
+LANE cursor is likewise a `ctx` selector, and CLR-L/CLR are destructive so they stay off MIDI.)
 
 **Master STOP (`stop_all`, Lua-only).** A binary param that chokes both decks inside
 `Mtape.update_mix` — the one place the engine `level` and the softcut voice levels are
@@ -548,3 +550,107 @@ small always-on cost on top of clouds+JPverb+delay+tape+voices.
 installed** → the FreeVerb fallback only responds to decay/damp/mix; the other 9 JPverb params
 (size, early, mod depth/freq, low/mid/high, low/high cut) are no-ops on it. Verify on device
 with `JPverb.class.postln` in the SC tab. Not a bug — the guard doing its job.
+
+### S16 — gesture looper (motion recording) (Lua-only, fingerprint STAYS 58)
+
+**The fourth driver.** Params are the single source of truth with three drivers — keys, encoders,
+MIDI (§4). S16 adds a fourth that **records the param stream and replays it**: a modulation loop
+pedal for a 3-knob instrument. Record a filter sweep and it loops hands-free while you granulate on
+top; overdub a delay-mix swell onto a second lane; each lane automates its own param independently.
+No engine change — it re-issues existing `params:set` calls — so **fingerprint STAYS 58, no RESTART,
+save + reload**, and zero risk of bricking LOADING (it is all Lua). This is the highest-leverage
+Lua-only addition on the table precisely because every controllable value already goes through
+`params:set/delta`: the looper is a thin capture/replay around that one chokepoint, needing no new
+audio path, no new engine command, and it inherits MIDI-mappability for its own transport.
+
+**Module: `lib/mmotion.lua`** (script-internal, like mtape/minput: `M.init(ctx)` binds `C = ctx`,
+returns `M`). Owns the loop state + the capture hook; drawn by mpages, ticked by the redraw clock,
+surfaced by keys/grid.
+
+**Data model — one loop, per-param lanes.**
+- `loop_len` — length in **frames** (the 15fps `ctx.frame` grid is the timeline; no new clock, per
+  the clock-minimalism gotcha). Set by the first from-empty record pass — free length, loop-pedal
+  style, no tempo needed.
+- `lane[id]` = a flat, pre-sized array of `{f, v}` events for param `id` over `[0, loop_len)`.
+  Sparse — only params the performer actually touched become lanes, so independent params are
+  independent automation lanes.
+- **Punch-in replace, per lane:** the first time a param is touched in a record pass its lane is
+  cleared, then events append. Re-recording a param overwrites **only** that lane (predictable
+  overdub); touching a new param adds a lane without disturbing the others. One growing loop you
+  keep overdubbing into — no track objects, no mute matrix.
+
+**Capture hook.** `mmotion` wraps the paramset methods `params.set` and `params.delta` (restored in
+`cleanup`): call the original, then, while armed, log `{ctx.frame − rec_start, id, params:get(id)}`
+into `lane[id]` — reading `params:get` *after* the call captures the absolute value whether the
+driver was a set or a delta. Only ids in a whitelist `MOTION_IDS` are captured — the performance /
+mangle params (the page `ENC_MAP` + `KEYS` targets: `mix`, `cutoff`, `resonance`, `drive`,
+`delay_*`, `rev_*`, `shimmer*`, `size`, `density`, `spread`, `clouds_*`, `scan`, `pitch`, `pos_*`,
+`warp_*`, `mode`, `freeze`, `pv_freeze`…). **Excluded:** system levels (`input/output/monitor_level`,
+`headphone_gain`), `keys_*`, PSET, and the transports `stop_all` / `rec` / `tape_rec` (a loop must
+never re-arm recording or fight STOP). *Device-gate check:* confirm MIDI-mapped (CC) moves land in a
+lane — norns pmap CC dispatch should route through paramset `set`; if a firmware path bypasses it,
+the fallback is to also notify from the `add_eng_control` action closures.
+
+**The replay guard (no runaway).** Playback fires `params:set` for owned lanes every frame; those
+must NOT be re-captured or the loop grows unbounded. `mmotion` raises an internal `replaying` flag
+around its own fire calls, and the capture hook ignores any change while it is set — so only genuinely
+live moves (enc/key/MIDI) enter a lane. Gate check: record a sweep, loop it 10×, lane event count
+stays constant.
+
+**Playback.** Inside the existing `redraw_clock` loop in `init()` (add `Mmotion.tick()` next to
+`Mparticles.update()`): when playing, advance a playhead `p` over `[0, loop_len)`, fire every lane
+event whose frame `== p`, wrap at `loop_len`. A param holds its last fired value until the next event
+(exactly as recorded), so continuous sweeps replay stepped-at-15fps — no worse than live encoder
+turning, which the engine already receives un-slewed. Playback visibly moves the footer knobs (they
+read the param), so a page shows itself being played. *Refinements (later):* optional linear
+interpolation between events for zipper-free sweeps; half-speed / reverse motion; clock/Link-quantized
+loop length (the §11 "clock-quantized gestures" line).
+
+**Controls — MOTION page (page 12, appended; `PAGE_GROUPS` gains it as its own fx-adjacent family).**
+A modulation looper earns a page the way a static HOME dashboard did not: it needs three unambiguous
+standalone controls AND a live lane view (the design law — brightness = audibility: an idle loop
+draws dim, a playing lane pulses on each event, the armed lane glows). Keys (the page claims its alt
+slots like GRAIN/TAPE/PADS, so the global STOP/DRY pair simply isn't on MOTION — documented):
+- **K2 = REC** (`motion_rec` toggle, lit while armed) — arm capture; from empty it starts the loop and
+  sets `loop_len` on the next stop; while looping it punches in an overdub.
+- **K3 = PLAY** (`motion_play` toggle, lit while looping) — start/stop loop playback.
+- **K1+K2 = CLR-L** — clear the selected lane. **K1+K3 = CLR** — wipe all lanes to empty. Clearing
+  leaves every param at its last value (no jump).
+- **E2 = LANE** — select a lane to view / solo / clear (a `ctx` cursor, not a param — like PADS SEL).
+  **E3 = LEN** — pre-set loop length in seconds before the first take (reads captured length after).
+
+**Params (`grp_motion`, Lua-only actions → no engine command, count unaffected).** `motion_rec`
+(binary) + `motion_play` (binary), both MIDI-mappable, so a **footswitch can punch overdubs and
+start/stop the loop** — the killer mapping for a looper. Clear stays key/grid only (destructive — no
+stray CC should wipe a take). Optional `motion_depth` (0..1 global amount / dry-blend of the
+automation) is a natural add.
+
+**Grid (mgrid, optional, existing pattern).** A small REC / PLAY / CLEAR transport cluster (lit /
+blinking to match) plus a per-lane activity readout — but the instrument stays fully playable
+standalone (hard invariant), so the gate rides on the keys.
+
+**Interactions.** STOP (`stop_all`) mutes audio while the loop keeps running silently — START returns
+to the exact motion state. DRY (`fx_dry`) is a manual rescue that zeroes FX params; a lane that owns
+one will fight DRY — expected (CLEAR stops the loop, DRY does not). **Not persisted in v1** —
+serializing lanes next to the PSET (alongside the tape wav, via `params.action_write`) is the
+follow-up. Synergy note: pairs naturally with the roadmap's self-resampling idea (evolving textures)
+and with clock-quantized gestures.
+
+**Allocation.** Playback + draw stay allocation-free (flat event arrays, static layout, no per-frame
+tables — the hot-path rule). Recording appends to lane arrays (amortized, user-driven, rare) — the
+only allocating path, and it is off the audio/redraw-critical loop.
+
+**Render suite.** Add MOTION shots (empty / armed / playing-with-lanes) to `tools/uisim`; eyeball
+before deploy (a redraw error is a silent black screen); rebuild `dist` and byte-verify the untouched
+shots.
+
+**S16 gate (Lua-only — save + reload, NO RESTART, count still 58):**
+1. Loads clean, `count: 58`, no matron/SC errors; MOTION is page 12.
+2. On MOTION, K2 arms REC (lit); go to FILTER, sweep `cutoff`; back to MOTION, K2 to stop → `loop_len`
+   set, K3 PLAY loops the sweep hands-free; the FILTER footer knob moves on its own.
+3. Overdub: while looping, K2, move a *different* param (`delay_mix`) → both lanes loop independently.
+4. Re-record `cutoff` → only its lane is replaced (the delay lane is untouched).
+5. CLR-L clears one lane, CLR wipes all; params hold their last value (no jump).
+6. MIDI-map `motion_rec` to a footswitch → stomping punches record.
+7. No runaway: record a sweep, loop 10×, lane event count constant (replay guard holds).
+8. No new xruns / GC hitch from playback (dev check with a stretch mode + tape running).

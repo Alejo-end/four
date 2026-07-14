@@ -81,7 +81,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS",
+  "FILTER", "DELAY", "REVERB", "PADS", "MOTION",
 }
 
 local FPS = 15
@@ -878,6 +878,284 @@ end
 return M
 
 end)()
+local Mmotion = (function()  -- inlined lib/mmotion.lua
+-- mmotion: the gesture looper (S16) — a fourth driver for the params.
+--
+-- keys/encoders/MIDI are three drivers of the single source of truth (the
+-- params). this module adds a fourth that RECORDS the param stream and
+-- REPLAYS it: a modulation loop pedal for a 3-knob instrument. record a
+-- filter sweep and it loops hands-free while you granulate on top; overdub a
+-- delay-mix swell onto a second lane; each param you touch becomes its own
+-- automation lane. no engine change — it re-issues the same params:set calls,
+-- so the fingerprint is untouched and it can never brick loading.
+--
+-- data model: one loop, per-param lanes.
+--   loop_len   loop length in FRAMES (the 15fps redraw grid is the timeline;
+--              no new clock). 0 until the first take sets it (free length).
+--   lanes[id]  { f={}, v={}, n, cur, last_fire } — flat, pre-grown arrays of
+--              {frame-offset, value} events over [0, loop_len). sparse: only
+--              params you actually touched exist, so they layer independently.
+--   punch-in replace: the first time a param is touched in a record pass its
+--   lane is cleared, then events append — re-recording a param overwrites
+--   ONLY that lane.
+--
+-- capture: wrap params.set/params.delta (restored in cleanup) — reading
+-- params:get AFTER the call captures the absolute value whether the driver
+-- was a set or an encoder delta, and catches keys + MIDI + the typing
+-- keyboard for free. only MOTION_IDS (the performance/mangle params) are
+-- captured; levels, transport and config are excluded.
+--
+-- the replay guard: playback fires params:set for owned lanes every frame —
+-- those must NOT be re-captured or the loop grows without bound. `replaying`
+-- is raised around the fire calls and the capture hook ignores changes while
+-- it is set, so only genuinely-live moves enter a lane.
+
+local min, max, floor = math.min, math.max, math.floor
+
+local C            -- shared ctx, bound at init
+local pget, clamp, FPS
+local MAX_LEN      -- cap the loop at 60s so a forgotten arm can't run away
+
+-- the params whose motion is recordable — the performance / mangle knobs and
+-- toggles. NOT here: system levels (input/output/monitor/headphone/out/sc/cut/
+-- rec), the keys_* config, pad_input, the transports (rec/tape_rec/stop_all),
+-- and motion_* itself. add new mangle params to this list to make them
+-- automatable.
+local MOTION_IDS = {}
+for _, id in ipairs({
+  "mix",
+  "pos_start", "pos_end", "scan", "pos_jitter",
+  "size", "density", "pitch", "spread", "pan", "grain_level",
+  "grain_jitter", "grain_pitch_spread",
+  "clouds_pos", "clouds_tex", "clouds_fb", "clouds_lofi", "clouds_mode",
+  "mode", "warp_window", "warp_rand", "pv_freeze", "freeze",
+  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_freeze",
+  "tape_reverse",
+  "cutoff", "resonance", "drive", "filt_type",
+  "delay_time", "delay_fb", "delay_mix",
+  "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
+  "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
+  "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
+  "voice_atk", "voice_rel",
+}) do MOTION_IDS[id] = true end
+
+local M = {
+  loop_len = 0,     -- frames; 0 = empty (no take yet)
+  playhead = 0,     -- current loop frame while playing
+  lane_ids = {},    -- ordered active param ids (first-touch order)
+  lanes = {},       -- lanes[id] = { f, v, n, cur, last_fire }
+}
+
+-- purely-internal state (not read by the page)
+local replaying = false        -- true while WE are firing params (no capture)
+local rec_start_frame = 0       -- ctx.frame when the first pass armed
+local touched_this_pass = {}    -- ids already punched-in this pass
+local orig_set, orig_delta      -- saved paramset methods (restored in cleanup)
+
+-- ============================================================================
+-- lane bookkeeping
+-- ============================================================================
+
+local function reset_cursors()
+  local ids = M.lane_ids
+  for i = 1, #ids do M.lanes[ids[i]].cur = 1 end
+end
+
+-- clear every lane (structures only — param VALUES are left untouched)
+local function wipe()
+  local ids = M.lane_ids
+  for i = #ids, 1, -1 do
+    M.lanes[ids[i]] = nil
+    ids[i] = nil
+  end
+  M.loop_len = 0
+  M.playhead = 0
+end
+
+-- ============================================================================
+-- capture — the wrapped params.set/delta land here after the original runs
+-- ============================================================================
+
+function M.on_change(id)
+  if replaying then return end
+  if pget("motion_rec", 0) ~= 1 then return end
+  if not MOTION_IDS[id] then return end
+  if not params.lookup[id] then return end
+  local offset
+  if M.loop_len == 0 then
+    offset = C.frame - rec_start_frame          -- first pass: elapsed frames
+    if offset < 0 or offset > MAX_LEN then return end
+  else
+    offset = M.playhead                          -- overdub: the loop position
+  end
+  local L = M.lanes[id]
+  if not touched_this_pass[id] then
+    -- punch-in replace: first touch this pass clears the lane (or creates it)
+    if not L then
+      L = { f = {}, v = {}, n = 0, cur = 1, last_fire = -1 }
+      M.lanes[id] = L
+      M.lane_ids[#M.lane_ids + 1] = id
+    else
+      L.n = 0
+    end
+    touched_this_pass[id] = true
+  end
+  L.n = L.n + 1
+  L.f[L.n] = offset
+  L.v[L.n] = params:get(id)
+end
+
+-- ============================================================================
+-- transport — driven by the motion_rec / motion_play param actions
+-- ============================================================================
+
+function M.set_armed(on)
+  if on then
+    touched_this_pass = {}
+    if M.loop_len == 0 then
+      rec_start_frame = C.frame                  -- first pass: start the clock
+    else
+      -- overdub: replay the existing loop from the top while we punch in
+      M.playhead = 0
+      reset_cursors()
+      if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
+    end
+  else
+    if M.loop_len == 0 then
+      -- finalize the first pass: its length becomes the loop length
+      local elapsed = C.frame - rec_start_frame
+      if #M.lane_ids > 0 and elapsed >= 2 then
+        M.loop_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
+        M.playhead = 0
+        reset_cursors()
+        if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
+      else
+        -- nothing captured (or too short): stay empty
+        wipe()
+        if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
+      end
+    else
+      touched_this_pass = {}                      -- overdub done
+    end
+  end
+end
+
+function M.set_playing(on)
+  if on and M.loop_len > 0 then
+    M.playhead = 0
+    reset_cursors()
+  end
+end
+
+-- ============================================================================
+-- clear (CLR-L / CLR on the MOTION page)
+-- ============================================================================
+
+-- clear the selected lane (E2 picks it; 0 = the newest). params keep their
+-- current values — clearing removes the automation, not the sound.
+function M.clear_lane()
+  local n = #M.lane_ids
+  if n == 0 then return end
+  local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, n)
+  if sel == 0 then sel = n end
+  local id = M.lane_ids[sel]
+  if not id then return end
+  M.lanes[id] = nil
+  table.remove(M.lane_ids, sel)
+  if #M.lane_ids == 0 then
+    M.loop_len = 0
+    M.playhead = 0
+    if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
+  else
+    reset_cursors()
+  end
+end
+
+-- wipe the whole loop back to empty
+function M.clear_all()
+  if pget("motion_rec", 0) == 1 then params:set("motion_rec", 0) end
+  wipe()
+  if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
+end
+
+-- ============================================================================
+-- playback — one tick per redraw frame (called from mangler's 15fps clock)
+-- ============================================================================
+
+function M.tick()
+  if pget("motion_play", 0) ~= 1 or M.loop_len == 0 then return end
+  M.playhead = M.playhead + 1
+  if M.playhead >= M.loop_len then
+    M.playhead = 0
+    reset_cursors()
+    -- an overdub that ran a full loop auto-disarms (keeps the lane's events
+    -- sorted and bounds the pass to one loop)
+    if pget("motion_rec", 0) == 1 then params:set("motion_rec", 0) end
+  end
+  local ph = M.playhead
+  -- motion_depth (0..1) scales continuous lanes toward their first value —
+  -- a global "amount" fader for the whole modulation loop (living loops).
+  -- discrete params (options/binaries/numbers, no controlspec) pass through.
+  local depth = pget("motion_depth", 1)
+  local blend = depth < 0.999
+  local ids = M.lane_ids
+  replaying = true
+  for i = 1, #ids do
+    local id = ids[i]
+    local L = M.lanes[id]
+    local n = L.n
+    local cur = L.cur
+    while cur <= n and L.f[cur] <= ph do
+      local v = L.v[cur]
+      if blend then
+        local p = params:lookup_param(id)
+        if p and p.controlspec then
+          local base = L.v[1]
+          v = base + depth * (v - base)
+        end
+      end
+      params:set(id, v)
+      L.last_fire = ph
+      cur = cur + 1
+    end
+    L.cur = cur
+  end
+  replaying = false
+end
+
+-- ============================================================================
+-- lifecycle
+-- ============================================================================
+
+function M.init(ctx)
+  C = ctx
+  pget, clamp, FPS = ctx.pget, ctx.clamp, ctx.FPS
+  MAX_LEN = 60 * FPS
+  -- wrap the paramset entry points so every value change (key/encoder/MIDI/
+  -- typing) flows through on_change. call the original first, then capture.
+  if not orig_set then
+    orig_set = params.set
+    params.set = function(self, id, ...)
+      orig_set(self, id, ...)
+      M.on_change(id)
+    end
+    orig_delta = params.delta
+    params.delta = function(self, id, ...)
+      orig_delta(self, id, ...)
+      M.on_change(id)
+    end
+  end
+end
+
+function M.cleanup()
+  if orig_set then params.set = orig_set end
+  if orig_delta then params.delta = orig_delta end
+  orig_set, orig_delta = nil, nil
+end
+
+return M
+
+end)()
 local Mpages = (function()  -- inlined lib/mpages.lua
 -- mpages: the screen — wave/twave display models, every page body, header,
 -- footer, and the redraw composition. (the bitmap mockups are the bible:
@@ -992,6 +1270,12 @@ local SHORT = {
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
+  motion_lane = "LANE", motion_depth = "AMT",
+  -- nicer MOTION lane labels for params that aren't footer encoders (safe:
+  -- SHORT is only read for the current page's enc ids + MOTION lane names)
+  mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
+  pv_freeze = "PVFZ", tape_freeze = "TFRZ", tape_reverse = "TREV",
+  clouds_mode = "CMOD",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -1010,6 +1294,17 @@ local function param_norm(id)
   return clamp(v, 0, 1)
 end
 
+-- normalized 0..1 of an ARBITRARY value for a param (not the live value) —
+-- used to plot the MOTION lanes' recorded events at their captured heights
+local function value_norm(id, v)
+  local p = params.lookup[id] and params:lookup_param(id)
+  if not p then return 0 end
+  if p.controlspec then return clamp(p.controlspec:unmap(v), 0, 1)
+  elseif p.count then return p.count > 1 and (v - 1) / (p.count - 1) or 0
+  elseif p.min and p.max and p.max > p.min then return (v - p.min) / (p.max - p.min) end
+  return clamp(v, 0, 1)
+end
+
 -- footer value text for a param: compact, ALL-CAPS abbreviations. a few
 -- ids get hand-tuned units (cutoff kHz, pitch semitones, rates x, times);
 -- a plain 0..1 linear control reads as a percentage; everything else falls
@@ -1017,6 +1312,14 @@ end
 local RATE_IDS = { scan = true, tape_rate = true }
 local function fmt_value(id)
   if not (id and params.lookup[id]) then return "--" end
+  if id == "motion_lane" then
+    -- show the SELECTED lane's param name (or "-" when none picked)
+    local ids = C.motion and C.motion.lane_ids
+    local n = ids and #ids or 0
+    local sel = clamp(floor(params:get(id) + 0.5), 0, n)
+    if n == 0 or sel == 0 then return "-" end
+    return SHORT[ids[sel]] or string.upper(ids[sel])
+  end
   if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
       or id == "shimmer_tone" then
     local v = params:get(id)
@@ -2014,11 +2317,105 @@ local function body_PADS(frame)
   end
 end
 
+local function body_MOTION(frame)
+  -- gesture looper (S16): the recorded param stream drawn as lanes on a loop
+  -- timeline. a ruler + sweeping playhead up top, then one row per automated
+  -- param (its SHORT name + its events plotted low..high across the loop).
+  -- the selected lane (E2) and any lane firing this frame brighten; an idle
+  -- loop lies dim, an empty one invites a take. loop length parks top-right
+  -- (this page's defining number). fully procedural — no math.random, so the
+  -- seeded renders of the other pages stay byte-identical.
+  local mo = C.motion
+  local ll = mo.loop_len
+  local ids = mo.lane_ids
+  local nlane = #ids
+  local armed = pget("motion_rec", 0) == 1
+  local playing = pget("motion_play", 0) == 1
+
+  if ll > 0 then
+    ptext_r(string.format("%.1fS", ll / FPS), 126, 13, 1, 4)
+  end
+
+  if nlane == 0 then
+    -- empty: the house-voice invitation (armed = the first pass is live)
+    if armed then
+      if (frame % FPS) < (FPS / 2) then chip("REC", 2, 13) end
+      ptext_c("MOVE A KNOB TO RECORD", 64, 24, 1, 8)
+    else
+      ptext_c("EMPTY - K2 ARM", 64, 22, 1, 4)
+      ptext_c("THEN MOVE A KNOB", 64, 30, 1, 3)
+    end
+    return
+  end
+
+  -- header: REC pulse while armed, else a LOOP tag
+  if armed and (frame % FPS) < (FPS / 2) then chip("REC", 2, 13)
+  else ptext("LOOP", 2, 13, 1, 4) end
+
+  -- lane block geometry
+  local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
+  local VIS = 4
+  local shown = min(nlane, VIS)
+  local top, rh = 20, 5
+  local tx0, tx1 = 30, 124
+  -- drawing length: the loop length once set, else (first pass) the furthest
+  -- event captured so far, so a recording-in-progress fills left -> right
+  local dl = ll
+  if dl == 0 then
+    for i = 1, nlane do
+      local L = mo.lanes[ids[i]]
+      if L.n > 0 and L.f[L.n] > dl then dl = L.f[L.n] end
+    end
+  end
+  if dl < 1 then dl = 1 end
+
+  -- timeline ruler above the lanes
+  screen.level(2)
+  screen.move(tx0, 16) screen.line(tx1, 16) screen.stroke()
+
+  for row = 1, shown do
+    local id = ids[row]
+    local L = mo.lanes[id]
+    local y = top + (row - 1) * rh
+    local selected = row == sel
+    local justfired = playing and L.last_fire == mo.playhead
+    ptext(SHORT[id] or string.upper(id), 2, y, 1,
+      justfired and 15 or (selected and 12 or 5))
+    screen.level(1)
+    screen.move(tx0, y + 3) screen.line(tx1, y + 3) screen.stroke()
+    screen.level(selected and 13 or 7)
+    local n = L.n
+    for e = 1, n do
+      local ex = tx0 + (L.f[e] / dl) * (tx1 - tx0)
+      local vn = value_norm(id, L.v[e])
+      screen.rect(ex, y + 3 - vn * 3, 1, 1)
+    end
+    screen.fill()
+  end
+
+  local ylo, yhi = top - 1, top + shown * rh - 1
+  if ll > 0 then
+    -- playback playhead: a line down the lanes + a knob on the ruler
+    local phx = tx0 + (mo.playhead / dl) * (tx1 - tx0)
+    screen.level(playing and 9 or 3)
+    screen.move(phx, ylo) screen.line(phx, yhi) screen.stroke()
+    screen.level(playing and 15 or 6)
+    screen.rect(phx, 14, 1, 5) screen.fill()
+  elseif armed then
+    -- first pass: a bright write head at the growing right edge
+    screen.level(15)
+    screen.move(tx1, ylo) screen.line(tx1, yhi) screen.stroke()
+  end
+  if nlane > VIS then
+    ptext_r("+" .. (nlane - VIS), 126, top + VIS * rh - 4, 1, 4)
+  end
+end
+
 local BODY = {
   MIX = body_MIX, LEVEL = body_LEVEL, REC = body_REC,
   WINDOW = body_WINDOW, GRAIN = body_GRAIN, STRETCH = body_STRETCH,
   TAPE = body_TAPE, FILTER = body_FILTER, DELAY = body_DELAY,
-  REVERB = body_REVERB, PADS = body_PADS,
+  REVERB = body_REVERB, PADS = body_PADS, MOTION = body_MOTION,
 }
 
 local function draw_body()
@@ -2124,11 +2521,13 @@ end)()
 ctx.font = Mfont
 ctx.particles = Mparticles
 ctx.grid = Mgrid
+ctx.motion = Mmotion
 
 Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
+Mmotion.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -2279,6 +2678,21 @@ local KEYS = {
     k3_alt = { label = "ROUTE", lit = "pad_input",
       act = function() ptoggle("pad_input") end },
   },
+  MOTION = {
+    -- the gesture looper (S16). K2 arms recording of the param stream (a
+    -- fresh loop from empty, or a punch-in overdub onto the running loop);
+    -- K3 starts/stops playback. the page claims its alt slots (like GRAIN/
+    -- TAPE/PADS) so K1+K2 = CLR-L (clear the selected lane) and K1+K3 = CLR
+    -- (wipe all lanes); clearing leaves every param at its last value.
+    k2 = { label = "REC", lit = "motion_rec",
+      act = function() ptoggle("motion_rec") end },
+    k3 = { label = "PLAY", lit = "motion_play",
+      act = function() ptoggle("motion_play") end },
+    k2_alt = { label = "CLR-L",
+      act = function() ctx.motion.clear_lane() end },
+    k3_alt = { label = "CLR",
+      act = function() ctx.motion.clear_all() end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware. any alt
@@ -2340,6 +2754,9 @@ local ENC_MAP = {
   DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
   REVERB  = { "rev_decay", "rev_damp", "rev_mix", "rev_size" },
   PADS    = { "voices", "voice_atk", "voice_rel", nil },
+  -- MOTION (S16): E2 browses lanes, E3 is the global automation amount.
+  -- no alt pair — the page claims K1 for CLR-L/CLR instead.
+  MOTION  = { "motion_lane", nil, "motion_depth", nil },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -2751,6 +3168,26 @@ local function init_params()
     params:lookup_param("pitch"):bang()
   end)
 
+  -- S16 gesture looper: records the param stream (MOTION_IDS) and replays it
+  -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
+  -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
+  -- no engine command, so the fingerprint is unchanged.
+  params:add_group("grp_motion", "motion", 4)
+  params:add_binary("motion_rec", "motion record", "toggle", 0)
+  params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
+  params:add_binary("motion_play", "motion play", "toggle", 0)
+  params:set_action("motion_play", function(v) ctx.motion.set_playing(v == 1) end)
+  params:add_number("motion_lane", "motion lane", 0, 16, 0,
+    function(p)
+      local ids = ctx.motion.lane_ids
+      local n = #ids
+      local v = math.min(p:get(), n)
+      if n == 0 or v == 0 then return "-" end
+      return ids[v]
+    end)
+  params:add_control("motion_depth", "motion depth",
+    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
   -- round-trip the softcut buffers (see mtape). the granular engine's
   -- record buffer would need a matching save command on the SC side to
@@ -2815,6 +3252,7 @@ function init()
       Mpages.update_wave()
       Mpages.update_tape_wave()
       Mparticles.update()
+      Mmotion.tick()   -- S16: advance + replay the gesture loop
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -2832,11 +3270,12 @@ function cleanup()
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
+  Mmotion.cleanup()    -- restore the wrapped params.set/delta
 end
 
 -- K1+E1 leaps between the page families the header dots draw:
--- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx
-local PAGE_GROUPS = { 1, 4, 7, 8 }
+-- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion
+local PAGE_GROUPS = { 1, 4, 7, 8, 12 }
 
 function enc(n, d)
   if n == 1 then

@@ -111,6 +111,12 @@ local SHORT = {
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
+  motion_lane = "LANE", motion_depth = "AMT",
+  -- nicer MOTION lane labels for params that aren't footer encoders (safe:
+  -- SHORT is only read for the current page's enc ids + MOTION lane names)
+  mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
+  pv_freeze = "PVFZ", tape_freeze = "TFRZ", tape_reverse = "TREV",
+  clouds_mode = "CMOD",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -129,6 +135,17 @@ local function param_norm(id)
   return clamp(v, 0, 1)
 end
 
+-- normalized 0..1 of an ARBITRARY value for a param (not the live value) —
+-- used to plot the MOTION lanes' recorded events at their captured heights
+local function value_norm(id, v)
+  local p = params.lookup[id] and params:lookup_param(id)
+  if not p then return 0 end
+  if p.controlspec then return clamp(p.controlspec:unmap(v), 0, 1)
+  elseif p.count then return p.count > 1 and (v - 1) / (p.count - 1) or 0
+  elseif p.min and p.max and p.max > p.min then return (v - p.min) / (p.max - p.min) end
+  return clamp(v, 0, 1)
+end
+
 -- footer value text for a param: compact, ALL-CAPS abbreviations. a few
 -- ids get hand-tuned units (cutoff kHz, pitch semitones, rates x, times);
 -- a plain 0..1 linear control reads as a percentage; everything else falls
@@ -136,6 +153,14 @@ end
 local RATE_IDS = { scan = true, tape_rate = true }
 local function fmt_value(id)
   if not (id and params.lookup[id]) then return "--" end
+  if id == "motion_lane" then
+    -- show the SELECTED lane's param name (or "-" when none picked)
+    local ids = C.motion and C.motion.lane_ids
+    local n = ids and #ids or 0
+    local sel = clamp(floor(params:get(id) + 0.5), 0, n)
+    if n == 0 or sel == 0 then return "-" end
+    return SHORT[ids[sel]] or string.upper(ids[sel])
+  end
   if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
       or id == "shimmer_tone" then
     local v = params:get(id)
@@ -1133,11 +1158,105 @@ local function body_PADS(frame)
   end
 end
 
+local function body_MOTION(frame)
+  -- gesture looper (S16): the recorded param stream drawn as lanes on a loop
+  -- timeline. a ruler + sweeping playhead up top, then one row per automated
+  -- param (its SHORT name + its events plotted low..high across the loop).
+  -- the selected lane (E2) and any lane firing this frame brighten; an idle
+  -- loop lies dim, an empty one invites a take. loop length parks top-right
+  -- (this page's defining number). fully procedural — no math.random, so the
+  -- seeded renders of the other pages stay byte-identical.
+  local mo = C.motion
+  local ll = mo.loop_len
+  local ids = mo.lane_ids
+  local nlane = #ids
+  local armed = pget("motion_rec", 0) == 1
+  local playing = pget("motion_play", 0) == 1
+
+  if ll > 0 then
+    ptext_r(string.format("%.1fS", ll / FPS), 126, 13, 1, 4)
+  end
+
+  if nlane == 0 then
+    -- empty: the house-voice invitation (armed = the first pass is live)
+    if armed then
+      if (frame % FPS) < (FPS / 2) then chip("REC", 2, 13) end
+      ptext_c("MOVE A KNOB TO RECORD", 64, 24, 1, 8)
+    else
+      ptext_c("EMPTY - K2 ARM", 64, 22, 1, 4)
+      ptext_c("THEN MOVE A KNOB", 64, 30, 1, 3)
+    end
+    return
+  end
+
+  -- header: REC pulse while armed, else a LOOP tag
+  if armed and (frame % FPS) < (FPS / 2) then chip("REC", 2, 13)
+  else ptext("LOOP", 2, 13, 1, 4) end
+
+  -- lane block geometry
+  local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
+  local VIS = 4
+  local shown = min(nlane, VIS)
+  local top, rh = 20, 5
+  local tx0, tx1 = 30, 124
+  -- drawing length: the loop length once set, else (first pass) the furthest
+  -- event captured so far, so a recording-in-progress fills left -> right
+  local dl = ll
+  if dl == 0 then
+    for i = 1, nlane do
+      local L = mo.lanes[ids[i]]
+      if L.n > 0 and L.f[L.n] > dl then dl = L.f[L.n] end
+    end
+  end
+  if dl < 1 then dl = 1 end
+
+  -- timeline ruler above the lanes
+  screen.level(2)
+  screen.move(tx0, 16) screen.line(tx1, 16) screen.stroke()
+
+  for row = 1, shown do
+    local id = ids[row]
+    local L = mo.lanes[id]
+    local y = top + (row - 1) * rh
+    local selected = row == sel
+    local justfired = playing and L.last_fire == mo.playhead
+    ptext(SHORT[id] or string.upper(id), 2, y, 1,
+      justfired and 15 or (selected and 12 or 5))
+    screen.level(1)
+    screen.move(tx0, y + 3) screen.line(tx1, y + 3) screen.stroke()
+    screen.level(selected and 13 or 7)
+    local n = L.n
+    for e = 1, n do
+      local ex = tx0 + (L.f[e] / dl) * (tx1 - tx0)
+      local vn = value_norm(id, L.v[e])
+      screen.rect(ex, y + 3 - vn * 3, 1, 1)
+    end
+    screen.fill()
+  end
+
+  local ylo, yhi = top - 1, top + shown * rh - 1
+  if ll > 0 then
+    -- playback playhead: a line down the lanes + a knob on the ruler
+    local phx = tx0 + (mo.playhead / dl) * (tx1 - tx0)
+    screen.level(playing and 9 or 3)
+    screen.move(phx, ylo) screen.line(phx, yhi) screen.stroke()
+    screen.level(playing and 15 or 6)
+    screen.rect(phx, 14, 1, 5) screen.fill()
+  elseif armed then
+    -- first pass: a bright write head at the growing right edge
+    screen.level(15)
+    screen.move(tx1, ylo) screen.line(tx1, yhi) screen.stroke()
+  end
+  if nlane > VIS then
+    ptext_r("+" .. (nlane - VIS), 126, top + VIS * rh - 4, 1, 4)
+  end
+end
+
 local BODY = {
   MIX = body_MIX, LEVEL = body_LEVEL, REC = body_REC,
   WINDOW = body_WINDOW, GRAIN = body_GRAIN, STRETCH = body_STRETCH,
   TAPE = body_TAPE, FILTER = body_FILTER, DELAY = body_DELAY,
-  REVERB = body_REVERB, PADS = body_PADS,
+  REVERB = body_REVERB, PADS = body_PADS, MOTION = body_MOTION,
 }
 
 local function draw_body()

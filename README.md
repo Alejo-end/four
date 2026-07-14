@@ -45,6 +45,9 @@ First time here? [Install](#install) takes about two minutes. Once it is on the 
 5. Play it polyphonically. On **PADS** (press K1+K3 to switch to `NOTES>PADS`), MIDI notes
    and grid pads trigger 8 slices of your recording on top of the drone. Chop it up, or play
    chords.
+6. Loop your hands. On **MOTION**, tap **K2** and move any knob — a filter sweep, a delay
+   swell — then tap **K2** again. It records the *movement* and plays it back on a loop, so
+   your hands are free to layer another one on top.
 
 > **Dry by default.** A fresh recording is your sample, untouched. The filter is wide open,
 > drive is a true bypass at zero, and delay and reverb stay silent until you turn them up.
@@ -72,6 +75,7 @@ E2/E3 values, and the K2/K3 pills.
 | ![FILTER page showing the filter frequency response curve with a node dot marking the cutoff](doc/ui/filter.png)<br>**FILTER** draws the engine's real LP/HP/BP response, with a node dot at the cutoff. | ![REVERB page showing the reverb decay tail as an onset spike followed by reflections fading over time](doc/ui/reverb.png)<br>**REVERB** shows the decay tail: an onset, then reflections dying off over time, with the tail length tracking the decay. K2 banks the full JPverb controls, including shimmer, which pitch-shifts the feedback into a rising octave halo. |
 | ![DELAY page showing bouncing arcs, one per repeat, that shrink as feedback rises](doc/ui/delay.png)<br>**DELAY** draws one bounce per repeat, and the arcs shrink as feedback rises. Starts dry. | ![TAPE page showing two tape reels spinning at the current playback rate](doc/ui/tape.png)<br>**TAPE** is a parallel loop deck. The reels spin at the real playback rate. |
 | ![PADS page showing the recording split into 8 slices up top with 8 pad buttons below, one per slice](doc/ui/pads.png)<br>**PADS** shows your recording up top split into 8 slices, with 8 pad buttons below, one per slice (GRN for a cloud, SLC for a slice, lit while sounding, with a cursor). The header reads `PLAY>PADS` or `PLAY>DRONE` (toggle with K1+K3). | ![STRETCH page showing the selected drone engine drawn as its own waveform texture](doc/ui/stretch-play.png)<br>**STRETCH** picks the drone engine: PLAY (a clean loop, the default), GRAIN, WARP or PV. Each one draws its own texture, and goes flat when it is off. |
+| ![MOTION page showing the gesture looper: a loop timeline up top with a sweeping playhead, and one lane per recorded parameter with its knob movement plotted across the loop](doc/ui/motion.png)<br>**MOTION** is the gesture looper. K2 arms it, and then any knob you move is recorded into a loop that plays your hands back — one lane per parameter. K2 again overdubs another move on top; K3 stops and starts playback. It records the moves, not the audio, so it costs nothing extra to run. | **A modulation loop pedal.** Record a slow filter sweep and it loops hands-free while you granulate over it; layer a delay swell on a second lane. E2 browses the lanes, E3 is a global amount, K1+K2 clears the selected lane, K1+K3 wipes all of them. `motion record` and `motion play` are MIDI-mappable, so a footswitch can punch overdubs. |
 
 ## Controls: 3 keys, 3 encoders
 
@@ -81,12 +85,12 @@ E2/E3 values, and the K2/K3 pills.
 | **E2 / E3** | The page's two knobs. Value and dial live in the footer. Hold K1 for the alt pair. |
 | **K1** (hold) | Alt / shift. |
 | **K2 / K3** | The page's two actions. The footer pills invert while they are active. |
-| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE and PADS, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
-| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB and PADS. Also grid pad (7,2). |
+| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE, PADS and MOTION, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
+| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB, PADS and MOTION. Also grid pad (7,2). |
 
-The pages are MIX, LEVEL, REC, WINDOW, GRAIN, STRETCH, TAPE, FILTER, DELAY, REVERB and PADS.
-The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages E2/E3 through the
-parameter pairs. The full page-to-control map is in `doc/spec.md` §10.
+The pages are MIX, LEVEL, REC, WINDOW, GRAIN, STRETCH, TAPE, FILTER, DELAY, REVERB, PADS and
+MOTION. The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages E2/E3 through
+the parameter pairs. The full page-to-control map is in `doc/spec.md` §10.
 
 ## Playing notes
 
@@ -161,6 +165,7 @@ lib/mpages.lua           the screen: page bodies, header and footer
 lib/mtape.lua            softcut tape path and the engine/tape mix
 lib/minput.lua           MIDI and typing-keyboard note input
 lib/mgrid.lua            optional grid surface
+lib/mmotion.lua          gesture looper: records and replays the param stream
 lib/mfont.lua  lib/mparticles.lua   pixel font and pooled grain particles
 tools/uisim/             offscreen UI renderer, every page as a PNG, no hardware
 dist/mangler_single.lua  generated single-file drop-in

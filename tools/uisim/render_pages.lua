@@ -379,7 +379,7 @@ run_ticks(EMPTY and 30 or 200)
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
 local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH",
-  "TAPE", "FILTER", "DELAY", "REVERB", "PADS" }
+  "TAPE", "FILTER", "DELAY", "REVERB", "PADS", "MOTION" }
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
 local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
@@ -613,6 +613,26 @@ else
   export(pfx("MIX", "_STOP_ALT"))
   key(1, 0)
   params:set("stop_all", 0)
+  -- S16 gesture looper: the empty invitation, a live first pass (armed, lanes
+  -- filling under the write head), and a finished loop playing its lanes back
+  goto_page("MOTION")
+  run_ticks(4)
+  redraw()
+  export(pfx("MOTION", "_EMPTY"))
+  params:set("motion_rec", 1)          -- arm: start the first pass
+  for t = 1, 20 do
+    -- a two-hand gesture: sweep the cutoff and swell the delay mix
+    params:set("cutoff", 400 + 3000 * (1 + math.sin(t * 0.4)))
+    params:set("delay_mix", 0.5 + 0.35 * math.sin(t * 0.25))
+    run_ticks(1)
+  end
+  redraw()
+  export(pfx("MOTION", "_REC"))        -- first pass in progress
+  params:set("motion_rec", 0)          -- finalize -> loop_len set, auto-plays
+  run_ticks(10)                         -- let the playhead sweep the loop
+  redraw()
+  export(pfx("MOTION", "_PLAY"))
+  params:set("motion_play", 0)
 end
 
 print("done: " .. TICK .. " ticks")
