@@ -113,6 +113,8 @@ local SHORT = {
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "AMT",
+  seq_euclid = "EUC", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLC",
+  clock_tempo = "BPM",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -161,6 +163,9 @@ local function fmt_value(id)
     local sel = clamp(floor(params:get(id) + 0.5), 0, n)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
+  end
+  if id == "clock_tempo" then
+    return tostring(floor(params:get(id) + 0.5))
   end
   if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
       or id == "shimmer_tone" then
@@ -1256,11 +1261,63 @@ local function body_MOTION(frame)
   end
 end
 
+local function body_SEQ(frame)
+  -- step sequencer (S18): a Euclidean on/off pattern that triggers a slice
+  -- one-shot per active step. up to 16 steps in two rows of 8; active steps
+  -- fill, rests outline, the playhead cell inverts while running. E2 sets the
+  -- hit count (regenerates the pattern), K3 picks the slice, K2 runs it.
+  -- fully procedural — no math.random, so other pages' seeded renders hold.
+  local sq = C.seq
+  local len = pget("seq_len", 16)
+  local hits = pget("seq_euclid", 0)
+  local slice = pget("seq_slice", 0)
+  local playing = pget("seq_play", 0) == 1
+  local pos = sq.pos
+  -- defining number top-right: hits / length. slice + run-state top-left.
+  ptext_r(hits .. "/" .. len, 126, 13, 1, 4)
+  ptext("SLICE " .. slice, 2, 13, 1, playing and 12 or 5)
+
+  if hits == 0 then
+    ptext_c("EUCLID: TURN E2 FOR HITS", 64, 28, 1, 5)
+    return
+  end
+
+  -- steps: up to 16 in two rows of 8 (15px pitch, 13x9 cells)
+  for i = 1, sq.NUM_STEPS do
+    if i <= len then
+      local col = (i - 1) % 8
+      local row = i <= 8 and 0 or 1
+      local x = 4 + col * 15
+      local y = 19 + row * 12
+      local on = sq.pattern[i]
+      if playing and i == pos then
+        screen.level(15)                     -- playhead: bright cell
+        screen.rect(x, y, 13, 9)
+        screen.fill()
+        if on then                           -- with an active-step notch
+          screen.level(0)
+          screen.rect(x + 4, y + 2, 5, 5)
+          screen.fill()
+        end
+      elseif on then
+        screen.level(8)                      -- active step: filled
+        screen.rect(x, y, 13, 9)
+        screen.fill()
+      else
+        screen.level(3)                      -- rest: outline
+        screen.rect(x + 0.5, y + 0.5, 12, 8)
+        screen.stroke()
+      end
+    end
+  end
+end
+
 local BODY = {
   MIX = body_MIX, LEVEL = body_LEVEL, REC = body_REC,
   WINDOW = body_WINDOW, GRAIN = body_GRAIN, STRETCH = body_STRETCH,
   TAPE = body_TAPE, FILTER = body_FILTER, DELAY = body_DELAY,
   REVERB = body_REVERB, PADS = body_PADS, MOTION = body_MOTION,
+  SEQ = body_SEQ,
 }
 
 local function draw_body()

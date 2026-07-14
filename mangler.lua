@@ -71,7 +71,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS", "MOTION",
+  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ",
 }
 
 local FPS = 15
@@ -175,18 +175,21 @@ local Mtape = include "lib/mtape"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
+local Mseq = include "lib/mseq"
 local Mpages = include "lib/mpages"
 
 ctx.font = Mfont
 ctx.particles = Mparticles
 ctx.grid = Mgrid
 ctx.motion = Mmotion
+ctx.seq = Mseq
 
 Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
+Mseq.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -352,6 +355,17 @@ local KEYS = {
     k3_alt = { label = "CLR",
       act = function() ctx.motion.clear_all() end },
   },
+  SEQ = {
+    -- the step sequencer (S18). K2 runs/stops the clock; K3 cycles which
+    -- slice the active steps trigger. E2 sets the Euclidean hit count (it
+    -- regenerates the pattern live). alt slots stay global STOP/DRY.
+    k2 = { label = "PLAY", lit = "seq_play",
+      act = function() ptoggle("seq_play") end },
+    k3 = { label = "SLICE",
+      act = function()
+        params:set("seq_slice", (params:get("seq_slice") + 1) % ctx.pad_n)
+      end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware. any alt
@@ -419,6 +433,9 @@ local ENC_MAP = {
   -- MOTION (S16): E2 browses lanes, E3 is the global automation amount.
   -- no alt pair — the page claims K1 for CLR-L/CLR instead.
   MOTION  = { "motion_lane", nil, "motion_depth", nil },
+  -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
+  -- clock_tempo is a SYSTEM param (referenced, never added).
+  SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -856,6 +873,20 @@ local function init_params()
   params:add_control("motion_depth", "motion depth",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
 
+  -- S18 step sequencer: a clock-synced Euclidean sequencer that triggers the
+  -- PADS slice one-shots (see lib/mseq). all Lua-only (drives engine.note_one_
+  -- shot) — no engine command, so the fingerprint is unchanged. seq_play is a
+  -- binary (MIDI-map it to a footswitch); seq_euclid/seq_len regen the pattern.
+  params:add_group("grp_seq", "sequencer", 5)
+  params:add_binary("seq_play", "seq play", "toggle", 0)
+  params:set_action("seq_play", function(v) ctx.seq.set_playing(v == 1) end)
+  params:add_option("seq_div", "seq division", Mseq.DIV_LABELS, 2)
+  params:add_number("seq_euclid", "seq euclid hits", 0, 16, 0)
+  params:set_action("seq_euclid", function() ctx.seq.regen() end)
+  params:add_number("seq_len", "seq length", 1, 16, 16)
+  params:set_action("seq_len", function() ctx.seq.regen() end)
+  params:add_number("seq_slice", "seq slice", 0, 7, 0)
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
   -- round-trip the softcut buffers (see mtape). the granular engine's
   -- record buffer would need a matching save command on the SC side to
@@ -939,11 +970,12 @@ function cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
   Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
+  Mseq.cleanup()       -- cancel the sequencer clock (norns clock hygiene)
 end
 
--- K1+E1 leaps between the page families the header dots draw:
--- source (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion
-local PAGE_GROUPS = { 1, 4, 7, 8, 12 }
+-- K1+E1 leaps between the page families the header dots draw: source
+-- (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion · seq
+local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13 }
 
 function enc(n, d)
   if n == 1 then

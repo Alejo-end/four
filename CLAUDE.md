@@ -525,6 +525,37 @@ does NOT model that `paramset:delta` bypasses `paramset:set` on hardware — a
 capture mechanism that intercepts calls can pass the sim yet miss the encoder
 path on device. Save + reload (Lua-only).
 
+Thirty-first change — **S18 step sequencer / SEQ page (Lua-only, fingerprint
+STAYS 58/59, renders verified, untested on device)**: the "sequencer pillar"
+toward a workstation (the Torso S-4 comparison) — a clock-synced **Euclidean**
+step sequencer. NEW module **lib/mseq.lua** (8th lib; amalgamate assert 7→8),
+built after the user shared their `snu` sequencer and asked to fold it in as a
+page + add a Euclidean option. v1 SCOPE (deliberately small — untested surface):
+ONE track, up to 16 steps, an on/off `pattern[]` from a Euclidean fill
+(`seq_euclid` hits over `seq_len`, Bresenham `acc+=k; if acc>=n then acc-=n,hit`).
+Each active step fires `engine.note_one_shot((seq_slice+0.5)/pad_n, 1.0,
+pad_type[seq_slice])` — a fire-and-forget slice one-shot over the drone. NO engine
+change (drives the existing S8 note_one_shot) → fingerprint untouched, can't
+brick. CLOCK: ONE `clock.sync` coroutine, `M.start` on seq_play=1, always
+`clock.cancel` on stop + in `cleanup` (the clock.lua resume-race gotcha);
+`seq_div` = 1/2·1/4·1/8 beats (8th/16th/32nd); `M.pos` advances on the musical
+clock, redraw only reads it. Params (grp_seq, 5, Lua-only): seq_play (binary,
+MIDI-map a footswitch), seq_div (option), seq_euclid (0-16, action regens live —
+turning E2 IS the generator), seq_len (1-16, regens), seq_slice (0-7). **SEQ =
+page 13** (PAGES/PAGE_GROUPS{…,13}/ENC_MAP/KEYS): E2 hits · E2alt clock_tempo
+(system param, referenced) · E3 len · E3alt div; K2 PLAY, K3 SLICE (cycle),
+alts stay global STOP/DRY. body_SEQ = two rows of 8 cells (active filled, rests
+outlined, playhead inverts), hits/len top-right, slice+run-state top-left, empty
+invites "EUCLID: TURN E2 FOR HITS"; fully procedural (no math.random). Adding a
+13th page dropped header-dot pitch 4→3, so the WHOLE doc/ui gallery was
+regenerated (+ seq.png). SIM NOTE: the render leaves seq_play=0 so the offscreen
+clock isn't engaged (the sim's clock.run reassigns the redraw coroutine) — the
+page still shows the generated pattern. Suite: SEQ_EUCLID + base_13_SEQ; dist
+rebuilt + byte-verified (source==dist, 8 modules inlined). FOLLOW-UPS (staged,
+don't pre-build): per-step pitch (scale) + per-step slice, grid step-editing,
+multiple tracks + CC/param-lock lanes, patterns + chaining, more generation
+(probability/ratchets/rotation). Gate: doc/spec.md §S18. Save + reload (Lua-only).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

@@ -379,7 +379,7 @@ run_ticks(EMPTY and 30 or 200)
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
 local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH",
-  "TAPE", "FILTER", "DELAY", "REVERB", "PADS", "MOTION" }
+  "TAPE", "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ" }
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
 local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
@@ -642,6 +642,15 @@ else
   redraw()
   export(pfx("MOTION", "_PLAY"))
   params:set("motion_play", 0)
+  -- S18 sequencer: a Euclidean pattern (5 hits over 16). seq_play stays 0 so
+  -- the offscreen clock isn't engaged; the page shows the generated pattern.
+  goto_page("SEQ")
+  params:set("seq_euclid", 5)
+  params:set("seq_slice", 2)
+  run_ticks(3)
+  redraw()
+  export(pfx("SEQ", "_EUCLID"))
+  params:set("seq_euclid", 0)
 end
 
 print("done: " .. TICK .. " ticks")
