@@ -1343,6 +1343,16 @@ local function body_SCENE(frame)
   end
   -- top-right, dim: this page's defining number — WHEN a recall lands
   ptext_r(string.upper(params:string("scene_recall_mode")), 126, 14, 1, 4)
+  -- a morph moves the morph-safe subset only: holds, note routing, the buffer
+  -- writers and the voice cap stay put (see mscenes MORPH_EXCLUDE). so when a
+  -- sweep has ARRIVED at an end and that scene still holds some of those, say
+  -- which key finishes the job — otherwise "I swept all the way to B and it
+  -- doesn't sound like B" is a mystery instead of a fact. only while the morph
+  -- is what's driving (parked at 0 from boot claims nothing).
+  local sc_end = amt >= 0.999 and b or (amt <= 0.001 and a or nil)
+  if sc_end and sc.engaged and sc.unlanded(sc_end) then
+    ptext_c("RCL " .. (amt >= 0.999 and "B" or "A") .. " TO LAND", 64, 14, 1, 5)
+  end
 
   -- the 8 slots, y21..31 (same cell geometry as the SEQ steps)
   local filled_any = false

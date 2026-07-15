@@ -697,7 +697,21 @@ else
   redraw()
   export(pfx("SCENE", "_ALT"))
   key(1, 0)
+  -- the morph's honest edge: swept all the way to B, but B holds a freeze —
+  -- and a hold is one of the things a morph deliberately won't carry. the page
+  -- says which key finishes the job instead of leaving it a mystery.
   params:set("scene_morph_amt", 0)
+  params:set("freeze", 1)
+  params:set("scene_slot", 7)
+  params:set("scene_capture", 1) params:set("scene_capture", 0)
+  params:set("freeze", 0)
+  params:set("scene_morph_b", 7)
+  params:set("scene_morph_amt", 1)
+  run_ticks(3)
+  redraw()
+  export(pfx("SCENE", "_UNLANDED"))
+  params:set("scene_morph_amt", 0)
+  params:set("scene_morph_b", 4)
 end
 
 print("done: " .. TICK .. " ticks")

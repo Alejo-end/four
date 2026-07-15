@@ -659,6 +659,45 @@ nowhere else (the wider diffs on `extra` shots are pure animation phase — the
 walk is 25 ticks longer). Gallery regenerated (+scene.png, 19); suite 67 shots ×
 4 variants; dist rebuilt + byte-verified (source==dist, 9 modules). Save + reload.
 
+S19 REVIEW PASS (same change, pre-gate — 6 refinements, harness now **212**
+assertions, 68 shots, dist re-verified; every new regression test was checked to
+FAIL when its fix is reverted). Two were real bugs:
+(1) **A PSET LOAD silently re-derived the morph over the values it had just
+restored** (proven by probe: load → cutoff 5000 → one frame later → 5270).
+`params:read()` re-sets `scene_morph_amt` → `touch()` → dirty, and `action_read`
+runs AFTER the values, so the next tick morphed on top of the pset — discarding
+anything hand-tweaked after the last morph move. INVISIBLE without drift, which
+is why it would have shipped. FIX: `dirty = false` FIRST in `M.pset_read` (before
+the file-exists early return). The pset is authoritative; the morph re-engages on
+the next knob move.
+(2) **The page-aware grid loses release edges — PRE-EXISTING since S18, live on
+`tape_reverse`.** `grid_key` dispatched on the CURRENT page, so changing page
+mid-hold handed the release to a layout that ignores it and LATCHED the param:
+hold grid (3,2) → E1 to SEQ → let go → **the tape plays backwards forever**; a
+held note pad → SEQ/SCENE → **stuck voice**; and S19 would have added a latched
+CHAOS with no way back. FIX (generic, fixes all three): `key_surface[k]` records
+the surface on the PRESS edge and routes the release back to it — a pad's release
+belongs to the surface that took its press. Made the SCENE-modifier page-change
+hack dead code (removed).
+The other four: `tape_reverse` OUT of every list (momentary — its resting value is
+0, so a captured 1 is a transient that recall would latch; `tape_rate` is bipolar,
+so "backwards" stores as a negative rate — nothing lost); `voices` INTO
+MORPH_EXCLUDE (lerping the poly cap crosses integers and each crossing re-caps the
+allocator → STEALS held pad notes mid-sweep; structure, not texture); `EDGE_PAIRS`
+in `apply()` — `pos_start`/`pos_end` + `loop_start`/`loop_end` now move the
+WIDENING edge FIRST so softcut can never render a region that is neither the old
+nor the new one (the `hi-lo<0.1` floor would turn a crossed pair into a 100ms loop
+→ head jump); and the **"RCL B TO LAND"** cue (`M.engaged` + `M.unlanded(slot)` +
+`MORPH_SKIPPED_IDS`) so `morph(1) ≠ recall(B)` is visible, in the STATUS row —
+NOT beside the bar, where the amt=1 handle (x110) would collide with it.
+DELIBERATELY NOT CHANGED (predictability over cleverness): the morph stays
+fixed-rate 15fps (adaptive would make the feel vary with load; and the engine has
+no Lag on these args, so a sweep zippers exactly as much as a hand on E2 does —
+if that ever becomes the complaint, `Lag.kr` engine-side is the real lever), and
+UNDO still does NOT stop the modulators (a running MOTION lane keeps driving its
+param straight after a restore — documented in the §S19 gate, not "fixed" by
+silently stopping someone's loop).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

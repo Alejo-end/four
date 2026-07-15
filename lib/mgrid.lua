@@ -235,10 +235,36 @@ local function scene_redraw()
   gg:led(8, 8, sc.safe and 6 or 1)
 end
 
+-- which layout the grid is showing right now (the surface follows the screen
+-- page, like snu)
+local function surface()
+  if is_seq_page() then return "seq" end
+  if is_scene_page() then return "scene" end
+  return "main"
+end
+
+-- a pad's RELEASE belongs to the surface that took its PRESS.
+-- the grid is page-aware, so without this, changing page mid-hold hands the
+-- release to a layout that doesn't know the pad — and whatever it was holding
+-- LATCHES: a tape stuck in reverse (hold (3,2), turn E1 to SEQ, let go), a
+-- note that never lifts, a chaos throw with no way back. the press decides who
+-- gets both edges. (this predates the SCENE page — it arrived with the SEQ
+-- surface in S18 and was live on tape_reverse.)
+local key_surface = {}
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
-  if is_seq_page() then return seq_grid_key(x, y, z) end
-  if is_scene_page() then return scene_grid_key(x, y, z) end
+  local k = y * 8 + x
+  local s
+  if z == 1 then
+    s = surface()
+    key_surface[k] = s
+  else
+    s = key_surface[k] or surface()
+    key_surface[k] = nil
+  end
+  if s == "seq" then return seq_grid_key(x, y, z) end
+  if s == "scene" then return scene_grid_key(x, y, z) end
   if y == 1 then
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
@@ -275,10 +301,8 @@ function M.redraw()
   -- SEQ / SCENE pages take over the whole grid (page-aware, like snu)
   if is_seq_page() then seq_redraw() gg:refresh() return end
   if is_scene_page() then scene_redraw() gg:refresh() return end
-  -- off the SCENE page, its held modifiers can't get their release edge (the
-  -- key dispatch follows the page), so drop them here rather than let a stale
-  -- CAP latch and turn the next slot tap into an overwrite
-  scene_mod.cap, scene_mod.clr = false, false
+  -- (no need to clear the SCENE modifiers here: key_surface routes their
+  -- release back to scene_grid_key even if the page has moved on)
 
   -- row 1: engine transport + mode radio
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)

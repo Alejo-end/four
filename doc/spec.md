@@ -815,12 +815,19 @@ go stale. The named helpers hang off ctx beside `fx_dry`/`pads_all_off`: `ctx.sc
   transports (`rec`, `tape_rec`), `stop_all`, and the motion/seq transports. A scene changes
   how it sounds, never how it's plumbed or whether it's running.
 - **`SCENE_MORPH_IDS`** — recall MINUS 7, derived at load (a filter, not a second literal
-  list — it can't drift). The rule in one line: **a morph never flips a hold, never re-routes
-  your notes, and never writes the buffer** → out: `freeze`, `pv_freeze`, `tape_freeze` (holds;
-  crossing 0.5 is a hard event, not a texture), `tape_reverse` (momentary by design), `pad_input`
-  (note routing), `resample`, `regen` (buffer writers — a sweep must stay undo-able, and
-  committed audio is not). **Consequence:** morph at amt=1 ≠ recall(B) — it moves the
-  morph-safe subset only. Sweep to 1, then K2 RCL to land the rest.
+  list — it can't drift; `MORPH_SKIPPED_IDS` is the complementary half, built in the same loop
+  and used by the page's cue). The rule in one line: **a morph never flips a hold, never
+  re-routes your notes, never writes the buffer, and never changes the voice structure** →
+  out: `freeze`, `pv_freeze`, `tape_freeze` (holds; crossing 0.5 is a hard event, not a
+  texture), `pad_input` (note routing), `resample`, `regen` (buffer writers — a sweep must stay
+  undo-able, and committed audio is not), `voices` (the poly CAP — lerping it crosses integers
+  and every crossing re-caps the engine allocator, which STEALS held pad notes mid-sweep).
+  **Consequence:** morph at amt=1 ≠ recall(B) — it moves the morph-safe subset only. Sweep to 1,
+  then K2 RCL to land the rest; `M.unlanded(slot)` reports exactly that, and the page cues it.
+- **`tape_reverse` is in NO list** — it's MOMENTARY (the TAPE key + grid pad hold it and hand
+  the release to `held_gesture`), so its resting value is 0 and a captured 1 is a transient.
+  Recalling that 1 would latch the tape backwards with nothing left to release it. Nothing is
+  lost: `tape_rate` is bipolar and IS recalled, so "backwards" stores as a negative rate.
 - **`SAFE_SNAPSHOT_IDS`** — recall + `out_level` (if a throw moved your level, the rescue
   brings it back). Still refuses the system levels/transports/`stop_all`: a restore must never
   unmute you, re-arm a recording, or undo a STOP you're leaning on.
@@ -890,11 +897,28 @@ endpoint ticks under A/B), then the morph bar (A? left, B? right, handle at the 
 either end — the audibility rule for a gesture); empty bank invites "EMPTY - K3 CAP", one
 endpoint missing reads "MORPH: PICK A+B". Fully procedural (no `math.random`).
 
+**The "RCL B TO LAND" cue** makes `morph(1) ≠ recall(B)` visible instead of mysterious: when a
+sweep has ARRIVED at an end (amt ≤ 0.001 / ≥ 0.999) **and** the morph is what's driving
+(`M.engaged`, set by `morph()`, cleared by `invalidate()` — so a knob parked at 0 from boot claims
+nothing) **and** `M.unlanded(end_slot)` (that scene holds a MORPH_SKIPPED value different from
+live), the status row says which key finishes the job. It sits centre-row, NOT beside the bar:
+at amt=1 the handle is pinned at x110 and would collide with a right-aligned label.
+
 **Grid (page-aware, like SEQ).** While the SCENE page is up: **row 1** = the 8 slots (tap =
 recall, quantize-aware; hold **CAP** and tap = capture; hold **CLR** and tap = clear), **row 3**
 = morph A, **row 4** = morph B, **row 6** = an 8-step morph amount bar (tap it — the sweep in
 reach of a finger), **row 8** = `[CAP][CLR] · [CHAOS, hold] · · [SAFE][UNDO]`. Every pad drives
 a param. Untested here (the uisim has no grid device).
+
+**A pad's RELEASE belongs to the surface that took its PRESS (`key_surface` in mgrid).** The grid
+dispatches on the CURRENT page, so changing page mid-hold handed the release to a layout that
+ignores it and **LATCHED** whatever was held. This **predates S19** — it arrived with the SEQ
+surface in S18 and was live on `tape_reverse`: hold grid (3,2), turn E1 to SEQ, let go → the tape
+plays backwards forever (also: a note pad held while leaving to SEQ never lifts → a stuck voice).
+S19 would have added two more (a latched CHAOS with no way back is the nasty one — "hold chaos
+and look at another page" is a gesture performers will try). `grid_key` now records the surface
+on the press edge and routes the release back to it. Generic, covers all three, and makes the
+SCENE modifiers self-clearing (no page-change hack needed).
 
 **Persistence.** The bank + safe snapshot ride along with the PSET: `tab.save`/`tab.load` of
 `{v=1, slots, safe}` → `norns.state.data .. "scenes-<n>.lua"`, wrapped in `pcall`. The
@@ -902,18 +926,36 @@ a param. Untested here (the uisim has no grid device).
 does its half (mtape the audio, mscenes the state). A pset with no scene file **leaves the bank
 alone** (mtape's precedent for a missing wav).
 
+**A pset LOAD must not re-derive the morph (found by review, proven by probe).** `params:read()`
+restores `scene_morph_amt`, which fires `touch()` → `dirty`; `action_read` runs *after* the
+values, so the next tick would morph on top of everything the pset just restored — silently
+discarding any param hand-tweaked after the last morph move (invisible when there's no drift,
+which is why it would ship). `M.pset_read` therefore clears `dirty` FIRST (before the
+file-exists early return). The pset is authoritative; the morph re-engages on the next knob move.
+
+**Region edges move outward-first.** `EDGE_PAIRS` (`pos_start`→`pos_end`, `loop_start`→`loop_end`)
+are params that only mean something as a pair: set one at a time, the consumer reads one new edge
+against one old one for an instant, and softcut can render up to a block of a region that is
+neither the old nor the new one (`update_tape_loop`'s `hi-lo < 0.1` floor turns a crossed pair
+into a 100ms loop → an audible head jump). `apply()` sets the edge that WIDENS the region first,
+so every intermediate contains a real region.
+
 **Verification done here (no device):** a functional harness drove the REAL script under the
-render sim's stubs — **177 assertions**, all passing: list curation + exclusions; capture/recall
-round trip; morph endpoints exact; warped-space midpoints (geometric mean); discrete policy at
-0.5; excluded params untouched by a morph but restored by a recall; deadband (identical params
-never re-fire, moving ones ≤1/frame) + endpoint snap; safe capture/restore incl. `out_level`,
-`stop_all` untouched; chaos throw/release, no regen/levels/rec, scan never parked, stray-edge
-safety, auto-safe-capture; motion (a recall punches NO lanes; a morph records exactly ONE);
-pset round trip + missing-file + delete; NOW immediate; BEAT/BAR queue → fires on the beat,
-replace-cancels, UNDO-cancels, cleanup-cancels. Renders: SCENE + SCENE_BANK/_MORPH/_SAFE/_ALT
-(67 shots × 4 variants), dist rebuilt + byte-verified (source==dist, 9 modules). Adding the
-14th page adds one header dot to every page: proven by re-render that all 62 pre-existing shots
-differ at EXACTLY pixels (y4-5, x122-123) and nowhere else. Gallery regenerated (+ scene.png).
+render sim's stubs — **212 assertions**, all passing: list curation + exclusions (by id, not by
+magic number); capture/recall round trip; morph endpoints exact; warped-space midpoints
+(geometric mean); discrete policy at 0.5; excluded params untouched by a morph but restored by a
+recall; deadband (identical params never re-fire, moving ones ≤1/frame) + endpoint snap; safe
+capture/restore incl. `out_level`, `stop_all` untouched; chaos throw/release, no regen/levels/rec,
+scan never parked, stray-edge safety, auto-safe-capture; motion (a recall punches NO lanes; a
+morph records exactly ONE); pset round trip + missing-file + delete + **the load-clobber
+regression**; **edge-pair ordering** (asserted on the actual `params:set` order, both
+directions); **the unlanded/engaged cue**; NOW immediate; BEAT/BAR queue → fires on the beat,
+replace-cancels, UNDO-cancels, cleanup-cancels. **Each new regression test was verified to FAIL
+when its fix is reverted** — a guard that can't fail is decoration. Renders: SCENE +
+SCENE_BANK/_MORPH/_SAFE/_ALT/_UNLANDED (68 shots × 4 variants), dist rebuilt + byte-verified
+(source==dist, 9 modules). Adding the 14th page adds one header dot to every page: proven by
+re-render that all 62 pre-existing shots differ at EXACTLY pixels (y4-5, x122-123) and nowhere
+else. Gallery regenerated (+ scene.png).
 
 **S19 gate (Lua-only — save + reload, no RESTART, count still 58/59):**
 1. Loads clean; SCENE is page 14; no errors in matron; `grp_scene` shows **11** params under
@@ -923,7 +965,8 @@ differ at EXACTLY pixels (y4-5, x122-123) and nowhere else. Gallery regenerated 
 3. **Morph:** K1+E2 = A=1, K1+E3 = B=2, then sweep **E3**. The instrument walks between the two
    sounds; the handle rides the bar. Check an exp param (cutoff) sweeps EVENLY, not all at once
    near the top. Check `mode` flips exactly halfway. Check a freeze set in B does NOT come on
-   during the sweep (it's morph-excluded) but DOES on a K2 recall of B.
+   during the sweep (it's morph-excluded), that the page then reads **"RCL B TO LAND"**, and
+   that K2 lands it.
 4. **Safety:** K1+K3 SAFE (chip lights) → wreck everything → K1+K2 UNDO → back, instantly, no
    glitch. MIDI-map `restore safe state` to a footswitch and confirm it does the same.
 5. **Chaos:** MIDI-map `chaos throw` to a pad/footswitch (or grid (4,8) on the SCENE page).
@@ -934,7 +977,19 @@ differ at EXACTLY pixels (y4-5, x122-123) and nowhere else. Gallery regenerated 
 7. **Motion:** arm MOTION (K2), sweep the morph knob, stop → check ONE lane appears (`MRPH`),
    not forty, and that replaying it moves the whole instrument. Then recall a scene while
    armed → it must punch NO lanes.
-8. **Grid** (if attached): on SCENE, row 1 recalls, CAP(8,1)+row 1 captures, rows 3/4 pick A/B,
+8. **Grid** (if attached): on SCENE, row 1 recalls, CAP(1,8)+row 1 captures, rows 3/4 pick A/B,
    row 6 sweeps, row 8 has CHAOS/SAFE/UNDO. Leaving the page restores the normal grid surface.
-9. PSET SAVE, change scenes, PSET LOAD → the bank comes back (`data/mangler/scenes-<n>.lua`).
-10. Watch xruns/GC over a few minutes of sweeping: the morph is capped at 15 passes/s.
+9. **The latch tests (the `key_surface` fix — highest-probability real failure, and the harness
+   cannot see any of it):** hold grid (3,2) tape-reverse → E1 to SEQ → release → the tape must
+   NOT stay backwards. Hold SCENE (4,8) chaos → E1 to another page → release → chaos must let go.
+   Hold a note pad → E1 to SEQ/SCENE → release → the voice must lift.
+10. PSET SAVE, change scenes, PSET LOAD → the bank comes back (`data/mangler/scenes-<n>.lua`).
+    Then the **clobber** case: morph to ~0.5, hand-tweak cutoff, SAVE, move on, LOAD → cutoff
+    must stay where the pset put it (it must not jump a frame later).
+11. **The tape-loop seam:** with the tape playing, recall a scene whose loop is somewhere else
+    entirely. Listen for a click/stutter (the outward-first edge ordering should keep every
+    intermediate a real region).
+12. Watch xruns/GC over a few minutes of sweeping: the morph is capped at 15 passes/s.
+13. **Known and accepted, verify it reads as intended:** UNDO takes the knobs back but does NOT
+    stop the things moving them — a running MOTION lane or the SEQ keeps driving its params
+    straight after a restore. If the runaway IS a motion loop, stop MOTION first.

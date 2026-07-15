@@ -901,10 +901,36 @@ local function scene_redraw()
   gg:led(8, 8, sc.safe and 6 or 1)
 end
 
+-- which layout the grid is showing right now (the surface follows the screen
+-- page, like snu)
+local function surface()
+  if is_seq_page() then return "seq" end
+  if is_scene_page() then return "scene" end
+  return "main"
+end
+
+-- a pad's RELEASE belongs to the surface that took its PRESS.
+-- the grid is page-aware, so without this, changing page mid-hold hands the
+-- release to a layout that doesn't know the pad — and whatever it was holding
+-- LATCHES: a tape stuck in reverse (hold (3,2), turn E1 to SEQ, let go), a
+-- note that never lifts, a chaos throw with no way back. the press decides who
+-- gets both edges. (this predates the SCENE page — it arrived with the SEQ
+-- surface in S18 and was live on tape_reverse.)
+local key_surface = {}
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
-  if is_seq_page() then return seq_grid_key(x, y, z) end
-  if is_scene_page() then return scene_grid_key(x, y, z) end
+  local k = y * 8 + x
+  local s
+  if z == 1 then
+    s = surface()
+    key_surface[k] = s
+  else
+    s = key_surface[k] or surface()
+    key_surface[k] = nil
+  end
+  if s == "seq" then return seq_grid_key(x, y, z) end
+  if s == "scene" then return scene_grid_key(x, y, z) end
   if y == 1 then
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
@@ -941,10 +967,8 @@ function M.redraw()
   -- SEQ / SCENE pages take over the whole grid (page-aware, like snu)
   if is_seq_page() then seq_redraw() gg:refresh() return end
   if is_scene_page() then scene_redraw() gg:refresh() return end
-  -- off the SCENE page, its held modifiers can't get their release edge (the
-  -- key dispatch follows the page), so drop them here rather than let a stale
-  -- CAP latch and turn the next slot tap into an overwrite
-  scene_mod.cap, scene_mod.clr = false, false
+  -- (no need to clear the SCENE modifiers here: key_surface routes their
+  -- release back to scene_grid_key even if the page has moved on)
 
   -- row 1: engine transport + mode radio
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)
@@ -1557,9 +1581,16 @@ local SPACE_IDS = {
 
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape", "seq_div",
-  "freeze", "pv_freeze", "tape_freeze", "tape_reverse", "pad_input",
+  "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "mode",   -- last of the last: this one respawns the voice
 }
+
+-- NOT here on purpose: `tape_reverse`. it's a MOMENTARY param — the TAPE key
+-- and the grid pad hold it and hand the release to held_gesture, so its
+-- resting value is 0 and a captured 1 is a transient, not a state. recalling
+-- that 1 would latch the tape backwards with nothing left to release it.
+-- nothing is lost: `tape_rate` is bipolar (-2..2) and IS in the list, so "this
+-- scene plays backwards" stores as a negative rate.
 
 local function append(dst, src)
   for i = 1, #src do dst[#dst + 1] = src[i] end
@@ -1571,27 +1602,36 @@ append(SCENE_RECALL_IDS, SPACE_IDS)
 append(SCENE_RECALL_IDS, SWITCH_IDS)
 
 -- MORPH-SAFE = recall MINUS these. the rule, in one line: a morph never
--- flips a hold, never re-routes your notes, and never writes the buffer.
+-- flips a hold, never re-routes your notes, never writes the buffer, and
+-- never changes the voice structure.
 --   freeze / pv_freeze / tape_freeze  holds. crossing 0.5 mid-sweep is a
 --     hard event, not a texture — recall the scene if you want the hold.
---   tape_reverse  momentary by design (the TAPE key + grid pad hold it);
---     a morph latching it would fight the held-gesture model.
 --   pad_input  note ROUTING. flipping it mid-sweep re-points the keyboard
 --     and releases sounding pad voices.
 --   resample / regen  the buffer writers. a sweep must stay undo-able, and
 --     audio already committed to the buffer is not.
+--   voices  the poly CAP. lerping it crosses integers, and every crossing
+--     re-caps the engine's allocator — which steals (cuts) held pad notes
+--     mid-sweep. structure, not texture: a recall sets it, a morph doesn't.
 -- consequence, worth knowing: morph at amt=1 is NOT the same as recall(B) —
 -- it moves the morph-safe subset only. sweep to 1, then K2 RCL to land the
--- rest.
+-- rest. (the SCENE page says so: see M.unlanded + the "RCL B TO LAND" cue.)
 local MORPH_EXCLUDE = {
-  freeze = true, pv_freeze = true, tape_freeze = true, tape_reverse = true,
-  pad_input = true, resample = true, regen = true,
+  freeze = true, pv_freeze = true, tape_freeze = true,
+  pad_input = true, resample = true, regen = true, voices = true,
 }
 
+-- the two complementary halves of the recall list: what a morph carries, and
+-- what it deliberately leaves behind (the latter drives the page's cue).
 local SCENE_MORPH_IDS = {}
+local MORPH_SKIPPED_IDS = {}
 for i = 1, #SCENE_RECALL_IDS do
   local id = SCENE_RECALL_IDS[i]
-  if not MORPH_EXCLUDE[id] then SCENE_MORPH_IDS[#SCENE_MORPH_IDS + 1] = id end
+  if MORPH_EXCLUDE[id] then
+    MORPH_SKIPPED_IDS[#MORPH_SKIPPED_IDS + 1] = id
+  else
+    SCENE_MORPH_IDS[#SCENE_MORPH_IDS + 1] = id
+  end
 end
 
 -- the safe snapshot is the recall set PLUS the master out: if a throw (or a
@@ -1667,6 +1707,9 @@ end
 -- the next amount move re-asserts the whole sweep from wherever we now are.
 function M.invalidate()
   for k in pairs(last_sent) do last_sent[k] = nil end
+  -- ...and the morph is no longer what's driving the sound: something else
+  -- (a recall, a restore, a throw, a new endpoint) just moved it off the line
+  M.engaged = false
 end
 
 local function snapshot_ids(ids)
@@ -1678,18 +1721,40 @@ local function snapshot_ids(ids)
   return t
 end
 
+-- region edges: two params that only mean something as a PAIR. setting them
+-- one at a time means the consumer reads ONE new edge against ONE old one for
+-- an instant — softcut can render up to a block of a region that is neither
+-- the old nor the new one (and update_tape_loop's `hi-lo < 0.1` floor turns a
+-- crossed pair into a 100ms loop, which jumps the head audibly). so: move the
+-- edge that widens the region FIRST, and every intermediate contains a real
+-- region instead of a bogus one. `start` key -> `end` key.
+local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end" }
+
 -- apply a stored table, walking `ids` IN ORDER (timbre -> space -> switches;
 -- see the list comment). params missing from the table are skipped, so a
 -- scene captured by an older version still recalls what it does know.
 local function apply(tbl, ids)
   if not tbl then return 0 end
   local n = 0
+  local done                      -- edge partners already set (nil until needed)
   for i = 1, #ids do
     local id = ids[i]
     local v = tbl[id]
-    if v ~= nil and params.lookup[id] then
-      pset(id, v)
-      n = n + 1
+    if v ~= nil and params.lookup[id] and not (done and done[id]) then
+      local partner = EDGE_PAIRS[id]
+      local pv = partner and tbl[partner]
+      if pv ~= nil and params.lookup[partner] then
+        -- outward edge first: if the new start moves LEFT it's the widening
+        -- one, else the new end is
+        if v < params:get(id) then pset(id, v) pset(partner, pv)
+        else pset(partner, pv) pset(id, v) end
+        done = done or {}
+        done[partner] = true
+        n = n + 2
+      else
+        pset(id, v)
+        n = n + 1
+      end
     end
   end
   M.invalidate()
@@ -1828,7 +1893,27 @@ function M.morph(a, b, amt, opts)
   end
   morphing = false
   M.morph_at = amt
+  M.engaged = true      -- the morph is now what's driving the sound
   return true
+end
+
+-- does this slot hold state a MORPH can't carry? (the MORPH_SKIPPED_IDS —
+-- holds, routing, buffer writers, the voice cap.) true = the sweep has
+-- arrived but those are still sitting where you left them, and only a K2
+-- recall lands them. drives the SCENE page's "RCL B TO LAND" cue, which
+-- exists so `morph(1) ~= recall(B)` is visible instead of mysterious.
+function M.unlanded(slot)
+  local scene = M.slots[slot_idx(slot)]
+  if not scene then return false end
+  for i = 1, #MORPH_SKIPPED_IDS do
+    local id = MORPH_SKIPPED_IDS[i]
+    local v = scene[id]
+    if v ~= nil and params.lookup[id]
+        and abs(params:get(id) - v) > 1e-6 then
+      return true
+    end
+  end
+  return false
 end
 
 -- scene_morph_amt's action calls this: mark the sweep dirty and let the next
@@ -1951,6 +2036,13 @@ function M.pset_write(number)
 end
 
 function M.pset_read(number)
+  -- a pset LOAD is authoritative: params:read() has just restored the VALUES
+  -- the sound actually had — and in doing so re-set scene_morph_amt, which
+  -- fired touch() and armed a sweep. drop it. re-deriving the morph here would
+  -- overwrite any param the performer hand-tweaked AFTER their last morph move
+  -- and saved, one frame after the load, silently. the morph re-engages on the
+  -- next move of the knob. (this runs from action_read, i.e. after the values.)
+  dirty = false
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
   -- exactly like mtape leaves the tape audio alone when there's no wav
@@ -3345,6 +3437,16 @@ local function body_SCENE(frame)
   end
   -- top-right, dim: this page's defining number — WHEN a recall lands
   ptext_r(string.upper(params:string("scene_recall_mode")), 126, 14, 1, 4)
+  -- a morph moves the morph-safe subset only: holds, note routing, the buffer
+  -- writers and the voice cap stay put (see mscenes MORPH_EXCLUDE). so when a
+  -- sweep has ARRIVED at an end and that scene still holds some of those, say
+  -- which key finishes the job — otherwise "I swept all the way to B and it
+  -- doesn't sound like B" is a mystery instead of a fact. only while the morph
+  -- is what's driving (parked at 0 from boot claims nothing).
+  local sc_end = amt >= 0.999 and b or (amt <= 0.001 and a or nil)
+  if sc_end and sc.engaged and sc.unlanded(sc_end) then
+    ptext_c("RCL " .. (amt >= 0.999 and "B" or "A") .. " TO LAND", 64, 14, 1, 5)
+  end
 
   -- the 8 slots, y21..31 (same cell geometry as the SEQ steps)
   local filled_any = false
