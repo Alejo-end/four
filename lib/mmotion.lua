@@ -55,6 +55,11 @@ local MOTION_IDS = {
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
   "voice_atk", "voice_rel",
+  -- S19: the scene morph knob. recording THIS records a whole-instrument
+  -- sweep in ONE lane — mscenes re-derives every param from it on replay
+  -- (and tells us it did, via M.account, so the sweep never punches forty
+  -- lanes of its own). appended, so existing lane order is unchanged.
+  "scene_morph_amt",
 }
 
 local M = {
@@ -128,6 +133,15 @@ local function capture_poll(offset)
       last_val[id] = v
     end
   end
+end
+
+-- another driver (scenes, S19) is about to move `id` itself: fold the
+-- resulting value into our baseline so the next poll doesn't read it as a
+-- live hand on a knob. this is the same trick playback uses on its own
+-- writes — a scene recall or a morph sweep is a JUMP, not a gesture, and
+-- must never punch itself into a lane. no-op for ids we don't track.
+function M.account(id)
+  if last_val[id] ~= nil then last_val[id] = params:get(id) end
 end
 
 -- ===========================================================================

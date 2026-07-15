@@ -44,7 +44,16 @@
 --          DRY makes what you HEAR the bare sample (also grid (7,2)). global,
 --          except GRAIN / TAPE / REVERB / PADS
 --
--- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
+-- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB
+--         PADS  MOTION  SEQ  SCENE
+--
+-- SCENE   8 slots that remember the whole sound (not the audio): K3 CAP, K2
+--   RCL (immediately or on the next beat/bar). E3 MORPHS between two slots —
+--   one knob walks the instrument from A to B. the alt keys are the way back:
+--   K1+K3 SAFE marks a state, K1+K2 UNDO returns to it, so you can throw the
+--   thing off a cliff and be home in one press. PARAMS > scenes maps all of
+--   it to MIDI (a capture/recall/undo footswitch, a morph fader, and
+--   `chaos throw` — hold for bounded mayhem, release to land safe).
 --
 -- NOTES   a MIDI keyboard (or USB typing keyboard, ableton-style: A-row =
 --   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
@@ -81,7 +90,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ",
+  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ", "SCENE",
 }
 
 local FPS = 15
@@ -818,9 +827,84 @@ local function seq_redraw()
   gg:led(8, 8, 4)
 end
 
+-- SCENE page (S19): like SEQ, the grid follows the screen — while the SCENE
+-- page is up the whole surface becomes the scene bank.
+--
+--   row 1  the 8 slots: tap = recall (quantized per scene_recall_mode).
+--          hold CAP and tap = capture into it; hold CLR and tap = clear it
+--   row 3  morph endpoint A        row 4  morph endpoint B
+--   row 6  morph amount, 8 steps (tap one — the sweep in reach of a finger)
+--   row 8  [CAP] [CLR] · [CHAOS, hold] · · [SAFE] [UNDO]
+--
+-- every pad drives a param, so it does exactly what the screen keys do.
+local function is_scene_page()
+  return C.PAGES[C.page] == "SCENE"
+end
+
+local scene_mod = { cap = false, clr = false }
+
+local function scene_grid_key(x, y, z)
+  -- row 8 first: these are the momentary/modifier pads, they need BOTH edges
+  if y == 8 then
+    if x == 1 then scene_mod.cap = (z == 1)
+    elseif x == 2 then scene_mod.clr = (z == 1)
+    elseif x == 4 then params:set("chaos_throw", z)          -- hold for mayhem
+    elseif x == 7 then params:set("scene_safe_capture", z)
+    elseif x == 8 then params:set("scene_safe_restore", z) end
+    return
+  end
+  if z ~= 1 then return end
+  if y == 1 then
+    params:set("scene_slot", x)                              -- screen follows
+    if scene_mod.cap then C.scene_capture(x)
+    elseif scene_mod.clr then C.scene_clear(x)
+    else C.scene_recall(x) end
+  elseif y == 3 then params:set("scene_morph_a", x)
+  elseif y == 4 then params:set("scene_morph_b", x)
+  elseif y == 6 then params:set("scene_morph_amt", (x - 1) / 7) end
+end
+
+local function scene_redraw()
+  local sc = C.scene
+  local sel = floor(pget("scene_slot", 1) + 0.5)
+  local a = floor(pget("scene_morph_a", 1) + 0.5)
+  local b = floor(pget("scene_morph_b", 2) + 0.5)
+  -- row 1: the bank. queued recall blinks, selected is bright, occupied mid,
+  -- empty barely there — the same brightness-is-truth rule as the screen.
+  for x = 1, 8 do
+    local filled = sc.slots[x] ~= nil
+    local lvl
+    if sc.pending == x then lvl = (C.frame % FPS) < (FPS / 2) and 15 or 4
+    elseif x == sel then lvl = filled and 12 or 3
+    elseif filled then lvl = 6
+    else lvl = 1 end
+    gg:led(x, 1, lvl)
+  end
+  -- rows 3/4: the morph endpoints (lit = chosen, dim = a slot with something
+  -- in it to choose)
+  for x = 1, 8 do
+    local filled = sc.slots[x] ~= nil
+    gg:led(x, 3, x == a and 15 or (filled and 4 or 1))
+    gg:led(x, 4, x == b and 15 or (filled and 4 or 1))
+  end
+  -- row 6: the morph amount as a bar with a bright head
+  local head = floor(pget("scene_morph_amt", 0) * 7 + 0.5) + 1
+  for x = 1, 8 do
+    gg:led(x, 6, x == head and 15 or (x < head and 5 or 1))
+  end
+  -- row 8: modifiers (lit while held), chaos (lit while thrown), the pair of
+  -- safety pads (dark until there's a safe state to go back to)
+  gg:led(1, 8, scene_mod.cap and 15 or 4)
+  gg:led(2, 8, scene_mod.clr and 15 or 4)
+  gg:led(4, 8, pget("chaos_throw", 0) == 1 and 15 or 4)
+  gg:led(7, 8, sc.safe and 6 or 2)
+  gg:led(8, 8, sc.safe and 6 or 1)
+end
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
   if is_seq_page() then return seq_grid_key(x, y, z) end
+  if is_scene_page() then return scene_grid_key(x, y, z) end
   if y == 1 then
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
@@ -854,8 +938,13 @@ function M.redraw()
   if not (gg and gg.device) then return end
   gg:all(0)
 
-  -- SEQ page takes over the whole grid (page-aware, like snu)
+  -- SEQ / SCENE pages take over the whole grid (page-aware, like snu)
   if is_seq_page() then seq_redraw() gg:refresh() return end
+  if is_scene_page() then scene_redraw() gg:refresh() return end
+  -- off the SCENE page, its held modifiers can't get their release edge (the
+  -- key dispatch follows the page), so drop them here rather than let a stale
+  -- CAP latch and turn the next slot tap into an overwrite
+  scene_mod.cap, scene_mod.clr = false, false
 
   -- row 1: engine transport + mode radio
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)
@@ -993,6 +1082,11 @@ local MOTION_IDS = {
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
   "voice_atk", "voice_rel",
+  -- S19: the scene morph knob. recording THIS records a whole-instrument
+  -- sweep in ONE lane — mscenes re-derives every param from it on replay
+  -- (and tells us it did, via M.account, so the sweep never punches forty
+  -- lanes of its own). appended, so existing lane order is unchanged.
+  "scene_morph_amt",
 }
 
 local M = {
@@ -1066,6 +1160,15 @@ local function capture_poll(offset)
       last_val[id] = v
     end
   end
+end
+
+-- another driver (scenes, S19) is about to move `id` itself: fold the
+-- resulting value into our baseline so the next poll doesn't read it as a
+-- live hand on a knob. this is the same trick playback uses on its own
+-- writes — a scene recall or a morph sweep is a JUMP, not a gesture, and
+-- must never punch itself into a lane. no-op for ids we don't track.
+function M.account(id)
+  if last_val[id] ~= nil then last_val[id] = params:get(id) end
 end
 
 -- ===========================================================================
@@ -1354,6 +1457,548 @@ end
 return M
 
 end)()
+local Mscenes = (function()  -- inlined lib/mscenes.lua
+-- mscenes: scenes, scene morphing, and the safe-state snapshot (S19) — the
+-- "remember this / go back to that" layer.
+--
+-- three features, one data model:
+--   SCENES   8 slots, each a flat map { param_id = value } captured from the
+--            live params. recall writes them back through params:set, so the
+--            engine, the tape and the display all follow for free — a scene
+--            is not a second source of truth, it's a photograph of the one
+--            that exists.
+--   MORPH    a continuous A -> B sweep over the subset of those params that
+--            can be interpolated. one knob (scene_morph_amt) moves the whole
+--            instrument along a line between two remembered sounds.
+--   SAFE     one "last known good" snapshot + an instant restore. capture it
+--            before you do something reckless (see the chaos throw below);
+--            restore drops you straight back on your feet.
+--
+-- NOTHING here stores audio. scenes are control state only: a recall does not
+-- bring back the take you have since overdubbed (that's what PSETs + the tape
+-- wav are for, see mtape). that's also what makes it cheap — 8 slots is ~350
+-- numbers, and a recall is ~60 params:set calls.
+--
+-- WHAT IS AND ISN'T IN A SCENE — the lists are right below and they are
+-- deliberate. in: everything that shapes the sound of the take (window,
+-- grain/clouds, stretch, tape loop, filter, delay, reverb, shimmer, voices,
+-- the sequencer's pattern generator). out: the hardware/config layer (midi
+-- channel, keys, root note), the SYSTEM levels (in/out/monitor/hp), the
+-- capture transports (rec, tape_rec), the master STOP, and the motion/seq
+-- transports. a scene changes how it sounds, never how it's plumbed or
+-- whether it's running.
+--
+-- THE MORPH IS FRAME-COALESCED. scene_morph_amt's action only marks the sweep
+-- dirty; M.tick() applies it at most once per redraw frame (the existing 15fps
+-- clock — no new process, same modulation grid the gesture looper runs on).
+-- a fast CC sweep would otherwise fire ~40 params x 128 CC steps at the engine
+-- in a second; this caps it at 15 passes/s, and the per-param deadband below
+-- drops the ones that aren't actually moving.
+
+local floor, abs = math.floor, math.abs
+
+local C            -- shared ctx, bound at init
+local pget, clamp
+
+local NUM_SLOTS = 8
+
+-- ===========================================================================
+-- the curated param lists
+-- ===========================================================================
+-- SCENE_RECALL_IDS is built from three ORDERED blocks, and recall/restore
+-- walk it in order, so a scene lands in the order the engine wants it:
+--
+--   1 TIMBRE  the continuous voice: source blend, window, grain/clouds,
+--             stretch shape, tape loop, voices, sequencer pattern
+--   2 SPACE   the wet path: filter, drive, delay, reverb, shimmer
+--   3 SWITCH  the discrete mode/type switches — LAST, on purpose: `mode`
+--             respawns the SC voice, so switching it after everything else
+--             means the new voice is BORN with the scene's params instead of
+--             being born wrong and then jumped to them.
+--
+-- add a new mangle param to the right block and it joins scenes, morphs and
+-- the safe snapshot at once (MOTION_IDS in mmotion is the same idea for the
+-- gesture looper — the two lists are siblings, kept separate on purpose).
+
+local TIMBRE_IDS = {
+  -- source blend. NOT out_level: a scene must never rewrite your stage
+  -- volume. (the safe snapshot does take it — see SAFE_EXTRA_IDS.)
+  "mix", "sc_level", "cut_level",
+  -- playback path + the two output->buffer writers. resample only bites on
+  -- the next armed take; regen is the one member that quietly rewrites the
+  -- buffer, which is exactly why a scene should be able to pull it back to 0.
+  "dry_wet", "resample", "regen",
+  -- window / scan
+  "pos_start", "pos_end", "scan", "pos_jitter",
+  -- grain + clouds (the granular character)
+  "size", "density", "pitch", "spread", "pan", "grain_level",
+  "grain_jitter", "grain_pitch_spread",
+  "clouds_pos", "clouds_tex", "clouds_fb", "clouds_lofi",
+  -- stretch shape (mode itself is a SWITCH, below)
+  "warp_window", "warp_overlaps", "warp_rand",
+  -- tape deck (loop bounds ride along, so a scene = a loop region too)
+  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade",
+  -- polyphonic pad voices
+  "voices", "voice_atk", "voice_rel",
+  -- the sequencer's PATTERN (not its transport): euclid regenerates on set,
+  -- so a scene restores the generated rhythm. hand-drawn grid edits live in
+  -- mseq.pattern, which is not a param — they don't survive a recall.
+  "seq_euclid", "seq_len", "seq_slice",
+}
+
+local SPACE_IDS = {
+  "cutoff", "resonance", "drive",
+  "delay_time", "delay_fb", "delay_mix",
+  "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
+  "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
+  "rev_highcut", "rev_mix",
+  "shimmer", "shimmer_pitch", "shimmer_tone",
+}
+
+local SWITCH_IDS = {
+  "filt_type", "clouds_mode", "grain_shape", "seq_div",
+  "freeze", "pv_freeze", "tape_freeze", "tape_reverse", "pad_input",
+  "mode",   -- last of the last: this one respawns the voice
+}
+
+local function append(dst, src)
+  for i = 1, #src do dst[#dst + 1] = src[i] end
+end
+
+local SCENE_RECALL_IDS = {}
+append(SCENE_RECALL_IDS, TIMBRE_IDS)
+append(SCENE_RECALL_IDS, SPACE_IDS)
+append(SCENE_RECALL_IDS, SWITCH_IDS)
+
+-- MORPH-SAFE = recall MINUS these. the rule, in one line: a morph never
+-- flips a hold, never re-routes your notes, and never writes the buffer.
+--   freeze / pv_freeze / tape_freeze  holds. crossing 0.5 mid-sweep is a
+--     hard event, not a texture — recall the scene if you want the hold.
+--   tape_reverse  momentary by design (the TAPE key + grid pad hold it);
+--     a morph latching it would fight the held-gesture model.
+--   pad_input  note ROUTING. flipping it mid-sweep re-points the keyboard
+--     and releases sounding pad voices.
+--   resample / regen  the buffer writers. a sweep must stay undo-able, and
+--     audio already committed to the buffer is not.
+-- consequence, worth knowing: morph at amt=1 is NOT the same as recall(B) —
+-- it moves the morph-safe subset only. sweep to 1, then K2 RCL to land the
+-- rest.
+local MORPH_EXCLUDE = {
+  freeze = true, pv_freeze = true, tape_freeze = true, tape_reverse = true,
+  pad_input = true, resample = true, regen = true,
+}
+
+local SCENE_MORPH_IDS = {}
+for i = 1, #SCENE_RECALL_IDS do
+  local id = SCENE_RECALL_IDS[i]
+  if not MORPH_EXCLUDE[id] then SCENE_MORPH_IDS[#SCENE_MORPH_IDS + 1] = id end
+end
+
+-- the safe snapshot is the recall set PLUS the master out: if a throw (or a
+-- fat finger) moved your level, the rescue should bring that back too. it
+-- still refuses the SYSTEM levels, the transports and stop_all — a restore
+-- must never unmute you, re-arm a recording, or undo a STOP you're leaning on.
+local SAFE_EXTRA_IDS = { "out_level" }
+local SAFE_SNAPSHOT_IDS = {}
+append(SAFE_SNAPSHOT_IDS, SAFE_EXTRA_IDS)
+append(SAFE_SNAPSHOT_IDS, SCENE_RECALL_IDS)
+
+-- NEVER capture the scene_* params themselves. scene_morph_amt's action
+-- re-fires the morph, so a snapshot that restored it would immediately
+-- overwrite everything it just restored. (they're also UI selectors — not
+-- sound.) this is a note to whoever adds the next param to the lists above.
+
+-- ===========================================================================
+-- module state
+-- ===========================================================================
+
+local M = {
+  slots = {},         -- slots[1..8] = { id = value } (nil = empty). ctx.scenes
+  safe = nil,         -- the safe snapshot, same shape
+  pending = nil,      -- slot waiting on a quantized recall (nil = none)
+  morph_at = 0,       -- last morph amount applied (display)
+  chaos_live = false, -- a chaos throw is currently held
+  safe_at = -999,     -- frames, for the page's confirmation flashes
+  restored_at = -999,
+  captured_at = -999,
+  NUM_SLOTS = NUM_SLOTS,
+  -- exposed for docs/tests/inspection: the three lists, as built above
+  SCENE_RECALL_IDS = SCENE_RECALL_IDS,
+  SCENE_MORPH_IDS = SCENE_MORPH_IDS,
+  SAFE_SNAPSHOT_IDS = SAFE_SNAPSHOT_IDS,
+}
+
+local dirty = false      -- a morph is pending for the next tick
+local morphing = false   -- re-entry guard (a param action must never recurse)
+local last_sent = {}     -- morph: the last value/norm we pushed, per param
+local pending_clock      -- the quantized-recall coroutine (nil = none)
+
+local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
+
+-- ===========================================================================
+-- param plumbing
+-- ===========================================================================
+
+local function lookup(id)
+  return params.lookup[id] and params:lookup_param(id) or nil
+end
+
+local function slot_idx(slot)
+  return clamp(floor((slot or pget("scene_slot", 1)) + 0.5), 1, NUM_SLOTS)
+end
+
+-- EVERY write in this module goes through here.
+-- 1) params stay the single source of truth — we set the same ids the
+--    encoders, keys and MIDI CCs set, and their actions do the engine work.
+-- 2) the gesture looper is told the value came from US. mmotion captures by
+--    polling for changes, so without this a scene jump or a morph sweep would
+--    look exactly like forty hands on forty knobs and punch a lane for each.
+--    scenes and motion stay orthogonal drivers: motion records the MORPH KNOB
+--    (scene_morph_amt is in MOTION_IDS) and replays that — one lane, not forty.
+local function pset(id, v)
+  params:set(id, v)
+  local mo = C.motion
+  -- account for the RESOLVED value: a control quantizes what you hand it
+  if mo and mo.account then mo.account(id) end
+end
+
+-- the morph's "already sent" memory is only valid while nothing else moves
+-- the instrument. any capture/recall/restore/endpoint change clears it, so
+-- the next amount move re-asserts the whole sweep from wherever we now are.
+function M.invalidate()
+  for k in pairs(last_sent) do last_sent[k] = nil end
+end
+
+local function snapshot_ids(ids)
+  local t = {}
+  for i = 1, #ids do
+    local id = ids[i]
+    if params.lookup[id] then t[id] = params:get(id) end
+  end
+  return t
+end
+
+-- apply a stored table, walking `ids` IN ORDER (timbre -> space -> switches;
+-- see the list comment). params missing from the table are skipped, so a
+-- scene captured by an older version still recalls what it does know.
+local function apply(tbl, ids)
+  if not tbl then return 0 end
+  local n = 0
+  for i = 1, #ids do
+    local id = ids[i]
+    local v = tbl[id]
+    if v ~= nil and params.lookup[id] then
+      pset(id, v)
+      n = n + 1
+    end
+  end
+  M.invalidate()
+  return n
+end
+
+local function cancel_pending()
+  if pending_clock then clock.cancel(pending_clock) end
+  pending_clock, M.pending = nil, nil
+end
+
+-- ===========================================================================
+-- scenes — capture / recall / clear
+-- ===========================================================================
+
+-- capture the live state of SCENE_RECALL_IDS into a slot (default: the
+-- selected one). overwrites without ceremony — like every other throw in this
+-- instrument, the key does the thing.
+function M.capture(slot)
+  slot = slot_idx(slot)
+  M.slots[slot] = snapshot_ids(SCENE_RECALL_IDS)
+  M.captured_at = C.frame
+  M.invalidate()   -- an endpoint's contents may have just changed under us
+  return true
+end
+
+-- recall a slot. opts.immediate = true forces NOW even when the page is set
+-- to quantize; otherwise scene_recall_mode decides (NOW / next BEAT / next
+-- BAR). a queued recall replaces any other queued recall — last press wins.
+function M.recall(slot, opts)
+  slot = slot_idx(slot)
+  local scene = M.slots[slot]
+  if not scene then return false end
+  opts = opts or {}
+  local mode = floor(pget("scene_recall_mode", 1) + 0.5)
+  local beats = QUANT_BEATS[mode] or 0
+  cancel_pending()
+  if beats > 0 and not opts.immediate then
+    M.pending = slot
+    -- ONE coroutine, always cancelled on replace / restore / cleanup (the
+    -- norns clock-race gotcha: a timer resuming a dead thread wedges clock)
+    pending_clock = clock.run(function()
+      clock.sync(beats)
+      pending_clock, M.pending = nil, nil
+      apply(M.slots[slot], SCENE_RECALL_IDS)
+    end)
+    return true
+  end
+  apply(scene, SCENE_RECALL_IDS)
+  return true
+end
+
+function M.clear(slot)
+  slot = slot_idx(slot)
+  -- mutate in place: ctx.scenes points AT this table
+  M.slots[slot] = nil
+  if M.pending == slot then cancel_pending() end
+  M.invalidate()
+  return true
+end
+
+-- ===========================================================================
+-- morph — A -> B, one knob
+-- ===========================================================================
+-- continuous params interpolate in the controlspec's OWN (warped) space:
+-- cutoff 20 -> 20000 is exponential, so a raw lerp would sit at "nearly open"
+-- for the whole second half of the sweep. unmap -> lerp -> map is linear in
+-- the space the encoder moves in, which is the one that sounds even. pass
+-- opts.linear for a raw-value lerp instead.
+-- numbers (voices, warp_overlaps) lerp and land on integers; options and
+-- binaries can't be half-switched, so they flip at the midpoint (amt >= 0.5).
+
+local function morph_value(id, va, vb, amt, linear)
+  local p = lookup(id)
+  if not p then return nil end
+  local cs = p.controlspec
+  if cs then
+    if linear then
+      local v = va + (vb - va) * amt
+      v = clamp(v, cs.minval, cs.maxval)
+      return v, clamp(cs:unmap(v), 0, 1)
+    end
+    local na = clamp(cs:unmap(va), 0, 1)
+    local nb = clamp(cs:unmap(vb), 0, 1)
+    local tn = na + (nb - na) * amt
+    -- the normalized target doubles as the deadband key below: if a param is
+    -- identical in A and B, tn never moves and it never gets sent at all
+    return cs:map(tn), tn
+  end
+  if p.count then                                  -- option: midpoint switch
+    return amt < 0.5 and va or vb
+  end
+  if p.min and p.max then                          -- number: lerp -> integer
+    return clamp(floor(va + (vb - va) * amt + 0.5), p.min, p.max)
+  end
+  return amt < 0.5 and va or vb                    -- binary / unknown
+end
+
+-- normalized deadband: a param must move at least this much (of its full
+-- range) before we re-send it. kills duplicate engine commands on a sweep
+-- without being coarse enough to see or hear.
+local MORPH_EPS = 1 / 400
+
+-- morph the instrument to `amt` (0..1) along slot a -> slot b.
+--   opts.force   send every param even if it hasn't moved
+--   opts.linear  interpolate raw values instead of controlspec space
+-- returns false when either slot is empty (nothing to interpolate between).
+function M.morph(a, b, amt, opts)
+  if morphing then return false end    -- a param action can never recurse in
+  local A, B = M.slots[slot_idx(a)], M.slots[slot_idx(b)]
+  if not (A and B) then return false end
+  opts = opts or {}
+  amt = clamp(amt or 0, 0, 1)
+  -- at the ends, land EXACTLY on the stored values (no deadband rounding)
+  local force = opts.force or amt <= 0 or amt >= 1
+  morphing = true
+  local ids = SCENE_MORPH_IDS
+  for i = 1, #ids do
+    local id = ids[i]
+    local va, vb = A[id], B[id]
+    -- skip anything either scene doesn't have (older capture, missing param)
+    if va ~= nil and vb ~= nil and params.lookup[id] then
+      local v, tn = morph_value(id, va, vb, amt, opts.linear)
+      if v ~= nil then
+        local key = tn or v        -- continuous: compare norms; discrete: values
+        local last = last_sent[id]
+        local fire = force or last == nil
+          or (tn and abs(tn - last) >= MORPH_EPS)
+          or (not tn and v ~= last)
+        if fire then
+          pset(id, v)
+          last_sent[id] = key
+        end
+      end
+    end
+  end
+  morphing = false
+  M.morph_at = amt
+  return true
+end
+
+-- scene_morph_amt's action calls this: mark the sweep dirty and let the next
+-- frame do the work (see the coalescing note at the top).
+function M.touch()
+  dirty = true
+end
+
+-- one per redraw frame, from the existing 15fps clock in mangler.lua.
+function M.tick()
+  if not dirty then return end
+  dirty = false
+  M.morph(pget("scene_morph_a", 1), pget("scene_morph_b", 2),
+    pget("scene_morph_amt", 0))
+end
+
+-- ===========================================================================
+-- safe snapshot — the undo for live experimentation
+-- ===========================================================================
+
+function M.safe_capture()
+  M.safe = snapshot_ids(SAFE_SNAPSHOT_IDS)
+  M.safe_at = C.frame
+  return true
+end
+
+-- back to the last known good state, now. control state only: it does not
+-- touch the buffer, the tape audio, or held voices — this is an undo for
+-- knobs, not a panic mute (K1+K2 STOP is the mute, and it stays yours).
+function M.safe_restore()
+  if not M.safe then return false end
+  cancel_pending()   -- a queued recall must not undo the rescue a beat later
+  apply(M.safe, SAFE_SNAPSHOT_IDS)
+  M.chaos_live = false
+  M.restored_at = C.frame
+  return true
+end
+
+-- ===========================================================================
+-- chaos throw — hold for madness, release for safety
+-- ===========================================================================
+-- chaos_throw is a MOMENTARY param: press throws, release restores the safe
+-- snapshot. map it to a footswitch or hit the grid pad. the throw is bounded
+-- per-param in NORMALIZED space, so it lands somewhere wild but never
+-- somewhere silent, and (like the morph) it never touches rec/resample/regen
+-- or the levels — everything it does is undo-able, which is the whole point.
+-- math.random lives here and nowhere near the draw path: the seeded render
+-- suite never calls it, so the pages' RNG stream is untouched.
+
+local CHAOS = {
+  { "pos_jitter", 0.35, 1.00 },
+  { "density", 0.55, 1.00 },
+  { "size", 0.00, 0.45 },
+  { "grain_jitter", 0.30, 1.00 },
+  { "grain_pitch_spread", 0.20, 0.90 },
+  { "clouds_tex", 0.00, 1.00 },
+  { "clouds_fb", 0.20, 0.70 },
+  { "resonance", 0.40, 0.95 },
+  { "drive", 0.20, 0.80 },
+  { "delay_fb", 0.50, 0.95 },
+  { "delay_mix", 0.30, 0.90 },
+  { "rev_mix", 0.30, 0.90 },
+  { "shimmer", 0.20, 0.90 },
+  { "warp_rand", 0.30, 1.00 },
+}
+
+-- scan is bipolar — normalized 0.5 is STOPPED. throw it to one side or the
+-- other so chaos always keeps moving.
+local SCAN_FWD = { 0.62, 0.95 }
+local SCAN_REV = { 0.05, 0.38 }
+
+local function set_norm(id, n)
+  local p = lookup(id)
+  if p and p.controlspec then pset(id, p.controlspec:map(clamp(n, 0, 1))) end
+end
+
+local function throw(id, lo, hi)
+  set_norm(id, lo + math.random() * (hi - lo))
+end
+
+function M.chaos()
+  -- never strand the performer: if they never marked a safe state, the throw
+  -- marks one for them, so the release always has somewhere to land
+  if not M.safe then M.safe_capture() end
+  for i = 1, #CHAOS do
+    local c = CHAOS[i]
+    throw(c[1], c[2], c[3])
+  end
+  local s = math.random() < 0.5 and SCAN_REV or SCAN_FWD
+  throw("scan", s[1], s[2])
+  M.invalidate()
+  M.chaos_live = true
+  return true
+end
+
+-- the release edge. it only acts when a throw is actually live, so a stray 0
+-- (params:bang at init, a pset read) can never restore out of nowhere.
+function M.chaos_release()
+  if not M.chaos_live then return false end
+  M.chaos_live = false
+  return M.safe_restore()
+end
+
+-- ===========================================================================
+-- persistence — rides along with the PSET
+-- ===========================================================================
+-- the scene bank + the safe snapshot save as a plain lua table next to the
+-- pset, in the same data/ folder the tape audio uses. mangler.lua's
+-- action_write/read/delete call BOTH modules (mtape does the audio, we do
+-- the state) — that hook is shared, never replaced.
+
+local function path_for(number)
+  return norns.state.data .. "scenes-" .. number .. ".lua"
+end
+
+function M.pset_write(number)
+  local ok, err = pcall(tab.save,
+    { v = 1, slots = M.slots, safe = M.safe }, path_for(number))
+  if not ok then print("mangler: scene save failed — " .. tostring(err)) end
+end
+
+function M.pset_read(number)
+  local path = path_for(number)
+  -- no scene file (a pset from before scenes existed): leave the bank alone,
+  -- exactly like mtape leaves the tape audio alone when there's no wav
+  if not util.file_exists(path) then return end
+  local ok, t = pcall(tab.load, path)
+  if not (ok and type(t) == "table" and type(t.slots) == "table") then
+    print("mangler: scene file unreadable — " .. tostring(t))
+    return
+  end
+  cancel_pending()
+  for i = 1, NUM_SLOTS do
+    M.slots[i] = type(t.slots[i]) == "table" and t.slots[i] or nil
+  end
+  if type(t.safe) == "table" then M.safe = t.safe end
+  M.invalidate()
+end
+
+function M.pset_delete(number)
+  os.remove(path_for(number))
+end
+
+-- ===========================================================================
+-- lifecycle
+-- ===========================================================================
+
+function M.init(ctx)
+  C = ctx
+  pget, clamp = ctx.pget, ctx.clamp
+  ctx.scene = M          -- the module, like ctx.motion / ctx.seq
+  ctx.scenes = M.slots   -- the scene table itself (mutated in place, never
+                         -- reassigned, so this ref can't go stale)
+  -- the named helpers, on ctx beside fx_dry / pads_all_off — the KEYS table
+  -- and the grid reach them the same way they reach everything else
+  ctx.scene_capture = M.capture
+  ctx.scene_recall = M.recall
+  ctx.scene_clear = M.clear
+  ctx.scene_morph = M.morph
+  ctx.safe_snapshot_capture = M.safe_capture
+  ctx.safe_snapshot_restore = M.safe_restore
+end
+
+function M.cleanup()
+  cancel_pending()
+end
+
+return M
+
+end)()
 local Mpages = (function()  -- inlined lib/mpages.lua
 -- mpages: the screen — wave/twave display models, every page body, header,
 -- footer, and the redraw composition. (the bitmap mockups are the bible:
@@ -1472,6 +2117,8 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "AMT",
   seq_euclid = "EUC", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLC",
   clock_tempo = "BPM",
+  scene_slot = "SLOT", scene_morph_a = "A", scene_morph_b = "B",
+  scene_morph_amt = "MRPH",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -2672,12 +3319,95 @@ local function body_SEQ(frame)
   end
 end
 
+local function body_SCENE(frame)
+  -- scenes (S19): the 8-slot bank on top, the A->B morph underneath, and the
+  -- safety net top-left. an occupied slot fills, the selected one wears a
+  -- bright border, a slot queued for a quantized recall blinks until the
+  -- clock lands it. the morph bar lies dim when either endpoint is empty —
+  -- the audibility rule: nothing to move between, so the picture says so.
+  -- fully procedural (no math.random), so the seeded renders of every other
+  -- page stay byte-identical.
+  local sc = C.scene
+  local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 1, 8)
+  local a = clamp(floor(pget("scene_morph_a", 1) + 0.5), 1, 8)
+  local b = clamp(floor(pget("scene_morph_b", 2) + 0.5), 1, 8)
+  local amt = pget("scene_morph_amt", 0)
+
+  -- status row y12..20 (the chip is 9 tall, so it starts at 12 and the plain
+  -- text sits at 14 to share its baseline — the row must clear the cells).
+  -- top-left: the safety net, armed or not. a fresh mark / a restore flashes
+  -- the chip for a beat, so the throw confirms itself.
+  if sc.safe then
+    local hot = (frame - max(sc.safe_at, sc.restored_at)) < FPS
+    if hot then chip("SAFE", 2, 12) else ptext("SAFE", 2, 14, 1, 8) end
+  else
+    ptext("NO SAFE", 2, 14, 1, 3)
+  end
+  -- top-right, dim: this page's defining number — WHEN a recall lands
+  ptext_r(string.upper(params:string("scene_recall_mode")), 126, 14, 1, 4)
+
+  -- the 8 slots, y21..31 (same cell geometry as the SEQ steps)
+  local filled_any = false
+  for i = 1, 8 do
+    local x = 4 + (i - 1) * 15
+    local filled = sc.slots[i] ~= nil
+    filled_any = filled_any or filled
+    local pending = sc.pending == i and (frame % FPS) < (FPS / 2)
+    if filled or pending then
+      screen.level(pending and 15 or 7)
+      screen.rect(x, 21, 13, 10)
+      screen.fill()
+    else
+      screen.level(2)
+      screen.rect(x + 0.5, 21.5, 12, 9)
+      screen.stroke()
+    end
+    ptext_c(tostring(i), x + 7, 23, 1, (filled or pending) and 0 or 5)
+    -- the morph endpoints get a tick, tying them to the A?/B? labels below
+    if i == a or i == b then
+      screen.level(9)
+      screen.rect(x + 5, 32, 3, 1)
+      screen.fill()
+    end
+    if i == sel then
+      screen.level(15)
+      screen.rect(x - 0.5, 20.5, 14, 11)
+      screen.stroke()
+    end
+  end
+
+  -- the morph: A on the left, B on the right, the handle at the amount
+  local A, B = sc.slots[a], sc.slots[b]
+  if not filled_any then
+    ptext_c("EMPTY - K3 CAP", 64, 35, 1, 4)
+    return
+  end
+  if not (A and B) then
+    ptext_c("MORPH: PICK A+B", 64, 35, 1, 3)
+    return
+  end
+  -- the end you're standing on reads bright; parked at either end the handle
+  -- dims (nothing is being morphed — the audibility rule, for a gesture)
+  local live = amt > 0.001 and amt < 0.999
+  ptext("A" .. a, 2, 35, 1, amt < 0.5 and 12 or 5)
+  ptext_r("B" .. b, 126, 35, 1, amt >= 0.5 and 12 or 5)
+  local x0, x1 = 18, 110
+  screen.level(3)
+  screen.move(x0, 38)
+  screen.line(x1, 38)
+  screen.stroke()
+  screen.level(live and 15 or 8)
+  local hx = x0 + amt * (x1 - x0)
+  screen.rect(hx - 1, 35, 3, 7)
+  screen.fill()
+end
+
 local BODY = {
   MIX = body_MIX, LEVEL = body_LEVEL, REC = body_REC,
   WINDOW = body_WINDOW, GRAIN = body_GRAIN, STRETCH = body_STRETCH,
   TAPE = body_TAPE, FILTER = body_FILTER, DELAY = body_DELAY,
   REVERB = body_REVERB, PADS = body_PADS, MOTION = body_MOTION,
-  SEQ = body_SEQ,
+  SEQ = body_SEQ, SCENE = body_SCENE,
 }
 
 local function draw_body()
@@ -2792,6 +3522,9 @@ Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
+-- S19: sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
+-- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
+Mscenes.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -2968,6 +3701,38 @@ local KEYS = {
         params:set("seq_slice", (params:get("seq_slice") + 1) % ctx.pad_n)
       end },
   },
+  SCENE = {
+    -- the scene bank (S19). K2 recalls the selected slot (immediately, or on
+    -- the next beat/bar per scene_recall_mode), K3 captures the live sound
+    -- into it. the page claims its ALT layer for the SAFETY pair — K1+K2
+    -- UNDO drops you back on the last safe state, K1+K3 SAFE marks the
+    -- current one — so on this one page the alt keys are the rescue instead
+    -- of the global STOP/DRY. (that's the whole job of the page: the ways
+    -- back.)
+    -- every key drives a MOMENTARY param and hands the release to
+    -- held_gesture (the TAPE REV pattern), so a MIDI-mapped footswitch and
+    -- the key are literally the same action.
+    k2 = { label = "RCL",
+      act = function()
+        params:set("scene_recall", 1)
+        held_gesture[2] = "scene_recall"
+      end },
+    k3 = { label = "CAP",
+      act = function()
+        params:set("scene_capture", 1)
+        held_gesture[3] = "scene_capture"
+      end },
+    k2_alt = { label = "UNDO",
+      act = function()
+        params:set("scene_safe_restore", 1)
+        held_gesture[2] = "scene_safe_restore"
+      end },
+    k3_alt = { label = "SAFE",
+      act = function()
+        params:set("scene_safe_capture", 1)
+        held_gesture[3] = "scene_safe_capture"
+      end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware. any alt
@@ -3038,6 +3803,11 @@ local ENC_MAP = {
   -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
   -- clock_tempo is a SYSTEM param (referenced, never added).
   SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
+  -- SCENE (S19): E2 picks the slot K2/K3 act on, E3 IS the morph — the one
+  -- knob that walks the whole instrument from scene A to scene B. the
+  -- endpoints sit on the alt layer (K1+E2 = A, K1+E3 = B), so picking them
+  -- and playing the sweep never fight over an encoder.
+  SCENE   = { "scene_slot", "scene_morph_a", "scene_morph_amt", "scene_morph_b" },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -3489,18 +4259,77 @@ local function init_params()
   params:set_action("seq_len", function() ctx.seq.regen() end)
   params:add_number("seq_slice", "seq slice", 0, 7, 0)
 
+  -- S19 scenes / morph / safe state (see lib/mscenes). all Lua-only — no
+  -- engine command, so the fingerprint is unchanged. the ACTIONS here are
+  -- momentary binaries rather than triggers: a trigger can't be MIDI-learned,
+  -- and the whole point is a footswitch that captures, recalls, rescues or
+  -- throws. every action fires on the press edge (v == 1) only — a stray 0
+  -- from params:bang() or a pset read must never do anything.
+  params:add_group("grp_scene", "scenes", 11)
+  -- selectors: the slot K2/K3 act on, and the two morph endpoints
+  params:add_number("scene_slot", "scene slot", 1, 8, 1)
+  params:add_number("scene_morph_a", "morph A", 1, 8, 1)
+  params:set_action("scene_morph_a", function() Mscenes.invalidate() end)
+  params:add_number("scene_morph_b", "morph B", 1, 8, 2)
+  params:set_action("scene_morph_b", function() Mscenes.invalidate() end)
+  -- THE performance knob: sweeps the instrument A -> B. MIDI-map it to a
+  -- fader/pedal, or record it with the gesture looper (it's in MOTION_IDS —
+  -- one lane replays the whole sweep). changing A/B never writes params on
+  -- its own; this does, and only from the next frame's tick (mscenes coalesces
+  -- so a fast CC can't flood the engine).
+  params:add_control("scene_morph_amt", "morph amount",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("scene_morph_amt", function() Mscenes.touch() end)
+  params:add_option("scene_recall_mode", "recall quantize",
+    { "NOW", "BEAT", "BAR" }, 1)
+  -- actions on the selected slot (also the SCENE page's K2/K3)
+  params:add_binary("scene_capture", "capture to slot", "momentary", 0)
+  params:set_action("scene_capture", function(v)
+    if v == 1 then Mscenes.capture() end
+  end)
+  params:add_binary("scene_recall", "recall slot", "momentary", 0)
+  params:set_action("scene_recall", function(v)
+    if v == 1 then Mscenes.recall() end
+  end)
+  params:add_binary("scene_clear", "clear slot", "momentary", 0)
+  params:set_action("scene_clear", function(v)
+    if v == 1 then Mscenes.clear() end
+  end)
+  -- the safety net (the SCENE page's alt layer): mark a state, then get back
+  -- to it. control state only — it never touches the buffer or the tape audio.
+  params:add_binary("scene_safe_capture", "mark safe state", "momentary", 0)
+  params:set_action("scene_safe_capture", function(v)
+    if v == 1 then Mscenes.safe_capture() end
+  end)
+  params:add_binary("scene_safe_restore", "restore safe state", "momentary", 0)
+  params:set_action("scene_safe_restore", function(v)
+    if v == 1 then Mscenes.safe_restore() end
+  end)
+  -- chaos: HOLD it for a bounded random throw, release to land back on the
+  -- safe state (it marks one for you if you never did). a footswitch or grid
+  -- pad you can lean on — the release is what makes it safe to press.
+  params:add_binary("chaos_throw", "chaos throw", "momentary", 0)
+  params:set_action("chaos_throw", function(v)
+    if v == 1 then Mscenes.chaos() else Mscenes.chaos_release() end
+  end)
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
   -- round-trip the softcut buffers (see mtape). the granular engine's
   -- record buffer would need a matching save command on the SC side to
   -- round-trip as well — until then, only the tape survives a restart.
+  -- the hooks are SHARED: each module does its own half (mtape the audio,
+  -- mscenes the scene bank + safe snapshot, as a lua table beside the pset).
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
+    Mscenes.pset_write(number)
   end
   params.action_read = function(filename, silent, number)
     Mtape.pset_read(number)
+    Mscenes.pset_read(number)
   end
   params.action_delete = function(filename, name, number)
     Mtape.pset_delete(number)
+    Mscenes.pset_delete(number)
   end
 
   params:bang()
@@ -3554,6 +4383,9 @@ function init()
       Mpages.update_tape_wave()
       Mparticles.update()
       Mmotion.tick()   -- S16: advance + replay the gesture loop
+      -- S19: apply a pending morph sweep. AFTER motion, which may have just
+      -- replayed a recorded scene_morph_amt move for us to act on.
+      Mscenes.tick()
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -3573,11 +4405,13 @@ function cleanup()
   Mtape.cleanup()
   Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
   Mseq.cleanup()       -- cancel the sequencer clock (norns clock hygiene)
+  Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
 -- K1+E1 leaps between the page families the header dots draw: source
 -- (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion · seq
-local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13 }
+-- · scene
+local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13, 14 }
 
 function enc(n, d)
   if n == 1 then

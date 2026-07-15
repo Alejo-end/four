@@ -34,7 +34,16 @@
 --          DRY makes what you HEAR the bare sample (also grid (7,2)). global,
 --          except GRAIN / TAPE / REVERB / PADS
 --
--- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB  PADS
+-- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB
+--         PADS  MOTION  SEQ  SCENE
+--
+-- SCENE   8 slots that remember the whole sound (not the audio): K3 CAP, K2
+--   RCL (immediately or on the next beat/bar). E3 MORPHS between two slots —
+--   one knob walks the instrument from A to B. the alt keys are the way back:
+--   K1+K3 SAFE marks a state, K1+K2 UNDO returns to it, so you can throw the
+--   thing off a cliff and be home in one press. PARAMS > scenes maps all of
+--   it to MIDI (a capture/recall/undo footswitch, a morph fader, and
+--   `chaos throw` — hold for bounded mayhem, release to land safe).
 --
 -- NOTES   a MIDI keyboard (or USB typing keyboard, ableton-style: A-row =
 --   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
@@ -71,7 +80,7 @@ local min, max = math.min, math.max
 
 local PAGES = {
   "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ",
+  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ", "SCENE",
 }
 
 local FPS = 15
@@ -176,6 +185,7 @@ local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
 local Mseq = include "lib/mseq"
+local Mscenes = include "lib/mscenes"
 local Mpages = include "lib/mpages"
 
 ctx.font = Mfont
@@ -190,6 +200,9 @@ Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
+-- S19: sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
+-- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
+Mscenes.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -366,6 +379,38 @@ local KEYS = {
         params:set("seq_slice", (params:get("seq_slice") + 1) % ctx.pad_n)
       end },
   },
+  SCENE = {
+    -- the scene bank (S19). K2 recalls the selected slot (immediately, or on
+    -- the next beat/bar per scene_recall_mode), K3 captures the live sound
+    -- into it. the page claims its ALT layer for the SAFETY pair — K1+K2
+    -- UNDO drops you back on the last safe state, K1+K3 SAFE marks the
+    -- current one — so on this one page the alt keys are the rescue instead
+    -- of the global STOP/DRY. (that's the whole job of the page: the ways
+    -- back.)
+    -- every key drives a MOMENTARY param and hands the release to
+    -- held_gesture (the TAPE REV pattern), so a MIDI-mapped footswitch and
+    -- the key are literally the same action.
+    k2 = { label = "RCL",
+      act = function()
+        params:set("scene_recall", 1)
+        held_gesture[2] = "scene_recall"
+      end },
+    k3 = { label = "CAP",
+      act = function()
+        params:set("scene_capture", 1)
+        held_gesture[3] = "scene_capture"
+      end },
+    k2_alt = { label = "UNDO",
+      act = function()
+        params:set("scene_safe_restore", 1)
+        held_gesture[2] = "scene_safe_restore"
+      end },
+    k3_alt = { label = "SAFE",
+      act = function()
+        params:set("scene_safe_capture", 1)
+        held_gesture[3] = "scene_safe_capture"
+      end },
+  },
 }
 
 -- the key def addressed by key n on the current page, alt-aware. any alt
@@ -436,6 +481,11 @@ local ENC_MAP = {
   -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
   -- clock_tempo is a SYSTEM param (referenced, never added).
   SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
+  -- SCENE (S19): E2 picks the slot K2/K3 act on, E3 IS the morph — the one
+  -- knob that walks the whole instrument from scene A to scene B. the
+  -- endpoints sit on the alt layer (K1+E2 = A, K1+E3 = B), so picking them
+  -- and playing the sweep never fight over an encoder.
+  SCENE   = { "scene_slot", "scene_morph_a", "scene_morph_amt", "scene_morph_b" },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -887,18 +937,77 @@ local function init_params()
   params:set_action("seq_len", function() ctx.seq.regen() end)
   params:add_number("seq_slice", "seq slice", 0, 7, 0)
 
+  -- S19 scenes / morph / safe state (see lib/mscenes). all Lua-only — no
+  -- engine command, so the fingerprint is unchanged. the ACTIONS here are
+  -- momentary binaries rather than triggers: a trigger can't be MIDI-learned,
+  -- and the whole point is a footswitch that captures, recalls, rescues or
+  -- throws. every action fires on the press edge (v == 1) only — a stray 0
+  -- from params:bang() or a pset read must never do anything.
+  params:add_group("grp_scene", "scenes", 11)
+  -- selectors: the slot K2/K3 act on, and the two morph endpoints
+  params:add_number("scene_slot", "scene slot", 1, 8, 1)
+  params:add_number("scene_morph_a", "morph A", 1, 8, 1)
+  params:set_action("scene_morph_a", function() Mscenes.invalidate() end)
+  params:add_number("scene_morph_b", "morph B", 1, 8, 2)
+  params:set_action("scene_morph_b", function() Mscenes.invalidate() end)
+  -- THE performance knob: sweeps the instrument A -> B. MIDI-map it to a
+  -- fader/pedal, or record it with the gesture looper (it's in MOTION_IDS —
+  -- one lane replays the whole sweep). changing A/B never writes params on
+  -- its own; this does, and only from the next frame's tick (mscenes coalesces
+  -- so a fast CC can't flood the engine).
+  params:add_control("scene_morph_amt", "morph amount",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("scene_morph_amt", function() Mscenes.touch() end)
+  params:add_option("scene_recall_mode", "recall quantize",
+    { "NOW", "BEAT", "BAR" }, 1)
+  -- actions on the selected slot (also the SCENE page's K2/K3)
+  params:add_binary("scene_capture", "capture to slot", "momentary", 0)
+  params:set_action("scene_capture", function(v)
+    if v == 1 then Mscenes.capture() end
+  end)
+  params:add_binary("scene_recall", "recall slot", "momentary", 0)
+  params:set_action("scene_recall", function(v)
+    if v == 1 then Mscenes.recall() end
+  end)
+  params:add_binary("scene_clear", "clear slot", "momentary", 0)
+  params:set_action("scene_clear", function(v)
+    if v == 1 then Mscenes.clear() end
+  end)
+  -- the safety net (the SCENE page's alt layer): mark a state, then get back
+  -- to it. control state only — it never touches the buffer or the tape audio.
+  params:add_binary("scene_safe_capture", "mark safe state", "momentary", 0)
+  params:set_action("scene_safe_capture", function(v)
+    if v == 1 then Mscenes.safe_capture() end
+  end)
+  params:add_binary("scene_safe_restore", "restore safe state", "momentary", 0)
+  params:set_action("scene_safe_restore", function(v)
+    if v == 1 then Mscenes.safe_restore() end
+  end)
+  -- chaos: HOLD it for a bounded random throw, release to land back on the
+  -- safe state (it marks one for you if you never did). a footswitch or grid
+  -- pad you can lean on — the release is what makes it safe to press.
+  params:add_binary("chaos_throw", "chaos throw", "momentary", 0)
+  params:set_action("chaos_throw", function(v)
+    if v == 1 then Mscenes.chaos() else Mscenes.chaos_release() end
+  end)
+
   -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
   -- round-trip the softcut buffers (see mtape). the granular engine's
   -- record buffer would need a matching save command on the SC side to
   -- round-trip as well — until then, only the tape survives a restart.
+  -- the hooks are SHARED: each module does its own half (mtape the audio,
+  -- mscenes the scene bank + safe snapshot, as a lua table beside the pset).
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
+    Mscenes.pset_write(number)
   end
   params.action_read = function(filename, silent, number)
     Mtape.pset_read(number)
+    Mscenes.pset_read(number)
   end
   params.action_delete = function(filename, name, number)
     Mtape.pset_delete(number)
+    Mscenes.pset_delete(number)
   end
 
   params:bang()
@@ -952,6 +1061,9 @@ function init()
       Mpages.update_tape_wave()
       Mparticles.update()
       Mmotion.tick()   -- S16: advance + replay the gesture loop
+      -- S19: apply a pending morph sweep. AFTER motion, which may have just
+      -- replayed a recorded scene_morph_amt move for us to act on.
+      Mscenes.tick()
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -971,11 +1083,13 @@ function cleanup()
   Mtape.cleanup()
   Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
   Mseq.cleanup()       -- cancel the sequencer clock (norns clock hygiene)
+  Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
 -- K1+E1 leaps between the page families the header dots draw: source
 -- (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion · seq
-local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13 }
+-- · scene
+local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13, 14 }
 
 function enc(n, d)
   if n == 1 then

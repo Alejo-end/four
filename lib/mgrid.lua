@@ -161,9 +161,84 @@ local function seq_redraw()
   gg:led(8, 8, 4)
 end
 
+-- SCENE page (S19): like SEQ, the grid follows the screen — while the SCENE
+-- page is up the whole surface becomes the scene bank.
+--
+--   row 1  the 8 slots: tap = recall (quantized per scene_recall_mode).
+--          hold CAP and tap = capture into it; hold CLR and tap = clear it
+--   row 3  morph endpoint A        row 4  morph endpoint B
+--   row 6  morph amount, 8 steps (tap one — the sweep in reach of a finger)
+--   row 8  [CAP] [CLR] · [CHAOS, hold] · · [SAFE] [UNDO]
+--
+-- every pad drives a param, so it does exactly what the screen keys do.
+local function is_scene_page()
+  return C.PAGES[C.page] == "SCENE"
+end
+
+local scene_mod = { cap = false, clr = false }
+
+local function scene_grid_key(x, y, z)
+  -- row 8 first: these are the momentary/modifier pads, they need BOTH edges
+  if y == 8 then
+    if x == 1 then scene_mod.cap = (z == 1)
+    elseif x == 2 then scene_mod.clr = (z == 1)
+    elseif x == 4 then params:set("chaos_throw", z)          -- hold for mayhem
+    elseif x == 7 then params:set("scene_safe_capture", z)
+    elseif x == 8 then params:set("scene_safe_restore", z) end
+    return
+  end
+  if z ~= 1 then return end
+  if y == 1 then
+    params:set("scene_slot", x)                              -- screen follows
+    if scene_mod.cap then C.scene_capture(x)
+    elseif scene_mod.clr then C.scene_clear(x)
+    else C.scene_recall(x) end
+  elseif y == 3 then params:set("scene_morph_a", x)
+  elseif y == 4 then params:set("scene_morph_b", x)
+  elseif y == 6 then params:set("scene_morph_amt", (x - 1) / 7) end
+end
+
+local function scene_redraw()
+  local sc = C.scene
+  local sel = floor(pget("scene_slot", 1) + 0.5)
+  local a = floor(pget("scene_morph_a", 1) + 0.5)
+  local b = floor(pget("scene_morph_b", 2) + 0.5)
+  -- row 1: the bank. queued recall blinks, selected is bright, occupied mid,
+  -- empty barely there — the same brightness-is-truth rule as the screen.
+  for x = 1, 8 do
+    local filled = sc.slots[x] ~= nil
+    local lvl
+    if sc.pending == x then lvl = (C.frame % FPS) < (FPS / 2) and 15 or 4
+    elseif x == sel then lvl = filled and 12 or 3
+    elseif filled then lvl = 6
+    else lvl = 1 end
+    gg:led(x, 1, lvl)
+  end
+  -- rows 3/4: the morph endpoints (lit = chosen, dim = a slot with something
+  -- in it to choose)
+  for x = 1, 8 do
+    local filled = sc.slots[x] ~= nil
+    gg:led(x, 3, x == a and 15 or (filled and 4 or 1))
+    gg:led(x, 4, x == b and 15 or (filled and 4 or 1))
+  end
+  -- row 6: the morph amount as a bar with a bright head
+  local head = floor(pget("scene_morph_amt", 0) * 7 + 0.5) + 1
+  for x = 1, 8 do
+    gg:led(x, 6, x == head and 15 or (x < head and 5 or 1))
+  end
+  -- row 8: modifiers (lit while held), chaos (lit while thrown), the pair of
+  -- safety pads (dark until there's a safe state to go back to)
+  gg:led(1, 8, scene_mod.cap and 15 or 4)
+  gg:led(2, 8, scene_mod.clr and 15 or 4)
+  gg:led(4, 8, pget("chaos_throw", 0) == 1 and 15 or 4)
+  gg:led(7, 8, sc.safe and 6 or 2)
+  gg:led(8, 8, sc.safe and 6 or 1)
+end
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
   if is_seq_page() then return seq_grid_key(x, y, z) end
+  if is_scene_page() then return scene_grid_key(x, y, z) end
   if y == 1 then
     if z ~= 1 then return end
     if x == 1 then ptoggle("rec")
@@ -197,8 +272,13 @@ function M.redraw()
   if not (gg and gg.device) then return end
   gg:all(0)
 
-  -- SEQ page takes over the whole grid (page-aware, like snu)
+  -- SEQ / SCENE pages take over the whole grid (page-aware, like snu)
   if is_seq_page() then seq_redraw() gg:refresh() return end
+  if is_scene_page() then scene_redraw() gg:refresh() return end
+  -- off the SCENE page, its held modifiers can't get their release edge (the
+  -- key dispatch follows the page), so drop them here rather than let a stale
+  -- CAP latch and turn the next slot tap into an overwrite
+  scene_mod.cap, scene_mod.clr = false, false
 
   -- row 1: engine transport + mode radio
   gg:led(1, 1, pget("rec", 0) == 1 and 15 or 2)

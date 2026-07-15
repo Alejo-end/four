@@ -77,6 +77,7 @@ E2/E3 values, and the K2/K3 pills.
 | ![PADS page showing the recording split into 8 slices up top with 8 pad buttons below, one per slice](doc/ui/pads.png)<br>**PADS** shows your recording up top split into 8 slices, with 8 pad buttons below, one per slice (GRN for a cloud, SLC for a slice, lit while sounding, with a cursor). The header reads `PLAY>PADS` or `PLAY>DRONE` (toggle with K1+K3). | ![STRETCH page showing the selected drone engine drawn as its own waveform texture](doc/ui/stretch-play.png)<br>**STRETCH** picks the drone engine: PLAY (a clean loop, the default), GRAIN, WARP or PV. Each one draws its own texture, and goes flat when it is off. |
 | ![MOTION page showing the gesture looper: a loop timeline up top with a sweeping playhead, and one lane per recorded parameter with its knob movement plotted across the loop](doc/ui/motion.png)<br>**MOTION** is the gesture looper. K2 arms it, and then any knob you move is recorded into a loop that plays your hands back — one lane per parameter. K2 again overdubs another move on top; K3 stops and starts playback. It records the moves, not the audio, so it costs nothing extra to run. | **A modulation loop pedal.** Record a slow filter sweep and it loops hands-free while you granulate over it; layer a delay swell on a second lane. E2 browses the lanes, E3 is a global amount, K1+K2 clears the selected lane, K1+K3 wipes all of them. `motion record` and `motion play` are MIDI-mappable, so a footswitch can punch overdubs. |
 | ![SEQ page showing a Euclidean step sequencer: two rows of eight step cells with an evenly distributed on/off pattern and a playhead](doc/ui/seq.png)<br>**SEQ** is a Euclidean step sequencer (up to 16 steps) that retriggers your slices on the clock. Turn E2 to set the number of hits and it distributes them evenly; K2 runs it, K3 picks which slice fires. | **Rhythm from a knob.** One dial (Euclidean hits) turns a slice into a beat — 5 hits over 16 gives you a clave-ish pattern for free. E3 sets the length, K1+E3 the division (8th/16th/32nd), K1+E2 the tempo. `seq play` is MIDI-mappable. Per-step pitch, patterns and grid editing are on the way. |
+| ![SCENE page showing eight scene slots in a row, two of them filled, with a morph bar underneath running from slot A to slot B and a handle parked halfway](doc/ui/scene.png)<br>**SCENE** remembers whole sounds. K3 captures the current one into the selected slot, K2 recalls it (now, or on the next beat/bar). E3 **morphs** between two slots — one knob walks the whole instrument from A to B. | **The ways back.** K1+K3 marks a **SAFE** state, K1+K2 **UNDO**s back to it — so you can throw the thing off a cliff and be home in one press. Map `chaos throw` to a footswitch: hold for bounded mayhem, release to land safe. Scenes save with your PSET. |
 
 ## Controls: 3 keys, 3 encoders
 
@@ -86,12 +87,12 @@ E2/E3 values, and the K2/K3 pills.
 | **E2 / E3** | The page's two knobs. Value and dial live in the footer. Hold K1 for the alt pair. |
 | **K1** (hold) | Alt / shift. |
 | **K2 / K3** | The page's two actions. The footer pills invert while they are active. |
-| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE, PADS and MOTION, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
-| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB, PADS and MOTION. Also grid pad (7,2). |
+| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE, PADS, MOTION and SCENE, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
+| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB, PADS, MOTION and SCENE. Also grid pad (7,2). |
 
 The pages are MIX, LEVEL, REC, WINDOW, GRAIN, STRETCH, TAPE, FILTER, DELAY, REVERB, PADS,
-MOTION and SEQ. The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages E2/E3
-through the parameter pairs. The full page-to-control map is in `doc/spec.md` §10.
+MOTION, SEQ and SCENE. The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages
+E2/E3 through the parameter pairs. The full page-to-control map is in `doc/spec.md` §10.
 
 ## Playing notes
 

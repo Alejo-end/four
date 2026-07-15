@@ -201,6 +201,16 @@ function CS:unmap(v)
   end
   return (v - self.minval) / (self.maxval - self.minval)
 end
+-- SIM FIX (S19): norns controlspecs have map() as well as unmap(); the stub
+-- only had one direction. mscenes needs both — it morphs in normalized space
+-- (unmap the endpoints, lerp, map back) so an exponential param sweeps evenly.
+function CS:map(t)
+  t = math.max(0, math.min(1, t))
+  if self.warp == "exp" then
+    return self.minval * (self.maxval / self.minval) ^ t
+  end
+  return self.minval + t * (self.maxval - self.minval)
+end
 
 -- params
 local PARAM_MT = {
@@ -379,7 +389,7 @@ run_ticks(EMPTY and 30 or 200)
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
 local PAGES = { "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH",
-  "TAPE", "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ" }
+  "TAPE", "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ", "SCENE" }
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
 local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
@@ -651,6 +661,43 @@ else
   redraw()
   export(pfx("SEQ", "_EUCLID"))
   params:set("seq_euclid", 0)
+  -- S19 scenes: capture two different sounds, then morph between them. the
+  -- recall mode stays NOW so no clock.sync coroutine is engaged (the sim's
+  -- clock.run would hijack the redraw coroutine), and nothing here calls
+  -- chaos — math.random stays untouched, so every seeded shot above holds.
+  goto_page("SCENE")
+  params:set("scene_slot", 1)
+  params:set("cutoff", 700)
+  params:set("delay_mix", 0.1)
+  params:set("scene_capture", 1) params:set("scene_capture", 0)
+  params:set("scene_slot", 4)
+  params:set("cutoff", 9000)
+  params:set("delay_mix", 0.7)
+  params:set("rev_mix", 0.6)
+  params:set("scene_capture", 1) params:set("scene_capture", 0)
+  run_ticks(3)
+  redraw()
+  export(pfx("SCENE", "_BANK"))       -- two slots filled, cursor on 4
+  -- the morph: A=1, B=4, parked halfway. the handle rides the bar bright,
+  -- both endpoint ticks show under their slots
+  params:set("scene_morph_a", 1)
+  params:set("scene_morph_b", 4)
+  params:set("scene_morph_amt", 0.5)
+  run_ticks(3)                         -- the tick applies the sweep
+  redraw()
+  export(pfx("SCENE", "_MORPH"))
+  -- the safety net: marked, so the chip reads SAFE (flashing right after)
+  params:set("scene_safe_capture", 1) params:set("scene_safe_capture", 0)
+  run_ticks(3)
+  redraw()
+  export(pfx("SCENE", "_SAFE"))
+  -- the morph as the footer sees it: alt held shows the A/B endpoint pair
+  key(1, 1)
+  run_ticks(2)
+  redraw()
+  export(pfx("SCENE", "_ALT"))
+  key(1, 0)
+  params:set("scene_morph_amt", 0)
 end
 
 print("done: " .. TICK .. " ticks")

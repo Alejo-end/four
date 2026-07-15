@@ -115,6 +115,8 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "AMT",
   seq_euclid = "EUC", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLC",
   clock_tempo = "BPM",
+  scene_slot = "SLOT", scene_morph_a = "A", scene_morph_b = "B",
+  scene_morph_amt = "MRPH",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -1315,12 +1317,95 @@ local function body_SEQ(frame)
   end
 end
 
+local function body_SCENE(frame)
+  -- scenes (S19): the 8-slot bank on top, the A->B morph underneath, and the
+  -- safety net top-left. an occupied slot fills, the selected one wears a
+  -- bright border, a slot queued for a quantized recall blinks until the
+  -- clock lands it. the morph bar lies dim when either endpoint is empty —
+  -- the audibility rule: nothing to move between, so the picture says so.
+  -- fully procedural (no math.random), so the seeded renders of every other
+  -- page stay byte-identical.
+  local sc = C.scene
+  local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 1, 8)
+  local a = clamp(floor(pget("scene_morph_a", 1) + 0.5), 1, 8)
+  local b = clamp(floor(pget("scene_morph_b", 2) + 0.5), 1, 8)
+  local amt = pget("scene_morph_amt", 0)
+
+  -- status row y12..20 (the chip is 9 tall, so it starts at 12 and the plain
+  -- text sits at 14 to share its baseline — the row must clear the cells).
+  -- top-left: the safety net, armed or not. a fresh mark / a restore flashes
+  -- the chip for a beat, so the throw confirms itself.
+  if sc.safe then
+    local hot = (frame - max(sc.safe_at, sc.restored_at)) < FPS
+    if hot then chip("SAFE", 2, 12) else ptext("SAFE", 2, 14, 1, 8) end
+  else
+    ptext("NO SAFE", 2, 14, 1, 3)
+  end
+  -- top-right, dim: this page's defining number — WHEN a recall lands
+  ptext_r(string.upper(params:string("scene_recall_mode")), 126, 14, 1, 4)
+
+  -- the 8 slots, y21..31 (same cell geometry as the SEQ steps)
+  local filled_any = false
+  for i = 1, 8 do
+    local x = 4 + (i - 1) * 15
+    local filled = sc.slots[i] ~= nil
+    filled_any = filled_any or filled
+    local pending = sc.pending == i and (frame % FPS) < (FPS / 2)
+    if filled or pending then
+      screen.level(pending and 15 or 7)
+      screen.rect(x, 21, 13, 10)
+      screen.fill()
+    else
+      screen.level(2)
+      screen.rect(x + 0.5, 21.5, 12, 9)
+      screen.stroke()
+    end
+    ptext_c(tostring(i), x + 7, 23, 1, (filled or pending) and 0 or 5)
+    -- the morph endpoints get a tick, tying them to the A?/B? labels below
+    if i == a or i == b then
+      screen.level(9)
+      screen.rect(x + 5, 32, 3, 1)
+      screen.fill()
+    end
+    if i == sel then
+      screen.level(15)
+      screen.rect(x - 0.5, 20.5, 14, 11)
+      screen.stroke()
+    end
+  end
+
+  -- the morph: A on the left, B on the right, the handle at the amount
+  local A, B = sc.slots[a], sc.slots[b]
+  if not filled_any then
+    ptext_c("EMPTY - K3 CAP", 64, 35, 1, 4)
+    return
+  end
+  if not (A and B) then
+    ptext_c("MORPH: PICK A+B", 64, 35, 1, 3)
+    return
+  end
+  -- the end you're standing on reads bright; parked at either end the handle
+  -- dims (nothing is being morphed — the audibility rule, for a gesture)
+  local live = amt > 0.001 and amt < 0.999
+  ptext("A" .. a, 2, 35, 1, amt < 0.5 and 12 or 5)
+  ptext_r("B" .. b, 126, 35, 1, amt >= 0.5 and 12 or 5)
+  local x0, x1 = 18, 110
+  screen.level(3)
+  screen.move(x0, 38)
+  screen.line(x1, 38)
+  screen.stroke()
+  screen.level(live and 15 or 8)
+  local hx = x0 + amt * (x1 - x0)
+  screen.rect(hx - 1, 35, 3, 7)
+  screen.fill()
+end
+
 local BODY = {
   MIX = body_MIX, LEVEL = body_LEVEL, REC = body_REC,
   WINDOW = body_WINDOW, GRAIN = body_GRAIN, STRETCH = body_STRETCH,
   TAPE = body_TAPE, FILTER = body_FILTER, DELAY = body_DELAY,
   REVERB = body_REVERB, PADS = body_PADS, MOTION = body_MOTION,
-  SEQ = body_SEQ,
+  SEQ = body_SEQ, SCENE = body_SCENE,
 }
 
 local function draw_body()

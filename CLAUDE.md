@@ -594,6 +594,71 @@ the report — "don't know what it does to the audio"): v1 retriggers ONE slice
 so to hear it distinctly, drop the drone (STRETCH mode OFF / mix) or shorten
 voice_rel (PADS E3); per-step pitch/slice (melodic sequencing) is the follow-up.
 
+Thirty-fourth change — **S19 scenes + scene morphing + safe snapshot (Lua-only,
+fingerprint STAYS 58/59, renders verified, 177-assertion functional harness
+passing, untested on device)**: the "remember this / go back to that" layer, in
+NEW module **lib/mscenes.lua** (9th lib; amalgamate assert 8→9). Full design +
+gate: doc/spec.md §S19. Data model: `M.slots[1..8]` = flat `{id=value}` maps
+captured from the live params (+ `M.safe`, one more). NO audio — control state
+only, so 8 slots ≈ 350 numbers. `ctx.scene` = the module, `ctx.scenes` = the
+slots table (mutated in place, NEVER reassigned — the ref would go stale);
+`ctx.scene_capture/_recall/_clear/_morph` + `ctx.safe_snapshot_capture/_restore`
+sit beside `fx_dry`. THREE CURATED LISTS (the design; heavily commented in the
+module): SCENE_RECALL_IDS = three ORDERED blocks TIMBRE→SPACE→SWITCH, walked in
+order so **`mode` lands LAST** (it respawns the SC voice — switching it last
+means the voice is born with the scene's params, not jumped to them); out =
+config/keys, SYSTEM levels, `out_level`, `rec`/`tape_rec`, `stop_all`,
+motion/seq transports. SCENE_MORPH_IDS = recall MINUS 7, DERIVED at load (a
+filter, not a second literal — can't drift): a morph **never flips a hold
+(freeze/pv_freeze/tape_freeze), never re-routes notes (pad_input/tape_reverse),
+never writes the buffer (resample/regen)** — so morph(1) ≠ recall(B) BY DESIGN.
+SAFE_SNAPSHOT_IDS = recall + `out_level`. **NEVER put a scene_* param in any
+list** — `scene_morph_amt`'s action re-fires the morph and would fight the
+restore. MORPH: interpolates in the controlspec's OWN warped space (unmap→lerp→
+map), so cutoff 200→20000 at 0.5 = 2000 (geometric mean), not 10100 — a raw lerp
+sounds wrong on every exp param (`opts.linear` forces raw); numbers lerp+round,
+options/binaries flip at ≥0.5; the normalized target doubles as the "already
+sent" key so a param identical in A and B NEVER fires; ends force-assert.
+**Changing A/B never writes** — only the amt knob does (else touching B at amt=0
+jumps the instrument to A). CPU: `scene_morph_amt`'s action only marks dirty;
+`Mscenes.tick()` in the EXISTING 15fps clock (right after `Mmotion.tick()` — no
+new process) applies ≤1 sweep/frame, capping what a fast CC would otherwise
+fire (~40 params × 128 steps) at the engine. MOTION SEAM (one function, no
+entanglement): every mscenes write goes through a local `pset()` → `params:set`
++ new `Mmotion.account(id)` (re-baselines from the RESOLVED value), because
+mmotion captures by POLLING — without it a recall/sweep looks like forty hands
+on forty knobs and punches a lane each. `scene_morph_amt` IS in MOTION_IDS
+(appended), so recording a sweep = ONE lane that re-derives the other forty.
+SAFE/CHAOS: safe_restore also cancels a queued recall (it would undo the rescue
+a beat later); `chaos_throw` is a MOMENTARY param (footswitch/grid) — press =
+bounded random throw of 14 params in NORMALIZED space (scan thrown to one SIDE,
+never the standstill at norm 0.5), release = safe_restore, auto-marks a safe
+state if none, and the release is guarded by `chaos_live` so a stray 0
+(params:bang, a pset read) can't restore out of nowhere. math.random lives ONLY
+here (never in draw) → seeded renders untouched. PARAMS (grp_scene, **11**): 3
+selectors + `scene_morph_amt` + `scene_recall_mode` (NOW/BEAT/BAR — non-NOW
+queues ONE clock.sync coroutine, always cancelled on replace/restore/cleanup)
++ **six MOMENTARY binaries** (capture/recall/clear/safe_capture/safe_restore/
+chaos_throw). Momentary NOT add_trigger: **triggers can't be MIDI-learned** (the
+point is a footswitch) and every action fires on the PRESS edge (v==1) only.
+UI: **SCENE = page 14**; E2 slot · **E3 = the morph** · K1+E2/K1+E3 = A/B; K2
+RCL, K3 CAP, and the page claims BOTH alt slots for the SAFETY pair (K1+K2 UNDO
+/ K1+K3 SAFE) instead of global STOP/DRY — that's the page's job. Keys drive the
+momentary params + `held_gesture` (the TAPE REV pattern), so key == footswitch.
+Grid is page-aware like SEQ (`is_scene_page()`): row 1 slots (CAP/CLR modifiers
+on row 8), rows 3/4 = A/B, row 6 = an 8-step morph bar, row 8 = CAP·CLR·CHAOS·
+SAFE·UNDO. PSET hooks are SHARED not replaced (mtape audio + mscenes state via
+tab.save → `scenes-<n>.lua`); a pset with no scene file leaves the bank alone
+(mtape's precedent). SIM FIX: the uisim's controlspec stub had `unmap` but no
+`map` — added (norns has both; the morph needs the round trip). VERIFIED: a
+throwaway harness loaded the REAL script under the sim's stubs (sliced from
+render_pages.lua) and asserted 177 properties — all pass, incl. the BEAT/BAR
+clock path driven by hand. Adding page 14 adds ONE header dot to every page:
+re-render proved all 62 prior shots differ at EXACTLY (y4-5, x122-123) and
+nowhere else (the wider diffs on `extra` shots are pure animation phase — the
+walk is 25 ticks longer). Gallery regenerated (+scene.png, 19); suite 67 shots ×
+4 variants; dist rebuilt + byte-verified (source==dist, 9 modules). Save + reload.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

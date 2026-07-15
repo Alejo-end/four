@@ -317,6 +317,7 @@ no clipping, no xruns with a stretch mode + tape + all FX engaged.
 | PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) / ROUTE (`pad_input`) |
 | MOTION  | LANE select / —          | LEN (`motion_len`) / —  | REC (`motion_rec`) / CLR-L | PLAY (`motion_play`) / CLR |
 | SEQ     | `seq_euclid` / `clock_tempo` | `seq_len` / `seq_div` | PLAY (`seq_play`) / STOP | SLICE (`seq_slice`++) / DRY |
+| SCENE   | `scene_slot` / `scene_morph_a` | `scene_morph_amt` / `scene_morph_b` | RCL (`scene_recall`) / **UNDO** (`scene_safe_restore`) | CAP (`scene_capture`) / **SAFE** (`scene_safe_capture`) |
 
 (This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
 always go through `params:*`. PADS keys are the exception — SEL/PLAY/TYPE drive the pad
@@ -785,3 +786,155 @@ which the S8 log marks "available but unused" — untested, and it produced no s
 tested path) at a window-relative position. DIAGNOSTIC if still silent: does the playhead cell
 move across the SEQ page while playing? Moving = the clock runs, so it's the audio path; not
 moving = the clock (check `clock_tempo` / that a take exists / voices audible on PADS).
+
+### S19 — scenes / scene morphing / safe snapshot (Lua-only, fingerprint STAYS 58/59)
+
+The **"remember this / go back to that"** layer. Three features on one data model, in
+**`lib/mscenes.lua`** (9th lib; amalgamate assert 8→9). No engine change — it re-issues
+`params:set`, so the fingerprint is untouched and it can't brick loading.
+
+**Data model.** `M.slots[1..8]` = a flat `{ param_id = value }` map captured from the live
+params (nil = empty); `M.safe` = one more of the same shape. **Nothing here stores audio** —
+scenes are control state only (a recall does not bring back a take you have since overdubbed;
+that's PSETs + the tape wav, see mtape). That's what makes it cheap: 8 slots ≈ 350 numbers, a
+recall ≈ 60 `params:set` calls. `ctx.scene` = the module (like `ctx.motion`/`ctx.seq`);
+`ctx.scenes` = the slots table itself, **mutated in place, never reassigned**, so the ref can't
+go stale. The named helpers hang off ctx beside `fx_dry`/`pads_all_off`: `ctx.scene_capture`,
+`ctx.scene_recall`, `ctx.scene_clear`, `ctx.scene_morph`, `ctx.safe_snapshot_capture`,
+`ctx.safe_snapshot_restore`.
+
+**The three curated lists** (in mscenes, heavily commented — this is the design):
+- **`SCENE_RECALL_IDS`** — built from three ORDERED blocks, and recall/restore walk it in
+  order: **TIMBRE** (source blend, window, grain/clouds, stretch shape, tape loop, voices, seq
+  pattern) → **SPACE** (filter/drive/delay/reverb/shimmer) → **SWITCH** (the discrete
+  mode/type switches, **`mode` last of all**: it respawns the SC voice, so switching it last
+  means the new voice is BORN with the scene's params instead of jumping to them).
+  **Out:** hardware/config (`midi_channel`, `keys_enable`, `kb_octave`, `root_note`,
+  `pitch_quant`), the SYSTEM levels (`input_level`/`output_level`/`monitor_level`/
+  `headphone_gain`), `out_level` (a scene must never rewrite your stage volume), the capture
+  transports (`rec`, `tape_rec`), `stop_all`, and the motion/seq transports. A scene changes
+  how it sounds, never how it's plumbed or whether it's running.
+- **`SCENE_MORPH_IDS`** — recall MINUS 7, derived at load (a filter, not a second literal
+  list — it can't drift). The rule in one line: **a morph never flips a hold, never re-routes
+  your notes, and never writes the buffer** → out: `freeze`, `pv_freeze`, `tape_freeze` (holds;
+  crossing 0.5 is a hard event, not a texture), `tape_reverse` (momentary by design), `pad_input`
+  (note routing), `resample`, `regen` (buffer writers — a sweep must stay undo-able, and
+  committed audio is not). **Consequence:** morph at amt=1 ≠ recall(B) — it moves the
+  morph-safe subset only. Sweep to 1, then K2 RCL to land the rest.
+- **`SAFE_SNAPSHOT_IDS`** — recall + `out_level` (if a throw moved your level, the rescue
+  brings it back). Still refuses the system levels/transports/`stop_all`: a restore must never
+  unmute you, re-arm a recording, or undo a STOP you're leaning on.
+- **NEVER in any list: the `scene_*` params themselves.** `scene_morph_amt`'s action re-fires
+  the morph, so a snapshot restoring it would instantly overwrite what it just restored.
+
+**Morph.** `M.morph(a, b, amt, opts)`. Continuous params interpolate in the **controlspec's own
+(warped) space** — `unmap` → lerp → `map` — because `cutoff` 20→20000 is exponential and a raw
+lerp would sit at "nearly open" for the whole second half; warped-space is linear in the space
+the encoder moves in, which is the one that sounds even (0.5 of 200→20000 = 2000, the geometric
+mean, verified). `opts.linear` forces a raw lerp. Numbers (`voices`, `warp_overlaps`) lerp and
+round to integers; options/binaries can't be half-switched, so they **flip at amt ≥ 0.5**.
+Params missing from either scene are skipped. **Deadband:** the normalized target doubles as the
+"already sent" key, so a param identical in A and B never fires at all, and a moving one re-sends
+only past `MORPH_EPS` (1/400 of range). The **ends force-assert** so amt=0/1 land exactly on the
+stored values. `M.invalidate()` clears that memory whenever something else moves the instrument
+(capture/recall/restore/endpoint change), so the next amt move re-asserts from wherever we are.
+**Changing A/B never writes params** — only the amt knob does; otherwise touching the B selector
+at amt=0 would jump the whole instrument to A.
+
+**Frame coalescing (the CPU rule).** `scene_morph_amt`'s action only marks dirty; `M.tick()`
+(in the EXISTING 15fps redraw clock, right after `Mmotion.tick()` — no new process) applies at
+most one sweep per frame. Uncoalesced, a fast CC sweep would fire ~40 params × 128 CC steps at
+the engine in a second; this caps it at 15 passes/s (and the deadband drops the rest). 15fps is
+the same modulation grid the gesture looper already runs on.
+
+**Motion integration (one seam, no entanglement).** Every mscenes write goes through one local
+`pset(id, v)` → `params:set` + `C.motion.account(id)` (new in mmotion: re-baseline that id from
+its RESOLVED value). mmotion captures by POLLING for changes, so without this a scene jump or a
+morph sweep would look like forty hands on forty knobs and punch a lane for each. Instead:
+`scene_morph_amt` is in `MOTION_IDS` (appended — lane order unchanged), so recording a morph
+sweep records **ONE lane** and replay re-derives the other forty. Verified both ways.
+
+**Safe / chaos.** `M.safe_capture()` / `M.safe_restore()` (restore also cancels a queued recall —
+it would undo the rescue a beat later). Control state only: it does not touch the buffer, the tape
+audio, or held voices (K1+K2 STOP remains the mute). **`chaos_throw`** is a MOMENTARY param
+(footswitch/grid pad): press = a bounded random throw of 14 mangle params in NORMALIZED space
+(so it lands wild but never silent; `scan` is thrown to one SIDE, never the standstill at norm
+0.5), release = `safe_restore`. It auto-marks a safe state if you never did, so the release always
+has somewhere to land. The release is guarded by `chaos_live`, so a stray 0 (`params:bang` at
+init, a pset read) can never restore out of nowhere. `math.random` lives here and nowhere near the
+draw path — the seeded render suite never calls it, so every page's RNG stream is untouched.
+
+**Quantized recall.** `scene_recall_mode` = NOW / BEAT / BAR. Non-NOW queues ONE `clock.sync`
+coroutine (`M.pending` = the slot, blinking on screen + grid); a new recall replaces it
+(last press wins), and it is **always cancelled** on replace / `safe_restore` / `cleanup` —
+the norns clock-race gotcha.
+
+**Params (`grp_scene`, 11, all Lua-only).** `scene_slot`, `scene_morph_a`, `scene_morph_b` (the
+A/B actions only `invalidate`), `scene_morph_amt` (control — THE performance knob: MIDI-map a
+fader/pedal), `scene_recall_mode` (option), then six **momentary binaries** — `scene_capture`,
+`scene_recall`, `scene_clear`, `scene_safe_capture`, `scene_safe_restore`, `chaos_throw`.
+Momentary, not `add_trigger`, for two reasons: **triggers can't be MIDI-learned** (the whole
+point is a capture/recall/undo/chaos footswitch), and every action fires on the **press edge
+(v==1) only**, so a stray 0 from `params:bang()` or a pset read does nothing.
+
+**SCENE = page 14** (PAGES / PAGE_GROUPS {…,14} / ENC_MAP / KEYS). E2 = `scene_slot`, **E3 =
+`scene_morph_amt`** (the sweep on the main layer), K1+E2/K1+E3 = the A/B endpoints. K2 RCL,
+K3 CAP; the page claims BOTH alt slots for the **safety pair** — K1+K2 **UNDO**
+(`scene_safe_restore`), K1+K3 **SAFE** (`scene_safe_capture`) — so on this one page the alt keys
+are the ways back instead of the global STOP/DRY (that's the page's whole job). Every key drives
+its momentary param and hands the release to `held_gesture` (the TAPE REV pattern), so a
+MIDI-mapped footswitch and the key are literally the same action. `body_SCENE`: the safety net
+top-left (SAFE chip flashes on mark/restore, else "NO SAFE"), the recall mode dim top-right,
+8 slot cells y21..31 (occupied fills, selected wears a bright border, a queued recall blinks,
+endpoint ticks under A/B), then the morph bar (A? left, B? right, handle at the amount, dim at
+either end — the audibility rule for a gesture); empty bank invites "EMPTY - K3 CAP", one
+endpoint missing reads "MORPH: PICK A+B". Fully procedural (no `math.random`).
+
+**Grid (page-aware, like SEQ).** While the SCENE page is up: **row 1** = the 8 slots (tap =
+recall, quantize-aware; hold **CAP** and tap = capture; hold **CLR** and tap = clear), **row 3**
+= morph A, **row 4** = morph B, **row 6** = an 8-step morph amount bar (tap it — the sweep in
+reach of a finger), **row 8** = `[CAP][CLR] · [CHAOS, hold] · · [SAFE][UNDO]`. Every pad drives
+a param. Untested here (the uisim has no grid device).
+
+**Persistence.** The bank + safe snapshot ride along with the PSET: `tab.save`/`tab.load` of
+`{v=1, slots, safe}` → `norns.state.data .. "scenes-<n>.lua"`, wrapped in `pcall`. The
+`action_write`/`action_read`/`action_delete` hooks are **SHARED, not replaced** — each module
+does its half (mtape the audio, mscenes the state). A pset with no scene file **leaves the bank
+alone** (mtape's precedent for a missing wav).
+
+**Verification done here (no device):** a functional harness drove the REAL script under the
+render sim's stubs — **177 assertions**, all passing: list curation + exclusions; capture/recall
+round trip; morph endpoints exact; warped-space midpoints (geometric mean); discrete policy at
+0.5; excluded params untouched by a morph but restored by a recall; deadband (identical params
+never re-fire, moving ones ≤1/frame) + endpoint snap; safe capture/restore incl. `out_level`,
+`stop_all` untouched; chaos throw/release, no regen/levels/rec, scan never parked, stray-edge
+safety, auto-safe-capture; motion (a recall punches NO lanes; a morph records exactly ONE);
+pset round trip + missing-file + delete; NOW immediate; BEAT/BAR queue → fires on the beat,
+replace-cancels, UNDO-cancels, cleanup-cancels. Renders: SCENE + SCENE_BANK/_MORPH/_SAFE/_ALT
+(67 shots × 4 variants), dist rebuilt + byte-verified (source==dist, 9 modules). Adding the
+14th page adds one header dot to every page: proven by re-render that all 62 pre-existing shots
+differ at EXACTLY pixels (y4-5, x122-123) and nowhere else. Gallery regenerated (+ scene.png).
+
+**S19 gate (Lua-only — save + reload, no RESTART, count still 58/59):**
+1. Loads clean; SCENE is page 14; no errors in matron; `grp_scene` shows **11** params under
+   PARAMS > scenes (a miscounted group would corrupt the paramset — check the neighbours).
+2. Dial a sound. On SCENE: **K3** CAP → slot 1 fills. Change the sound, **E2** to slot 2, K3.
+   **E2** back to 1, **K2** RCL → the first sound returns (mode/filter/FX all follow).
+3. **Morph:** K1+E2 = A=1, K1+E3 = B=2, then sweep **E3**. The instrument walks between the two
+   sounds; the handle rides the bar. Check an exp param (cutoff) sweeps EVENLY, not all at once
+   near the top. Check `mode` flips exactly halfway. Check a freeze set in B does NOT come on
+   during the sweep (it's morph-excluded) but DOES on a K2 recall of B.
+4. **Safety:** K1+K3 SAFE (chip lights) → wreck everything → K1+K2 UNDO → back, instantly, no
+   glitch. MIDI-map `restore safe state` to a footswitch and confirm it does the same.
+5. **Chaos:** MIDI-map `chaos throw` to a pad/footswitch (or grid (4,8) on the SCENE page).
+   HOLD → bounded mayhem; RELEASE → back on the safe state. It must never touch your level,
+   arm rec, or move regen.
+6. **Quantize:** `recall quantize` = BEAT. K2 RCL → the slot blinks, then lands on the next
+   beat (with the clock running). A second press replaces the queue; UNDO kills it.
+7. **Motion:** arm MOTION (K2), sweep the morph knob, stop → check ONE lane appears (`MRPH`),
+   not forty, and that replaying it moves the whole instrument. Then recall a scene while
+   armed → it must punch NO lanes.
+8. **Grid** (if attached): on SCENE, row 1 recalls, CAP(8,1)+row 1 captures, rows 3/4 pick A/B,
+   row 6 sweeps, row 8 has CHAOS/SAFE/UNDO. Leaving the page restores the normal grid surface.
+9. PSET SAVE, change scenes, PSET LOAD → the bank comes back (`data/mangler/scenes-<n>.lua`).
+10. Watch xruns/GC over a few minutes of sweeping: the morph is capped at 15 passes/s.
