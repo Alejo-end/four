@@ -73,9 +73,12 @@ function M.clear()
   for i = 1, NUM_STEPS do M.pattern[i] = false end
 end
 
--- fire a slice as a HELD voice at a position INSIDE the current window (the
--- take), so it always lands on recorded audio — not a silent stretch of the
--- 60s buffer (which is what whole-buffer slicing would give a short take).
+-- fire a slice as a HELD voice at the pad's own slice point (C.pad_pos — the
+-- centre of the i-th eighth of the WINDOW, i.e. of the take). that helper is
+-- shared with the PADS page and the note routing, so seq slice 3 and pad 3 are
+-- the same audio by construction. (this module used to compute the window
+-- position itself — the S18 device fix — while the pads still sliced the whole
+-- 60s buffer; the two have been folded back into one law.)
 -- MONO retrigger via the TESTED note_on/note_off path (what the PADS use), NOT
 -- the untested note_one_shot: note_off releases the previous voice, note_on
 -- starts the next. rests release, so steps gate cleanly.
@@ -85,10 +88,10 @@ local voicing = false
 local function fire()
   local n = C.pad_n or 8
   local slice = clamp(pget("seq_slice", 0), 0, n - 1)
-  local lo, _, span = C.window_bounds()
-  local pos = lo + (slice + 0.5) / n * span
   if engine.note_off then engine.note_off(SEQ_VOICE) end
-  if engine.note_on then engine.note_on(SEQ_VOICE, pos, 1.0, C.pad_type[slice] or 0) end
+  if engine.note_on then
+    engine.note_on(SEQ_VOICE, C.pad_pos(slice), 1.0, C.pad_type[slice] or 0)
+  end
   voicing = true
 end
 

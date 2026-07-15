@@ -698,12 +698,139 @@ UNDO still does NOT stop the modulators (a running MOTION lane keeps driving its
 param straight after a restore — documented in the §S19 gate, not "fixed" by
 silently stopping someone's loop).
 
+Thirty-fifth change — **S20 pad slices follow the take (Lua-only, fingerprint
+STAYS 58/59, renders verified, untested on device)**: asked "what is PADS doing
+anymore?" — answer: playing SILENCE, mostly. Full detail + gate: doc/spec.md §S20.
+THE BUG: `pad_pos(i)` was `(i+0.5)/8` = an eighth of the **60s BUFFER**, but the
+normal workflow (REC K2, phrase, K2) snaps the window to the take, so a 4s phrase
+is ~7% of the buffer → the 8 pads fired at 3.75s/11.25s/…/56.25s → **pad 1 caught
+the take's last 6%, pads 2-8 played silence**. S18 hit EXACTLY this on device and
+fixed it **only inside mseq** ("the pads' known whole-buffer-slice limitation" —
+the log named the bug and left it), so post-S18 the sequencer played your take
+while the pads, same slice number, played empty buffer: TWO meanings of "slice n".
+FIX: ONE law in `ctx.pad_pos(i)` = `lo + (i+0.5)/pad_n * span` over the window;
+the PADS audition, route_note/pad_trigger AND mseq.fire() all resolve through it,
+so pad 3 == seq slice 3 **by construction** (mseq's local copy deleted — the
+divergence can't return). A full-buffer window reduces to the old even-eighths
+split, so nothing is lost. PAGE: body_PADS drew the whole buffer with 8 even
+dividers — honest about the old pads, but it made S12's "a pad is an eighth of
+what you recorded" a LIE and drew a short take as an 8px blip with 7 dividers over
+silence. The strip is now **the window zoomed to full width** (wave[] is binned
+over the buffer → index it through the window), playhead in window space, drawn
+only while inside the take. CONSEQUENCE: slices are now RELATIVE to the window —
+re-record, nudge WINDOW, or recall a scene (pos_start/pos_end are in
+SCENE_RECALL_IDS) and every pad moves with the take. Intended; per-pad absolute
+positions stay deferred (S12). NB the zoom is bounded by the display model (a 4s
+take = ~8 of the 128 wave bins → blocky, same as the WINDOW loupe). VERIFIED: the
+harness (220 assertions) drives the REAL key path (PADS K2 x3 → cursor 3, K1+K2 →
+audition) and the REAL Mseq.step(), capturing what each asks the ENGINE for —
+pad fires inside the take at its eighth's centre; pad 3 and seq slice 3 fire the
+IDENTICAL position + type; slices track a moving window; a full-buffer window
+reproduces the classic split. Reverting pad_pos fails 3 of them (pad 3 → 0.4375 =
+26s, take ends 4s). Renders: exactly base_11_PADS + _LIVE changed (all 8 pads now
+sit on material); pads.png regenerated; dist rebuilt + byte-verified (68 shots).
+LESSON: when a device bugfix names a limitation in ANOTHER module ("the pads'
+known whole-buffer-slice limitation"), that's not a note — it's an unfixed bug
+with a witness.
+
+Thirty-sixth change — **S19 fix: the SCENE page could not prove it worked
+(Lua-only, fingerprint STAYS 58/59)**: DEVICE REPORT — "SCENE page is completely
+broken, keys do nothing, no sound". **The keys were firing the whole time.**
+Checked against the REAL norns source (`lua/core/params/binary.lua`, fetched):
+`Binary:set` equality-guards (`if self.value ~= v`), but every SCENE key hands
+its release to `held_gesture`, which returns the param to 0 — so each press is a
+fresh 0→1 edge and `bang()` runs. The bug was that the page said NOTHING: capture
+moved ONE 13px box (I set `captured_at` and never drew it); recall of the slot you
+just captured re-applies the sound you are ALREADY making, so it is **inaudible by
+definition**; recall of an EMPTY slot was a silent no-op. That combination is
+indistinguishable from dead keys. **A performance page that can't prove it worked
+is broken, whatever the code does** — the report was right and the diagnosis
+("works, user error") would have been wrong.
+FIX, one mechanism for two audiences: `say(msg, detail, slot)` in mscenes sets a
+~1.2s on-screen chip AND prints the full story to maiden (the codebase already
+leans on bring-up prints; now you can always tell whether a key fired by looking).
+Every action reports: SAVED n / RECALL n / **RECALL n - SAME** / SLOT n EMPTY /
+QUEUED n / CLEARED n / SAFE MARKED / NO SAFE STATE / UNDO / **UNDO - SAME** /
+CHAOS. The **`- SAME` variants are the whole point**: `apply()` now returns
+(set, MOVED) by comparing each param before/after (`set_moved`), so the page can
+say the recall LANDED and nothing moved — which is exactly why no sound changed.
+The touched slot flashes with the message (`msg_slot`), so the news has a place as
+well as words. The message line outranks the morph cue (a fresh action is the more
+urgent news). Empty-bank invitation now TEACHES the workflow instead of stalling
+at one scene: 0 filled → "EMPTY - K3 CAP"; **1 filled → "CHANGE SOUND - CAP SLOT
+n"** (names the next EMPTY slot — one scene can't prove itself, you need a second
+sound to come back from, and this is the step everybody stalls on); 2+ but no
+endpoints → "MORPH: K1+E2 = A - K1+E3 = B" (says HOW, not just "pick"). SCREEN
+GOTCHA hit here: the first cut of the hint was 136px on a 128px screen and clipped
+at BOTH ends — **measure with `text_w` before adding words; 124px is the centered
+limit** (`lua -e` + dofile lib/mfont.lua measures it in seconds). Suite: +SCENE_ONE
+(the teaching state), +SCENE_SAVED (the chip + flashed slot), +SCENE_SAME (the
+recall that explains silence) = 71 shots; only SCENE shots moved (the added
+run_ticks shift their message/blink phase); scene.png unchanged; dist rebuilt +
+byte-verified; harness still 220. Save + reload.
+
+Thirty-seventh change — **S21: delete a take + load a sample, and MIX stops
+lying (ENGINE + Lua, fingerprint 59 → 61, UNTESTED — no sclang here)**: DEVICE
+REPORT — "sometimes some different tempo version of the sample sounds then cut,
+I think is the tape" + "there is no real way to delete a recording or use some
+other sample source". Both real; full detail doc/spec.md §S21.
+(a) **THE MYSTERY SOUND WAS THE TAPE, AND MIX WAS HIDING IT.** init_tape sets
+`sc.play(v,1)` + `sc.loop(v,1)` ONCE and never clears them, so the softcut deck
+is ALWAYS looping — and at the default `mix` 0.5 the plateau law puts it at FULL
+level. Anything that ever landed in that buffer (grid (1,2) is `tape_rec`, easy
+to hit while exploring; a PSET load also restores tape-N.wav) loops the take back
+once every 60s and then falls silent for the rest of the loop = "sometimes ...
+sounds then cut". It records the RAW INPUT on its own 60s cycle, not aligned to
+the drone's tight window — and at any tape_rate ≠ 1 it is literally a different
+tempo. **The MIX page could not show them this**: the TAPE lane drew a STATIC
+SYNTHETIC waveform (`TAPE_PREVIEW`, "so the lane always reads as material")
+whose height rode the FADER — it claimed the tape had audio whether it did or
+not, and ignored stop_all entirely. That breaks this file's own headline rule
+(brightness encodes audibility) on the one page whose job is telling you which
+deck you hear; the 8th change's MIX truth pass had it right and the Toy redesign
+(12th) replaced it with decoration. FIX: both lanes now scale by their deck's
+REAL gain (the same law Mtape.update_mix sends: trim x plateau x master x STOP),
+the TAPE lane draws the REAL `twave`, and the tape HEAD is drawn whenever the
+deck holds audio — bright when audible, dim when thrown away, so a deck you
+forgot you armed can never hide again. TAPE_PREVIEW deleted (if a lane can't
+tell the truth it shouldn't draw).
+(b) **ENGINE +2 commands → 61**: `clear` ("" format — verified against norns
+engine.lua: `#fmt`=0 means a genuine no-arg command) zeroes bufL/bufR; `read_file`
+("s") loads any wav/aiff. BOTH act on the SAME bufL/bufR the synths already hold
+— `Buffer:zero` and the INSTANCE `Buffer:readChannel` (verified in SC's
+Buffer.sc: reads into an EXISTING buffer, does not allocate) — so no bufnum ever
+changes, nothing respawns, nothing desyncs. Mono files feed both sides from ch 0
+via `(nch-1).min(1)`. All core SC, no plugin deps, cannot brick. CAVEAT:
+/b_readChannel does NOT sample-rate convert and norns runs at 48k, so a 44.1k
+file plays ~9% fast (a varispeed, not a bug).
+(c) **Lua**: `ctx.clear_recording` (REC **K1+K3 = CLR**, mirroring TAPE's CLR —
+REC gives up the global DRY for it, like TAPE does) + `ctx.load_sample`
+(`params:add_file` → norns fileselect; the path rides the PSET so a session
+reloads its sample). grp_rec 7 → 9. A loaded sample lands in the SAME buffer a
+take does — there is no "loaded sample" mode, window/drone/pads/seq just work on
+it — and the window SNAPS to the file's length.
+(d) **THE WAVEFORM PROBLEM**: lua cannot read an SC buffer, so a loaded sample
+would be INVISIBLE — REC/WINDOW/PADS sitting on "EMPTY - K2 REC" over audible
+audio. `Mpages.load_wave(path, secs)` reads the peaks out of the FILE itself: a
+RIFF chunk walk (handles LIST/metadata chunks before `data`), 16-bit PCM only
+(else nil → the caller leaves the display alone rather than draw a lie), 128 bins
+peaked with a STRIDE so the work is bounded whatever the length. TESTED here with
+generated wavs: 4s stereo / 2s mono / a LIST-chunk file / a missing file / an
+11MB 60s file — exact amplitudes (0.90, 0.50), correct bin counts, zeros past the
+sample, 17-30ms scans. **A first cut sampled 8x64 frames per bin and lost a 40ms
+drum hit ENTIRELY** — sparse sampling looks fine on continuous material and eats
+transients, the exact wrong failure for a sampler; striding the whole bin catches
+it (bin 6 = 0.92) and is FASTER on big files.
+Renders: only the 5 MIX shots moved (mix.png regenerated); 71 shots; harness 220;
+dist byte-verified. **DEPLOY: this is an ENGINE change — rsync, SYSTEM > RESTART,
+confirm `count: 61`**, then run the §S21 gate.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = 55, S15 = 58, S17 = **59**). Wrong count = old engine still live.
+   S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = **61**). Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---

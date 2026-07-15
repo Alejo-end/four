@@ -155,7 +155,7 @@ end
 
 engine = {}
 audio = setmetatable({}, { __index = function() return nop end })
-_path = { code = "/nonexistent/" }
+_path = { code = "/nonexistent/", audio = "/nonexistent/audio/" }
 util = {
   round = function(x) return math.floor(x + 0.5) end,
   file_exists = function() return false end,
@@ -242,6 +242,10 @@ function params:add_option(id, name, options, default)
 end
 function params:add_number(id, name, minv, maxv, default, fmt)
   padd({ id = id, name = name, min = minv, max = maxv, value = default or minv, fmt = fmt })
+end
+-- S21: a file param (norns opens fileselect for it; the path rides the PSET)
+function params:add_file(id, name, path)
+  padd({ id = id, name = name, value = path or "-" })
 end
 function params:lookup_param(id) return params.list[params.lookup[id]] end
 function params:set_action(id, fn) self:lookup_param(id).action = fn end
@@ -670,6 +674,12 @@ else
   params:set("cutoff", 700)
   params:set("delay_mix", 0.1)
   params:set("scene_capture", 1) params:set("scene_capture", 0)
+  run_ticks(20)
+  redraw()
+  -- ONE slot filled: the step everybody stalls on. recalling it re-applies the
+  -- sound you're already playing, so the page teaches the next move instead of
+  -- offering a morph bar that has nothing to morph to.
+  export(pfx("SCENE", "_ONE"))
   params:set("scene_slot", 4)
   params:set("cutoff", 9000)
   params:set("delay_mix", 0.7)
@@ -677,7 +687,20 @@ else
   params:set("scene_capture", 1) params:set("scene_capture", 0)
   run_ticks(3)
   redraw()
+  -- the action said so: the SAVED chip + the slot it landed in, flashing.
+  -- without this the only sign a capture happened was one 13px box filling.
+  export(pfx("SCENE", "_SAVED"))
+  run_ticks(20)                        -- let the message expire: resting state
+  redraw()
   export(pfx("SCENE", "_BANK"))       -- two slots filled, cursor on 4
+  -- recalling the slot you're already sitting on: the recall LANDS but nothing
+  -- moves, so it is inaudible by definition. this is the exact thing that read
+  -- as "no sound / the keys do nothing" — now the page says so in words.
+  params:set("scene_recall", 1) params:set("scene_recall", 0)
+  run_ticks(3)
+  redraw()
+  export(pfx("SCENE", "_SAME"))
+  run_ticks(20)
   -- the morph: A=1, B=4, parked halfway. the handle rides the bar bright,
   -- both endpoint ticks show under their slots
   params:set("scene_morph_a", 1)
@@ -686,11 +709,13 @@ else
   run_ticks(3)                         -- the tick applies the sweep
   redraw()
   export(pfx("SCENE", "_MORPH"))
-  -- the safety net: marked, so the chip reads SAFE (flashing right after)
+  -- the safety net: marked, so the chip reads SAFE (flashing right after) and
+  -- the message line confirms it in words
   params:set("scene_safe_capture", 1) params:set("scene_safe_capture", 0)
   run_ticks(3)
   redraw()
   export(pfx("SCENE", "_SAFE"))
+  run_ticks(20)                        -- message expires again
   -- the morph as the footer sees it: alt held shows the A/B endpoint pair
   key(1, 1)
   run_ticks(2)

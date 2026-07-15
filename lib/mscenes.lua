@@ -228,13 +228,52 @@ function M.invalidate()
   M.engaged = false
 end
 
+-- ===========================================================================
+-- feedback — every action says what it did, on screen AND in maiden
+-- ===========================================================================
+-- a scene action is far too easy to miss. capture moves ONE 13px box; recall
+-- of the slot you just captured re-applies the sound you are ALREADY making,
+-- so it is inaudible by definition; recall of an empty slot did nothing at all
+-- and said nothing about it. that combination reads exactly like "the keys do
+-- nothing, there's no sound" — which is what it was reported as, on a page
+-- whose code was firing correctly the whole time. a performance page that
+-- can't prove it worked is broken, whatever the code does.
+--
+-- so: one call, two audiences. `msg` is a chip on the page for ~1s; the detail
+-- goes to maiden, where you can read the whole story after the fact (the
+-- codebase already leans on bring-up prints for exactly this reason).
+-- the "- SAME" variants are the important ones: they mean the action landed
+-- and NOTHING moved, which is precisely why you can't hear anything.
+
+local function say(msg, detail, slot)
+  M.msg, M.msg_at, M.msg_slot = msg, C.frame, slot
+  print("mangler: " .. (detail or msg))
+end
+
+local function say_recall(slot, n, moved)
+  if moved == 0 then
+    say("RECALL " .. slot .. " - SAME",
+      "scene " .. slot .. " recalled — " .. n .. " params set, NONE moved: the"
+      .. " instrument already sounds like this scene, which is why nothing"
+      .. " changed. capture a DIFFERENT sound to another slot to hear a recall.",
+      slot)
+  else
+    say("RECALL " .. slot,
+      "scene " .. slot .. " recalled — " .. moved .. " of " .. n
+      .. " params moved", slot)
+  end
+end
+
 local function snapshot_ids(ids)
-  local t = {}
+  local t, n = {}, 0
   for i = 1, #ids do
     local id = ids[i]
-    if params.lookup[id] then t[id] = params:get(id) end
+    if params.lookup[id] then
+      t[id] = params:get(id)
+      n = n + 1
+    end
   end
-  return t
+  return t, n
 end
 
 -- region edges: two params that only mean something as a PAIR. setting them
@@ -246,12 +285,22 @@ end
 -- region instead of a bogus one. `start` key -> `end` key.
 local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end" }
 
+-- set one param and report whether the value actually MOVED. the count of
+-- moved params is what tells a performer why a recall was silent: 0 moved
+-- means the scene and the live sound are already the same.
+local function set_moved(id, v)
+  local before = params:get(id)
+  pset(id, v)
+  return params:get(id) ~= before and 1 or 0
+end
+
 -- apply a stored table, walking `ids` IN ORDER (timbre -> space -> switches;
 -- see the list comment). params missing from the table are skipped, so a
 -- scene captured by an older version still recalls what it does know.
+-- returns: how many params were set, how many of them actually changed.
 local function apply(tbl, ids)
-  if not tbl then return 0 end
-  local n = 0
+  if not tbl then return 0, 0 end
+  local n, moved = 0, 0
   local done                      -- edge partners already set (nil until needed)
   for i = 1, #ids do
     local id = ids[i]
@@ -262,19 +311,22 @@ local function apply(tbl, ids)
       if pv ~= nil and params.lookup[partner] then
         -- outward edge first: if the new start moves LEFT it's the widening
         -- one, else the new end is
-        if v < params:get(id) then pset(id, v) pset(partner, pv)
-        else pset(partner, pv) pset(id, v) end
+        if v < params:get(id) then
+          moved = moved + set_moved(id, v) + set_moved(partner, pv)
+        else
+          moved = moved + set_moved(partner, pv) + set_moved(id, v)
+        end
         done = done or {}
         done[partner] = true
         n = n + 2
       else
-        pset(id, v)
+        moved = moved + set_moved(id, v)
         n = n + 1
       end
     end
   end
   M.invalidate()
-  return n
+  return n, moved
 end
 
 local function cancel_pending()
@@ -291,9 +343,13 @@ end
 -- instrument, the key does the thing.
 function M.capture(slot)
   slot = slot_idx(slot)
-  M.slots[slot] = snapshot_ids(SCENE_RECALL_IDS)
+  local t, n = snapshot_ids(SCENE_RECALL_IDS)
+  M.slots[slot] = t
   M.captured_at = C.frame
   M.invalidate()   -- an endpoint's contents may have just changed under us
+  say("SAVED " .. slot,
+    "scene " .. slot .. " captured — " .. n .. " params (the whole mangle:"
+    .. " window, grain, stretch, tape loop, filter, FX, voices)", slot)
   return true
 end
 
@@ -303,32 +359,45 @@ end
 function M.recall(slot, opts)
   slot = slot_idx(slot)
   local scene = M.slots[slot]
-  if not scene then return false end
+  if not scene then
+    -- an empty slot used to be a silent no-op, which reads as a dead key
+    say("SLOT " .. slot .. " EMPTY",
+      "scene " .. slot .. " is empty — nothing to recall. K3 (CAP) stores the"
+      .. " current sound into it first.", slot)
+    return false
+  end
   opts = opts or {}
   local mode = floor(pget("scene_recall_mode", 1) + 0.5)
   local beats = QUANT_BEATS[mode] or 0
   cancel_pending()
   if beats > 0 and not opts.immediate then
     M.pending = slot
+    say("QUEUED " .. slot,
+      "scene " .. slot .. " queued — lands on the next "
+      .. (beats > 1 and "bar" or "beat"), slot)
     -- ONE coroutine, always cancelled on replace / restore / cleanup (the
     -- norns clock-race gotcha: a timer resuming a dead thread wedges clock)
     pending_clock = clock.run(function()
       clock.sync(beats)
       pending_clock, M.pending = nil, nil
-      apply(M.slots[slot], SCENE_RECALL_IDS)
+      say_recall(slot, apply(M.slots[slot], SCENE_RECALL_IDS))
     end)
     return true
   end
-  apply(scene, SCENE_RECALL_IDS)
+  say_recall(slot, apply(scene, SCENE_RECALL_IDS))
   return true
 end
 
 function M.clear(slot)
   slot = slot_idx(slot)
+  local had = M.slots[slot] ~= nil
   -- mutate in place: ctx.scenes points AT this table
   M.slots[slot] = nil
   if M.pending == slot then cancel_pending() end
   M.invalidate()
+  say(had and ("CLEARED " .. slot) or ("SLOT " .. slot .. " EMPTY"),
+    had and ("scene " .. slot .. " cleared") or
+    ("scene " .. slot .. " was already empty"), slot)
   return true
 end
 
@@ -451,8 +520,12 @@ end
 -- ===========================================================================
 
 function M.safe_capture()
-  M.safe = snapshot_ids(SAFE_SNAPSHOT_IDS)
+  local t, n = snapshot_ids(SAFE_SNAPSHOT_IDS)
+  M.safe = t
   M.safe_at = C.frame
+  say("SAFE MARKED",
+    "safe state marked — " .. n .. " params. K1+K2 (UNDO) brings this exact"
+    .. " sound back from anywhere.")
   return true
 end
 
@@ -460,11 +533,17 @@ end
 -- touch the buffer, the tape audio, or held voices — this is an undo for
 -- knobs, not a panic mute (K1+K2 STOP is the mute, and it stays yours).
 function M.safe_restore()
-  if not M.safe then return false end
+  if not M.safe then
+    say("NO SAFE STATE",
+      "no safe state marked yet — K1+K3 (SAFE) on the SCENE page marks one")
+    return false
+  end
   cancel_pending()   -- a queued recall must not undo the rescue a beat later
-  apply(M.safe, SAFE_SNAPSHOT_IDS)
+  local n, moved = apply(M.safe, SAFE_SNAPSHOT_IDS)
   M.chaos_live = false
   M.restored_at = C.frame
+  say(moved == 0 and "UNDO - SAME" or "UNDO",
+    "safe state restored — " .. moved .. " of " .. n .. " params moved")
   return true
 end
 
@@ -522,6 +601,7 @@ function M.chaos()
   throw("scan", s[1], s[2])
   M.invalidate()
   M.chaos_live = true
+  say("CHAOS", "chaos thrown — release to land back on the safe state")
   return true
 end
 

@@ -18,7 +18,7 @@
 --   REC     K2, play a phrase, K2 — the window snaps to your take and loops it
 --   STRETCH pick the drone engine (PLAY clean · GRAIN · WARP · PV) · GRAIN tunes it
 --   DELAY / REVERB   start dry (mix 0); turn E2 up to add them
---   PADS    K1+K3 -> NOTES>PADS: MIDI/grid notes play 8 slices over the drone
+--   PADS    K1+K3 -> PLAY>PADS: MIDI/grid notes play 8 slices of the take
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
 --   E1     select page          (hold K1: jump between page families)
@@ -245,6 +245,14 @@ local KEYS = {
       act = function() ptoggle("rec") end },
     k3 = { label = "FRZ", lit = "freeze",
       act = function() ptoggle("freeze") end },
+    -- S21: wipe the take. same key as the TAPE page's CLR, on purpose — the
+    -- two decks now clear the same way. (REC keeps the global STOP on K1+K2;
+    -- it gives up the global DRY for this, like TAPE does.)
+    k3_alt = { label = "CLR",
+      act = function()
+        params:set("clear_rec", 1)
+        held_gesture[3] = "clear_rec"
+      end },
   },
   WINDOW = {
     k2 = { label = "RST",
@@ -349,7 +357,7 @@ local KEYS = {
         ctx.pad_type[i] = (ctx.pad_type[i] == 0) and 1 or 0
       end },
     -- alt: route MIDI/grid notes to the pads (vs the drone) — the header
-    -- flips NOTES>DRONE / NOTES>PADS
+    -- flips PLAY>DRONE / PLAY>PADS
     k3_alt = { label = "ROUTE", lit = "pad_input",
       act = function() ptoggle("pad_input") end },
   },
@@ -521,9 +529,21 @@ ctx.key_def = key_def
 -- ============================================================================
 -- S8 polyphonic pad voices
 -- ============================================================================
--- a pad's slice point + rate. 8 pads spread evenly across the buffer; rate
--- fixed at 1 for now (per-pad rate is a later knob). type is per-pad.
-local function pad_pos(i) return (i + 0.5) / ctx.pad_n end
+-- a pad's slice point: the centre of the i-th eighth OF THE TAKE — i.e. of
+-- the current window, not of the 60s buffer. this is the one definition of
+-- "slice i" in the instrument: the PADS audition, MIDI/grid note pads, and
+-- the sequencer (mseq.fire) all resolve through here, so pad 3 and seq slice
+-- 3 are always the same audio.
+-- it was buffer-relative ((i+0.5)/8) until now, which meant a normal take —
+-- record a phrase, the rec action snaps the window to it — left 7 of the 8
+-- pads pointing at silence out in the empty buffer. mseq hit exactly that on
+-- device in S18 and worked around it locally; this is that fix, shared.
+-- rate stays fixed at 1 (per-pad rate is a later knob). type is per-pad.
+local function pad_pos(i)
+  local lo, _, span = window_bounds()
+  return lo + (i + 0.5) / ctx.pad_n * span
+end
+ctx.pad_pos = pad_pos
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
 -- the note_on that started it). z=1 press, z=0 release.
@@ -557,6 +577,58 @@ function ctx.pads_all_off()
   for id in pairs(ctx.pad_held) do
     if engine.note_off then engine.note_off(id) end
     ctx.pad_held[id] = nil
+  end
+end
+
+-- S21 — the two things a sampler needs and this didn't have: a way to DELETE
+-- the recording, and a source other than the live input.
+-- the engine's 60s buffer is the thing everything slices (window, drone, pads,
+-- sequencer), and until now the only way to change it was to record over it.
+-- (the TAPE deck's own CLR is on the TAPE page — that's the softcut loop, a
+-- different deck entirely.)
+
+-- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
+-- the window back up, so every page goes back to inviting a take instead of
+-- drawing one that isn't there.
+function ctx.clear_recording()
+  if engine.clear then
+    engine.clear()
+  else
+    print("mangler: engine has no `clear` — SYSTEM > RESTART for the new engine")
+    return
+  end
+  Mpages.clear_wave()
+  params:set("pos_start", 0)
+  params:set("pos_end", 1)
+  print("mangler: recording cleared")
+end
+
+-- load any wav as the sample (PARAMS > rec > load sample). it lands in the SAME
+-- buffer a take does, so the window, drone, pads and sequencer all work on it
+-- identically — there is no "loaded sample" mode, it's just the sample.
+-- the window snaps to the file's length, and the display is read from the FILE
+-- (lua can't see the SC buffer — see Mpages.load_wave).
+function ctx.load_sample(path)
+  if path == nil or path == "" or path == "-" or path == _path.audio then return end
+  if not util.file_exists(path) then
+    print("mangler: no such file — " .. tostring(path))
+    return
+  end
+  if not engine.read_file then
+    print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
+    return
+  end
+  engine.read_file(path)
+  local dur = Mpages.load_wave(path, 60)
+  if dur then
+    params:set("pos_start", 0)
+    params:set("pos_end", clamp(dur / 60, 0.002, 1))
+    print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
+      path, dur))
+  else
+    -- audio is in, but we have no picture for it: say so rather than draw a lie
+    print("mangler: loaded " .. path
+      .. " (no waveform preview — not a 16-bit PCM wav)")
   end
 end
 
@@ -626,7 +698,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "rec", 7)
+  params:add_group("grp_rec", "rec", 9)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -662,6 +734,17 @@ local function init_params()
   -- convex crossfade so it can't run away.
   add_eng_control("regen", "regen (self-resample)",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- S21: delete the take (REC K1+K3, mirroring TAPE's CLR) and load one off the
+  -- disk. clear is a MOMENTARY binary so a footswitch can wipe between takes;
+  -- both fire on the press edge only, so a stray 0 from bang/pset does nothing.
+  params:add_binary("clear_rec", "clear recording", "momentary", 0)
+  params:set_action("clear_rec", function(v)
+    if v == 1 then ctx.clear_recording() end
+  end)
+  -- add_file opens norns' fileselect in the menu and the path rides the PSET,
+  -- so a saved session reloads its sample
+  params:add_file("sample_file", "load sample", _path.audio)
+  params:set_action("sample_file", function(f) ctx.load_sample(f) end)
 
   params:add_group("grp_window", "window", 4)
   -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s

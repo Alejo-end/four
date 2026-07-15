@@ -630,6 +630,42 @@ Engine_Mangler : CroneEngine {
             voiceParams[\voice_rel] = msg[1];
         });
 
+        // ---- S21: wipe the recording / load a sample off the disk.
+        // there was NO way to delete a take (only overwrite it) and no source
+        // but the live input — the two things that stop this being a sampler.
+        // BOTH act on the SAME bufL/bufR the synths already hold: Buffer:zero
+        // and the INSTANCE Buffer:readChannel read into an existing buffer, so
+        // no bufnum ever changes, nothing respawns, nothing desyncs. all core
+        // SC, no plugin deps — cannot brick loading.
+        this.addCommand(\clear, "", { arg msg;
+            bufL.zero;
+            bufR.zero;
+            "mangler: engine buffer cleared".postln;
+        });
+
+        // any wav/aiff becomes the sample. NOTE: /b_readChannel does NOT
+        // sample-rate convert, and norns runs the server at 48k — a 44.1k file
+        // plays ~9% fast. that's a varispeed, not a bug; the Lua side measures
+        // the frames it actually occupies and snaps the window to them.
+        this.addCommand(\read_file, "s", { arg msg;
+            var path = msg[1].asString;
+            var sf = SoundFile.new;
+            sf.openRead(path).if({
+                var nch = sf.numChannels;
+                var frames = sf.numFrames.min(s.sampleRate * 60);
+                sf.close;
+                bufL.zero;
+                bufR.zero;
+                bufL.readChannel(path, 0, frames, 0, false, [0]);
+                // a mono file feeds BOTH sides from channel 0
+                bufR.readChannel(path, 0, frames, 0, false, [(nch - 1).min(1)]);
+                ("mangler: loaded " ++ path ++ " — " ++ frames ++ " frames, "
+                    ++ nch ++ "ch").postln;
+            }, {
+                ("mangler: CANNOT READ " ++ path).postln;
+            });
+        });
+
         this.addPoll(\play_phase, {
             phaseBus.getSynchronous;
         });
