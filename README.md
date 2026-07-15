@@ -300,30 +300,34 @@ and your taps edit on top of it — set hits to 0 and draw a pattern by hand.
 
 ### SCENE
 
-![SCENE page showing eight scene slots in a row, two of them filled, with a morph bar underneath running from slot A to slot B and a handle parked halfway](doc/ui/scene.png)
+![SCENE page showing eight scene slots in a row with a morph bar underneath running from LIVE to the selected slot, the handle parked halfway](doc/ui/scene.png)
 
 **Eight slots that remember the whole sound** — every mangle knob at once, not the audio. **K3**
 captures what you're hearing into the selected slot; **K2** recalls it, right away or on the next
-beat or bar (`PARAMS > scenes > recall quantize`).
+beat or bar (**K1+E2**).
 
-**E3 morphs.** Pick two slots as A and B, and that one knob walks the entire instrument between
-them — filter, grain, stretch, FX, all moving together. Holds like freeze, the note routing and
-the buffer-writers deliberately don't ride a morph, so the page says `RCL B TO LAND` when a
-recall is needed to finish the trip.
+**E3 morphs there.** Point at a slot with E2 and that one knob slides the whole instrument from
+the sound you have now toward it — filter, grain, stretch, FX, all moving together. Sweep back to
+0 and you're exactly where you started. **One captured scene is enough:** save a sound, mangle it
+however you like, then use E3 to slide back toward it — and stop anywhere in between.
 
 **The ways back.** **K1+K3** marks the current sound as **SAFE**; **K1+K2** is **UNDO** — it puts
 you straight back on it. Mark a state, do something reckless, come home in one press.
 
-- **E2** slot · **K1+E2** morph A
-- **E3** morph amount · **K1+E3** morph B
+- **E2** slot — the one selector: K2 recalls it, K3 captures into it, E3 morphs toward it ·
+  **K1+E2** when a recall lands (now / next beat / next bar)
+- **E3** morph amount
 - **K2** recall · **K3** capture · **K1+K2** UNDO to safe · **K1+K3** mark safe
+
+Holds like freeze, the note routing and the buffer-writers deliberately don't ride a morph, so
+the page says `K2 TO LAND THE REST` when a recall is needed to finish the trip.
 
 Map `chaos throw` to a footswitch: **hold** it for a bounded random throw, **release** and you
 land back on your safe state. Scenes save and load with your PSET.
 
 **With a grid**, the SCENE page becomes the bank: row 1 is the 8 slots (tap to recall, or hold
-CAP / CLR on row 8 and tap to capture or clear), rows 3 and 4 pick A and B, row 6 is an 8-step
-morph bar, and row 8 carries CAP, CLR, CHAOS, SAFE and UNDO.
+CAP / CLR on row 8 and tap to capture or clear), row 3 aims the morph at a slot without jumping
+to it, row 5 is an 8-step morph bar, and row 8 carries CAP, CLR, CHAOS, SAFE and UNDO.
 
 ## Playing notes
 

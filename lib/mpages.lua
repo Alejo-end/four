@@ -203,8 +203,7 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "AMT",
   seq_euclid = "EUC", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLC",
   clock_tempo = "BPM",
-  scene_slot = "SLOT", scene_morph_a = "A", scene_morph_b = "B",
-  scene_morph_amt = "MRPH",
+  scene_slot = "SLOT", scene_morph_amt = "MRPH", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -1446,8 +1445,6 @@ local function body_SCENE(frame)
   -- page stay byte-identical.
   local sc = C.scene
   local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 1, 8)
-  local a = clamp(floor(pget("scene_morph_a", 1) + 0.5), 1, 8)
-  local b = clamp(floor(pget("scene_morph_b", 2) + 0.5), 1, 8)
   local amt = pget("scene_morph_amt", 0)
 
   -- status row y12..20 (the chip is 9 tall, so it starts at 12 and the plain
@@ -1474,13 +1471,11 @@ local function body_SCENE(frame)
   else
     -- a morph moves the morph-safe subset only: holds, note routing, the buffer
     -- writers and the voice cap stay put (see mscenes MORPH_EXCLUDE). so when a
-    -- sweep has ARRIVED at an end and that scene still holds some of those, say
-    -- which key finishes the job — otherwise "I swept all the way to B and it
-    -- doesn't sound like B" is a mystery instead of a fact. only while the morph
-    -- is what's driving (parked at 0 from boot claims nothing).
-    local sc_end = amt >= 0.999 and b or (amt <= 0.001 and a or nil)
-    if sc_end and sc.engaged and sc.unlanded(sc_end) then
-      ptext_c("RCL " .. (amt >= 0.999 and "B" or "A") .. " TO LAND", 64, 14, 1, 5)
+    -- sweep has ARRIVED and that scene still holds some of those, say which key
+    -- finishes the job — otherwise "I swept all the way there and it doesn't
+    -- sound like the scene" is a mystery instead of a fact.
+    if amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
+      ptext_c("K2 TO LAND THE REST", 64, 14, 1, 5)
     end
   end
 
@@ -1504,12 +1499,6 @@ local function body_SCENE(frame)
       screen.stroke()
     end
     ptext_c(tostring(i), x + 7, 23, 1, (filled or pending or flash) and 0 or 5)
-    -- the morph endpoints get a tick, tying them to the A?/B? labels below
-    if i == a or i == b then
-      screen.level(9)
-      screen.rect(x + 5, 32, 3, 1)
-      screen.fill()
-    end
     if i == sel then
       screen.level(15)
       screen.rect(x - 0.5, 20.5, 14, 11)
@@ -1518,38 +1507,22 @@ local function body_SCENE(frame)
   end
 
   -- the morph: A on the left, B on the right, the handle at the amount
-  -- the bottom row teaches the workflow, because a scene bank can't prove
-  -- itself in one press: you have to store a sound, make a DIFFERENT one, and
-  -- come back. one slot filled is the step everybody stalls on — recalling it
-  -- re-applies what you're already playing and nothing happens, which reads as
-  -- broken. so say the next move instead of showing a morph bar that can't run.
-  local A, B = sc.slots[a], sc.slots[b]
+  -- the morph: from the sound you have (LIVE) toward the selected slot. one
+  -- stored scene is enough to play with — capture, mangle, then slide back —
+  -- which is why the bank no longer has to nag you for a second one.
   if nfilled == 0 then
     ptext_c("EMPTY - K3 CAP", 64, 35, 1, 4)
     return
   end
-  if nfilled == 1 then
-    -- name the next EMPTY slot: "capture a second one" is the move, and being
-    -- concrete about where beats being vague. one line — two would crowd the
-    -- footer, and 124px is the centered limit (measure with text_w before
-    -- adding words; it is easy to sail past it and clip both ends).
-    local nxt = 1
-    for i = 1, 8 do
-      if not sc.slots[i] then nxt = i break end
-    end
-    ptext_c("CHANGE SOUND - CAP SLOT " .. nxt, 64, 35, 1, 6)
+  if not sc.slots[sel] then
+    ptext_c("SLOT " .. sel .. " EMPTY - K3 CAP", 64, 35, 1, 4)
     return
   end
-  if not (A and B) then
-    ptext_c("MORPH: K1+E2 = A - K1+E3 = B", 64, 35, 1, 3)
-    return
-  end
-  -- the end you're standing on reads bright; parked at either end the handle
-  -- dims (nothing is being morphed — the audibility rule, for a gesture)
+  -- the end you're standing on reads bright; mid-sweep the handle is live
   local live = amt > 0.001 and amt < 0.999
-  ptext("A" .. a, 2, 35, 1, amt < 0.5 and 12 or 5)
-  ptext_r("B" .. b, 126, 35, 1, amt >= 0.5 and 12 or 5)
-  local x0, x1 = 18, 110
+  ptext("LIVE", 2, 35, 1, amt < 0.5 and 12 or 4)
+  ptext_r(tostring(sel), 126, 35, 1, amt >= 0.5 and 12 or 4)
+  local x0, x1 = 24, 116
   screen.level(3)
   screen.move(x0, 38)
   screen.line(x1, 38)

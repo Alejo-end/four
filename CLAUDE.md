@@ -825,6 +825,38 @@ Renders: only the 5 MIX shots moved (mix.png regenerated); 71 shots; harness 220
 dist byte-verified. **DEPLOY: this is an ENGINE change — rsync, SYSTEM > RESTART,
 confirm `count: 61`**, then run the §S21 gate.
 
+Thirty-eighth change — **S19c scenes: one selector, not three (Lua-only,
+fingerprint STAYS 61)**: "the scenes are hard to use" — the THIRD report. Twice I
+answered it as feedback (§S19b); the third time it was the MODEL. Full detail
+doc/spec.md §S19c. THE DIAGNOSIS: capturing a scene ALREADY names the slots you
+care about, and the morph made you say it twice more — as `morph A`/`morph B`, on
+the ALT LAYER where they're invisible until you hold K1. Six steps before you
+heard anything, two hidden, and a bank that did NOTHING until two slots were
+filled. THE FIX IS A DELETION: `scene_slot` is the ONE selector with three jobs —
+K2 recalls it, K3 captures into it, **E3 morphs TOWARD it from wherever you are**.
+The near end (`morph_from`) is snapshotted implicitly on the rising edge out of 0;
+sweeping home to 0 lands EXACTLY where you started and drops it, as does
+`invalidate` (any recall/capture/restore/throw), so the next sweep departs from
+wherever you are by then. scene_morph_a/b DELETED (grp_scene 11 → 9); the freed
+alt encoder took `scene_recall_mode` (PARAMS-only before). WHAT IT BUYS: still
+does the old A→B (recall A, sweep toward B — FEWER steps), plus the thing the old
+model couldn't — **ONE captured scene is immediately musical** (capture, mangle,
+slide back, stop anywhere between), which is why the "CAP A 2ND SLOT" teaching
+hint is gone: the situation it taught around no longer exists. THE TRADE (stated,
+not hidden): the morph is now RELATIVE, so a motion-recorded sweep replays from
+wherever the instrument IS at replay time, not from a fixed A. Inherent to "from
+here", musically reasonable (a sweep is a move, not a coordinate), and the price
+of deleting two selectors. UI: the bar reads `LIVE ——●—— n`; at amt=1 an unlanded
+scene says `K2 TO LAND THE REST`. GRID: row 1 taps RECALL (the scene-launcher
+gesture), so row 1 CAN'T double as the morph target — you'd already be there and
+the sweep would have nowhere to go — hence **row 3 = AIM** (point without
+jumping) and row 5 = the 8-step morph bar. Harness 229 (new: aiming doesn't jump ·
+amt 1 lands · amt 0 returns home exactly · warped midpoint measured from the live
+sound · re-aiming mid-sweep re-targets · ONE scene is musical · the endpoint
+params are provably gone). Only SCENE renders moved; scene.png + README manual
+entry regenerated; dist byte-verified. Save + reload (Lua-only — but the S21
+engine still needs its RESTART for count 61).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

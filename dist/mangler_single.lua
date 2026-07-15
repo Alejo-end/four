@@ -48,8 +48,9 @@
 --         PADS  MOTION  SEQ  SCENE
 --
 -- SCENE   8 slots that remember the whole sound (not the audio): K3 CAP, K2
---   RCL (immediately or on the next beat/bar). E3 MORPHS between two slots —
---   one knob walks the instrument from A to B. the alt keys are the way back:
+--   RCL (immediately or on the next beat/bar). E3 MORPHS from the sound you
+--   have toward the selected slot — one scene is enough to play with. the alt
+--   keys are the way back:
 --   K1+K3 SAFE marks a state, K1+K2 UNDO returns to it, so you can throw the
 --   thing off a cliff and be home in one press. PARAMS > scenes maps all of
 --   it to MIDI (a capture/recall/undo footswitch, a morph fader, and
@@ -830,10 +831,13 @@ end
 -- SCENE page (S19): like SEQ, the grid follows the screen — while the SCENE
 -- page is up the whole surface becomes the scene bank.
 --
---   row 1  the 8 slots: tap = recall (quantized per scene_recall_mode).
+--   row 1  the 8 slots: tap = JUMP (recall, quantized per scene_recall_mode).
 --          hold CAP and tap = capture into it; hold CLR and tap = clear it
---   row 3  morph endpoint A        row 4  morph endpoint B
---   row 6  morph amount, 8 steps (tap one — the sweep in reach of a finger)
+--   row 3  AIM: tap = point the morph at that slot WITHOUT jumping to it.
+--          (row 1 recalls, so it can't double as the morph target — you'd
+--          already be there and the sweep would have nowhere to go.)
+--   row 5  morph amount, 8 steps: slide from the sound you have toward the
+--          aimed slot — the sweep in reach of a finger
 --   row 8  [CAP] [CLR] · [CHAOS, hold] · · [SAFE] [UNDO]
 --
 -- every pad drives a param, so it does exactly what the screen keys do.
@@ -859,16 +863,13 @@ local function scene_grid_key(x, y, z)
     if scene_mod.cap then C.scene_capture(x)
     elseif scene_mod.clr then C.scene_clear(x)
     else C.scene_recall(x) end
-  elseif y == 3 then params:set("scene_morph_a", x)
-  elseif y == 4 then params:set("scene_morph_b", x)
-  elseif y == 6 then params:set("scene_morph_amt", (x - 1) / 7) end
+  elseif y == 3 then params:set("scene_slot", x)             -- aim, don't jump
+  elseif y == 5 then params:set("scene_morph_amt", (x - 1) / 7) end
 end
 
 local function scene_redraw()
   local sc = C.scene
   local sel = floor(pget("scene_slot", 1) + 0.5)
-  local a = floor(pget("scene_morph_a", 1) + 0.5)
-  local b = floor(pget("scene_morph_b", 2) + 0.5)
   -- row 1: the bank. queued recall blinks, selected is bright, occupied mid,
   -- empty barely there — the same brightness-is-truth rule as the screen.
   for x = 1, 8 do
@@ -880,17 +881,14 @@ local function scene_redraw()
     else lvl = 1 end
     gg:led(x, 1, lvl)
   end
-  -- rows 3/4: the morph endpoints (lit = chosen, dim = a slot with something
-  -- in it to choose)
+  -- row 3: where the morph is aimed (lit = aimed, dim = a slot worth aiming at)
   for x = 1, 8 do
-    local filled = sc.slots[x] ~= nil
-    gg:led(x, 3, x == a and 15 or (filled and 4 or 1))
-    gg:led(x, 4, x == b and 15 or (filled and 4 or 1))
+    gg:led(x, 3, x == sel and 15 or (sc.slots[x] and 4 or 1))
   end
-  -- row 6: the morph amount as a bar with a bright head
+  -- row 5: the morph amount as a bar with a bright head
   local head = floor(pget("scene_morph_amt", 0) * 7 + 0.5) + 1
   for x = 1, 8 do
-    gg:led(x, 6, x == head and 15 or (x < head and 5 or 1))
+    gg:led(x, 5, x == head and 15 or (x < head and 5 or 1))
   end
   -- row 8: modifiers (lit while held), chaos (lit while thrown), the pair of
   -- safety pads (dark until there's a safe state to go back to)
@@ -1676,6 +1674,20 @@ local morphing = false   -- re-entry guard (a param action must never recurse)
 local last_sent = {}     -- morph: the last value/norm we pushed, per param
 local pending_clock      -- the quantized-recall coroutine (nil = none)
 
+-- THE MORPH'S OTHER END: the sound you were making when you started sweeping.
+-- taken on the rising edge out of 0 and dropped when you come home to 0 (or
+-- when something else moves the instrument — see invalidate).
+--
+-- this replaced an A/B pair of slot selectors. capturing a scene ALREADY tells
+-- the instrument which slots you care about; making you then name them again as
+-- A and B — on the alt layer, where they're invisible until you hold K1 — was
+-- two selectors too many and six steps before you heard anything. "from HERE to
+-- that slot" is what a performer means, needs no selector at all, and can still
+-- do the old A->B: recall A (K2), then sweep toward B. it also makes ONE stored
+-- scene immediately useful, which the old model couldn't: with a single capture
+-- you can mangle the sound and slide back toward it.
+local morph_from = nil
+
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
 
 -- ===========================================================================
@@ -1711,8 +1723,10 @@ end
 function M.invalidate()
   for k in pairs(last_sent) do last_sent[k] = nil end
   -- ...and the morph is no longer what's driving the sound: something else
-  -- (a recall, a restore, a throw, a new endpoint) just moved it off the line
+  -- (a recall, a restore, a throw) just moved it off the line. drop the "from"
+  -- with it — we are somewhere new, so the next sweep starts from HERE.
   M.engaged = false
+  morph_from = nil
 end
 
 -- ===========================================================================
@@ -1930,16 +1944,23 @@ end
 -- without being coarse enough to see or hear.
 local MORPH_EPS = 1 / 400
 
--- morph the instrument to `amt` (0..1) along slot a -> slot b.
+-- morph `amt` (0..1) of the way from where you were toward `slot`.
+--   amt 0   the sound you had when you started sweeping (exactly)
+--   amt 1   that slot's stored sound (exactly, for the morph-safe subset)
 --   opts.force   send every param even if it hasn't moved
 --   opts.linear  interpolate raw values instead of controlspec space
--- returns false when either slot is empty (nothing to interpolate between).
-function M.morph(a, b, amt, opts)
+-- returns false when the slot is empty, or when there's nothing to do (parked
+-- at 0 with no sweep in progress — at rest the sound is just the sound).
+function M.morph(slot, amt, opts)
   if morphing then return false end    -- a param action can never recurse in
-  local A, B = M.slots[slot_idx(a)], M.slots[slot_idx(b)]
-  if not (A and B) then return false end
+  local B = M.slots[slot_idx(slot)]
+  if not B then return false end
   opts = opts or {}
   amt = clamp(amt or 0, 0, 1)
+  if amt <= 0 and not morph_from then return false end
+  -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
+  local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
+  morph_from = A
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
   local force = opts.force or amt <= 0 or amt >= 1
   morphing = true
@@ -1947,7 +1968,7 @@ function M.morph(a, b, amt, opts)
   for i = 1, #ids do
     local id = ids[i]
     local va, vb = A[id], B[id]
-    -- skip anything either scene doesn't have (older capture, missing param)
+    -- skip anything either side doesn't have (older capture, missing param)
     if va ~= nil and vb ~= nil and params.lookup[id] then
       local v, tn = morph_value(id, va, vb, amt, opts.linear)
       if v ~= nil then
@@ -1965,7 +1986,14 @@ function M.morph(a, b, amt, opts)
   end
   morphing = false
   M.morph_at = amt
-  M.engaged = true      -- the morph is now what's driving the sound
+  M.engaged = amt > 0   -- the morph is what's driving the sound... unless home
+  if amt <= 0 then
+    -- home again, exactly where you started. forget the "from" so the NEXT
+    -- sweep departs from wherever you are by then, and forget what we sent so
+    -- it re-asserts from scratch.
+    morph_from = nil
+    for k in pairs(last_sent) do last_sent[k] = nil end
+  end
   return true
 end
 
@@ -1995,11 +2023,12 @@ function M.touch()
 end
 
 -- one per redraw frame, from the existing 15fps clock in mangler.lua.
+-- the target is simply the SELECTED slot — the same one K2 recalls and K3
+-- captures into. one selector, three jobs.
 function M.tick()
   if not dirty then return end
   dirty = false
-  M.morph(pget("scene_morph_a", 1), pget("scene_morph_b", 2),
-    pget("scene_morph_amt", 0))
+  M.morph(pget("scene_slot", 1), pget("scene_morph_amt", 0))
 end
 
 -- ===========================================================================
@@ -2380,8 +2409,7 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "AMT",
   seq_euclid = "EUC", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLC",
   clock_tempo = "BPM",
-  scene_slot = "SLOT", scene_morph_a = "A", scene_morph_b = "B",
-  scene_morph_amt = "MRPH",
+  scene_slot = "SLOT", scene_morph_amt = "MRPH", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -3623,8 +3651,6 @@ local function body_SCENE(frame)
   -- page stay byte-identical.
   local sc = C.scene
   local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 1, 8)
-  local a = clamp(floor(pget("scene_morph_a", 1) + 0.5), 1, 8)
-  local b = clamp(floor(pget("scene_morph_b", 2) + 0.5), 1, 8)
   local amt = pget("scene_morph_amt", 0)
 
   -- status row y12..20 (the chip is 9 tall, so it starts at 12 and the plain
@@ -3651,13 +3677,11 @@ local function body_SCENE(frame)
   else
     -- a morph moves the morph-safe subset only: holds, note routing, the buffer
     -- writers and the voice cap stay put (see mscenes MORPH_EXCLUDE). so when a
-    -- sweep has ARRIVED at an end and that scene still holds some of those, say
-    -- which key finishes the job — otherwise "I swept all the way to B and it
-    -- doesn't sound like B" is a mystery instead of a fact. only while the morph
-    -- is what's driving (parked at 0 from boot claims nothing).
-    local sc_end = amt >= 0.999 and b or (amt <= 0.001 and a or nil)
-    if sc_end and sc.engaged and sc.unlanded(sc_end) then
-      ptext_c("RCL " .. (amt >= 0.999 and "B" or "A") .. " TO LAND", 64, 14, 1, 5)
+    -- sweep has ARRIVED and that scene still holds some of those, say which key
+    -- finishes the job — otherwise "I swept all the way there and it doesn't
+    -- sound like the scene" is a mystery instead of a fact.
+    if amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
+      ptext_c("K2 TO LAND THE REST", 64, 14, 1, 5)
     end
   end
 
@@ -3681,12 +3705,6 @@ local function body_SCENE(frame)
       screen.stroke()
     end
     ptext_c(tostring(i), x + 7, 23, 1, (filled or pending or flash) and 0 or 5)
-    -- the morph endpoints get a tick, tying them to the A?/B? labels below
-    if i == a or i == b then
-      screen.level(9)
-      screen.rect(x + 5, 32, 3, 1)
-      screen.fill()
-    end
     if i == sel then
       screen.level(15)
       screen.rect(x - 0.5, 20.5, 14, 11)
@@ -3695,38 +3713,22 @@ local function body_SCENE(frame)
   end
 
   -- the morph: A on the left, B on the right, the handle at the amount
-  -- the bottom row teaches the workflow, because a scene bank can't prove
-  -- itself in one press: you have to store a sound, make a DIFFERENT one, and
-  -- come back. one slot filled is the step everybody stalls on — recalling it
-  -- re-applies what you're already playing and nothing happens, which reads as
-  -- broken. so say the next move instead of showing a morph bar that can't run.
-  local A, B = sc.slots[a], sc.slots[b]
+  -- the morph: from the sound you have (LIVE) toward the selected slot. one
+  -- stored scene is enough to play with — capture, mangle, then slide back —
+  -- which is why the bank no longer has to nag you for a second one.
   if nfilled == 0 then
     ptext_c("EMPTY - K3 CAP", 64, 35, 1, 4)
     return
   end
-  if nfilled == 1 then
-    -- name the next EMPTY slot: "capture a second one" is the move, and being
-    -- concrete about where beats being vague. one line — two would crowd the
-    -- footer, and 124px is the centered limit (measure with text_w before
-    -- adding words; it is easy to sail past it and clip both ends).
-    local nxt = 1
-    for i = 1, 8 do
-      if not sc.slots[i] then nxt = i break end
-    end
-    ptext_c("CHANGE SOUND - CAP SLOT " .. nxt, 64, 35, 1, 6)
+  if not sc.slots[sel] then
+    ptext_c("SLOT " .. sel .. " EMPTY - K3 CAP", 64, 35, 1, 4)
     return
   end
-  if not (A and B) then
-    ptext_c("MORPH: K1+E2 = A - K1+E3 = B", 64, 35, 1, 3)
-    return
-  end
-  -- the end you're standing on reads bright; parked at either end the handle
-  -- dims (nothing is being morphed — the audibility rule, for a gesture)
+  -- the end you're standing on reads bright; mid-sweep the handle is live
   local live = amt > 0.001 and amt < 0.999
-  ptext("A" .. a, 2, 35, 1, amt < 0.5 and 12 or 5)
-  ptext_r("B" .. b, 126, 35, 1, amt >= 0.5 and 12 or 5)
-  local x0, x1 = 18, 110
+  ptext("LIVE", 2, 35, 1, amt < 0.5 and 12 or 4)
+  ptext_r(tostring(sel), 126, 35, 1, amt >= 0.5 and 12 or 4)
+  local x0, x1 = 24, 116
   screen.level(3)
   screen.move(x0, 38)
   screen.line(x1, 38)
@@ -4146,11 +4148,10 @@ local ENC_MAP = {
   -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
   -- clock_tempo is a SYSTEM param (referenced, never added).
   SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
-  -- SCENE (S19): E2 picks the slot K2/K3 act on, E3 IS the morph — the one
-  -- knob that walks the whole instrument from scene A to scene B. the
-  -- endpoints sit on the alt layer (K1+E2 = A, K1+E3 = B), so picking them
-  -- and playing the sweep never fight over an encoder.
-  SCENE   = { "scene_slot", "scene_morph_a", "scene_morph_amt", "scene_morph_b" },
+  -- SCENE (S19): E2 picks the slot — the ONE selector: K2 recalls it, K3
+  -- captures into it, and E3 morphs toward it from wherever you are. K1+E2
+  -- sets when a recall lands (now / next beat / next bar).
+  SCENE   = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -4683,18 +4684,20 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 11)
-  -- selectors: the slot K2/K3 act on, and the two morph endpoints
+  params:add_group("grp_scene", "scenes", 9)
+  -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
+  -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
+  -- alt layer, where you couldn't see them. see mscenes' morph_from.)
   params:add_number("scene_slot", "scene slot", 1, 8, 1)
-  params:add_number("scene_morph_a", "morph A", 1, 8, 1)
-  params:set_action("scene_morph_a", function() Mscenes.invalidate() end)
-  params:add_number("scene_morph_b", "morph B", 1, 8, 2)
-  params:set_action("scene_morph_b", function() Mscenes.invalidate() end)
-  -- THE performance knob: sweeps the instrument A -> B. MIDI-map it to a
-  -- fader/pedal, or record it with the gesture looper (it's in MOTION_IDS —
-  -- one lane replays the whole sweep). changing A/B never writes params on
-  -- its own; this does, and only from the next frame's tick (mscenes coalesces
-  -- so a fast CC can't flood the engine).
+  params:set_action("scene_slot", function()
+    -- re-aim a sweep in progress; at rest, picking a slot must stay silent
+    if pget("scene_morph_amt", 0) > 0 then Mscenes.touch() end
+  end)
+  -- THE performance knob: sweeps from the sound you have toward the selected
+  -- slot. MIDI-map it to a fader/pedal, or record it with the gesture looper
+  -- (it's in MOTION_IDS — one lane replays the whole sweep). only this writes
+  -- params, and only from the next frame's tick (mscenes coalesces so a fast
+  -- CC can't flood the engine).
   params:add_control("scene_morph_amt", "morph amount",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)

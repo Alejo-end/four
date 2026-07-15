@@ -164,10 +164,13 @@ end
 -- SCENE page (S19): like SEQ, the grid follows the screen — while the SCENE
 -- page is up the whole surface becomes the scene bank.
 --
---   row 1  the 8 slots: tap = recall (quantized per scene_recall_mode).
+--   row 1  the 8 slots: tap = JUMP (recall, quantized per scene_recall_mode).
 --          hold CAP and tap = capture into it; hold CLR and tap = clear it
---   row 3  morph endpoint A        row 4  morph endpoint B
---   row 6  morph amount, 8 steps (tap one — the sweep in reach of a finger)
+--   row 3  AIM: tap = point the morph at that slot WITHOUT jumping to it.
+--          (row 1 recalls, so it can't double as the morph target — you'd
+--          already be there and the sweep would have nowhere to go.)
+--   row 5  morph amount, 8 steps: slide from the sound you have toward the
+--          aimed slot — the sweep in reach of a finger
 --   row 8  [CAP] [CLR] · [CHAOS, hold] · · [SAFE] [UNDO]
 --
 -- every pad drives a param, so it does exactly what the screen keys do.
@@ -193,16 +196,13 @@ local function scene_grid_key(x, y, z)
     if scene_mod.cap then C.scene_capture(x)
     elseif scene_mod.clr then C.scene_clear(x)
     else C.scene_recall(x) end
-  elseif y == 3 then params:set("scene_morph_a", x)
-  elseif y == 4 then params:set("scene_morph_b", x)
-  elseif y == 6 then params:set("scene_morph_amt", (x - 1) / 7) end
+  elseif y == 3 then params:set("scene_slot", x)             -- aim, don't jump
+  elseif y == 5 then params:set("scene_morph_amt", (x - 1) / 7) end
 end
 
 local function scene_redraw()
   local sc = C.scene
   local sel = floor(pget("scene_slot", 1) + 0.5)
-  local a = floor(pget("scene_morph_a", 1) + 0.5)
-  local b = floor(pget("scene_morph_b", 2) + 0.5)
   -- row 1: the bank. queued recall blinks, selected is bright, occupied mid,
   -- empty barely there — the same brightness-is-truth rule as the screen.
   for x = 1, 8 do
@@ -214,17 +214,14 @@ local function scene_redraw()
     else lvl = 1 end
     gg:led(x, 1, lvl)
   end
-  -- rows 3/4: the morph endpoints (lit = chosen, dim = a slot with something
-  -- in it to choose)
+  -- row 3: where the morph is aimed (lit = aimed, dim = a slot worth aiming at)
   for x = 1, 8 do
-    local filled = sc.slots[x] ~= nil
-    gg:led(x, 3, x == a and 15 or (filled and 4 or 1))
-    gg:led(x, 4, x == b and 15 or (filled and 4 or 1))
+    gg:led(x, 3, x == sel and 15 or (sc.slots[x] and 4 or 1))
   end
-  -- row 6: the morph amount as a bar with a bright head
+  -- row 5: the morph amount as a bar with a bright head
   local head = floor(pget("scene_morph_amt", 0) * 7 + 0.5) + 1
   for x = 1, 8 do
-    gg:led(x, 6, x == head and 15 or (x < head and 5 or 1))
+    gg:led(x, 5, x == head and 15 or (x < head and 5 or 1))
   end
   -- row 8: modifiers (lit while held), chaos (lit while thrown), the pair of
   -- safety pads (dark until there's a safe state to go back to)

@@ -1168,3 +1168,48 @@ sampler. Don't reintroduce it.
    fast — expected.
 5. The loaded sample must slice on PADS and fire from SEQ exactly like a recorded take.
 6. PSET save/load round-trips the sample path.
+
+### S19c — scenes: one selector, not three (Lua-only, fingerprint STAYS 61)
+
+**"The scenes are hard to use" — said three times.** Twice I answered it as a feedback problem
+(§S19b). The third time it was the model. This is the fix, and it is a deletion.
+
+**What was wrong.** Capturing a scene ALREADY tells the instrument which slots you care about.
+The morph then made you say it twice more — as `morph A` and `morph B`, on the **alt layer**,
+where they are invisible until you hold K1. Six steps before you heard anything, two of them
+hidden, and a bank that couldn't do a thing until you'd filled TWO slots.
+
+**The model now: from HERE to the slot you're pointed at.** `scene_slot` is the ONE selector and
+it has three jobs — K2 recalls it, K3 captures into it, E3 morphs toward it. The morph's near end
+is captured implicitly (`morph_from`) on the rising edge out of 0, so it is always "the sound I
+was making". Sweep back to 0 and you land exactly where you started; `morph_from` is dropped
+there (and by `invalidate`, i.e. any recall/capture/restore/throw), so the next sweep departs
+from wherever you are by then. `scene_morph_a`/`scene_morph_b` are **deleted**; `grp_scene` 11 → 9;
+the freed alt encoder took `scene_recall_mode`, which was PARAMS-only before.
+
+**What this buys.** It can still do the old A→B (recall A, then sweep toward B — fewer steps than
+before), and it adds the thing the old model could not: **ONE captured scene is immediately
+musical.** Capture a sound, mangle it however you like, then slide E3 back toward it and stop
+anywhere in between. The "you need a second slot before anything happens" teaching hint is gone
+because the situation it taught around is gone.
+
+**The trade, stated plainly.** The morph is now RELATIVE, so a sweep recorded by the gesture
+looper replays from wherever the instrument is at replay time rather than from a fixed A. That is
+inherent to "from here", it is musically reasonable (the sweep is a move, not a coordinate), and
+it is the price of deleting two selectors. Noted so nobody rediscovers it as a bug.
+
+**UI.** The bar reads `LIVE ——●—— n`, the aimed slot wears the cursor, and at amt=1 an unlanded
+scene says `K2 TO LAND THE REST` (see §S19b). **Grid:** row 1 taps still RECALL (a scene
+launcher's natural gesture), so row 3 is **AIM** — point the morph at a slot without jumping to
+it; row 1 can't double as the target because you'd already be there and the sweep would have
+nowhere to go. Row 5 is the 8-step morph bar.
+
+**Verified:** 229 assertions. New properties — aiming does NOT jump; amt 1 lands on the slot;
+amt 0 returns home EXACTLY; the warped midpoint is measured from the live sound; re-aiming
+mid-sweep re-targets from the same near end; **one scene + a sweep is musical**; the endpoint
+selectors are gone (`params.lookup` asserts their absence). Renders: only SCENE frames moved;
+scene.png regenerated; dist byte-verified.
+
+**Gate:** capture ONE scene. Mangle the sound. Sweep E3 → it slides back toward the scene, and
+stops anywhere between. Sweep to 0 → exactly the mangled sound again. E2 to another slot mid-sweep
+→ it re-aims. Nothing needs the alt layer to work.

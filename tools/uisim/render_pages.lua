@@ -701,10 +701,9 @@ else
   redraw()
   export(pfx("SCENE", "_SAME"))
   run_ticks(20)
-  -- the morph: A=1, B=4, parked halfway. the handle rides the bar bright,
-  -- both endpoint ticks show under their slots
-  params:set("scene_morph_a", 1)
-  params:set("scene_morph_b", 4)
+  -- the morph: aim at slot 4 (E2), sweep halfway. there is no A/B to set —
+  -- the other end is simply the sound you had when the sweep left 0.
+  params:set("scene_slot", 4)
   params:set("scene_morph_amt", 0.5)
   run_ticks(3)                         -- the tick applies the sweep
   redraw()
@@ -730,13 +729,12 @@ else
   params:set("scene_slot", 7)
   params:set("scene_capture", 1) params:set("scene_capture", 0)
   params:set("freeze", 0)
-  params:set("scene_morph_b", 7)
   params:set("scene_morph_amt", 1)
   run_ticks(3)
   redraw()
   export(pfx("SCENE", "_UNLANDED"))
   params:set("scene_morph_amt", 0)
-  params:set("scene_morph_b", 4)
+  run_ticks(2)
 end
 
 print("done: " .. TICK .. " ticks")

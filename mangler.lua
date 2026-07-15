@@ -38,8 +38,9 @@
 --         PADS  MOTION  SEQ  SCENE
 --
 -- SCENE   8 slots that remember the whole sound (not the audio): K3 CAP, K2
---   RCL (immediately or on the next beat/bar). E3 MORPHS between two slots —
---   one knob walks the instrument from A to B. the alt keys are the way back:
+--   RCL (immediately or on the next beat/bar). E3 MORPHS from the sound you
+--   have toward the selected slot — one scene is enough to play with. the alt
+--   keys are the way back:
 --   K1+K3 SAFE marks a state, K1+K2 UNDO returns to it, so you can throw the
 --   thing off a cliff and be home in one press. PARAMS > scenes maps all of
 --   it to MIDI (a capture/recall/undo footswitch, a morph fader, and
@@ -489,11 +490,10 @@ local ENC_MAP = {
   -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
   -- clock_tempo is a SYSTEM param (referenced, never added).
   SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
-  -- SCENE (S19): E2 picks the slot K2/K3 act on, E3 IS the morph — the one
-  -- knob that walks the whole instrument from scene A to scene B. the
-  -- endpoints sit on the alt layer (K1+E2 = A, K1+E3 = B), so picking them
-  -- and playing the sweep never fight over an encoder.
-  SCENE   = { "scene_slot", "scene_morph_a", "scene_morph_amt", "scene_morph_b" },
+  -- SCENE (S19): E2 picks the slot — the ONE selector: K2 recalls it, K3
+  -- captures into it, and E3 morphs toward it from wherever you are. K1+E2
+  -- sets when a recall lands (now / next beat / next bar).
+  SCENE   = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
 }
 
 -- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
@@ -1026,18 +1026,20 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 11)
-  -- selectors: the slot K2/K3 act on, and the two morph endpoints
+  params:add_group("grp_scene", "scenes", 9)
+  -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
+  -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
+  -- alt layer, where you couldn't see them. see mscenes' morph_from.)
   params:add_number("scene_slot", "scene slot", 1, 8, 1)
-  params:add_number("scene_morph_a", "morph A", 1, 8, 1)
-  params:set_action("scene_morph_a", function() Mscenes.invalidate() end)
-  params:add_number("scene_morph_b", "morph B", 1, 8, 2)
-  params:set_action("scene_morph_b", function() Mscenes.invalidate() end)
-  -- THE performance knob: sweeps the instrument A -> B. MIDI-map it to a
-  -- fader/pedal, or record it with the gesture looper (it's in MOTION_IDS —
-  -- one lane replays the whole sweep). changing A/B never writes params on
-  -- its own; this does, and only from the next frame's tick (mscenes coalesces
-  -- so a fast CC can't flood the engine).
+  params:set_action("scene_slot", function()
+    -- re-aim a sweep in progress; at rest, picking a slot must stay silent
+    if pget("scene_morph_amt", 0) > 0 then Mscenes.touch() end
+  end)
+  -- THE performance knob: sweeps from the sound you have toward the selected
+  -- slot. MIDI-map it to a fader/pedal, or record it with the gesture looper
+  -- (it's in MOTION_IDS — one lane replays the whole sweep). only this writes
+  -- params, and only from the next frame's tick (mscenes coalesces so a fast
+  -- CC can't flood the engine).
   params:add_control("scene_morph_amt", "morph amount",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)

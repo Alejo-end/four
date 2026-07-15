@@ -189,6 +189,20 @@ local morphing = false   -- re-entry guard (a param action must never recurse)
 local last_sent = {}     -- morph: the last value/norm we pushed, per param
 local pending_clock      -- the quantized-recall coroutine (nil = none)
 
+-- THE MORPH'S OTHER END: the sound you were making when you started sweeping.
+-- taken on the rising edge out of 0 and dropped when you come home to 0 (or
+-- when something else moves the instrument — see invalidate).
+--
+-- this replaced an A/B pair of slot selectors. capturing a scene ALREADY tells
+-- the instrument which slots you care about; making you then name them again as
+-- A and B — on the alt layer, where they're invisible until you hold K1 — was
+-- two selectors too many and six steps before you heard anything. "from HERE to
+-- that slot" is what a performer means, needs no selector at all, and can still
+-- do the old A->B: recall A (K2), then sweep toward B. it also makes ONE stored
+-- scene immediately useful, which the old model couldn't: with a single capture
+-- you can mangle the sound and slide back toward it.
+local morph_from = nil
+
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
 
 -- ===========================================================================
@@ -224,8 +238,10 @@ end
 function M.invalidate()
   for k in pairs(last_sent) do last_sent[k] = nil end
   -- ...and the morph is no longer what's driving the sound: something else
-  -- (a recall, a restore, a throw, a new endpoint) just moved it off the line
+  -- (a recall, a restore, a throw) just moved it off the line. drop the "from"
+  -- with it — we are somewhere new, so the next sweep starts from HERE.
   M.engaged = false
+  morph_from = nil
 end
 
 -- ===========================================================================
@@ -443,16 +459,23 @@ end
 -- without being coarse enough to see or hear.
 local MORPH_EPS = 1 / 400
 
--- morph the instrument to `amt` (0..1) along slot a -> slot b.
+-- morph `amt` (0..1) of the way from where you were toward `slot`.
+--   amt 0   the sound you had when you started sweeping (exactly)
+--   amt 1   that slot's stored sound (exactly, for the morph-safe subset)
 --   opts.force   send every param even if it hasn't moved
 --   opts.linear  interpolate raw values instead of controlspec space
--- returns false when either slot is empty (nothing to interpolate between).
-function M.morph(a, b, amt, opts)
+-- returns false when the slot is empty, or when there's nothing to do (parked
+-- at 0 with no sweep in progress — at rest the sound is just the sound).
+function M.morph(slot, amt, opts)
   if morphing then return false end    -- a param action can never recurse in
-  local A, B = M.slots[slot_idx(a)], M.slots[slot_idx(b)]
-  if not (A and B) then return false end
+  local B = M.slots[slot_idx(slot)]
+  if not B then return false end
   opts = opts or {}
   amt = clamp(amt or 0, 0, 1)
+  if amt <= 0 and not morph_from then return false end
+  -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
+  local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
+  morph_from = A
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
   local force = opts.force or amt <= 0 or amt >= 1
   morphing = true
@@ -460,7 +483,7 @@ function M.morph(a, b, amt, opts)
   for i = 1, #ids do
     local id = ids[i]
     local va, vb = A[id], B[id]
-    -- skip anything either scene doesn't have (older capture, missing param)
+    -- skip anything either side doesn't have (older capture, missing param)
     if va ~= nil and vb ~= nil and params.lookup[id] then
       local v, tn = morph_value(id, va, vb, amt, opts.linear)
       if v ~= nil then
@@ -478,7 +501,14 @@ function M.morph(a, b, amt, opts)
   end
   morphing = false
   M.morph_at = amt
-  M.engaged = true      -- the morph is now what's driving the sound
+  M.engaged = amt > 0   -- the morph is what's driving the sound... unless home
+  if amt <= 0 then
+    -- home again, exactly where you started. forget the "from" so the NEXT
+    -- sweep departs from wherever you are by then, and forget what we sent so
+    -- it re-asserts from scratch.
+    morph_from = nil
+    for k in pairs(last_sent) do last_sent[k] = nil end
+  end
   return true
 end
 
@@ -508,11 +538,12 @@ function M.touch()
 end
 
 -- one per redraw frame, from the existing 15fps clock in mangler.lua.
+-- the target is simply the SELECTED slot — the same one K2 recalls and K3
+-- captures into. one selector, three jobs.
 function M.tick()
   if not dirty then return end
   dirty = false
-  M.morph(pget("scene_morph_a", 1), pget("scene_morph_b", 2),
-    pget("scene_morph_amt", 0))
+  M.morph(pget("scene_slot", 1), pget("scene_morph_amt", 0))
 end
 
 -- ===========================================================================
