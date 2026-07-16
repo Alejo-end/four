@@ -12,15 +12,15 @@ local midi_devices = {}
 local C     -- shared ctx, bound at init
 local pget, ptoggle, FPS
 
--- true when vport i holds the device midigrid adopted as the grid: its
--- note-ons are grid pads, not notes. norns dispatches midi to BOTH the
--- device-level handler (which midigrid uses) and the vport-level handler
--- (which we use), so without this filter every pad press would also yank
--- `pitch` to whatever the pad's raw note number maps to.
+-- true when vport i holds the device the grid layer adopted (midigrid, OR the
+-- native Launchpad Mini MK3 colour driver): its note-ons are grid pads, not
+-- notes. norns dispatches midi to BOTH the device-level handler (which those
+-- use) and the vport-level handler (which we use), so without this filter every
+-- pad press would also yank `pitch` to whatever the pad's raw note maps to.
 local function is_grid_vport(i)
   local G = C.grid
   local gg = G.gg
-  if not (G.have_midigrid and gg and gg.device) then return false end
+  if not ((G.have_midigrid or G.have_launchpad) and gg and gg.device) then return false end
   local vp = midi.vports[i]
   local dev = vp and vp.device
   if not dev then return false end

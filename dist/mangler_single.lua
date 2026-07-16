@@ -577,15 +577,15 @@ local midi_devices = {}
 local C     -- shared ctx, bound at init
 local pget, ptoggle, FPS
 
--- true when vport i holds the device midigrid adopted as the grid: its
--- note-ons are grid pads, not notes. norns dispatches midi to BOTH the
--- device-level handler (which midigrid uses) and the vport-level handler
--- (which we use), so without this filter every pad press would also yank
--- `pitch` to whatever the pad's raw note number maps to.
+-- true when vport i holds the device the grid layer adopted (midigrid, OR the
+-- native Launchpad Mini MK3 colour driver): its note-ons are grid pads, not
+-- notes. norns dispatches midi to BOTH the device-level handler (which those
+-- use) and the vport-level handler (which we use), so without this filter every
+-- pad press would also yank `pitch` to whatever the pad's raw note maps to.
 local function is_grid_vport(i)
   local G = C.grid
   local gg = G.gg
-  if not (G.have_midigrid and gg and gg.device) then return false end
+  if not ((G.have_midigrid or G.have_launchpad) and gg and gg.device) then return false end
   local vp = midi.vports[i]
   local dev = vp and vp.device
   if not dev then return false end
@@ -730,13 +730,18 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
-local M = { gg = nil, have_midigrid = false }
+local M = { gg = nil, have_midigrid = false, have_launchpad = false }
 
 local grid_mod = grid
+local no_monome = false    -- true when no native monome grid holds grid vport 1
 do
   local gname = (grid.vports and grid.vports[1] and grid.vports[1].name)
     or "none"
-  if gname == "none" and util.file_exists(_path.code .. "midigrid") then
+  no_monome = gname == "none"
+  -- midigrid is loaded as the FALLBACK backend; a Launchpad Mini MK3 is
+  -- preferred over it at connect time (real per-pad colour vs midigrid's
+  -- monochrome emulation — see the Launchpad driver below).
+  if no_monome and util.file_exists(_path.code .. "midigrid") then
     -- pcall: a broken midigrid install must not take mangler down with it
     local ok, mg = pcall(include, "midigrid/lib/midigrid")
     if ok and mg then
@@ -747,6 +752,127 @@ do
       print("mangler: midigrid present but failed to load: " .. tostring(mg))
     end
   end
+end
+
+-- ============================================================================
+-- Launchpad Mini MK3 — native colour driver (optional)
+-- ============================================================================
+-- midigrid emulates a MONOCHROME grid, so on a launchpad every state shows as
+-- one hue at different brightness ("shades of yellow"). This driver talks to a
+-- Mini MK3 DIRECTLY in Programmer mode and lights each pad with a real RGB
+-- colour, while still feeding pad presses to the same grid_key handler. It
+-- takes priority over midigrid when a Mini MK3 is attached; every device call
+-- is guarded (pcall) so a missing/renamed/odd device falls back to midigrid/
+-- native cleanly — it can't brick. Protocol verified against Novation's
+-- "Launchpad Mini MK3 Programmer's Reference" (SysEx, note grid, RGB lighting).
+
+-- SysEx: enter Programmer mode / return to Live (device id 0x0D); RGB LED
+-- header (command 0x03) is followed by colourspecs `03 <note> <R> <G> <B>`.
+local LP_PROG    = { 0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E, 0x01, 0xF7 }
+local LP_LIVE    = { 0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x0E, 0x00, 0xF7 }
+local LP_RGB_HDR = { 0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x03 }
+
+-- norns brightness 0-15 -> Launchpad RGB (each 0-127, i.e. hex/2). The grid
+-- draw code sends BRIGHTNESS; we colour it here. The sequencer uses a few
+-- UNIQUE levels (7, 9, 13 appear nowhere else on the grid — see draw_pads_ws)
+-- so its states get their OWN hues: rest=blue, note=green, slice=orange,
+-- clear=red, playhead=white; shared levels stay a calm blue/teal/white so the
+-- whole surface reads cleanly. Every triple is tweakable live on the device.
+local LP_RGB = {
+  [0]  = { 0, 0, 0 },       -- off
+  [1]  = { 7, 7, 13 },      -- near-black         (empty slot / disabled key)
+  [2]  = { 16, 16, 34 },    -- dim blue-grey      (idle strip)
+  [3]  = { 26, 26, 100 },   -- BLUE               (seq rest / low states)
+  [4]  = { 34, 34, 48 },    -- soft grey-blue     (white key / filled slot)
+  [5]  = { 24, 60, 90 },    -- steel blue         (morph filled)
+  [6]  = { 30, 96, 110 },   -- teal               (in-region slice / gap pad)
+  [7]  = { 110, 22, 22 },   -- RED                (seq clear pad)
+  [8]  = { 120, 84, 34 },   -- amber              (safe cell)
+  [9]  = { 28, 115, 40 },   -- GREEN              (seq note ON / pressed step)
+  [10] = { 40, 110, 120 },  -- cyan               (latched state)
+  [11] = { 42, 112, 46 },   -- green              (run / rec write head)
+  [12] = { 122, 104, 28 },  -- YELLOW             (mode selected / quantize)
+  [13] = { 127, 66, 8 },    -- ORANGE             (seq slice selected)
+  [14] = { 90, 90, 110 },   -- (spare)
+  [15] = { 120, 120, 120 }, -- WHITE              (playhead / selection / writes)
+}
+
+-- programmer-mode pad note <-> (x,y); y=1 is the TOP row, LP row 8 (notes 81-88)
+local function lp_note(x, y) return (9 - y) * 10 + x end
+local function lp_xy(note)
+  local x, row = note % 10, floor(note / 10)
+  if x < 1 or x > 8 or row < 1 or row > 8 then return nil end
+  return x, 9 - row
+end
+
+-- find the Mini MK3's MIDI (surface) port, NOT the DAW port. ALSA names vary,
+-- so match "mk3" + a launchpad marker and prefer the MIDI/2nd interface.
+local function lp_find_device()
+  if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
+  local best
+  for _, dev in pairs(midi.devices) do
+    local n = (type(dev) == "table" and type(dev.name) == "string")
+      and dev.name:lower() or ""
+    if n:find("mk3", 1, true)
+        and (n:find("mini", 1, true) or n:find("lpmini", 1, true)) then
+      local is_daw = n:find("daw", 1, true) ~= nil
+      if not is_daw and (n:find("midi", 1, true) or n:find("2")) then
+        return dev                       -- the surface/MIDI port: take it
+      end
+      if not is_daw then best = best or dev end
+    end
+  end
+  return best
+end
+
+-- a monome-grid-shaped backend over the Mini MK3: mgrid's draw code calls
+-- gg:led/all/refresh with brightness; we buffer, diff, and push RGB SysEx.
+local function lp_make_backend(dev)
+  return { connect = function()
+    if not pcall(function() dev:send(LP_PROG) end) then return nil end
+    local gg = { device = dev, rows = 8, cols = 8, key = nil }
+    local buf, sent = {}, {}
+    function gg:led(x, y, z)
+      if x >= 1 and x <= 8 and y >= 1 and y <= 8 then
+        buf[lp_note(x, y)] = max(0, min(15, floor((z or 0) + 0.5)))
+      end
+    end
+    function gg:all(z)
+      local lvl = max(0, min(15, floor((z or 0) + 0.5)))
+      for yy = 1, 8 do for xx = 1, 8 do buf[lp_note(xx, yy)] = lvl end end
+    end
+    function gg:refresh()                -- one SysEx carries every changed pad
+      local m = { table.unpack(LP_RGB_HDR) }
+      local changed = false
+      for yy = 1, 8 do for xx = 1, 8 do
+        local note = lp_note(xx, yy)
+        local lvl = buf[note] or 0
+        if sent[note] ~= lvl then
+          sent[note] = lvl
+          local c = LP_RGB[lvl] or LP_RGB[0]
+          m[#m + 1] = 0x03               -- colourspec: RGB
+          m[#m + 1] = note
+          m[#m + 1] = c[1]; m[#m + 1] = c[2]; m[#m + 1] = c[3]
+          changed = true
+        end
+      end end
+      if not changed then return end
+      m[#m + 1] = 0xF7
+      pcall(function() dev:send(m) end)
+    end
+    function gg:shutdown() pcall(function() dev:send(LP_LIVE) end) end
+    dev.event = function(data)           -- pad presses -> the grid_key handler
+      local ok, msg = pcall(midi.to_msg, data)
+      if not ok or type(msg) ~= "table" then return end
+      if msg.type == "note_on" or msg.type == "note_off" then
+        local x, y = lp_xy(msg.note or -1)
+        if x and gg.key then
+          gg.key(x, y, (msg.type == "note_on" and (msg.vel or 0) > 0) and 1 or 0)
+        end
+      end
+    end
+    return gg
+  end }
 end
 
 local gg  -- connected grid; no device attached until one is
@@ -1091,7 +1217,24 @@ function M.redraw()
 end
 
 function M.connect()
-  gg = grid_mod.connect()
+  gg = nil
+  -- prefer a native Launchpad Mini MK3 colour driver over midigrid/native when
+  -- no monome grid is attached; on ANY failure fall back — can't brick.
+  if no_monome then
+    local lp = lp_find_device()
+    if lp then
+      local ok, cand = pcall(function() return lp_make_backend(lp).connect() end)
+      if ok and cand then
+        gg = cand
+        M.have_launchpad = true
+        M.have_midigrid = false     -- the LP is driving, not midigrid
+        print("mangler: Launchpad Mini MK3 colour driver — " .. tostring(lp.name))
+      else
+        print("mangler: Mini MK3 found but colour driver failed; using fallback")
+      end
+    end
+  end
+  if not gg then gg = grid_mod.connect() end   -- midigrid or native grid
   M.gg = gg
   if gg then gg.key = grid_key end
 end
@@ -1103,6 +1246,8 @@ function M.cleanup()
       gg:all(0)
       gg:refresh()
     end
+    if gg.shutdown then gg:shutdown() end        -- LP: return to Live mode
+    if M.have_launchpad and gg.device then gg.device.event = nil end
   end
 end
 
