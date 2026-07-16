@@ -321,6 +321,24 @@ local function draw_main_ws()
   gg:led(8, 5, (en and pget("pitch_quant", 0) == 1) and 12 or (en and 3 or 1))
 end
 
+-- Grid sequencer LED map. mangler can only send BRIGHTNESS 0-15 (monome grids
+-- are monochrome); on a launchpad, midigrid translates each brightness to a
+-- colour via its own palette. The old scheme (rest 2, active 8, playhead 15)
+-- put active + playhead both high on that ramp, so on a launchpad they read as
+-- two shades of the same yellow — the reported confusion. These values are
+-- pushed as far apart as brightness allows AND chosen to land on DISTINCT
+-- palette entries on RGB-launchpad midigrid builds, so a pressed step is
+-- clearly not an empty one. Intended colour per state (realised by midigrid;
+-- confirm on your device — the exact hue is your launchpad's palette, not ours):
+--   SEQ_OFF   0   beyond loop length   off / dark
+--   SEQ_REST  3   in length, no note   dim  (blue on RGB palettes)
+--   SEQ_ON    9   note ON (pressed)    green
+--   SEQ_HEAD 15   the playhead step    white / full-bright
+-- Row 5 slice-select and row 6 run/clear get their own separated levels too.
+local SEQ_OFF, SEQ_REST, SEQ_ON, SEQ_HEAD = 0, 3, 9, 15
+local SEQ_SLICE_ON, SEQ_SLICE_OFF = 13, 4   -- selected slice (orange) vs rest
+local SEQ_RUN_ON, SEQ_RUN_OFF, SEQ_CLR = 11, 4, 7  -- run(green)/idle · clear(red)
+
 local function draw_pads_ws()
   local sq = C.seq
   local len = pget("seq_len", 16)
@@ -330,16 +348,16 @@ local function draw_pads_ws()
     local x = ((i - 1) % 8) + 1
     local y = i <= 8 and 3 or 4
     local lvl
-    if i > len then lvl = 0
-    elseif playing and i == pos then lvl = 15
-    elseif sq.pattern[i] then lvl = 8
-    else lvl = 2 end
+    if i > len then lvl = SEQ_OFF
+    elseif playing and i == pos then lvl = SEQ_HEAD
+    elseif sq.pattern[i] then lvl = SEQ_ON
+    else lvl = SEQ_REST end
     gg:led(x, y, lvl)
   end
   local slice = pget("seq_slice", 0)
-  for x = 1, 8 do gg:led(x, 5, (x - 1) == slice and 15 or 3) end
-  gg:led(1, 6, playing and 15 or 4)   -- run
-  gg:led(8, 6, 4)                     -- clear
+  for x = 1, 8 do gg:led(x, 5, (x - 1) == slice and SEQ_SLICE_ON or SEQ_SLICE_OFF) end
+  gg:led(1, 6, playing and SEQ_RUN_ON or SEQ_RUN_OFF)   -- run
+  gg:led(8, 6, SEQ_CLR)                                 -- clear
 end
 
 local function draw_scene_ws()

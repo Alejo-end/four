@@ -1021,6 +1021,24 @@ local function draw_main_ws()
   gg:led(8, 5, (en and pget("pitch_quant", 0) == 1) and 12 or (en and 3 or 1))
 end
 
+-- Grid sequencer LED map. mangler can only send BRIGHTNESS 0-15 (monome grids
+-- are monochrome); on a launchpad, midigrid translates each brightness to a
+-- colour via its own palette. The old scheme (rest 2, active 8, playhead 15)
+-- put active + playhead both high on that ramp, so on a launchpad they read as
+-- two shades of the same yellow — the reported confusion. These values are
+-- pushed as far apart as brightness allows AND chosen to land on DISTINCT
+-- palette entries on RGB-launchpad midigrid builds, so a pressed step is
+-- clearly not an empty one. Intended colour per state (realised by midigrid;
+-- confirm on your device — the exact hue is your launchpad's palette, not ours):
+--   SEQ_OFF   0   beyond loop length   off / dark
+--   SEQ_REST  3   in length, no note   dim  (blue on RGB palettes)
+--   SEQ_ON    9   note ON (pressed)    green
+--   SEQ_HEAD 15   the playhead step    white / full-bright
+-- Row 5 slice-select and row 6 run/clear get their own separated levels too.
+local SEQ_OFF, SEQ_REST, SEQ_ON, SEQ_HEAD = 0, 3, 9, 15
+local SEQ_SLICE_ON, SEQ_SLICE_OFF = 13, 4   -- selected slice (orange) vs rest
+local SEQ_RUN_ON, SEQ_RUN_OFF, SEQ_CLR = 11, 4, 7  -- run(green)/idle · clear(red)
+
 local function draw_pads_ws()
   local sq = C.seq
   local len = pget("seq_len", 16)
@@ -1030,16 +1048,16 @@ local function draw_pads_ws()
     local x = ((i - 1) % 8) + 1
     local y = i <= 8 and 3 or 4
     local lvl
-    if i > len then lvl = 0
-    elseif playing and i == pos then lvl = 15
-    elseif sq.pattern[i] then lvl = 8
-    else lvl = 2 end
+    if i > len then lvl = SEQ_OFF
+    elseif playing and i == pos then lvl = SEQ_HEAD
+    elseif sq.pattern[i] then lvl = SEQ_ON
+    else lvl = SEQ_REST end
     gg:led(x, y, lvl)
   end
   local slice = pget("seq_slice", 0)
-  for x = 1, 8 do gg:led(x, 5, (x - 1) == slice and 15 or 3) end
-  gg:led(1, 6, playing and 15 or 4)   -- run
-  gg:led(8, 6, 4)                     -- clear
+  for x = 1, 8 do gg:led(x, 5, (x - 1) == slice and SEQ_SLICE_ON or SEQ_SLICE_OFF) end
+  gg:led(1, 6, playing and SEQ_RUN_ON or SEQ_RUN_OFF)   -- run
+  gg:led(8, 6, SEQ_CLR)                                 -- clear
 end
 
 local function draw_scene_ws()
@@ -2494,6 +2512,36 @@ local SHORT = {
   clouds_mode = "CMOD",
 }
 
+-- the FULL word for a footer encoder label. shown at REST (no assumptions —
+-- you read "START", not "ST"); the SHORT form above takes over only while the
+-- value is up (turning, or a selector), where the digits need the room. a full
+-- word that would collide with the key words falls back to SHORT (flabel_r).
+local FULL = {
+  mix = "MIX", out_level = "OUT", sc_level = "ENGINE", cut_level = "TAPE",
+  input_level = "INPUT", monitor_level = "MONITOR",
+  output_level = "OUT", headphone_gain = "HP",
+  rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
+  regen = "REGEN",
+  pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
+  ["@win_move"] = "MOVE", ["@loop_move"] = "MOVE",
+  scan = "SPEED", pitch = "PITCH",
+  size = "SIZE", spread = "SPREAD", density = "DENSITY", grain_level = "GRAIN",
+  clouds_pos = "POSITION", clouds_tex = "TEXTURE", clouds_fb = "FEEDBACK",
+  clouds_lofi = "LOFI",
+  warp_window = "WINDOW", warp_rand = "RANDOM",
+  tape_rate = "RATE", tape_pre = "PRE", loop_start = "START", loop_end = "LOOP",
+  cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
+  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
+  rev_size = "SIZE", rev_mix = "REVERB",
+  rev_decay = "DECAY", rev_damp = "DAMP",
+  shimmer = "SHIMMER", shimmer_pitch = "OCT", shimmer_tone = "AIR",
+  voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
+  motion_lane = "LANE", motion_depth = "DEPTH",
+  seq_euclid = "HITS", seq_len = "LENGTH", seq_div = "DIV", seq_slice = "SLICE",
+  clock_tempo = "TEMPO",
+  scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
+}
+
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
 -- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
 local function param_norm(id)
@@ -2628,16 +2676,31 @@ local function fkey_draw(n, x)
   return w
 end
 
--- one encoder word, right-anchored: WORD· — the value exists only while
--- you're asking (the 1.2s swell), or always on the selector pages
-local function flabel_r(id, rx)
-  local lab = id and (SHORT[id] or "--") or "--"
+-- one encoder word, right-anchored: WORD· — the FULL word at rest (no
+-- assumptions), the SHORT form only while the value is up (turning, or a
+-- selector). the value itself exists only while you're asking (the 1.2s swell),
+-- or always on the selector pages. minx is the key words' right edge: a full
+-- word that would cross it drops to the abbreviation so the row never overlaps.
+local function flabel_r(id, rx, minx)
   local turning = is_turning(id)
   local val
   if id and (turning or SELECTOR_IDS[id]) then val = fmt_value(id) end
+  local function labfor(full)
+    if not id then return "--" end
+    if full then return FULL[id] or SHORT[id] or string.upper(id) end
+    return SHORT[id] or "--"
+  end
+  -- full word by default; abbreviate whenever a value is shown (turning /
+  -- selector), where the digits need the room
+  local full = not val
+  local lab = labfor(full)
   local lvl = turning and 15 or 6
-  local total = text_w(lab, 1) + 3 + (val and text_w(val, 1) or 0)
-  local x = rx - total
+  local function total(l) return text_w(l, 1) + 3 + (val and text_w(val, 1) or 0) end
+  local x = rx - total(lab)
+  if full and minx and x < minx then    -- full word won't fit: drop to SHORT
+    lab = labfor(false)
+    x = rx - total(lab)
+  end
   ptext(lab, x, FY, 1, lvl)
   screen.level(lvl)
   screen.rect(x + text_w(lab, 1) + 1, FY + 2, 1, 1)
@@ -2658,6 +2721,7 @@ local function draw_footer()
   local w = fkey_draw(2, x)
   x = x + w + 9
   w = fkey_draw(3, x)
+  local keys_right = x + w + 4     -- the key words' right edge (labels clear it)
   -- the erase hold-arc beside the K3 word (only where material exists)
   if C.alt and C.k13_frame and C.page_erase() then
     local dt = C.frame - C.k13_frame
@@ -2679,8 +2743,8 @@ local function draw_footer()
       screen.fill()
     end
   end
-  local e3x = flabel_r(C.enc_param(3), 126)
-  flabel_r(C.enc_param(2), e3x - 9)
+  local e3x = flabel_r(C.enc_param(3), 126, keys_right)
+  flabel_r(C.enc_param(2), e3x - 9, keys_right)
 end
 
 -- ============================================================================
@@ -2920,89 +2984,57 @@ local function body_VOICE(frame)
 end
 
 -- ============================================================================
--- 3 · TAPE — the second deck: the BELT (a literal tape loop; material rides
---     the top run, the return run carries the circulation arrow, the head a
---     bright tick with a comet trail; rate inside the loop)
+-- 3 · TAPE — the second deck: the REELS (the physical-tape look, restored per
+--     user over the belt: two reels spin at the effective rate — reverse spins
+--     backward, stopped stands still — above the loop track + head. The loop
+--     readout on the right is kept.)
 -- ============================================================================
+local REEL_X = { 46, 86 }   -- the two reel centers
+local reel_angle = 0        -- persistent spin accumulator, driven by tape rate
 local function body_TAPE(frame)
   local a2, b2 = pget("loop_start", 0), pget("loop_end", 1)
-  local llo, lhi = min(a2, b2), max(a2, b2)
-  local lspan = max(lhi - llo, 0.001)
-  local x0, x1, yt, yb = 22, 106, 22, 42
-  local yc = (yt + yb) / 2
-  local rate = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
-  local fwd = rate >= 0
-  local recing = pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0
-  -- turnarounds + the return run
-  screen.level(4)
-  for t = -1.5707, 1.5708, 0.06 do
-    screen.rect(x1 + cos(t) * 9, yc + sin(t) * 9, 1, 1)
+  local lo, hi = min(a2, b2), max(a2, b2)
+  local lspan = max(hi - lo, 0.001)
+  -- the reels spin at the effective rate: reverse -> backward, stopped -> still
+  local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
+  reel_angle = reel_angle + r * 0.35
+  for _, cx in ipairs(REEL_X) do
+    screen.level(4)
+    screen.circle(cx, 24, 8)
+    screen.stroke()
+    screen.level(6)                      -- hub
+    screen.rect(cx - 1, 23, 3, 3)
+    screen.fill()
+    screen.level(10)                     -- three spokes, inner r2.5 -> r6.5
+    for k = 0, 2 do
+      local a = reel_angle + k * 2.094
+      local ca, sa = cos(a), sin(a)
+      screen.move(cx + ca * 2.5, 24 + sa * 2.5)
+      screen.line(cx + ca * 6.5, 24 + sa * 6.5)
+    end
+    screen.stroke()
   end
-  for t = 1.5707, 4.7124, 0.06 do
-    screen.rect(x0 + cos(t) * 9, yc + sin(t) * 9, 1, 1)
-  end
-  screen.fill()
-  screen.level(4)
-  screen.move(x0, yb) screen.line(x1, yb)
+  screen.level(4)                        -- straight tape guides between the reels
+  screen.move(46, 16) screen.line(86, 16)
+  screen.move(46, 32) screen.line(86, 32)
   screen.stroke()
-  -- circulation arrow on the return (forward: top moves right, return left)
-  local s = fwd and 1 or -1
-  screen.level(7)
-  screen.rect(62 + 2 * s, yb - 2, 1, 1)
-  screen.rect(62 + s, yb - 1, 1, 1)
-  screen.rect(62, yb, 1, 1)
-  screen.rect(62 + s, yb + 1, 1, 1)
-  screen.rect(62 + 2 * s, yb + 2, 1, 1)
-  screen.fill()
-  -- the head: position WITHIN the loop, on the top run
-  local hn = clamp((clamp(C.tape_phase, 0, 1) - llo) / lspan, 0, 1)
-  local hx = floor(x0 + hn * (x1 - x0) + 0.5)
-  -- material: twave indexed through the loop, riding the top run
-  if C.twave_any then
-    local run = 0
-    for x = x0, x1 do
-      local a = twave[floor((llo + (x - x0) / (x1 - x0) * lspan) * 127) + 1] or 0
-      if a > 0.002 then
-        local h = clamp(sqrt(min(a * 2, 1)) * 5, 1, 5)
-        local lvl = 10
-        if recing then
-          local d = (hx - x) * s
-          if d >= 0 and d < 16 then lvl = 15 end   -- punch-in: fresh glow
-        end
-        if lvl ~= run then
-          if run ~= 0 then screen.stroke() end
-          screen.level(lvl)
-          run = lvl
-        end
-        screen.move(x, yt - h)
-        screen.line(x, yt + h)
-      end
-    end
-    if run ~= 0 then screen.stroke() end
-  elseif not recing then
-    ptext_c("EMPTY - K2 REC", 64, yt - 3, 1, 3)
-  end
-  -- quarter-position ticks above the material
-  screen.level(3)
-  for k = 1, 3 do
-    screen.rect(x0 + floor((x1 - x0) * k / 4), yt - 8, 1, 2)
-  end
-  screen.fill()
-  -- comet trail = direction, then the head
-  for k = 8, 1, -1 do
-    local tx = hx - s * k
-    if tx >= x0 and tx <= x1 then
-      screen.level(max(5, 14 - k))
-      screen.rect(tx, yt - 5, 1, 11)
-      screen.fill()
-    end
-  end
+  -- the loop track below (kept): full-width rail, the loop region, the head
+  screen.level(2)
+  screen.move(0, 40) screen.line(128, 40)
+  screen.stroke()
+  screen.level(8)
+  screen.move(lo * 127, 40) screen.line(hi * 127, 40)
+  screen.stroke()
   screen.level(15)
-  screen.move(hx, yt - 6) screen.line(hx, yt + 6)
+  local tx = clamp(C.tape_phase, 0, 1) * 127
+  screen.move(tx, 37) screen.line(tx, 43)
   screen.stroke()
-  -- rate inside the loop, loop length top-right
-  ptext_c(string.format("X%.1f", rate), 64, yc + 1, 1, 8)
   ptext_r(string.format("%.1fS", lspan * 60), 126, 12, 1, 4)
+  if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+    if (frame % FPS) < (FPS / 2) then chip("REC", 2, 12) end
+  elseif not C.twave_any then
+    ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+  end
 end
 
 -- ============================================================================
@@ -3341,9 +3373,17 @@ local function body_PADS(frame)
     local cx = bx0 + i * sw
     local cur = i == C.pad_cursor
     local lit = pad_lit[i] or (firing and i == target)
-    screen.level(cur and 15 or 4)
-    screen.rect(cx + 1.5, 28.5, sw - 3, 10)
-    screen.stroke()
+    if cur then
+      -- the selected cell is a SQUARE that stands 1px proud on every side, so
+      -- it reads as picked instead of as one more small rectangle in the row
+      screen.level(15)
+      screen.rect(cx + sw / 2 - 7, 26.5, 14, 14)
+      screen.stroke()
+    else
+      screen.level(4)
+      screen.rect(cx + 1.5, 28.5, sw - 3, 10)
+      screen.stroke()
+    end
     if lit then
       screen.level(cur and 15 or 9)
       screen.rect(cx + 3, 30, sw - 6, 7)
@@ -3404,13 +3444,21 @@ local function body_MOTION(frame)
     return
   end
   if ll > 0 then
-    ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 12, 1, 4)
+    ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 9, 1, 4)
   end
   local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
-  local VIS = 3
+  local VIS = 4
   local shown = min(nlane, VIS)
-  local top, rh = 18, 12
+  local top, rh = 15, 10
   local gx0, gx1 = 33, 124
+  -- scroll: the VIS-lane window follows the selected lane so every lane is
+  -- reachable (a scrollbar on the right edge shows where in the stack you are)
+  local off = 0
+  if nlane > VIS then
+    local focus = sel > 0 and sel or 1
+    off = clamp(focus - VIS, 0, nlane - VIS)   -- keep the selected lane visible:
+    if focus - 1 < off then off = focus - 1 end --   between the top and bottom row
+  end
   -- drawing length: the loop once set, else the furthest event so far
   local dl = ll
   if dl == 0 then
@@ -3429,10 +3477,11 @@ local function body_MOTION(frame)
   screen.fill()
   local phx = gx0 + (clamp(mo.playhead, 0, dl) / dl) * (gx1 - gx0)
   for row = 1, shown do
-    local id = ids[row]
+    local li = off + row                  -- the lane index this row shows
+    local id = ids[li]
     local L = mo.lanes[id]
     local yb = top + (row - 1) * rh + 8   -- the lane's value baseline
-    local selected = row == sel
+    local selected = li == sel
     ptext(SHORT[id] or string.upper(id), 2, yb - 6, 1, selected and 11 or 5)
     if selected then
       screen.level(15)
@@ -3483,8 +3532,17 @@ local function body_MOTION(frame)
     screen.rect(gx0 - 2.5, top - 4.5, gx1 - gx0 + 6, shown * rh + 5)
     screen.stroke()
   end
+  -- scrollbar (right edge): the VIS-lane window's place in the whole stack
   if nlane > VIS then
-    ptext_r("+" .. (nlane - VIS), 126, top + VIS * rh - 2, 1, 4)
+    local sy0, sy1 = top - 2, top + shown * rh - 3
+    screen.level(2)
+    screen.rect(127, sy0, 1, sy1 - sy0)
+    screen.fill()
+    local th0 = sy0 + (sy1 - sy0) * (off / nlane)
+    local th1 = sy0 + (sy1 - sy0) * ((off + VIS) / nlane)
+    screen.level(9)
+    screen.rect(127, th0, 1, max(1, th1 - th0))
+    screen.fill()
   end
 end
 
@@ -3679,9 +3737,6 @@ local function purity()
   return true
 end
 
--- header dot grouping: gaps after these stations (source·color·out·play)
-local DOT_GAP = { [3] = true, [5] = true, [6] = true }
-
 -- header (NU-1): TITLE ◇ flags ···· path dots. STOP inverts the title chip;
 -- writes (R/T/M) carry the ONLY fast blink; runs are steady.
 local function draw_header()
@@ -3734,19 +3789,28 @@ local function draw_header()
     ptext("TF", x, 1, 1, 10)
     x = x + 12
   end
-  -- path dots: nine stations grouped 3·2·1·3 — the nav row IS the signal map
-  local dx = 87
+  -- path dots, top-right: uniform spacing (restored — the version that rode
+  -- with the reel TAPE page; first x=81, pitch 5, current page a rounded 4x4
+  -- block). the wider current dot nudges every dot after it 2px right so it
+  -- gets matching breathing room.
+  local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   for i = 1, #PAGES do
+    local dx = 81 + (i - 1) * dpitch + (i > page and 2 or 0)
     if i == page then
       screen.level(15)
-      screen.rect(dx - 1, 1, 3, 3)
+      screen.rect(dx, 3, 4, 4)
+      screen.fill()
+      screen.level(0)
+      screen.rect(dx, 3, 1, 1)
+      screen.rect(dx + 3, 3, 1, 1)
+      screen.rect(dx, 6, 1, 1)
+      screen.rect(dx + 3, 6, 1, 1)
+      screen.fill()
     else
       screen.level(3)
-      screen.rect(dx, 2, 2, 2)
+      screen.rect(dx, 4, 2, 2)
+      screen.fill()
     end
-    screen.fill()
-    dx = dx + 4
-    if DOT_GAP[i] then dx = dx + 2 end
   end
 end
 
