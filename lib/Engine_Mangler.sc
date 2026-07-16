@@ -1,90 +1,20 @@
-// Engine_Mangler.sc
-// THE ONLY engine file for the `mangler` norns script.
+// Engine_Mangler.sc — THE ONLY engine file for the `mangler` norns script.
 //
-// STAGE 4 — full instrument: mode-switched playback voice + FILTER/DELAY/
-// REVERB on the wet path in the io synth (each FX with its own dry/wet).
-// Architecture: one persistent io synth (input, record head, dry/wet mix,
-// resample feedback, FX chain, output) + ONE playback (drone) synth at a
-// time, spawned/freed by `mode`: OFF(0) / GRAIN(1) / WARP(2) / PV(3), PLUS
-// (S8) a polyphonic voice layer that coexists with the drone.
-//   GRAIN — GrainBuf clouds (S1 behavior)
-//   WARP  — Warp1 time-stretch: `scan` is speed, `pitch` independent
-//   PV    — phase-vocoder FFT->PV_MagFreeze->IFFT (`pv_freeze` holds spectrum)
-// Playback synths write to play_bus + phase_out; io reads play_bus.
+// HARD RULE: exactly one `Engine_Mangler` class under dust/code. A duplicate
+// hangs every norns script forever on "LOADING".
 //
-// HARD RULE: there must be exactly one `Engine_Mangler` class under dust/code.
-// A duplicate makes every norns script hang forever on "LOADING".
+// Architecture: one persistent `io` synth (input, record head, dry/wet mix,
+// resample/regen feedback, FILTER/DELAY, output) + ONE `mode` drone at a time
+// (OFF/GRAIN/WARP/PV/PLAY, spawned/freed by setMode) + a polyphonic voice layer
+// + a spawn/free reverb synth (updateReverb, only while rev_mix > 0). Drone and
+// voices Out.ar additively onto play_bus; io reads it. Plugin UGens (JPverb,
+// MiClouds, DFM1) are guarded via .asClass -> stock fallback so a missing
+// plugin never bricks the load.
 //
-// S5 GAIN + TONE PASS (on-device gate pending): stock/core UGens only, one
-// gate, fingerprint 31 (only `drive` new). grain overlap comp, equal-power
-// FX mixes, `drive` tanh stage, master Limiter; interp 2->4, delay-feedback
-// LPF, resonance floor 0.05 (mirrored in lib/mpages.lua — keep in sync).
-// S6 REVERB (same batch, still fingerprint 31): FreeVerb -> JPverb guarded
-// by a build-time .asClass check so a missing sc3-plugins falls back instead
-// of bricking.
-//
-// S7 GRANULAR CHARACTER PASS (gate pending, fingerprint 31 -> 34): GRAIN
-// voice de-mechanised, stock UGens only. +3 commands (grain_jitter,
-// grain_pitch_spread, grain_shape).
-//   * triggers Impulse.kr -> Dust.kr: kills periodic buzz + decorrelates L/R
-//   * grain_jitter: per-grain size randomisation (default 0 = identical)
-//   * grain_pitch_spread: per-grain detune in SEMITONES (default 0 = identical)
-//   * grain_shape: 0 built-in Hann / 1 Welch bell / 2 percussive; two env
-//     buffers filled in alloc BEFORE s.sync (DO NOT move that sync).
-//
-// S8 POLYPHONIC VOICE ENGINE (gate pending, fingerprint 34 -> 40): the
-// per-note / per-pad layer scoped 2026-07-02. drone modes untouched; voices
-// spawn into playGroup, Out.ar (additive) onto play_bus, so they mix with
-// the drone and pass through the io FX chain. +6 commands (note_on,
-// note_off, note_one_shot, voices, voice_atk, voice_rel).
-//   * TWO voice SynthDefs, allocator picks by per-pad type (THE SWITCH):
-//       type 0 -> mangler_voice_grain : S7 grain cloud, fixed at note_pos —
-//                 matches the drone sound. reuses size/density/spread/
-//                 grain_* from the live playParams so it tracks the drone.
-//       type 1 -> mangler_voice_slice : PlayBuf slice from note_pos —
-//                 clean/tight, better for kicks & one-shots.
-//   * MPC-tight: fresh Synth per note, sounds a control-block (~1.5ms) after
-//     press, NOT a loop wrap. Env.asr gated + doneAction 2 frees on release
-//     (grain gaps can't premature-free it — env-driven, not silence-driven).
-//     one_shot uses a self-terminating internal gate (Trig held `sustain`).
-//   * polyphony cap = `voices` param (default 8); at cap, OLDEST voice is
-//     release-stolen. held notes tracked by id for note_off; one-shots are
-//     fire-and-forget.
-//   Lua side (separate, in the script): a PADS page calls
-//     engine.note_on(id,pos,pitch,type) / engine.note_off(id) /
-//     engine.note_one_shot(pos,pitch,type) / engine.voices(n). type is the
-//     per-pad grain/slice toggle. NOT built here.
-//
-// NB (learned in S0/S1): context.in_b is an ARRAY of two mono busses; out_b
-// is one stereo bus. An error inside alloc means doneCallback never fires and
-// every load hangs on "loading" — errors land in maiden's SC tab. After
-// editing: SYSTEM > RESTART, then check the command count in the load log
-// (S8/S9 fingerprint: count 40 — S9 is gain constants only, no new commands).
-//
-// S9 HEADROOM (gate pending, still fingerprint 40): poly voices summing on
-// play_bus were slamming the master limiter into pumping on chords. per-voice
-// amp 0.5 -> 0.3 + limiter ceiling 0.98 -> 0.92. no command change.
-//
-// S10 FULL JPVERB (gate pending, fingerprint 40 -> 50): the reverb block now
-// wraps JPverb's ENTIRE attribute set as args (no hardcoding) — +10 commands
-// (rev_decay/damp/early/moddepth/modfreq/low/mid/high/lowcut/highcut). Still
-// guarded (.asClass) so a missing sc3-plugins -> FreeVerb fallback, no brick.
-//
-// S11 -> 55 (clouds), S14 stays 55 (PLAY drone adds no command). S15 SHIMMER
-// (gate pending, fingerprint 55 -> 58): +3 commands (shimmer/shimmer_pitch/
-// shimmer_tone). the reverb gained a pitch-shifted feedback loop; the delay's
-// LocalIn/LocalOut MERGED into ONE LocalIn.ar(4) (SC allows one pair) — delay
-// on ch 0-1, shimmer on ch 2-3, a single deferred LocalOut. shimmer=0 is
-// bit-identical to the old dry reverb (PitchShift still runs, output gated 0).
-//
-// S17 SELF-RESAMPLING / REGEN (gate pending, fingerprint 58 -> 59): +1 command
-// (`regen`). the io record head can now run CONTINUOUSLY (independent of the
-// manual `rec` arm), crossfading the processed OUTPUT back into the buffer so
-// the granular/FX engine slowly re-mangles its own sound (Basinski decay).
-// BOUNDED (convex crossfade preLvl+recLvl=1, output Limiter-capped, LeakDC on
-// the feedback source) so it can't run away; all core UGens so it can't brick;
-// GATED so regen=0 is bit-identical to S15 (regenRun 0 -> the exact old
-// RecordBuf). manual rec and freeze both suspend regen.
+// DEVICE NOTES: context.in_b is an ARRAY of two mono busses, out_b one stereo
+// bus. SC errors land in maiden's SC tab, not matron. Editing this file needs
+// SYSTEM > RESTART (sclang recompiles at startup); confirm the command count in
+// the load log after.
 
 Engine_Mangler : CroneEngine {
     var <ioSynth, <playSynth;
@@ -95,6 +25,9 @@ Engine_Mangler : CroneEngine {
     var <phaseBus, <recPhaseBus, <recAmpBus;
     var <playParams;
     var <ioKeys;
+    // reverb+shimmer spawn/free synth: freed at rev_mix==0. send/return busses
+    // + last-known reverb params (handed over when the synth is spawned).
+    var <revSynth, <revSendBus, <revRetBus, <revParams;
     // S8 polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
     // S11: true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
@@ -125,6 +58,20 @@ Engine_Mangler : CroneEngine {
                 \play_bus, playBus, \phase_out, phaseBus,
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
             ] ++ playParams.getPairs, playGroup);
+        });
+    }
+
+    // spawn/free the reverb synth on rev_mix. placed AFTER ioSynth (reads io's
+    // fresh send this block; io reads the return via InFeedback next block).
+    updateReverb { arg mix;
+        (mix > 0).if({
+            revSynth.isNil.if({
+                revSynth = Synth.new(\mangler_reverb, [
+                    \in_bus, revSendBus, \out_bus, revRetBus,
+                ] ++ revParams.getPairs, ioSynth, \addAfter);
+            });
+        }, {
+            revSynth.notNil.if({ revSynth.free; revSynth = nil });
         });
     }
 
@@ -193,6 +140,9 @@ Engine_Mangler : CroneEngine {
         grainEnv2.loadCollection(Env([0, 1, 0], [0.02, 0.98], [4, -4]).asSignal(2048));
 
         playBus = Bus.audio(s, 2);
+        // reverb send/return busses (each 2ch)
+        revSendBus = Bus.audio(s, 2);
+        revRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
@@ -217,16 +167,20 @@ Engine_Mangler : CroneEngine {
             \clouds_pos -> 0.5, \clouds_tex -> 0.5, \clouds_fb -> 0.0,
             \clouds_mode -> 0, \clouds_lofi -> 0.0
         ];
+        // reverb params live in revParams (routed to \mangler_reverb); io keeps
+        // only rev_mix. (ioKeys U revParams) is the old ioKeys -> same commands.
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
             \dry_wet, \resample, \regen, \grain_level,
             \filt_type, \cutoff, \resonance, \drive,
             \delay_time, \delay_fb, \delay_mix,
-            \rev_size, \rev_mix,
-            // S10 full-JPverb attributes
-            \rev_decay, \rev_damp, \rev_early, \rev_moddepth, \rev_modfreq,
-            \rev_low, \rev_mid, \rev_high, \rev_lowcut, \rev_highcut,
-            // S15 shimmer: pitch-shifted reverb feedback
-            \shimmer, \shimmer_pitch, \shimmer_tone];
+            \rev_mix];
+        revParams = Dictionary[
+            \rev_size -> 1.0, \rev_decay -> 2.0, \rev_damp -> 0.3, \rev_early -> 0.7,
+            \rev_moddepth -> 0.1, \rev_modfreq -> 2.0,
+            \rev_low -> 1.0, \rev_mid -> 1.0, \rev_high -> 1.0,
+            \rev_lowcut -> 500, \rev_highcut -> 2000,
+            \shimmer -> 0.0, \shimmer_pitch -> 12.0, \shimmer_tone -> 4500.0
+        ];
 
         // ---- drone playback defs: ONE runs at a time. all share the full
         // arg set (unused args ignored) so spawn/set stays uniform.
@@ -350,14 +304,10 @@ Engine_Mangler : CroneEngine {
             Out.ar(play_bus, sig);
         }).add;
 
-        // ---- S11: MiClouds granular drone (mi-UGens). GUARDED TWO WAYS so it
-        // can never brick LOADING: the class is resolved via .asClass (the .sc
-        // compiles fine without mi-UGens — no literal MiClouds reference), and
-        // the whole def is wrapped in `try` so a wrong graph/arg set sets
-        // hasClouds=false and falls back to GrainBuf instead of failing alloc.
-        // architecture: a BufRd scrubs the recorded window (the same scan/pos
-        // Phasor the GrainBuf drone uses) and feeds Clouds; freeze reuses
-        // pv_freeze so the STRETCH PVFZ key freezes clouds too.
+        // MiClouds granular drone (mi-UGens), guarded two ways: .asClass (no
+        // literal reference) + a try around the def -> falls back to GrainBuf if
+        // absent/broken. a BufRd scrubs the window into Clouds; pv_freeze doubles
+        // as the clouds freeze.
         hasClouds = false;
         "MiClouds".asSymbol.asClass.notNil.if({
             try {
@@ -467,32 +417,36 @@ Engine_Mangler : CroneEngine {
                 grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
                 delay_time = 0.3, delay_fb = 0.3, delay_mix = 0.0,
-                rev_size = 1.0, rev_mix = 0.0,
-                // S10: JPverb's full attribute set as args (no hardcoding)
-                rev_decay = 2.0, rev_damp = 0.3, rev_early = 0.7,
-                rev_moddepth = 0.1, rev_modfreq = 2.0,
-                rev_low = 1.0, rev_mid = 1.0, rev_high = 1.0,
-                rev_lowcut = 500, rev_highcut = 2000,
-                // S15 shimmer: pitch-shifted reverb feedback
-                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0;
+                // reverb runs in \mangler_reverb; io keeps the return mix + buses
+                rev_mix = 0.0, rev_send = 0, rev_ret = 0;
             var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
-            var cf, rq, lp, hp, bp, isLp, isHp, isBp, pre, fbIn, dIn, dOut, rv, jpClass;
-            var delayFb, shimFb, revIn, ratio, pitched, shimOut;
+            var cf, res, pre, fbIn, dIn, dOut, delayFb, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
             wet = In.ar(play_bus, 2) * grain_level * 1.5;
 
+            // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
+            // if sc3-plugins is absent. One DFM1: LP for LP+BP, HP for HP; BP
+            // high-passes the resonant LP peak into a band. filt_type 0=LP 1=HP 2=BP.
             cf = cutoff.clip(20, 20000).lag(0.05);
-            rq = (1 - (resonance * 0.92)).max(0.05);
-            lp = RLPF.ar(wet, cf, rq);
-            hp = RHPF.ar(wet, cf, rq);
-            bp = BPF.ar(wet, cf, rq) * (1 + resonance);
-            isLp = (filt_type < 0.5);
-            isHp = (filt_type > 0.5) * (filt_type < 1.5);
-            isBp = (filt_type > 1.5);
-            wet = (lp * isLp) + (hp * isHp) + (bp * isBp);
+            res = resonance.clip(0, 0.95);
+            mmFilter = {
+                var rq = (1 - (resonance * 0.92)).max(0.05);
+                (RLPF.ar(wet, cf, rq) * (filt_type < 0.5))
+                    + (RHPF.ar(wet, cf, rq) * ((filt_type > 0.5) * (filt_type < 1.5)))
+                    + (BPF.ar(wet, cf, rq) * (1 + resonance) * (filt_type > 1.5))
+            };
+            dfmClass = "DFM1".asSymbol.asClass;
+            wet = dfmClass.notNil.if({
+                try {
+                    // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel
+                    var d = dfmClass.ar(wet, cf, res, 1,
+                        (filt_type > 0.5) * (filt_type < 1.5), 0);
+                    Select.ar(filt_type > 1.5, [d, HPF.ar(d, (cf * 0.5).clip(20, 20000))])
+                } { |e| mmFilter.value }
+            }, { mmFilter.value });
 
             // S13: drive is a clean->saturated crossfade so drive=0 is a TRUE
             // bypass. it was an always-on tanh that soft-clipped even at 0,
@@ -502,23 +456,69 @@ Engine_Mangler : CroneEngine {
             wet = XFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
 
-            // S15: ONE feedback bus for BOTH loops. SC allows a single
-            // LocalIn/LocalOut pair per SynthDef, so the delay (channels 0-1)
-            // and the shimmer recirculation (channels 2-3) share it, and the
-            // single LocalOut is DEFERRED to the end of the block (after the
-            // shimmer signal exists). delay writeback is computed here.
-            fbIn = LocalIn.ar(4);
-            dIn = wet + (fbIn[0..1] * delay_fb);
+            // delay feedback loop (own LocalIn/LocalOut(2); the shimmer loop
+            // moved into the reverb synth).
+            fbIn = LocalIn.ar(2);
+            dIn = wet + (fbIn * delay_fb);
             dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));
             delayFb = LPF.ar(dOut, 3500).softclip;
             wet = (wet * (1 - delay_mix).sqrt) + (dOut * delay_mix.sqrt);
+            LocalOut.ar(delayFb);
 
-            // S10/S15: FULL JPverb (guarded) wrapped in a SHIMMER feedback
-            // loop — the reverb tail, pitched up and band-limited, recirculates
-            // into the reverb INPUT, so it climbs in octaves into a pad. gated
-            // so shimmer=0 is bit-for-bit the old dry reverb (loop writes 0,
-            // revIn==wet). missing plugin -> FreeVerb fallback, no brick.
-            shimFb = fbIn[2..3];
+            // reverb + shimmer run in a spawn/free synth (\mangler_reverb, only
+            // while rev_mix > 0). io sends the post-delay wet and reads the tail
+            // back via InFeedback (1-block delay across the node boundary). At
+            // rev_mix=0 the synth is gone, the return reads 0, output unchanged.
+            Out.ar(rev_send, wet);
+            rvRet = InFeedback.ar(rev_ret, 2);
+            wet = (wet * (1 - rev_mix).sqrt) + (rvRet * rev_mix.sqrt);
+
+            dry = [inL, inR];
+            sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
+            sig = sig * Lag.kr(level, 0.05);
+            sig = Limiter.ar(sig, 0.92, 0.01);  // S9: 0.98 -> 0.92 DAC headroom
+            recRun = rec * (1 - freeze);
+            recPhase = Phasor.ar(0, recRun * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
+            Out.kr(rec_phase_out, A2K.kr(recPhase));
+            recL = (inL * (1 - resample)) + (sig[0] * resample);
+            recR = (inR * (1 - resample)) + (sig[1] * resample);
+            // regen: run the record head continuously and crossfade the OUTPUT
+            // back into the buffer (self-mangle). BOUNDED (convex crossfade +
+            // LeakDC + master Limiter); bit-identical to no-regen at regen=0.
+            // manual rec and freeze both suspend it.
+            regenRun = (regen > 0) * (1 - rec) * (1 - freeze);
+            runW = recRun.max(regenRun);
+            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
+            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
+            // record-safety limiter: transparent below 0.99, stops a hot take
+            // hard-clipping into the buffer.
+            srcL = Limiter.ar(srcL, 0.99, 0.002);
+            srcR = Limiter.ar(srcR, 0.99, 0.002);
+            recLvl = (rec_level * (1 - regenRun)) + (regen * regenRun);
+            preLvl = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
+            RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
+            RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
+            Out.kr(rec_amp_out,
+                Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
+            Out.ar(out, sig);
+        }).add;
+
+        // reverb + shimmer synth (spawned by updateReverb while rev_mix > 0).
+        // reads io's post-delay wet, returns the JPverb tail; shimmer recirculates
+        // through this synth's own LocalIn/LocalOut. JPverb guarded -> FreeVerb.
+        SynthDef(\mangler_reverb, {
+            arg in_bus, out_bus,
+                rev_size = 1.0, rev_decay = 2.0, rev_damp = 0.3, rev_early = 0.7,
+                rev_moddepth = 0.1, rev_modfreq = 2.0,
+                rev_low = 1.0, rev_mid = 1.0, rev_high = 1.0,
+                rev_lowcut = 500, rev_highcut = 2000,
+                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0;
+            var wet, fbIn, shimFb, revIn, rv, jpClass, ratio, pitched, shimOut;
+            wet = In.ar(in_bus, 2);                 // io's post-delay wet send
+            // shimmer feedback: the pitched tail recirculates into the reverb
+            // INPUT so it climbs in octaves. shimmer=0 -> shimOut 0 -> revIn==wet.
+            fbIn = LocalIn.ar(2);
+            shimFb = fbIn;
             revIn = wet + (shimFb * shimmer.clip(0, 0.95));
             jpClass = "JPverb".asSymbol.asClass;
             rv = jpClass.notNil.if({
@@ -534,52 +534,15 @@ Engine_Mangler : CroneEngine {
             });
             // pitch the tail (semitones -> ratio), band-limit so the octave
             // stack stays a halo (HPF kills DC/rumble build-up, LPF tames the
-            // metallic hiss), softclip bounds runaway like the delay's writeback
+            // metallic hiss), softclip bounds runaway. STEREO shimmer — a
+            // PitchShift per channel — for a wide halo.
             ratio = (shimmer_pitch.round(1) / 12.0);
             ratio = (2 ** ratio).clip(0.25, 4);
             pitched = PitchShift.ar(rv, 0.2, ratio, 0, 0.01);
             pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
             shimOut = (pitched * (shimmer > 0)).softclip;
-            wet = (wet * (1 - rev_mix).sqrt) + (rv * rev_mix.sqrt);
-
-            // close BOTH feedback loops with the one allowed LocalOut
-            LocalOut.ar(delayFb ++ shimOut);
-
-            dry = [inL, inR];
-            sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
-            sig = sig * Lag.kr(level, 0.05);
-            sig = Limiter.ar(sig, 0.92, 0.01);  // S9: 0.98 -> 0.92 DAC headroom
-            recRun = rec * (1 - freeze);
-            recPhase = Phasor.ar(0, recRun * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
-            Out.kr(rec_phase_out, A2K.kr(recPhase));
-            recL = (inL * (1 - resample)) + (sig[0] * resample);
-            recR = (inR * (1 - resample)) + (sig[1] * resample);
-            // S17 self-resampling: when manual rec is OFF and not frozen, run the
-            // record head CONTINUOUSLY and crossfade the processed OUTPUT back
-            // into the buffer, so the granular/FX engine slowly re-mangles its
-            // own sound (Basinski-style decay). BOUNDED: preLvl+recLvl=1 (a convex
-            // crossfade), output is Limiter-capped, LeakDC stops DC building over
-            // passes — the buffer can't run away. GATED: regen=0 -> regenRun=0 ->
-            // src==recL/R, levels==rec_level/pre_level, runW==recRun -> the writes
-            // are bit-identical to pre-S17. manual rec (the (1-rec) factor) and
-            // freeze both suspend regen.
-            regenRun = (regen > 0) * (1 - rec) * (1 - freeze);
-            runW = recRun.max(regenRun);
-            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
-            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
-            // record-SAFETY limiter: the take can no longer hard-clip from a hot
-            // input (the OUTPUT had a limiter, the record path did not). transparent
-            // below 0.99, so a normal-level take is unchanged bar ~2ms lookahead —
-            // a limited take beats a clipped one, and dry stays dry under 0.99.
-            srcL = Limiter.ar(srcL, 0.99, 0.002);
-            srcR = Limiter.ar(srcR, 0.99, 0.002);
-            recLvl = (rec_level * (1 - regenRun)) + (regen * regenRun);
-            preLvl = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
-            RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
-            RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
-            Out.kr(rec_amp_out,
-                Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
-            Out.ar(out, sig);
+            LocalOut.ar(shimOut);
+            Out.ar(out_bus, rv);
         }).add;
 
         s.sync;
@@ -597,18 +560,26 @@ Engine_Mangler : CroneEngine {
             \play_bus, playBus,
             \rec_phase_out, recPhaseBus,
             \rec_amp_out, recAmpBus,
+            \rev_send, revSendBus,
+            \rev_ret, revRetBus,
         ], playGroup, \addAfter);
 
-        // every float control as one command; rec/freeze fan out to both synths
-        allKeys = (ioKeys ++ playParams.keys.asArray).asSet;
+        // every float control as one command; rec/freeze fan out to both synths;
+        // revParams route to \mangler_reverb; rev_mix also spawns/frees it.
+        allKeys = (ioKeys ++ playParams.keys.asArray ++ revParams.keys.asArray).asSet;
         allKeys.do({ arg name;
             this.addCommand(name, "f", { arg msg;
                 var v = msg[1];
                 ioKeys.includes(name).if({ ioSynth.set(name, v) });
+                revParams.includesKey(name).if({
+                    revParams[name] = v;
+                    revSynth.notNil.if({ revSynth.set(name, v) });
+                });
                 playParams.includesKey(name).if({
                     playParams[name] = v;
                     playSynth.notNil.if({ playSynth.set(name, v) });
                 });
+                (name == \rev_mix).if({ this.updateReverb(v) });
             });
         });
 
@@ -639,23 +610,16 @@ Engine_Mangler : CroneEngine {
             voiceParams[\voice_rel] = msg[1];
         });
 
-        // ---- S21: wipe the recording / load a sample off the disk.
-        // there was NO way to delete a take (only overwrite it) and no source
-        // but the live input — the two things that stop this being a sampler.
-        // BOTH act on the SAME bufL/bufR the synths already hold: Buffer:zero
-        // and the INSTANCE Buffer:readChannel read into an existing buffer, so
-        // no bufnum ever changes, nothing respawns, nothing desyncs. all core
-        // SC, no plugin deps — cannot brick loading.
+        // clear/load act on the SAME bufL/bufR the synths hold (Buffer:zero and
+        // instance readChannel into the existing buffer) — no bufnum ever changes.
         this.addCommand(\clear, "", { arg msg;
             bufL.zero;
             bufR.zero;
             "mangler: engine buffer cleared".postln;
         });
 
-        // any wav/aiff becomes the sample. NOTE: /b_readChannel does NOT
-        // sample-rate convert, and norns runs the server at 48k — a 44.1k file
-        // plays ~9% fast. that's a varispeed, not a bug; the Lua side measures
-        // the frames it actually occupies and snaps the window to them.
+        // load any wav/aiff into the buffer. no SR conversion — a 44.1k file at
+        // the 48k server plays ~9% fast (a varispeed).
         this.addCommand(\read_file, "s", { arg msg;
             var path = msg[1].asString;
             var sf = SoundFile.new;
@@ -675,17 +639,9 @@ Engine_Mangler : CroneEngine {
             });
         });
 
-        // ---- S22 Phase A: persist the LIVE take across save/load.
-        // bufL/bufR are two MONO buffers and scsynth has no cheap non-realtime
-        // way to interleave them into one stereo file, so the take rides the
-        // PSET as a private L/R pair beside the pset — the direct INVERSE of
-        // read_file's readChannel. Buffer:write issues an async /b_write (a
-        // direct buffer dump, NOT realtime playback), bounded by the buffer,
-        // all core UGens: cannot brick. Write 16-bit PCM wav specifically so
-        // the Lua side (Mpages.load_wave) can repaint the restored take.
-        // numFrames bounds the write to the TAKE (from frame 0), not the whole
-        // 60s buffer — a 3s take was writing ~11.5MB of mostly silence. n <= 0
-        // (or no arg, an old caller) writes the whole buffer, as before.
+        // persist the live take across PSET save/load: write bufL/bufR to a
+        // private L/R pair (16-bit wav, async /b_write, bounded, core UGens).
+        // numFrames bounds the write to the take from frame 0; n <= 0 = whole buffer.
         this.addCommand(\write_take, "si", { arg msg;
             var stem = msg[1].asString;
             var n = (msg.size > 2).if({ msg[2].asInteger }, { -1 });
@@ -736,6 +692,7 @@ Engine_Mangler : CroneEngine {
     free {
         activeVoices.notNil.if({ activeVoices.do({ arg v; v.notNil.if({ v.free }) }) });
         playSynth.notNil.if({ playSynth.free });
+        revSynth.notNil.if({ revSynth.free });
         ioSynth.free;
         playGroup.free;
         bufL.free;
@@ -743,6 +700,8 @@ Engine_Mangler : CroneEngine {
         grainEnv1.free;
         grainEnv2.free;
         playBus.free;
+        revSendBus.free;
+        revRetBus.free;
         phaseBus.free;
         recPhaseBus.free;
         recAmpBus.free;

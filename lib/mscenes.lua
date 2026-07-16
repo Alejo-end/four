@@ -102,10 +102,9 @@ local SWITCH_IDS = {
   "mode",   -- last of the last: this one respawns the voice
 }
 
--- `tape_reverse` IS captured/recalled (added back). The NU punch law made TAPE
--- K3 a LATCHING toggle (a tap holds tape_reverse=1 until tapped again), so it is
--- now a real state, not the momentary held-gesture it was under S19 — and the
--- direction lives ONLY here: Mtape.update_tape_rate does
+-- `tape_reverse` IS captured/recalled. The punch law makes TAPE K3 a LATCHING
+-- toggle (a tap holds tape_reverse=1 until tapped again), so it is a real state —
+-- and the direction lives ONLY here: Mtape.update_tape_rate does
 -- `tape_rate * (tape_reverse==1 and -1 or 1)` with tape_rate kept positive, so a
 -- backwards scene is NOT stored in tape_rate. It is in MORPH_EXCLUDE, though: a
 -- morph must not flip the tape mid-sweep (a hard event, like a freeze).
@@ -200,14 +199,9 @@ local pending_clock      -- the quantized-recall coroutine (nil = none)
 -- taken on the rising edge out of 0 and dropped when you come home to 0 (or
 -- when something else moves the instrument — see invalidate).
 --
--- this replaced an A/B pair of slot selectors. capturing a scene ALREADY tells
--- the instrument which slots you care about; making you then name them again as
--- A and B — on the alt layer, where they're invisible until you hold K1 — was
--- two selectors too many and six steps before you heard anything. "from HERE to
--- that slot" is what a performer means, needs no selector at all, and can still
--- do the old A->B: recall A (K2), then sweep toward B. it also makes ONE stored
--- scene immediately useful, which the old model couldn't: with a single capture
--- you can mangle the sound and slide back toward it.
+-- "from HERE to that slot" needs no A/B selector: recall A (K2) then sweep
+-- toward B still does the old A->B, and it makes ONE stored scene immediately
+-- useful — with a single capture you can mangle the sound and slide back.
 local morph_from = nil
 
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
@@ -364,7 +358,7 @@ end
 -- capture the live state of SCENE_RECALL_IDS into a slot (default: the
 -- selected one). overwrites without ceremony — like every other throw in this
 -- instrument, the key does the thing.
--- NU-3: slot 0 is the ◄ cell — the way back. capturing into it marks the
+-- slot 0 is the ◄ cell — the way back. capturing into it marks the
 -- safe state, recalling it restores, clearing it forgets. the bank proper
 -- stays 1..8; every ◄ caller branches here BEFORE slot_idx clamps.
 local function is_back(slot)
@@ -417,7 +411,7 @@ function M.recall(slot, opts)
     end)
     return true
   end
-  -- NU-3: every commit auto-captures the pre-state into the ◄ cell — an
+  -- every commit auto-captures the pre-state into the ◄ cell — an
   -- undo that never needed arming. (quiet: the recall is the news here.)
   M.auto_safe()
   say_recall(slot, apply(scene, SCENE_RECALL_IDS))

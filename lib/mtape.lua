@@ -15,7 +15,7 @@ function M.init(ctx)
   pget = ctx.pget
 end
 
--- MIX page, now real: `mix` crossfades SC engine <-> tape, out_level masters
+-- MIX page: `mix` crossfades SC engine <-> tape, out_level masters
 -- both, each side keeps its own trim. center keeps both at full trim.
 function M.update_mix()
   local mixv = pget("mix", 0.5)

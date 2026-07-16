@@ -7,7 +7,7 @@
 -- wins). every pad drives params, the same single source of truth as keys,
 -- encoders, and MIDI CCs.
 --
--- THE SPINE (NU-4, doc/redesign.md §7): rows 1-2 and 7-8 NEVER change
+-- THE SPINE: rows 1-2 and 7-8 NEVER change
 -- meaning; only the workspace rows 3-6 follow the screen page. your hands
 -- always know where the scenes, the transport, and the notes are.
 --
@@ -40,7 +40,7 @@ do
   no_monome = gname == "none"
   -- midigrid is loaded as the FALLBACK backend; a Launchpad Mini MK3 is
   -- preferred over it at connect time (real per-pad colour vs midigrid's
-  -- monochrome emulation — see the Launchpad driver below).
+  -- monochrome emulation).
   if no_monome and util.file_exists(_path.code .. "midigrid") then
     -- pcall: a broken midigrid install must not take mangler down with it
     local ok, mg = pcall(include, "midigrid/lib/midigrid")

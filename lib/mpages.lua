@@ -87,7 +87,7 @@ end
 -- wipe the engine's picture (S21 `clear`): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
-  if M.cancel_load then M.cancel_load() end  -- #15: stop an in-flight fill first
+  if M.cancel_load then M.cancel_load() end  -- stop an in-flight fill first
   for i = 1, 128 do wave[i] = 0 end
   wave_bin = 0
   C.wave_any = false
@@ -227,7 +227,7 @@ end
 -- cancel any in-flight fill (cleanup, or a superseding load)
 function M.cancel_load() cancel_load() end
 
--- S22 Phase B: interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
+-- interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
 -- into one stereo 16-bit wav — a browsable export that reloads via load sample,
 -- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
 local function open_pcm16_mono(path)
@@ -275,8 +275,8 @@ local function hash(x, y, sd)
   return f - floor(f)
 end
 
--- footer words per param id (NU-1: the owning page's own vocabulary —
--- these are also the MOTION lane names, so a lane says what its page says)
+-- footer words per param id: the owning page's own vocabulary — these are
+-- also the MOTION lane names, so a lane says what its page says
 local SHORT = {
   mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
   input_level = "IN", monitor_level = "MON",
@@ -482,25 +482,26 @@ end
 -- selector). the value itself exists only while you're asking (the 1.2s swell),
 -- or always on the selector pages. minx is the key words' right edge: a full
 -- word that would cross it drops to the abbreviation so the row never overlaps.
+-- hoisted out of flabel_r so the draw path allocates no per-frame closures
+local function label_for(id, full)
+  if not id then return "--" end
+  if full then return FULL[id] or SHORT[id] or string.upper(id) end
+  return SHORT[id] or "--"
+end
+local function label_total(l, val) return text_w(l, 1) + 3 + (val and text_w(val, 1) or 0) end
 local function flabel_r(id, rx, minx)
   local turning = is_turning(id)
   local val
   if id and (turning or SELECTOR_IDS[id]) then val = fmt_value(id) end
-  local function labfor(full)
-    if not id then return "--" end
-    if full then return FULL[id] or SHORT[id] or string.upper(id) end
-    return SHORT[id] or "--"
-  end
   -- full word by default; abbreviate whenever a value is shown (turning /
   -- selector), where the digits need the room
   local full = not val
-  local lab = labfor(full)
+  local lab = label_for(id, full)
   local lvl = turning and 15 or 6
-  local function total(l) return text_w(l, 1) + 3 + (val and text_w(val, 1) or 0) end
-  local x = rx - total(lab)
+  local x = rx - label_total(lab, val)
   if full and minx and x < minx then    -- full word won't fit: drop to SHORT
-    lab = labfor(false)
-    x = rx - total(lab)
+    lab = label_for(id, false)
+    x = rx - label_total(lab, val)
   end
   ptext(lab, x, FY, 1, lvl)
   screen.level(lvl)
@@ -549,7 +550,7 @@ local function draw_footer()
 end
 
 -- ============================================================================
--- the nine dominant objects (NU-2, doc/redesign.md §6)
+-- the nine dominant objects (doc/redesign.md §6)
 -- ============================================================================
 -- one object per page, drawn from REAL state, brightness riding audibility.
 -- statics first: everything the 15fps hot path needs preallocated.
@@ -785,10 +786,9 @@ local function body_VOICE(frame)
 end
 
 -- ============================================================================
--- 3 · TAPE — the second deck: the REELS (the physical-tape look, restored per
---     user over the belt: two reels spin at the effective rate — reverse spins
---     backward, stopped stands still — above the loop track + head. The loop
---     readout on the right is kept.)
+-- 3 · TAPE — the second deck: the REELS (two reels spin at the effective
+--     rate — reverse spins backward, stopped stands still — above the loop
+--     track + head, with the loop readout on the right)
 -- ============================================================================
 local REEL_X = { 46, 86 }   -- the two reel centers
 local reel_angle = 0        -- persistent spin accumulator, driven by tape rate
@@ -819,7 +819,7 @@ local function body_TAPE(frame)
   screen.move(46, 16) screen.line(86, 16)
   screen.move(46, 32) screen.line(86, 32)
   screen.stroke()
-  -- the loop track below (kept): full-width rail, the loop region, the head
+  -- the loop track below: full-width rail, the loop region, the head
   screen.level(2)
   screen.move(0, 40) screen.line(128, 40)
   screen.stroke()
@@ -839,8 +839,8 @@ local function body_TAPE(frame)
 end
 
 -- ============================================================================
--- 4 · FILTER — tone (kept on merit: the REAL biquad magnitude, now with its
---     measurement rails labeled; drive = grit on the line, not a number)
+-- 4 · FILTER — tone (the REAL biquad magnitude, with labeled measurement
+--     rails; drive = grit on the line, not a number)
 -- ============================================================================
 local function body_FILTER(frame)
   local cut = pget("cutoff", 20000)
@@ -1145,7 +1145,7 @@ local function body_PADS(frame)
     return
   end
   -- THE TAKE: the window zoomed full width, divided into 8 (a pad is
-  -- self-evidently an eighth of what you recorded — S20's one law)
+  -- self-evidently an eighth of what you recorded)
   local bx0, bx1, by = 4, 124, 22
   local sw = (bx1 - bx0) / 8
   local wlo, _, wspan = window_bounds()
@@ -1381,8 +1381,7 @@ local function body_SCENE(frame)
   else
     ptext_r(string.upper(params:string("scene_recall_mode")), 126, 13, 1, 4)
   end
-  -- the ◄ cell: the way back (the safe state, auto-marked by chaos; the
-  -- one-key UNDO lands in NU-3 — until then it shows the net exists)
+  -- the ◄ cell: the way back (the safe state, auto-marked by chaos)
   if sc.safe then
     screen.level(6)
     screen.rect(3, 22, 9, 12)
@@ -1531,7 +1530,7 @@ local function draw_body()
   if f then f(C.frame) end
 end
 
--- the purity mark ◇ (NU-1, doc/redesign.md §4): lit ONLY when the output
+-- the purity mark ◇ (doc/redesign.md §4): lit ONLY when the output
 -- is the take, verbatim. conservative — it may stay dark when technically
 -- pure, but it never lies pure.
 local function purity()
@@ -1555,8 +1554,19 @@ local function purity()
   return true
 end
 
--- header (NU-1): TITLE ◇ flags ···· path dots. STOP inverts the title chip;
+-- header: TITLE ◇ flags ···· path dots. STOP inverts the title chip;
 -- writes (R/T/M) carry the ONLY fast blink; runs are steady.
+-- a write flag: dot + letter, blinking. hoisted to module scope (no per-frame
+-- closure); returns the advanced x so the caller threads the cursor.
+local function wflag(x, blink, ch, adv)
+  if blink then
+    screen.level(15)
+    screen.rect(x, 1, 3, 3)
+    screen.fill()
+    ptext(ch, x + 5, 1, 1, 15)
+  end
+  return x + adv
+end
 local function draw_header()
   local page, frame = C.page, C.frame
   local title = PAGES[page]
@@ -1581,18 +1591,9 @@ local function draw_header()
     x = x + 8
   end
   local blink = (frame % 4) < 2
-  local function wflag(ch, adv)        -- a write flag: dot + letter, blinking
-    if blink then
-      screen.level(15)
-      screen.rect(x, 1, 3, 3)
-      screen.fill()
-      ptext(ch, x + 5, 1, 1, 15)
-    end
-    x = x + adv
-  end
-  if pget("rec", 0) == 1 then wflag("R", 12) end
-  if pget("tape_rec", 0) == 1 then wflag("T", 11) end
-  if pget("motion_rec", 0) == 1 then wflag("M", 13) end
+  if pget("rec", 0) == 1 then x = wflag(x, blink, "R", 12) end
+  if pget("tape_rec", 0) == 1 then x = wflag(x, blink, "T", 11) end
+  if pget("motion_rec", 0) == 1 then x = wflag(x, blink, "M", 13) end
   if pget("seq_play", 0) == 1 then     -- running: a steady triangle
     screen.level(10)
     screen.rect(x, 1, 1, 5) screen.rect(x + 1, 2, 1, 3) screen.rect(x + 2, 3, 1, 1)
@@ -1607,10 +1608,9 @@ local function draw_header()
     ptext("TF", x, 1, 1, 10)
     x = x + 12
   end
-  -- path dots, top-right: uniform spacing (restored — the version that rode
-  -- with the reel TAPE page; first x=81, pitch 5, current page a rounded 4x4
-  -- block). the wider current dot nudges every dot after it 2px right so it
-  -- gets matching breathing room.
+  -- path dots, top-right: uniform spacing (first x=81, pitch 5, current page
+  -- a rounded 4x4 block). the wider current dot nudges every dot after it 2px
+  -- right so it gets matching breathing room.
   local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   for i = 1, #PAGES do
     local dx = 81 + (i - 1) * dpitch + (i > page and 2 or 0)

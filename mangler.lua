@@ -81,7 +81,7 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- NU-1 (doc/redesign.md §5): nine stations on one signal path —
+-- nine stations on one signal path —
 -- TAKE VOICE TAPE | FILTER SPACE | MIX | PADS MOTION SCENE
 local PAGES = {
   "TAKE", "VOICE", "TAPE", "FILTER", "SPACE", "MIX",
@@ -173,7 +173,7 @@ local ctx = {
   -- 0): the take end at rec-stop, a loaded sample's length, or 1 when regen has
   -- filled the whole buffer. write_take bounds the PSET save to it. 0 = empty.
   take_len = 0,
-  -- S8 pad bank: 8 slice pads, per-pad type (0 grain / 1 slice), a screen
+  -- pad bank: 8 slice pads, per-pad type (0 grain / 1 slice), a screen
   -- cursor for standalone select/audition. shared by the PADS page + the
   -- MIDI/grid note routing (they map an incoming note to a pad index).
   -- SOUND-LOCKS: per-pad voice (0 grain / 1 slice) + pitch (semitones). the
@@ -186,9 +186,9 @@ local ctx = {
   pad_cursor = 0,
   pad_n = 8,
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
-  rev_bank = 1,              -- S10: which REVERB param pair E2/E3 edit
-  grain_bank = 1,            -- S11: which GRAIN param pair E2/E3 edit
-  shimmer_mem = 0.6,         -- S15: last shimmer amount, for the SHMR bloom key
+  rev_bank = 1,              -- which REVERB param pair E2/E3 edit
+  grain_bank = 1,            -- which GRAIN param pair E2/E3 edit
+  shimmer_mem = 0.6,         -- last shimmer amount, for the SHMR bloom key
 }
 
 local Mfont = include "lib/mfont"
@@ -213,13 +213,13 @@ Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
--- S19: sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
+-- sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
 -- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
 Mscenes.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
--- keys: the punch law (NU-1, doc/redesign.md §3)
+-- keys: the punch law
 -- ============================================================================
 -- ONE physical rule for every key:
 --   press = engage NOW · release within TAP_FRAMES = it latches ·
@@ -376,7 +376,7 @@ local KEYS = {
     erase = function() ctx.motion.clear_lane() end,
   },
   SCENE = {
-    -- NU-3: RCL under the punch law — hold = PEEK (borrow the scene via the
+    -- RCL under the punch law — hold = PEEK (borrow the scene via the
     -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
     -- (slot 0) a tap is the way back (safe restore). CAP captures into the
     -- selected slot — into ◄ it marks the way-back state by hand.
@@ -521,7 +521,7 @@ ctx.ERASE_FRAMES = ERASE_FRAMES
 ctx.TAP_FRAMES = TAP_FRAMES
 
 -- ============================================================================
--- S8 polyphonic pad voices
+-- polyphonic pad voices
 -- ============================================================================
 -- a pad's slice point: the centre of the i-th eighth OF THE TAKE — i.e. of
 -- the current window, not of the 60s buffer. this is the one definition of
@@ -587,12 +587,10 @@ function ctx.pad_edit_sync()
   ctx.pad_sync = false
 end
 
--- S21 — the two things a sampler needs and this didn't have: a way to DELETE
--- the recording, and a source other than the live input.
--- the engine's 60s buffer is the thing everything slices (window, drone, pads,
--- sequencer), and until now the only way to change it was to record over it.
--- (the TAPE deck's own CLR is on the TAPE page — that's the softcut loop, a
--- different deck entirely.)
+-- delete the recording, and load a source other than the live input. the
+-- engine's 60s buffer is what everything slices (window, drone, pads,
+-- sequencer). (the TAPE deck's own CLR is on the TAPE page — that's the
+-- softcut loop, a different deck entirely.)
 
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
 -- the window back up, so every page goes back to inviting a take instead of
@@ -628,8 +626,8 @@ function ctx.load_sample(path)
   end
   engine.read_file(path)
   ctx.wave_any = true    -- audio is in the buffer now, drawable or not — never
-                         -- lie "EMPTY" over an audible sample (the S21 fix, now
-                         -- also honoured for formats the preview can't draw)
+                         -- lie "EMPTY" over an audible sample, even for formats
+                         -- the preview can't draw
   local dur = Mpages.load_wave(path, 60)
   -- the loaded length bounds a PSET save; unknown length (no preview) -> full
   ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1
@@ -646,7 +644,7 @@ function ctx.load_sample(path)
   end
 end
 
--- S22 Phase A: the live take rides the PSET as a private L/R pair beside the
+-- the live take rides the PSET as a private L/R pair beside the
 -- pset file (take-N_L.wav / _R.wav), the same way mtape persists the tape
 -- audio and mscenes the scene bank — the shared action_write/read/delete hook
 -- calls each. the engine holds the buffer; lua only knows whether it has
@@ -687,9 +685,9 @@ function ctx.take_pset_read(number)
   -- pset's own params (window included) still load.
   if not util.file_exists(stem .. "_L.wav") then return end
   engine.read_take(stem)
-  -- repaint from the file or the restored take is INVISIBLE (the "audio you can
-  -- hear over EMPTY - K2 REC" bug S21 fixed for loaded samples). do NOT snap the
-  -- window — params:read already restored the saved pos_start/pos_end.
+  -- repaint from the file or the restored take is INVISIBLE (audio you can hear
+  -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already
+  -- restored the saved pos_start/pos_end.
   local dur = Mpages.load_wave(stem .. "_L.wav", 60)
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
   ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1  -- bounds a re-save
@@ -730,10 +728,10 @@ function ctx.padlock_pset_delete(number)
   os.remove(padlock_path(number))
 end
 
--- S22 Phase B: browsable stereo EXPORT. write_take dumps the DRY take to a temp
+-- browsable stereo EXPORT. write_take dumps the DRY take to a temp
 -- L/R pair; we wait for the async /b_write to finish (sizes stop growing), then
 -- interleave into a named stereo wav in dust/audio that reloads via `load
--- sample` (zero new load code). Lua-only — fingerprint unchanged.
+-- sample` (zero new load code).
 local export_clock
 local function filesize(p)
   local f = io.open(p, "rb"); if not f then return nil end
@@ -880,7 +878,7 @@ local function init_params()
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   add_eng_control("resample", "resample (in<>out)",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  -- S17 self-resampling: continuous feedback of the processed OUTPUT back into
+  -- self-resampling: continuous feedback of the processed OUTPUT back into
   -- the record buffer (Basinski-style regenerative decay). 0 = off (a fresh
   -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
   -- convex crossfade so it can't run away.
@@ -893,7 +891,7 @@ local function init_params()
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
     if v > 0 then ctx.take_len = 1 end
   end)
-  -- S21: delete the take (REC K1+K3, mirroring TAPE's CLR) and load one off the
+  -- delete the take (REC K1+K3, mirroring TAPE's CLR) and load one off the
   -- disk. clear is a MOMENTARY binary so a footswitch can wipe between takes;
   -- both fire on the press edge only, so a stray 0 from bang/pset does nothing.
   params:add_binary("clear_rec", "clear recording", "momentary", 0)
@@ -904,7 +902,7 @@ local function init_params()
   -- so a saved session reloads its sample
   params:add_file("sample_file", "load sample", _path.audio)
   params:set_action("sample_file", function(f) ctx.load_sample(f) end)
-  -- S22 Phase B: export the take as a browsable stereo wav in dust/audio.
+  -- export the take as a browsable stereo wav in dust/audio.
   -- momentary so a footswitch/grid can fire it; press edge only.
   params:add_binary("export_take", "export take (wav)", "momentary", 0)
   params:set_action("export_take", function(v)
@@ -955,7 +953,7 @@ local function init_params()
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  -- S7 granular character: per-grain size jitter + detune spread (both
+  -- granular character: per-grain size jitter + detune spread (both
   -- continuous from 0 = off), and a 3-way grain-envelope shape. shape is
   -- an option (engine wants 0/1/2, norns options are 1-based, so -1 in the
   -- action — same trick as `mode`).
@@ -968,7 +966,7 @@ local function init_params()
     if engine.grain_shape then engine.grain_shape(v - 1) end
   end)
 
-  -- S11: MiClouds granular controls (GRAIN mode uses the Clouds voice when
+  -- MiClouds granular controls (GRAIN mode uses the Clouds voice when
   -- mi-UGens are installed; on the GrainBuf fallback these are stored but
   -- ignored — same guarded philosophy as the JPverb-only reverb params). the
   -- shared size/density/spread/pitch already remap to Clouds; these are the
@@ -991,7 +989,7 @@ local function init_params()
   params:add_group("grp_stretch", "voice - stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
   -- costs CPU; OFF frees the SC voice entirely
-  -- S14: PLAY (clean straight loop = the exact recorded sample) is the
+  -- PLAY (clean straight loop = the exact recorded sample) is the
   -- DEFAULT so a fresh take plays back untouched; GRAIN/WARP/PV are switched
   -- on for mangling. appended (not reordered) so 1..4 keep their meaning.
   params:add_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 5)
@@ -1065,7 +1063,7 @@ local function init_params()
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
   add_eng_control("resonance", "resonance",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  -- post-filter tanh saturation with makeup (S5): louder AND dirtier up
+  -- post-filter tanh saturation with makeup: louder AND dirtier up
   add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
@@ -1081,7 +1079,7 @@ local function init_params()
   add_eng_control("delay_mix", "delay mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""), square)
 
-  -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
+  -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
   -- hardcoded. edited on the REVERB page in banks (K2 pages through them).
   params:add_group("grp_reverb", "space - reverb", 15)
@@ -1109,7 +1107,7 @@ local function init_params()
     controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""), square)   -- progressive fade (see delay_mix)
-  -- S15 shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
+  -- shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
   add_eng_control("shimmer", "shimmer",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   add_eng_control("shimmer_pitch", "shimmer pitch",
@@ -1117,7 +1115,7 @@ local function init_params()
   add_eng_control("shimmer_tone", "shimmer tone",
     controlspec.new(500, 12000, "exp", 0, 4500, "hz"))
 
-  -- S8 polyphonic voices: the per-note/per-pad layer that coexists with the
+  -- polyphonic voices: the per-note/per-pad layer that coexists with the
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
   -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
@@ -1147,7 +1145,7 @@ local function init_params()
     controlspec.new(0.001, 1, "exp", 0, 0.005, "s"))
   add_eng_control("voice_rel", "voice release",
     controlspec.new(0.01, 4, "exp", 0, 0.6, "s"))
-  -- pad voice LEVEL (per-note amp): the chord-safe default (0.3, the old S9
+  -- pad voice LEVEL (per-note amp): the chord-safe default (0.3, the
   -- level that stops poly stacks slamming the master limiter). read at note-on.
   params:add_control("pad_level", "pad level",
     controlspec.new(0, 1, "lin", 0, 0.3, ""))
@@ -1172,7 +1170,7 @@ local function init_params()
     params:lookup_param("pitch"):bang()
   end)
 
-  -- S16 gesture looper: records the param stream (MOTION_IDS) and replays it
+  -- gesture looper: records the param stream (MOTION_IDS) and replays it
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
@@ -1192,7 +1190,7 @@ local function init_params()
   params:add_control("motion_depth", "motion depth",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
 
-  -- S18 step sequencer: a clock-synced Euclidean sequencer that triggers the
+  -- step sequencer: a clock-synced Euclidean sequencer that triggers the
   -- PADS slice one-shots (see lib/mseq). all Lua-only (drives engine.note_one_
   -- shot) — no engine command, so the fingerprint is unchanged. seq_play is a
   -- binary (MIDI-map it to a footswitch); seq_euclid/seq_len regen the pattern.
@@ -1205,8 +1203,8 @@ local function init_params()
   params:add_number("seq_len", "seq length", 1, 16, 16)
   params:set_action("seq_len", function() ctx.seq.regen() end)
   params:add_number("seq_slice", "seq slice", 0, 7, 0)
-  -- NU-1 glue until the NU-3 `slice` merge: the sequencer's target and the
-  -- PADS cursor are ONE selection (browsing slices retargets the sequence)
+  -- the sequencer's target and the PADS cursor are ONE selection (browsing
+  -- slices retargets the sequence)
   params:set_action("seq_slice", function(v)
     ctx.pad_cursor = v
     ctx.pad_edit_sync()          -- the sound-lock editors follow the selected pad
@@ -1216,7 +1214,7 @@ local function init_params()
   params:add_control("seq_level", "seq level",
     controlspec.new(0, 1, "lin", 0, 0.85, ""))
 
-  -- S19 scenes / morph / safe state (see lib/mscenes). all Lua-only — no
+  -- scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
   -- momentary binaries rather than triggers: a trigger can't be MIDI-learned,
   -- and the whole point is a footswitch that captures, recalls, rescues or
@@ -1226,7 +1224,7 @@ local function init_params()
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
-  -- NU-3: slot 0 is the ◄ cell — the way back (mscenes branches on it)
+  -- slot 0 is the ◄ cell — the way back (mscenes branches on it)
   params:add_number("scene_slot", "scene slot", 0, 8, 1)
   params:set_action("scene_slot", function()
     -- re-aim a sweep in progress; at rest, picking a slot must stay silent
@@ -1274,7 +1272,7 @@ local function init_params()
   end)
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
-  -- the softcut buffers (mtape) AND, since S22, the granular engine's record
+  -- the softcut buffers (mtape) AND the granular engine's record
   -- buffer — the live take, as an L/R wav pair beside the pset (ctx.take_pset_*
   -- → engine write_take/read_take). the hooks are SHARED: each module/helper
   -- does its own half (mtape the tape audio, mscenes the scene bank + safe
@@ -1345,15 +1343,15 @@ function init()
     while true do
       clock.sleep(1 / FPS)
       ctx.frame = ctx.frame + 1
-      Mpages.load_tick()   -- #15: fill a loaded/restored waveform a batch/frame
+      Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
       Mparticles.update()
-      Mmotion.tick()   -- S16: advance + replay the gesture loop
-      -- S19: apply a pending morph sweep. AFTER motion, which may have just
+      Mmotion.tick()   -- advance + replay the gesture loop
+      -- apply a pending morph sweep. AFTER motion, which may have just
       -- replayed a recorded scene_morph_amt move for us to act on.
       Mscenes.tick()
-      tick_keys()  -- NU-1: the K1+K3 erase arc fires AT its threshold
+      tick_keys()  -- the K1+K3 erase arc fires AT its threshold
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -1367,8 +1365,8 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
-  if export_clock then clock.cancel(export_clock) end  -- S22B: stop a pending export
-  Mpages.cancel_load()  -- #15: close any in-flight waveform read
+  if export_clock then clock.cancel(export_clock) end  -- stop a pending export
+  Mpages.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   Mgrid.cleanup()
@@ -1380,7 +1378,7 @@ end
 
 -- per-key press bookkeeping for the punch law: the def is resolved at the
 -- PRESS and the release routes back to it, so an alt released mid-hold can
--- never hand the release to the wrong action (the grid learned this in S19)
+-- never hand the release to the wrong action (the grid learned this the hard way)
 local key_state = { [2] = {}, [3] = {} }
 
 function enc(n, d)

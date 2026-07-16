@@ -1,12 +1,11 @@
--- mmotion: the gesture looper (S16) — a fourth driver for the params.
+-- mmotion: the gesture looper — a fourth driver for the params.
 --
 -- keys/encoders/MIDI are three drivers of the single source of truth (the
 -- params). this module adds a fourth that RECORDS the param stream and
--- REPLAYS it: a modulation loop pedal for a 3-knob instrument. record a
--- filter sweep and it loops hands-free while you granulate on top; overdub a
--- delay-mix swell onto a second lane; each param you move becomes its own
--- automation lane. no engine change — it just re-issues params:set, so the
--- fingerprint is untouched and it can never brick loading.
+-- REPLAYS it: a modulation loop pedal for a 3-knob instrument. each param you
+-- move becomes its own automation lane, overdubbed independently. no engine
+-- change — it just re-issues params:set, so the fingerprint is untouched and
+-- it can never brick loading.
 --
 -- data model: one loop, per-param lanes.
 --   loop_len   loop length in FRAMES (the 15fps redraw grid is the timeline;
@@ -55,7 +54,7 @@ local MOTION_IDS = {
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
   "voice_atk", "voice_rel",
-  -- S19: the scene morph knob. recording THIS records a whole-instrument
+  -- the scene morph knob. recording THIS records a whole-instrument
   -- sweep in ONE lane — mscenes re-derives every param from it on replay
   -- (and tells us it did, via M.account, so the sweep never punches forty
   -- lanes of its own). appended, so existing lane order is unchanged.
