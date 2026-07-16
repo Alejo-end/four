@@ -300,29 +300,45 @@ no clipping, no xruns with a stretch mode + tape + all FX engaged.
 
 ---
 
-## 10. Page → control map (target, filled in per stage)
+## 10. Page → control map (NU redesign — 9 stations)
 
-| page    | E2 / E2-alt              | E3 / E3-alt             | K2 / K2-alt   | K3 / K3-alt   |
-|---------|--------------------------|-------------------------|---------------|---------------|
-| MIX     | `mix` / `out_level`      | `sc_level` / `cut_level`| ENG throw (`mix`=0) / **STOP** (`stop_all`) | TAPE throw (`mix`=1) / **DRY** (`ctx.fx_dry`) |
-| LEVEL   | `input_level` / `monitor_level` | `output_level` / `headphone_gain` | IN=0 dB reset | OUT=0 dB reset |
-| REC     | `rec_level` / `pre_level`| `dry_wet` / `resample`  | `rec` toggle  | `freeze` toggle |
-| WINDOW  | `pos_start` / `scan`     | `pos_end` / `pos_jitter`| reset window  | FLIP (negate `scan`) |
-| GRAIN   | banked (2 banks × 4)     | banked                  | BANK / OCT− (`pitch` ×½) | MODE (Clouds) / OCT+ (`pitch` ×2) |
-| STRETCH | `scan` / `pitch`         | `warp_window` / `warp_rand` | cycle `mode` | `pv_freeze` toggle |
-| TAPE    | `tape_rate` / `tape_pre` | `loop_start` / `loop_end`| `tape_rec` / REV (mom) | `tape_freeze` / CLR |
-| FILTER  | `cutoff` / `dry_wet`     | `resonance` / `grain_level` | cycle `filt_type` | OPEN (neutralize) |
-| DELAY   | `delay_mix` / `delay_time`| `delay_fb` / `drive`   | INF (`delay_fb`=0.95) | KILL (`delay_fb`=0) |
-| REVERB  | banked (4 banks × 4)     | banked                  | BANK | KILL (`rev_mix`=0) / SHMR (shimmer bloom) |
-| PADS    | `voices` / `voice_atk`   | `voice_rel` / —         | SEL (cursor++) / PLAY (audition) | TYPE (grain/slice) / ROUTE (`pad_input`) |
-| MOTION  | LANE select / —          | LEN (`motion_len`) / —  | REC (`motion_rec`) / CLR-L | PLAY (`motion_play`) / CLR |
-| SEQ     | `seq_euclid` / `clock_tempo` | `seq_len` / `seq_div` | PLAY (`seq_play`) / STOP | SLICE (`seq_slice`++) / DRY |
-| SCENE   | `scene_slot` / `scene_morph_a` | `scene_morph_amt` / `scene_morph_b` | RCL (`scene_recall`) / **UNDO** (`scene_safe_restore`) | CAP (`scene_capture`) / **SAFE** (`scene_safe_capture`) |
+The redesign merged the old 14 pages into 9 stations and replaced per-page alt
+keys with a **global alt layer** — the same three chords on every page:
 
-(This table is kept in lockstep with `ENC_MAP` and `KEYS` in `mangler.lua`; encoders/keys
-always go through `params:*`. PADS keys are the exception — SEL/PLAY/TYPE drive the pad
-cursor/audition/type in `ctx`, not a param, since a pad bank isn't a single value; MOTION's
-LANE cursor is likewise a `ctx` selector, and CLR-L/CLR are destructive so they stay off MIDI.)
+- **K1+E1** — scene morph toward the selected slot, from anywhere.
+- **K1+K2** — STOP (`stop_all`).
+- **K1+K3** — DRY (`ctx.fx_dry`) on a tap; hold to the ~1s arc (`ERASE_FRAMES`
+  = 15) to ERASE the current page's material (the frames between the tap and the
+  arc are an abort zone). Per-page erase targets are the last column.
+
+| page   | E2 / E2-alt                    | E3 / E3-alt                 | K2                                   | K3                                   | K1+K3 erases          |
+|--------|--------------------------------|-----------------------------|--------------------------------------|--------------------------------------|-----------------------|
+| TAKE   | `pos_start` / `@win_move`      | `pos_end` / `pos_jitter`    | REC (`rec`, punch)                   | SNAP (window→take)                   | take (`clear_rec`)    |
+| VOICE  | `scan`\* / `scan`              | `pitch`\* / `pitch`         | FRZ (`pv_freeze`, punch)             | MODE (cycle PLAY→GRAIN→WARP→PV)      | —                     |
+| TAPE   | `tape_rate` / `tape_pre`       | `loop_end` / `@loop_move`   | REC (`tape_rec`, punch)              | REV (`tape_reverse`, punch)          | tape loop + reset     |
+| FILTER | `cutoff` / `drive`             | `resonance` / `dry_wet`     | OPEN (throw)                         | TYPE (cycle LP/HP/BP)                | —                     |
+| SPACE  | `delay_mix` / `delay_time`     | `rev_mix` / `rev_decay`     | INF (throw: `delay_fb`=0.95)         | BLOOM (throw: shimmer surge)         | —                     |
+| MIX    | `mix` / `input_level`          | `out_level` / `monitor_level` | ENG (throw: `mix`=0)               | TAPE (throw: `mix`=1)                | —                     |
+| PADS   | `seq_slice` / `seq_len`        | `seq_euclid` / `seq_div`    | PAD (gate: audition slice)           | RUN (`seq_play`, punch)              | pattern (`Mseq.clear`)|
+| MOTION | `motion_lane` / —              | `motion_depth` / —          | REC (`motion_rec`, punch)            | PLAY (`motion_play`, punch)          | selected lane         |
+| SCENE  | `scene_slot` / `scene_recall_mode` | `scene_morph_amt` / —   | RCL (punch: hold=PEEK, tap=COMMIT; ◄=safe restore) | CAP (`scene_capture`; ◄=mark safe) | slot (`scene_clear`)  |
+
+\* VOICE E2/E3 are **mode-contextual** (`VOICE_FACE`): GRAIN → `size`/`density`,
+WARP → `warp_window`/`warp_rand`, OFF/PV/PLAY → `scan`/`pitch`; the alt layer is
+always `scan`/`pitch`.
+
+(Encoders/keys all go through `params:*`; the table mirrors `ENC_MAP`,
+`VOICE_FACE` and `KEYS` in `mangler.lua`. `@win_move`/`@loop_move` are compound
+targets — `move_pair` slides a lo/hi pair together, width-preserved. **The punch
+law** governs K2/K3: press engages now, release within `TAP_FRAMES` (5, ~300 ms)
+latches, held longer is a punch whose release disengages, and pressing a latched
+key turns it off; `pk(...)` wraps a binary param, **throws** (OPEN/INF/BLOOM/ENG/
+TAPE) store the prior values and restore them when un-latched, and the PADS
+**PAD** gate always closes its audition voice on release (a latched voice would
+just be the drone). The selectors `seq_slice`/`motion_lane`/`scene_slot` are real
+params — MIDI-mappable — and `seq_slice`'s action mirrors `ctx.pad_cursor` (one
+selection, until the NU-3 slice merge). Destructive erases stay off the tap
+layer: they need the held K1+K3 arc.)
 
 **Master STOP (`stop_all`, Lua-only).** A binary param that chokes both decks inside
 `Mtape.update_mix` — the one place the engine `level` and the softcut voice levels are
@@ -1213,3 +1229,105 @@ scene.png regenerated; dist byte-verified.
 **Gate:** capture ONE scene. Mangle the sound. Sweep E3 → it slides back toward the scene, and
 stops anywhere between. Sweep to 0 → exactly the mangled sound again. E2 to another slot mid-sweep
 → it re-aims. Nothing needs the alt layer to work.
+
+---
+
+### S22 — persist the live take (session snapshot + export) — Phase A BUILT (ENGINE, gate pending), Phase B PLANNED
+
+Request: *"is there a way to [save/load] for the live take?"* Today a PSET restores everything
+**except** the live take — the engine's `bufL`/`bufR` (what REC captures from the input) is never
+written to disk, so a recorded phrase is gone on reload. What survives is the tape deck's audio
+(`tape-N.wav`), the scene bank, all params, and any **loaded** sample's path. The tape deck is a
+zero-code workaround (arm it while you play — it persists), but it records the RAW input on the
+tape's own 60s timeline, not the engine's windowed take. This stage makes the take itself
+persist, in two independent phases so the simple half ships and gates on its own.
+
+**SEQUENCING (why "build after the S21 gate").** S21 already took the engine to fingerprint 61
+but that count is **still ungated on device**. Phase A adds engine commands, so the number the
+S21 gate looks for would change under it. Do it in order: **confirm `count: 61` for S21 first**,
+THEN land Phase A → **63**, so each engine change is confirmed against a legible number. The whole
+feature is opt-in on top of a device gate that is itself still pending — do not build ahead of it.
+
+#### Phase A — session snapshot (ENGINE +2 → fingerprint 61 → 63, then Lua) — BUILT, device gate pending
+
+> **Status (2026-07-16):** implemented and verified in the offscreen harness (12 assertions
+> driving the REAL `params.action_write/read/delete` → `ctx.take_pset_*` closures under the sim
+> stubs; the wave_any write-gate and the `_L`/`_R` delete contract each proven to FAIL when
+> reverted). Renders byte-identical to HEAD, dist rebuilt + byte-verified. **UNTESTED on device**
+> (no sclang here). The gate below is what's left.
+
+The take auto-rides the PSET as a private **L/R pair** beside the pset file, exactly like
+`mtape` does for the tape wav and `mscenes` for the scene bank. `bufL`/`bufR` are two **mono**
+60s buffers (`Engine_Mangler.sc:184`), and scsynth has no cheap non-realtime way to interleave
+two mono buffers into one stereo file — so the snapshot stays two mono files and sidesteps the
+interleave entirely. That is Phase B's problem, not Phase A's; keeping them decoupled means the
+snapshot never waits on the hard part.
+
+**Engine, +2 commands (the direct inverse of S21's `read_file`/`clear`):**
+- `write_take` (format `"s"`, a path **stem**) → `bufL.write(stem ++ "_L.wav", "wav", "int16")`
+  and `bufR.write(stem ++ "_R.wav", ...)`. `Buffer:write` issues an async `/b_write` — a direct
+  buffer dump, NOT realtime playback — bounded by the buffer size, core UGen-free, no plugin
+  deps: cannot brick. **Write 16-bit PCM wav specifically** so `Mpages.load_wave` (the S21
+  RIFF/16-bit-PCM peak reader) can repaint the restored take from the L file.
+- `read_take` (format `"s"`, the same stem) → the S21-proven idiom, per side:
+  `bufL.readChannel(stem ++ "_L.wav", 0, frames, 0, false, [0])` and the same for R. Reads into
+  the EXISTING buffers (verified in `Buffer.sc`), so no bufnum changes, nothing respawns.
+- Both act on the **same `bufL`/`bufR` the synths already hold** — same guarantee as S21.
+
+**Lua / PSET wiring (fold into the shared hook — do NOT replace it).** `params.action_write/
+read/delete` in `mangler.lua:1061` already call `Mtape` + `Mscenes`; add the take half beside
+them (a few functions near `ctx.clear_recording`/`ctx.load_sample`, or a tiny `mtake` lib if it
+grows):
+- **write:** only when there is content — gate on the existing **`ctx.wave_any`** (the same
+  has-a-take signal that draws `EMPTY - K2 REC`), so an empty pset never carries a ~5.5 MB
+  silence file. `if engine.write_take then engine.write_take(norns.state.data .. "take-" ..
+  number) end` (the `if engine.*` guard no-ops against an old engine, like S21).
+- **read:** `if util.file_exists(stem .. "_L.wav")` → `engine.read_take(stem)`, set
+  `ctx.wave_any = true`, and `Mpages.load_wave(stem .. "_L.wav", 60)` to repaint — otherwise the
+  restored take is INVISIBLE (the exact "audio you can hear over EMPTY - K2 REC" bug S21 fixed
+  for loaded samples). No take file (a pre-S22 pset) → leave the buffer alone, like `mtape`
+  leaves the tape alone when there's no wav.
+- **delete:** `os.remove` both `_L`/`_R` files.
+
+**Phase A gate (ENGINE — rsync, SYSTEM > RESTART, confirm `count: 63`; S21's 61 first if not yet
+done):** record a take → PSET SAVE n → `clear_recording` (REC K1+K3) so the buffer is empty and
+the page says `EMPTY - K2 REC` → PSET LOAD n → the take is back, audible, and the REC/WINDOW/PADS
+strips draw its real waveform. Confirm `take-n_L.wav`/`_R.wav` exist and are non-truncated (the
+`/b_write` is async — a save immediately followed by quit is the risk to check). A pset with no
+take saved must NOT resurrect a stale buffer or draw silence as material. An empty take must NOT
+write a file. Round-trips alongside tape audio + scenes without fighting them.
+
+#### Phase B — browsable stereo export (a real single file) — DEFERRED until the count-63 gate
+
+> **Decision (2026-07-16):** hold Phase B until the device confirms `count: 63` (S21 + S22A both
+> gated). It would be a THIRD untested engine change stacked on two unproven ones, against the
+> one-gate-at-a-time rule — and Phase A already gives full session save/load in the meantime.
+> **Chosen source: the DRY take (B-eng below)**, not the post-FX softcut bounce — export means
+> "the sample I recorded," and B-soft's routing side-effects (eng→cut, the tape catching it)
+> aren't worth it. Build B-eng on the proven engine once the gate passes.
+
+Phase A's pair is a private session snapshot, not a file you can browse or reuse. Export writes a
+**named stereo `.wav` into `dust/audio`** so it reloads through the existing `sample_file` /
+`read_file` path with ZERO new load code. The only hard part is producing an interleaved stereo
+file; two mechanisms, chosen (and gated) when this phase is actually built:
+
+- **B-eng (recommended — the true DRY take).** Engine-side, +1 command (`export_stereo "s"` →
+  fingerprint 63 → 64). Either (a) a short bounce synth `BufRd.ar([bufL, bufR]) →
+  RecordBuf.ar(stereoBuf)` run for the buffer length then `stereoBuf.write(path, "wav", "int16")`
+  (realtime — takes the take's length), or (b) `getToFloatArray` both buffers, interleave in
+  sclang, `SoundFile.writeData` (non-realtime, ~5.7M floats over OSC — measure on the Pi4 first).
+  Prefer (b) if the pull is fast enough, else (a).
+- **B-soft (easy, but DIFFERENT audio).** Lua-only: raise `audio.level_eng_cut` (mtape holds it
+  at **0** on purpose — `mtape.lua:82`), record the engine OUTPUT into a softcut buffer for the
+  window length, `sc.buffer_write_stereo`. Captures what you HEAR (post-FX, not the dry buffer),
+  runs realtime, and collides with mtape's routing (the tape would also catch it) and with live
+  playback. Only pick this if "bounce the processed sound" is the actual want.
+
+**Convergence (optional, later).** Once B-eng proves a safe stereo write, Phase A's snapshot
+COULD migrate from the L/R pair to a single `take-n.wav` loadable by `read_file`, unifying the
+two paths — but that inverts the staging (snapshot would then depend on the hard part), so it is
+a cleanup to consider only after both phases are gated, never a reason to delay Phase A.
+
+**Phase B gate:** export a take → a real stereo wav appears in `dust/audio`, plays in any editor,
+and reloads via PARAMS > load sample identical to the original (B-eng: dry; B-soft: post-FX, as
+chosen). No xruns during the bounce; live audio recovers cleanly afterward.

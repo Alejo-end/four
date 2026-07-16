@@ -666,6 +666,44 @@ Engine_Mangler : CroneEngine {
             });
         });
 
+        // ---- S22 Phase A: persist the LIVE take across save/load.
+        // bufL/bufR are two MONO buffers and scsynth has no cheap non-realtime
+        // way to interleave them into one stereo file, so the take rides the
+        // PSET as a private L/R pair beside the pset — the direct INVERSE of
+        // read_file's readChannel. Buffer:write issues an async /b_write (a
+        // direct buffer dump, NOT realtime playback), bounded by the buffer,
+        // all core UGens: cannot brick. Write 16-bit PCM wav specifically so
+        // the Lua side (Mpages.load_wave) can repaint the restored take.
+        this.addCommand(\write_take, "s", { arg msg;
+            var stem = msg[1].asString;
+            bufL.write(stem ++ "_L.wav", "wav", "int16");
+            bufR.write(stem ++ "_R.wav", "wav", "int16");
+            ("mangler: wrote take " ++ stem).postln;
+        });
+
+        // read the pair back into the SAME bufL/bufR (readChannel into an
+        // existing buffer — no bufnum change, nothing respawns). The Lua side
+        // only calls this when the _L file exists; both halves are the same
+        // length because write_take always writes them together.
+        this.addCommand(\read_take, "s", { arg msg;
+            var stem = msg[1].asString;
+            var pathL = stem ++ "_L.wav";
+            var pathR = stem ++ "_R.wav";
+            var sf = SoundFile.new;
+            sf.openRead(pathL).if({
+                var frames = sf.numFrames.min(s.sampleRate * 60);
+                sf.close;
+                bufL.zero;
+                bufR.zero;
+                bufL.readChannel(pathL, 0, frames, 0, false, [0]);
+                bufR.readChannel(pathR, 0, frames, 0, false, [0]);
+                ("mangler: restored take " ++ stem ++ " — "
+                    ++ frames ++ " frames").postln;
+            }, {
+                ("mangler: CANNOT READ take " ++ stem).postln;
+            });
+        });
+
         this.addPoll(\play_phase, {
             phaseBus.getSynchronous;
         });

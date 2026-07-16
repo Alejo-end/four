@@ -604,6 +604,44 @@ function ctx.load_sample(path)
   end
 end
 
+-- S22 Phase A: the live take rides the PSET as a private L/R pair beside the
+-- pset file (take-N_L.wav / _R.wav), the same way mtape persists the tape
+-- audio and mscenes the scene bank — the shared action_write/read/delete hook
+-- calls each. the engine holds the buffer; lua only knows whether it has
+-- CONTENT (ctx.wave_any — the has-a-take signal that also draws
+-- "EMPTY - K2 REC"), so the write is gated on it: an empty take never leaves a
+-- multi-MB silence file behind, and a fresh pset never resurrects one.
+local function take_stem(number)
+  return norns.state.data .. "take-" .. number
+end
+
+function ctx.take_pset_write(number)
+  if not engine.write_take then return end   -- old engine: no-op (like read_file)
+  if not ctx.wave_any then return end         -- nothing recorded — write nothing
+  engine.write_take(take_stem(number))
+end
+
+function ctx.take_pset_read(number)
+  if not engine.read_take then return end
+  local stem = take_stem(number)
+  -- no take file (a pset from before S22, or one saved with an empty buffer):
+  -- leave the buffer alone, exactly like mtape when there's no wav — the
+  -- pset's own params (window included) still load.
+  if not util.file_exists(stem .. "_L.wav") then return end
+  engine.read_take(stem)
+  -- repaint from the file or the restored take is INVISIBLE (the "audio you can
+  -- hear over EMPTY - K2 REC" bug S21 fixed for loaded samples). do NOT snap the
+  -- window — params:read already restored the saved pos_start/pos_end.
+  Mpages.load_wave(stem .. "_L.wav", 60)
+  ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
+end
+
+function ctx.take_pset_delete(number)
+  local stem = take_stem(number)
+  os.remove(stem .. "_L.wav")
+  os.remove(stem .. "_R.wav")
+end
+
 -- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
 -- sample — every "on top" color to zero (delay, reverb, shimmer, drive,
 -- clouds feedback — the one wash the REVERB page can't kill) and the
@@ -1052,23 +1090,26 @@ local function init_params()
     if v == 1 then Mscenes.chaos() else Mscenes.chaos_release() end
   end)
 
-  -- PSETs persist the tape audio too: PARAMS > PSET > SAVE/LOAD/DELETE
-  -- round-trip the softcut buffers (see mtape). the granular engine's
-  -- record buffer would need a matching save command on the SC side to
-  -- round-trip as well — until then, only the tape survives a restart.
-  -- the hooks are SHARED: each module does its own half (mtape the audio,
-  -- mscenes the scene bank + safe snapshot, as a lua table beside the pset).
+  -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
+  -- the softcut buffers (mtape) AND, since S22, the granular engine's record
+  -- buffer — the live take, as an L/R wav pair beside the pset (ctx.take_pset_*
+  -- → engine write_take/read_take). the hooks are SHARED: each module/helper
+  -- does its own half (mtape the tape audio, mscenes the scene bank + safe
+  -- snapshot as a lua table, the take helpers the engine buffer).
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
     Mscenes.pset_write(number)
+    ctx.take_pset_write(number)   -- S22: the engine take, as an L/R pair
   end
   params.action_read = function(filename, silent, number)
     Mtape.pset_read(number)
     Mscenes.pset_read(number)
+    ctx.take_pset_read(number)
   end
   params.action_delete = function(filename, name, number)
     Mtape.pset_delete(number)
     Mscenes.pset_delete(number)
+    ctx.take_pset_delete(number)
   end
 
   params:bang()

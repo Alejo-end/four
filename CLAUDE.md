@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **S21 (fingerprint 61) — ENGINE RESTART + count-61 gate STILL PENDING on device · NU-1..NU-4 UI redesign (doc/redesign.md) fully landed in Lua (renders + dist byte-verified 2026-07-16) — its on-device gate is also pending: save+reload, walk the nine pages, punch-law feel, erase arc, scene peek/◄, and the whole grid spine (grid code is sim-stubbed, device-only)**
+         ## CURRENT STAGE: **S22 Phase A (fingerprint 61 → 63) — ENGINE `write_take`/`read_take` so the LIVE take rides the PSET (L/R wav pair); Lua-verified (12-assertion harness, renders + dist byte-verified 2026-07-16), UNTESTED on device. This STACKS on the still-pending S21 count-61 restart: confirm `count: 63` covers BOTH. · S21 (61) ENGINE RESTART gate STILL PENDING · NU-1..NU-4 UI redesign (doc/redesign.md) fully landed in Lua, its on-device gate also pending: save+reload, walk the nine pages, punch-law feel, erase arc, scene peek/◄, and the whole grid spine (grid code is sim-stubbed, device-only)**
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1044,12 +1044,54 @@ polyphonic slices + release cleanly, and specifically hold a key → tap X →
 release → NO stuck voice. Save + reload (Lua-only — the S21 engine RESTART
 for count 61 is still separately pending).
 
+Forty-fourth change — **S22 Phase A: the LIVE take rides the PSET (ENGINE +2 →
+fingerprint 61 → 63, Lua PSET wiring, UNTESTED on device — no sclang here)**:
+answered *"is there a way to save/load the live take?"* — before this, a PSET
+restored everything EXCEPT the engine's record buffer (`bufL`/`bufR`, what REC
+captures), so a recorded phrase died on reload; only the tape deck's audio, the
+scenes, the params, and a loaded sample's PATH survived. Full design +
+staging: doc/spec.md §S22 (Phase B = a browsable stereo export, still PLANNED).
+ENGINE, **+2 commands** — the direct inverse of S21's `read_file`/`clear`:
+`write_take` ("s", a path STEM) → `bufL.write(stem++"_L.wav","wav","int16")` +
+`bufR.write(…_R.wav…)`; `read_take` ("s", same stem) → `readChannel` each mono
+file back into the SAME `bufL`/`bufR` (existing-buffer read, no bufnum change,
+nothing respawns). `Buffer:write` is an async `/b_write` (a direct buffer dump,
+NOT realtime playback), bounded, all core UGens — cannot brick. **16-bit PCM wav
+specifically** so `Mpages.load_wave` can repaint the restored take. WHY A PAIR,
+not one stereo file: `bufL`/`bufR` are two MONO buffers and scsynth has no cheap
+non-realtime interleave — so the snapshot sidesteps it entirely (that's Phase
+B's problem, kept decoupled so the simple half ships alone). LUA: three helpers
+beside the S21 `clear_recording`/`load_sample` (`ctx.take_pset_write/read/
+delete`), folded into the SHARED `action_write/read/delete` hook alongside
+mtape + mscenes (never replaced). **Write is GATED on `ctx.wave_any`** (the
+existing has-a-take signal that also draws "EMPTY - K2 REC") so an empty pset
+never leaves a multi-MB silence file and a fresh pset never resurrects one;
+**read is gated on `file_exists(stem_L)`** (a pre-S22 pset → leave the buffer
+alone, like mtape with no wav) and repaints via `Mpages.load_wave` — WITHOUT
+snapping the window (params:read already restored the saved pos_start/pos_end;
+this is a session snapshot, not a fresh file like load_sample). Both guard
+`if engine.write_take`/`read_take` → clean no-op against an old engine. VERIFIED:
+a 12-assertion harness drives the REAL `params.action_*` closures under the sim
+stubs with a real generated 16-bit wav (wave_any set through the REAL
+load_sample path) — asserts the write-gate (empty→nothing, take→write_take with
+the right stem), old-engine no-op, the CLR round-trip, read-absent leaves the
+buffer alone, read-present fires read_take + repaint, delete removes BOTH halves.
+Two mutants (drop the wave_any gate; delete only `_L`) each fail exactly their
+guard assertions. Renders byte-identical to HEAD (no params/draw touched); dist
+rebuilt + byte-verified (source==dist). **DEPLOY: ENGINE change — rsync, SYSTEM >
+RESTART, confirm `count: 63`** (this SUBSUMES the pending S21 restart — 63 covers
+S21's 61 too). §S22 Phase A gate: record a take → PSET SAVE → CLR (buffer empty,
+page says EMPTY) → PSET LOAD → the take is back, audible, drawn; confirm
+`take-N_L/_R.wav` exist non-truncated (async `/b_write` — a save-then-quit is the
+risk); an empty take writes NO file; a pre-S22 pset doesn't resurrect a buffer.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = **61**). Wrong count = old engine still live.
+   S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = 61, S22 Phase A = **63**).
+   Wrong count = old engine still live.
 Lua-only changes skip all this: save + reload the script.
 
 ---
