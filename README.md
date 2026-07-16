@@ -12,11 +12,11 @@ you have one you can plug it in for a pad surface.
 
 ![Signal flow: audio comes in, gets recorded, feeds the drone and pads source stage, then passes through filter, delay and reverb on the way out. The effects all start dry.](doc/signal-flow.svg)
 
-> **Status:** staged and still moving. The engine is built and tested in gated stages on real
-> hardware, so features can still change between versions. See [CLAUDE.md](CLAUDE.md) for the
-> current stage and the full build log.
+> **Status:** freshly redesigned around the spec in [doc/redesign.md](doc/redesign.md) — nine
+> pages, one gesture law — and still moving. The engine is built and tested in gated stages
+> on real hardware. See [CLAUDE.md](CLAUDE.md) for the current stage and the full build log.
 
-**Contents:** [Requirements](#requirements) · [Play it in 60 seconds](#play-it-in-60-seconds) · [Controls](#controls-3-keys-3-encoders) · [The pages](#the-pages) · [Playing notes](#playing-notes) · [Install](#install) · [Under the hood](#under-the-hood)
+**Contents:** [Requirements](#requirements) · [Play it in 60 seconds](#play-it-in-60-seconds) · [One gesture law](#one-gesture-law) · [What the screen always tells you](#what-the-screen-always-tells-you) · [The nine pages](#the-nine-pages) · [Playing notes](#playing-notes) · [The grid](#the-grid-optional) · [Install](#install) · [Under the hood](#under-the-hood)
 
 ## Requirements
 
@@ -34,318 +34,240 @@ you have one you can plug it in for a pad surface.
 
 First time here? [Install](#install) takes about two minutes. Once it is on the norns:
 
-1. Plug in your source. Go to **LEVEL** and set IN so the meters peak just below the top.
-2. Record. On **REC**, tap **K2**, play a phrase, then tap **K2** again. The window snaps to
-   your take and starts looping it. It plays back dry, exactly the sound you just recorded.
-3. Shape it. The drone starts on **PLAY**, a clean loop of your sample. Switch to **GRAIN**,
-   **WARP** or **PV** on **STRETCH** when you want to mangle it. **WINDOW** tightens the
-   slice and **GRAIN** tunes the granular character.
-4. Add effects when you want them. **DELAY** and **REVERB** both start at zero mix, so they
-   are off. Turn E2 up on each page to dial them in.
-5. Play it polyphonically. On **PADS** (press K1+K3 so the header reads `PLAY>PADS`), MIDI
-   notes and grid pads trigger 8 slices of your recording on top of the drone. Chop it up, or
-   play chords.
-6. Loop your hands. On **MOTION**, tap **K2** and move any knob — a filter sweep, a delay
-   swell — then tap **K2** again. It records the *movement* and plays it back on a loop, so
-   your hands are free to layer another one on top.
+1. **Record.** The script opens on **TAKE**. Tap **K2**, play a phrase, tap **K2** again —
+   the window snaps to your take and loops it back dry, exactly the sound you played. A
+   little **◇** lights up by the title: that mark means *what you hear is the recording,
+   verbatim*.
+2. **Choose a voice.** On **VOICE**, K3 cycles PLAY (the clean loop) → GRAIN → WARP → PV.
+   The picture under the mode rail *is* the mode — an unbroken wave, a grain cloud,
+   overlapped windows, spectral columns. The encoders always shape what you're hearing.
+3. **Add space when you want it.** **FILTER** and **SPACE** (delay + reverb in one picture)
+   start neutral — turn ECHO and VERB up to add them. The ◇ goes out the moment anything
+   touches the sound.
+4. **Play it as slices.** On **PADS**, the take sits chopped into 8 numbered slices over a
+   16-step Euclidean row: E2 picks a slice, K2 plays it, E3 dials in a rhythm, K3 runs it.
+5. **Loop your hands.** On **MOTION**, tap K2, move any knob — a filter sweep, an echo
+   swell — tap K2 again. The movement itself loops, one lane per knob you touched, drawn as
+   curves.
+6. **Keep sounds you like.** On **SCENE**, K3 captures everything into a slot. Later, *hold*
+   K2 on it to **peek** — the whole instrument slides into that sound, and slides home when
+   you let go. Tap K2 to keep it. The **◄** cell always holds where you just were.
 
 > **Dry by default.** A fresh recording is your sample, untouched. The filter is wide open,
 > drive is a true bypass at zero, and delay and reverb stay silent until you turn them up.
-> You build the sound by adding to it, never by taking away what was already there.
+> The ◇ purity mark by the title is that promise, kept live: it shows only while the output
+> is your take, verbatim.
 
-Longer walkthroughs: [standalone](doc/workflow-standalone.md) and [with a grid](doc/workflow-grid.md).
+## One gesture law
 
-## Controls: 3 keys, 3 encoders
+Every key obeys the same physical rule, on every page:
 
-Everything is these six controls. Learn this once and every page reads the same way.
+> **Press engages now. Let go quickly and it latches. Hold it and it's a *punch* — it lets
+> go when you do.** If something is already latched on, any press turns it off.
+
+That one law makes everything playable two ways: tap **REC** to arm a take or *hold it* to
+punch a stab of input into the buffer; hold **REV** on TAPE to flip the loop for a beat or
+tap to leave it backwards; hold **OPEN** on FILTER for a sweep that returns by itself; hold
+**INF** on SPACE for a dub grab; hold **RUN** on PADS to stutter the sequencer; hold **RCL**
+on SCENE to *borrow* a scene and come home on release. If a word in the footer is still
+inverted after your finger is off, it's latched.
 
 | | |
 |---|---|
-| **E1** | Select the page. Hold K1 to jump between page families. |
-| **E2 / E3** | The page's two knobs. Value and dial live in the footer. Hold K1 for the alt pair. |
-| **K1** (hold) | Alt / shift. Nothing happens on its own — hold it to reach the second layer of the knobs and keys. The footer shows you what you have while it's down. |
-| **K2 / K3** | The page's two actions. The footer pills invert while they are active. |
-| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE, PADS, MOTION and SCENE, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
-| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB, PADS, MOTION and SCENE. Also grid pad (7,2). |
+| **E1** | Select the page — nine stations along the signal path. |
+| **E2 / E3** | The page's two shaping knobs. Hold K1 for the second pair. Values appear only while you turn (the footer word swells), so the screen stays quiet. |
+| **K1** (hold) | Shift. The footer swaps whole — alt knobs, and the two global keys below. A bar appears at the footer's left edge while it's down. |
+| **K2 / K3** | The page's two gestures, named in the footer, under the law above. |
+| **K1+K2** | **STOP / START** — on every page, no exceptions. Tap to choke everything (the title inverts), tap again for the exact mix back. Hold it for a mute stab. Also the space bar of a USB keyboard, the grid, and MIDI (`stop all`). |
+| **K1+K3** | **DRY**, tap — one press throws the playback path clean: delay, reverb, shimmer, drive and clouds feedback to zero, filter open. **Hold it ~1s** and it becomes the **eraser**: a ring fills beside the word, and when it closes, the page's material is wiped (the take, the tape loop, the pattern, a motion lane, a scene slot). Let go early and nothing happens. |
+| **K1+E1** | The **morph, from anywhere** — sweeps the whole instrument toward the selected scene without leaving your page. Sweep back to zero and you land exactly where you started. |
 
-**The footer mirrors your hands.** Left dial = E2, right dial = E3, and the two pills between
-them are K2 and K3. A dial fills in solid while you're turning that knob. Hold K1 and all four
-change to the alt layer, so you can always see what the second layer does before you commit.
+## What the screen always tells you
 
-Two pages have more controls than four knobs (**REVERB**, **GRAIN**), so they are *banked*: K2
-pages E2/E3 — and their alt pair — through the parameters, and a `BK n` chip shows where you are.
+The header and footer never change shape — learn them once and every page is pre-learned.
 
-## The pages
+- **Top left:** the page name. It inverts while STOPped.
+- **◇** beside it: the purity mark — lit only while the output is your take, verbatim.
+- **Flags:** `R` / `T` / `M` blink fast while the take, the tape, or motion is *writing*
+  (fast blinking always means writing); a steady `▸` means the sequencer runs; `FZ` / `TF`
+  are the freezes.
+- **Top right:** nine dots, grouped `3·2·1·3` — TAKE VOICE TAPE · FILTER SPACE · MIX ·
+  PADS MOTION SCENE. The nav row is the signal map.
+- **Footer:** four quiet words — K2, K3, then E2·, E3·. Latched things stay inverted;
+  numbers exist only while you're asking.
 
-You do not need to learn these to start — the quickstart above uses a handful. This is the
-manual for the rest. Every frame is real output from the offscreen renderer in `tools/uisim/`,
-drawn over a scripted take.
+## The nine pages
 
-E1 walks the pages in this order. Hold K1 and turn E1 to jump between the families.
+Every frame below is real output from the offscreen renderer in `tools/uisim/`, drawn over a
+scripted take. Every knob is also a parameter in **PARAMS** (organized by these same pages),
+where you can MIDI-map it.
 
-| # | page | what it's for | family |
-|---|---|---|---|
-| 1 | [MIX](#mix) | balance the engine against the tape deck | source |
-| 2 | [LEVEL](#level) | set your levels — **start here** | source |
-| 3 | [REC](#rec) | record a phrase | source |
-| 4 | [WINDOW](#window) | choose which part of the take loops | shape |
-| 5 | [GRAIN](#grain) | granular character | shape |
-| 6 | [STRETCH](#stretch) | pick the engine that plays your loop | shape |
-| 7 | [TAPE](#tape) | a second, parallel loop deck | tape |
-| 8 | [FILTER](#filter) | tone | fx |
-| 9 | [DELAY](#delay) | echoes | fx |
-| 10 | [REVERB](#reverb) | space, and shimmer | fx |
-| 11 | [PADS](#pads) | play your take as 8 slices | fx |
-| 12 | [MOTION](#motion) | record and replay your knob moves | motion |
-| 13 | [SEQ](#seq) | a Euclidean step sequencer | seq |
-| 14 | [SCENE](#scene) | store, recall and morph whole sounds | scene |
+| # | page | what it's for |
+|---|---|---|
+| 1 | [TAKE](#take) | record the material and frame what plays |
+| 2 | [VOICE](#voice) | how the take plays: PLAY · GRAIN · WARP · PV |
+| 3 | [TAPE](#tape) | a second, parallel loop deck |
+| 4 | [FILTER](#filter) | tone |
+| 5 | [SPACE](#space) | echoes and reverb, one picture |
+| 6 | [MIX](#mix) | the console: in → decks → out |
+| 7 | [PADS](#pads) | the take chopped into 8 slices, played and sequenced |
+| 8 | [MOTION](#motion) | record and replay your knob moves |
+| 9 | [SCENE](#scene) | keep whole sounds, morph between them, always have a way back |
 
-Every knob below is also a parameter in **PARAMS**, where you can MIDI-map it. The same map in
-one terse table (for anyone reading the code) is `doc/spec.md` §10.
+### TAKE
 
-### MIX
+![TAKE page: the recorded material as a strip with window brackets, the rest of the buffer dotted](doc/ui/take.png)
 
-![MIX page showing a crossfader between the engine level and the tape deck level](doc/ui/mix.png)
+The material. Your recording sits bright inside the **window brackets** (E2/E3 move them,
+finer as the window tightens; K1+E2 slides the whole window), dim outside them, and the
+unwritten buffer is a dotted line. **K2** records — tap to arm, tap to commit (the window
+snaps to the take), or hold to punch a stab straight in. **K3** snaps the window full and
+back. While armed, the frame blinks, the write head sweeps with a hot trail, the seconds
+count big, and the input meter shows a bracket: keep your peaks inside it for a clean take.
 
-Blends the **engine** (the drone and the pads) against the **tape deck**. Each lane only shows
-energy when that deck is actually audible, so the picture tells you what you're hearing.
+![TAKE page while recording: armed frame, write head, big elapsed seconds, input meter with the ready bracket](doc/ui/take-rec.png)
 
-- **E2** engine ↔ tape crossfade · **K1+E2** master out level
-- **E3** engine level · **K1+E3** tape level
-- **K2** throw all the way to ENG · **K3** throw all the way to TAPE
+`RSMP` / `REGN` badges appear when resampling or regeneration is feeding output back into
+the buffer (both live in PARAMS). Loading a wav instead of recording: PARAMS > take.
 
-### LEVEL
+### VOICE
 
-![LEVEL page showing stereo input and output meters with peak-hold marks and clip lamps](doc/ui/level.png)
+![VOICE page in PLAY mode: the mode rail with PLAY inverted over one unbroken wave](doc/ui/voice-play.png)
 
-Stereo meters for what's coming in and what's going out, with peak-hold pips and clip lamps.
-**Start here:** set IN so the meters peak just below the top.
+How the take plays. The rail names the mode — **K3** cycles PLAY → GRAIN → WARP → PV (OFF
+lives in PARAMS; stopping is STOP's job) — and the texture below *is* the mode:
 
-- **E2** input · **K1+E2** monitor (your input passed straight through to the output)
-- **E3** output · **K1+E3** headphones
-- **K2** IN to unity (0 dB) · **K3** OUT to unity
+![GRAIN mode: the wave sampled as a cloud of grains](doc/ui/voice-grain.png)
+![WARP mode: an overlapped stretch window ghosts behind the wave](doc/ui/voice-warp.png)
+![PV mode: spectral columns](doc/ui/voice-pv.png)
 
-### REC
-
-![REC page showing the recording buffer with the write head sweeping across it as it captures](doc/ui/rec.png)
-
-The 60-second buffer, with the write head laying material down as it captures. **K2, play a
-phrase, K2** — the window snaps to what you just played and loops it, dry. Empty, it says
-`EMPTY - K2 REC`.
-
-- **E2** rec level · **K1+E2** overdub — how much of the old take survives underneath the new one
-- **E3** resample — bakes the processed output into the take while you record · **K1+E3** regen —
-  the buffer slowly re-records its own output, a self-mangling decay (`REGN` lights while it runs)
-- **K2** arm / stop · **K3** freeze — nothing more gets written, whatever the transport does
-
-### WINDOW
-
-![WINDOW page showing the recorded buffer as a waveform with slice handles marking the loop start and end](doc/ui/window.png)
-
-The take with handles on it: this is the region the drone loops, and it's what everything
-downstream slices — the pads and the sequencer both work inside it. Recording sets it for you;
-tighten it by hand for a stutter.
-
-- **E2** window start · **K1+E2** scan rate — playback speed and direction
-- **E3** window end · **K1+E3** jitter — scatters the playhead around the window
-- **K2** reset to the whole buffer · **K3** FLIP — negate the scan and play it backwards
-
-The edges get finer as the window tightens, so a wide window moves fast and a tight loop nudges
-by milliseconds.
-
-### GRAIN
-
-![GRAIN page showing the granular cloud editor, drawn as the currently selected Clouds mode](doc/ui/grain.png)
-
-The granular editor, and the drawing *is* the mode you pick with K3: a cloud of grains
-(GRANULAR), overlapping windows (STRETCH), a loop with echo ghosts (LOOP), or spectral columns
-(SPECTRAL).
-
-**These knobs feed the GRAIN drone** — if the drone is on PLAY (the default), switch it to GRAIN
-on [STRETCH](#stretch) or you won't hear them.
-
-- **Bank 1** — **E2** grain size · **K1+E2** spread (stereo width) · **E3** density (grains per
-  second) · **K1+E3** texture
-- **Bank 2** — **E2** grain position · **K1+E2** grain level · **E3** feedback · **K1+E3** lofi
-- **K2** BANK — page the knobs · **K3** MODE — cycle the four modes
-- **K1+K2** octave down · **K1+K3** octave up
-
-Texture, position, feedback, lofi and the modes are **MiClouds** controls: with mi-UGens
-installed you get the Clouds granular voice, and without it the stock grain cloud, where those
-four do nothing. Size, density, spread and pitch work either way.
-
-### STRETCH
-
-![STRETCH page showing the selected drone engine drawn as its own waveform texture](doc/ui/stretch-play.png)
-
-Picks the engine that plays your loop. Each one draws its own texture, and lies flat when it's
-off.
-
-- **PLAY** — a clean loop, exactly as recorded. The default.
-- **GRAIN** — granular clouds, tuned on [GRAIN](#grain).
-- **WARP** — time-stretch: scan sets the speed, pitch stays independent of it.
-- **PV** — a phase vocoder. K3 freezes the spectrum into a pad.
-- **OFF** — silences the drone. The pads, the sequencer and the tape still play.
-
-- **E2** scan rate · **K1+E2** pitch — ±2 octaves, independent of speed
-- **E3** warp window · **K1+E3** warp randomisation
-- **K2** cycle the mode · **K3** PV freeze
+**K2** freezes (hold for a stutter, tap to hold it — `FZ` joins the header). The encoders are
+**mode-contextual**: in GRAIN they're SIZE and DENS; everywhere else SPEED and PITCH (always
+on the shift pair too). Speed goes through zero — turn it negative and the take plays
+backwards. Deep granular character (spread, texture, position, feedback, lofi, jitter) lives
+in PARAMS > voice.
 
 ### TAPE
 
-![TAPE page showing two tape reels spinning at the current playback rate](doc/ui/tape.png)
+![TAPE page: the belt — a literal tape loop with the waveform riding the top run, a circulation arrow on the return](doc/ui/tape.png)
 
-A second deck running in parallel: it records straight from your input, independent of the
-engine, and loops it. The reels spin at the real playback rate. **Hear it by turning the
-[MIX](#mix) crossfade toward TAPE.**
-
-- **E2** tape rate — negative plays it backwards · **K1+E2** overdub
-- **E3** loop start · **K1+E3** loop end
-- **K2** record · **K3** freeze the loop · **K1+K2** reverse while held · **K1+K3** clear the tape
-
-It runs on softcut, a separate audio core, so it costs the engine almost nothing.
+A second deck: softcut records the raw input on its own 60-second loop, independent of the
+drone. The loop is drawn as a **belt** — material rides the top run, the head sweeps it with
+a trail, the arrow on the return run shows direction, the rate sits inside. **K2** records
+(hold = punch-in overdub, the freshly written stretch glows). **K3** reverses — hold to flip
+for a moment, tap to latch it backwards. E2 is the rate (through zero = backwards), E3 the
+loop length; the shift pair is overdub decay and loop position. The eraser (K1+K3 held)
+wipes the loop.
 
 ### FILTER
 
-![FILTER page showing the filter frequency response curve with a node dot marking the cutoff](doc/ui/filter.png)
+![FILTER page: the real filter response curve with labeled 100Hz/1k/10k rails, a bright node at the cutoff](doc/ui/filter.png)
 
-The engine's real response curve, with a bright node at the cutoff. Wide open by default.
+Tone. The curve is the engine's *real* response — cutoff (E2) drags the bright node along
+the labeled rails, resonance (E3) raises the bump, and drive (K1+E2) flecks the curve with
+grit instead of showing you a number. **K2 OPEN** throws the filter wide — hold it for a
+sweep that comes back by itself, tap to park it open, tap again to return to your carved
+tone. **K3** cycles LP / HP / BP.
 
-- **E2** cutoff · **K1+E2** dry/wet — the engine's own wet path
-- **E3** resonance · **K1+E3** grain level
-- **K2** cycle LP / HP / BP · **K3** OPEN — throw it wide open and kill the resonance
+### SPACE
 
-### DELAY
+![SPACE page: the impulse scape — onset spike, echo taps decaying by feedback, the reverb tail as a slope, time rails at 1s and 2s](doc/ui/space.png)
 
-![DELAY page showing bouncing arcs, one per repeat, that shrink as feedback rises](doc/ui/delay.png)
+Delay and reverb as one picture: *when does the sound come back?* The spike is now; the taps
+are your echoes (spacing = TIME, decay = feedback); the slope under them is the reverb tail
+(reach = DECAY); motes climb off it when shimmer is up. Dotted rails mark 1s and 2s. E2/E3
+are the two amounts, ECHO and VERB; the shift pair is TIME and DECAY. **K2 INF** pins the
+delay loop (hold for a dub grab, tap to latch — the taps stop decaying, which is the
+warning). **K3 BLOOM** surges the shimmer. When the tail runs off the right edge into the
+hatched margin, the sound will outlive your patience:
 
-One bouncing arc per repeat; the arcs shrink as the feedback rises. Starts dry.
+![SPACE page with a wash: the tail runs off the edge](doc/ui/space-wash.png)
 
-- **E2** delay mix · **K1+E2** time
-- **E3** feedback · **K1+E3** drive — post-filter saturation, a true bypass at zero
-- **K2** INF — feedback to 0.95, the dub pile-up · **K3** KILL — feedback to zero
+Everything deeper — damp, size, early, mod, EQ, cuts, shimmer pitch/tone — is PARAMS > space.
 
-### REVERB
+### MIX
 
-![REVERB page showing the reverb decay tail as an onset spike followed by reflections fading over time](doc/ui/reverb.png)
+![MIX page: input meter, both deck lanes at their real gains with a crossfader between, master VU](doc/ui/mix.png)
 
-The decay tail drawn the way it sounds: an onset spike, then reflections dying away. The tail
-grows with the decay. Starts dry.
-
-- **Bank 1 · SPACE** — **E2** decay · **K1+E2** damping · **E3** mix · **K1+E3** size
-- **Bank 2 · TONE** — **E2** low decay · **K1+E2** high decay · **E3** mid decay · **K1+E3**
-  early diffusion
-- **Bank 3 · MOD** — **E2** mod depth · **K1+E2** low crossover · **E3** mod rate · **K1+E3**
-  high crossover
-- **Bank 4 · SHIMMER** — **E2** shimmer · **K1+E2** shimmer tone · **E3** shimmer pitch ·
-  **K1+E3** mix
-- **K2** BANK · **K3** KILL — mix to zero · **K1+K3** SHMR — bloom the shimmer on and off
-
-Shimmer pitch-shifts the reverb's own feedback, so the tail climbs in octaves into a pad. With
-sc3-plugins installed this is the full JPverb; without it you get stock FreeVerb, which responds
-to decay, damping and mix only — the other nine knobs do nothing.
+The console: input meter → the two decks → master VU, on one screen. Each lane shows its
+deck's *real* level — a deck you can't hear lies flat, and the tape head is drawn whenever
+the tape holds audio, so a deck you forgot you armed can never hide. E2 crossfades, E3 is
+the master; the shift pair is input and monitor. **K2/K3** throw the crossfade hard to
+either deck — hold for a stab, tap to latch, tap again to come back.
 
 ### PADS
 
-![PADS page showing the recording split into 8 slices up top with 8 pad buttons below, one per slice](doc/ui/pads.png)
+![PADS page: the take chopped into 8 numbered slices over a 16-step euclidean row](doc/ui/pads.png)
 
-Your take, chopped into 8 playable slices. The strip up top is the take; the 8 buttons below are
-the pads, one per slice, sitting under the slice they play. `GRN` plays its slice as a grain
-cloud, `SLC` plays it clean. They sound **polyphonically, on top of the drone**.
-
-Press **K1+K3** so the header reads `PLAY>PADS`, and MIDI notes and grid pads play the slices
-instead of retuning the drone. The slices follow the [window](#window), so re-record and the pads
-move with the new take.
-
-- **E2** poly voices (1–16) · **K1+E2** attack
-- **E3** release — shorten it for tight, percussive hits
-- **K2** move the cursor · **K3** flip the cursor pad GRN/SLC · **K1+K2** audition it while held ·
-  **K1+K3** route notes to the pads or back to the drone
+The take, chopped. The window sits zoomed across the top, divided into 8; the numbered cells
+under it are the slices; the row at the bottom is a 16-step Euclidean rhythm that re-fires
+the selected slice. **One cursor does everything**: E2 selects the slice that **K2** plays
+(hold = gate it, tap = fire it) *and* that the sequencer targets — browsing slices while it
+runs re-aims the rhythm live. E3 is the hit count (turning it *is* sequencing); the shift
+pair is length and clock division. **K3** runs it — hold for a stutter. Route MIDI/grid
+notes to the pads in PARAMS > keys (`pad input`), and the header reads `PLAY>PADS`.
 
 ### MOTION
 
-![MOTION page showing the gesture looper: a loop timeline up top with a sweeping playhead, and one lane per recorded parameter with its knob movement plotted across the loop](doc/ui/motion.png)
+![MOTION page: two recorded knob gestures drawn as automation curves with one playhead crossing both](doc/ui/motion.png)
 
-**A loop pedal for your hands.** It records the *movement* of your knobs — not audio — and plays
-it back on a loop, so a slow filter sweep keeps going while you do something else.
-
-**K2**, move a knob, **K2**. That move now loops. Move a different knob and it becomes a second
-lane, layered on the first. Each parameter gets its own lane, and re-recording one replaces only
-that lane.
-
-- **E2** browse the lanes · **E3** amount — scales every lane back toward where it started
-- **K2** arm / finish (arming again overdubs onto the running loop) · **K3** play / stop
-- **K1+K2** clear the selected lane · **K1+K3** wipe all of them
-
-`motion record` and `motion play` are MIDI-mappable, so a footswitch can punch overdubs in
-hands-free.
-
-### SEQ
-
-![SEQ page showing a Euclidean step sequencer: two rows of eight step cells with an evenly distributed on/off pattern and a playhead](doc/ui/seq.png)
-
-**Rhythm from one knob.** Turn **E2** and it spreads that many hits as evenly as it can across the
-pattern — 5 over 16 gives you a clave for free. Every hit retriggers one slice of your take, on
-the clock, over the drone.
-
-- **E2** hits · **K1+E2** tempo (the system clock)
-- **E3** length, up to 16 steps · **K1+E3** division — 8th / 16th / 32nd notes
-- **K2** run / stop · **K3** pick which slice fires
-
-To hear the steps distinctly, drop the drone (STRETCH → OFF) or shorten the pad release.
-
-**With a grid**, the SEQ page turns the whole grid into the sequencer: rows 1–2 are the 16 steps
-(tap one to toggle it), row 7 picks the slice, row 8 is play and clear. Euclid is the generator
-and your taps edit on top of it — set hits to 0 and draw a pattern by hand.
+A loop pedal for your hands. Tap **K2**, move knobs — *on any page* — tap K2 again: every
+knob you touched becomes a lane, drawn as a curve and named with its page's own word (SPEED,
+CUT, ECHO…). One playhead crosses all of them with a bright dot at each: the value sounding
+right now. **K3** plays/stops the loop; holding K2 while it plays punches a replacement into
+just the lanes you move. E2 selects a lane, E3 scales the whole loop's depth. The eraser
+wipes the selected lane.
 
 ### SCENE
 
-![SCENE page showing eight scene slots in a row with a morph bar underneath running from LIVE to the selected slot, the handle parked halfway](doc/ui/scene.png)
+![SCENE page: the ◄ cell and eight slots over the morph rail](doc/ui/scene.png)
 
-**Eight slots that remember the whole sound** — every mangle knob at once, not the audio. **K3**
-captures what you're hearing into the selected slot; **K2** recalls it, right away or on the next
-beat or bar (**K1+E2**).
+Whole sounds, kept. **K3** captures everything (the mangle, not the audio) into the selected
+slot; **E3 morphs there** from whatever you're playing — sweep back to 0 and you're exactly
+home. One captured scene is enough to play with.
 
-**E3 morphs there.** Point at a slot with E2 and that one knob slides the whole instrument from
-the sound you have now toward it — filter, grain, stretch, FX, all moving together. Sweep back to
-0 and you're exactly where you started. **One captured scene is enough:** save a sound, mangle it
-however you like, then use E3 to slide back toward it — and stop anywhere in between.
+**Hold K2 to peek**: the instrument slides into the scene while your finger is down and
+slides home when you release. Tap K2 to commit.
 
-**The ways back.** **K1+K3** marks the current sound as **SAFE**; **K1+K2** is **UNDO** — it puts
-you straight back on it. Mark a state, do something reckless, come home in one press.
+![SCENE peek: RCL held, the rail swept to the far end](doc/ui/scene-peek.png)
 
-- **E2** slot — the one selector: K2 recalls it, K3 captures into it, E3 morphs toward it ·
-  **K1+E2** when a recall lands (now / next beat / next bar)
-- **E3** morph amount
-- **K2** recall · **K3** capture · **K1+K2** UNDO to safe · **K1+K3** mark safe
-
-Holds like freeze, the note routing and the buffer-writers deliberately don't ride a morph, so
-the page says `K2 TO LAND THE REST` when a recall is needed to finish the trip.
-
-Map `chaos throw` to a footswitch: **hold** it for a bounded random throw, **release** and you
-land back on your safe state. Scenes save and load with your PSET.
-
-**With a grid**, the SCENE page becomes the bank: row 1 is the 8 slots (tap to recall, or hold
-CAP / CLR on row 8 and tap to capture or clear), row 3 aims the morph at a slot without jumping
-to it, row 5 is an 8-step morph bar, and row 8 carries CAP, CLR, CHAOS, SAFE and UNDO.
+**The ◄ cell is the way back.** Every commit and every chaos throw parks the sound you were
+just making in ◄ automatically. Select it (E2 left of slot 1) and tap K2 — you're back. No
+arming, no ceremony. Recalls can land on the next beat or bar (K1+E2); a queued slot blinks
+with a little wedge counting down. Holds, note routing and the buffer writers deliberately
+don't ride a morph, so the page says `K2 TO LAND THE REST` when a tap is needed to finish
+the trip. Map `chaos throw` to a footswitch: hold for bounded mayhem, release to land back
+on ◄. Scenes save and load with your PSET.
 
 ## Playing notes
 
 A MIDI keyboard retunes the sample chromatically. Note 60 plays it as recorded, and you get
 ±24 semitones with the pitch staying independent of the speed. A USB typing keyboard works
 Ableton-style: the A row plays white keys, the W row plays black keys, and Z/X shift the
-octave. Turn pad input on and the notes trigger the 8 PADS slices polyphonically instead. The
-settings are in **PARAMS > keys**.
+octave. Turn pad input on and the notes trigger the 8 PADS slices polyphonically instead.
+The settings are in **PARAMS > keys**.
 
 **MIDI mapping.** Every continuous and toggle parameter can be mapped. Long-press it in
 **PARAMS** and assign a CC. Your mappings save per script to `data/mangler/mangler.pmap` and
 reload automatically.
 
-**Grid (optional).** You don't need a grid, but you can plug one in. A monome grid works
-as-is, and a Launchpad or APC mini works through the
-[midigrid](https://github.com/miker2049/midigrid) library. Either way you get an 8×8 surface
-with transport and mode toggles, two-finger slice and loop selection, and two piano octaves.
-The pads drive the same params as everything else.
+## The grid (optional)
+
+A monome grid works as-is; a Launchpad or APC mini works through
+[midigrid](https://github.com/miker2049/midigrid). The surface has a **spine that never
+moves**, so your hands always know where things are:
+
+- **Row 1 — scenes, from any page.** Tap a slot to recall it, *hold to peek* (same law as
+  the key). On the SCENE page, hold the CAP or CLR pad below and tap a slot to capture or
+  clear.
+- **Row 2 — the state strip:** take rec · tape rec · tape reverse (hold) · freeze · tape
+  freeze · seq run · DRY · STOP.
+- **Rows 3–6 — the workspace**, which follows the page: normally window and tape-loop
+  spans (hold one pad, tap another to stretch a region) plus the mode radio; on **PADS**
+  the 16 steps, slice select, run/clear; on **SCENE** aim, the morph bar, and
+  CAP · CLR · CHAOS(hold) · ◄.
+- **Rows 7–8 — one piano octave**, black keys over white, with octave −/+ at the row-7
+  corners. The pads play the drone pitch, or the slices when pad input is on.
 
 ## Install
 
@@ -392,18 +314,20 @@ same `params:*`, so they stay in lockstep. This is also why every parameter is M
 for free.
 
 **Staged and gated.** The engine grows in stages, each one tested on the device before the
-next. The current stage and the full build log are at the top of [CLAUDE.md](CLAUDE.md), and
-the durable design lives in [doc/spec.md](doc/spec.md).
+next. The current stage and the full build log are at the top of [CLAUDE.md](CLAUDE.md); the
+UI's design spec is [doc/redesign.md](doc/redesign.md) and the engine design lives in
+[doc/spec.md](doc/spec.md).
 
 ```
-mangler.lua              orchestrator: state, params, keys and encoders
+mangler.lua              orchestrator: state, params, the punch-law keys and encoders
 lib/Engine_Mangler.sc    the one and only SuperCollider engine
-lib/mpages.lua           the screen: page bodies, header and footer
+lib/mpages.lua           the screen: the nine dominant objects, header and footer
 lib/mtape.lua            softcut tape path and the engine/tape mix
 lib/minput.lua           MIDI and typing-keyboard note input
-lib/mgrid.lua            optional grid surface
+lib/mgrid.lua            optional grid surface (the spine + page workspaces)
 lib/mmotion.lua          gesture looper: records and replays the param stream
 lib/mseq.lua             Euclidean step sequencer driving the slice voices
+lib/mscenes.lua          scenes, the morph, and the ◄ way back
 lib/mfont.lua  lib/mparticles.lua   pixel font and pooled grain particles
 tools/uisim/             offscreen UI renderer, every page as a PNG, no hardware
 dist/mangler_single.lua  generated single-file drop-in

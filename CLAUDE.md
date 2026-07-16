@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **S5–S15 (fingerprint 58) — loads + plays on device (2026-07-11, after the duplicate-mi-UGens fix); count-58 check + S11 MiClouds / S15 shimmer ear gates still to confirm explicitly**
+         ## CURRENT STAGE: **S21 (fingerprint 61) — ENGINE RESTART + count-61 gate STILL PENDING on device · NU-1..NU-4 UI redesign (doc/redesign.md) fully landed in Lua (renders + dist byte-verified 2026-07-16) — its on-device gate is also pending: save+reload, walk the nine pages, punch-law feel, erase arc, scene peek/◄, and the whole grid spine (grid code is sim-stubbed, device-only)**
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -856,6 +856,150 @@ sound · re-aiming mid-sweep re-targets · ONE scene is musical · the endpoint
 params are provably gone). Only SCENE renders moved; scene.png + README manual
 entry regenerated; dist byte-verified. Save + reload (Lua-only — but the S21
 engine still needs its RESTART for count 61).
+
+Thirty-ninth change — **NU-1: the redesign lands its spine (Lua-only,
+fingerprint STAYS 61, renders verified, untested on device)**: first stage of
+**doc/redesign.md** (the S-4-inspired redesign; decisions locked with the user
+across the proto shot-gallery rounds — belt tape, SPACE name kept, measurement
+rails, dynamic motion lanes). PAGES 14 → **9 stations** (TAKE VOICE TAPE
+FILTER SPACE MIX PADS MOTION SCENE; merged REC+WINDOW→TAKE, STRETCH+GRAIN→
+VOICE, DELAY+REVERB→SPACE, MIX+LEVEL→MIX, PADS+SEQ→PADS). **THE PUNCH LAW**
+replaces the act-only KEYS table: press = engage NOW, release <5 frames =
+latch, ≥5 = punch (release disengages), press-when-latched = off. Defs:
+`{label,act}` tap-cycles (fire on press) or `{label,pon,poff,lit}` punchables
+— pk() wraps binary params, throw() wraps store/restore gestures (OPEN / INF
+/ BLOOM / ENG / TAPE all round-trip: tap latches, tap again restores the
+prior values). **K1+K2 = STOP and K1+K3 = DRY(tap) / ERASE(hold) are GLOBAL,
+zero page claims**; the erase fires AT the 15-frame arc threshold from the
+redraw clock (tick_keys), release in frames 5–14 = the abort zone; per-page
+`erase` entries wipe that page's material (take / tape loop / pattern / lane
+/ slot). key_state[] resolves the def at PRESS and routes the release back to
+it — the S19 grid lesson applied to the keys. **Banking DELETED**
+(REVERB_BANKS/GRAIN_BANKS/cyclers gone; macros + PARAMS menu is the deep
+layer). ENC_MAP = 4 macros/page, with "@win_move"/"@loop_move" compound
+targets (move_pair: width-preserving, fine_delta-scaled). **VOICE face
+encoders are mode-contextual** (VOICE_FACE: GRAIN→size/density,
+WARP→win/rand, else speed/pitch; alt = speed/pitch always). **K1+E1 = scene
+morph from anywhere** (the family jump retired). held_gesture/gesture_release
+retired (SCENE keys pulse their momentary params). CHROME (mpages): header =
+title (chip inverts on STOP) + **◇ purity mark** (purity() — lit only when
+output==take verbatim; conservative, never lies pure) + write flags R/T/M
+(the ONLY fast blink) + ▸ seq-run + FZ/TF + **path dots grouped 3·2·1·3**;
+footer = four quiet words `K2 K3 | E2· E3·` — latched = inverted chip, values
+only while turning (1.2s swell) EXCEPT selectors (seq_slice/motion_lane/
+scene_slot read at rest), shift bar while K1 held, DRY→ERASE word + arc.
+seq_slice's action mirrors ctx.pad_cursor (ONE selection, until the NU-3
+`slice` merge). Old bodies draw temporarily under the new chrome (TAKE→
+body_REC, VOICE→body_STRETCH, SPACE→body_REVERB; LEVEL/WINDOW/GRAIN/DELAY/
+SEQ bodies orphaned until NU-2 harvests them). Suite re-pointed at the nine
+names (+TAKE_PURE, TAKE_ERASE_ARC, FILTER_OPEN/_SHIFT shots; 58 shots × 4
+variants); dist rebuilt + byte-verified. GOTCHA: mgrid's is_seq_page()
+matches "SEQ", which no longer exists — the grid's sequencer view is dormant
+until NU-4 re-homes it (all other grid behavior untouched). Lua-only: save +
+reload. (The S21 engine RESTART + count-61 device gate is still pending,
+unchanged by this.)
+
+Fortieth change — **NU-2: the nine dominant objects (Lua-only, fingerprint
+STAYS 61, renders verified, untested on device)**: every page body replaced
+with its doc/redesign.md §6 object, bound to REAL state; mpages shrank 1640 →
+~1440 lines (draw_strip, the reels, the bouncing ball, the GR_* grain pool,
+LEVEL faders and all five orphaned bodies deleted). **TAKE** = the material
+strip (bright in-window / dim out / dotted unwritten; write head + hot
+afterglow + armed frame blink + BIG elapsed seconds + IN meter with the
+−12..−3dB ready bracket while rec; window brackets with feet; danger hatch
+over the material while the K1+K3 erase arc runs; RSMP/REGN chips). **VOICE**
+= mode rail (active word inverted, OFF dims all) over the S2 textures
+(unbroken wave / grains / warp ghost / spectral columns) + window bar +
+playhead. **TAPE** = the BELT: real twave riding the top run indexed through
+the LOOP, turnaround arcs, circulation arrow (flips with direction), comet
+trail + head (position within loop from tape_phase), punch-in glow behind
+the head while tape_rec, rate INSIDE the loop, loop seconds top-right.
+**FILTER** = the real biquad curve kept, + labeled 100/1K/10K dotted rails,
+0dB dots, drive grit flecking the curve. **SPACE** = the impulse scape:
+onset spike, echo taps at delay_time spacing decaying by fb (height rides
+delay_mix), the reverb tail as a filled slope (tau from rev_decay t60 /6.9,
+49px/s), 1S/2S time rails + labels, hatched wash margin when the tail
+reaches the edge, shimmer motes; dormant baseline + stub when both mixes ~0.
+**MIX** = the console: IN meter + peak pip → ENG lane (real wave × the real
+gain law) + playhead → crossfade rail/tick (tick stays put in STOP) → TAPE
+lane (real twave × real gain) + always-running head → OUT VU + pip.
+**PADS** = cause above rhythm below: the window-zoomed take + 8 dividers +
+playhead, 8 numbered slice cells (cursor bracket / sounding fill / seq-fire
+pulse), the 16-step euclid row (playhead inverts, beyond-len dark) —
+SLICE·n reads at rest. **MOTION** = dynamic lanes as STEP CURVES (hold value
+between events), full footer-word names, quarter rails, ONE playhead
+crossing every lane with a live-value dot per lane, armed frame blink +
+grow-right write head. **SCENE** = the ◄ safe cell (filled when a safe state
+exists, dotted when not) + 8 slots (dotted empties, pending blink, msg
+flash, cursor brackets) + the morph rail (origin dot, traveled segment,
+handle; LIVE/target brightness by side) — say() chips + K2-TO-LAND cue kept.
+SCENARIO fix in the suite: the TAKE_REC 1-frame re-arm snaps the window to
+its blip (the rec-stop law) — the choreography now restores the take window
+after, so downstream shots don't show a sliver. GOTCHA hit: mpages had no
+`exp` local (body_SPACE) — add math locals when porting. 58 shots × 4
+variants; dist rebuilt + byte-verified. Save + reload.
+
+Forty-first change — **NU-3: behavior (Lua-only, fingerprint STAYS 61,
+renders verified, untested on device)**: the redesign's trust mechanics.
+**PEEK**: SCENE K2 under the punch law — press starts a ~3-frame ramp of
+`scene_morph_amt` toward 1 (driven through the PARAM from tick_keys, so the
+morph engine, motion capture and MIDI all stay true), release-as-punch ramps
+it home (landing exactly, S19c), release-as-tap = COMMIT (pulse scene_recall,
+then amt→0 which is a no-op because recall invalidated morph_from — verified
+against mscenes' rising-edge law). The key engine grew an optional `def.tap`
+hook (tap-release runs it INSTEAD of latching; also fires when pon declined
+to engage — how RCL on an empty slot still reports EMPTY). **THE ◄ CELL =
+slot 0**: scene_slot is now 0..8; mscenes branches on `is_back` BEFORE
+slot_idx clamps (capture→safe_capture · recall→safe_restore · clear→forget ·
+morph→refused) — so grid/MIDI recall of ◄ works through the same params.
+**AUTO-SAFE**: every commit recall (immediate AND the queued fire) and every
+chaos press parks the pre-state in ◄ via the new quiet `M.auto_safe()` — an
+undo that never needs arming; manual SAFE (capture into ◄) still exists.
+fmt_value: scene_slot 0 reads `<` (footer `SLOT·<`); body_SCENE brackets the
+◄ cell and swaps the rail for "K2 = THE WAY BACK" when it's selected.
+**SLICE**: single-source confirmed — ctx.pad_cursor's only writer is the
+seq_slice action (param id deliberately KEPT as `seq_slice`: ids are never
+renamed, the merge is behavioral). **PARAMS menu mirrors the stations**:
+group labels renamed (take - record/window · voice - grain/clouds/stretch ·
+space - delay/reverb · pads - voices/sequencer; mix/tape/filter/keys/motion/
+scenes as-is) — ids untouched, PSETs/PMAPs unaffected. Suite: +SCENE_BACK +
+SCENE_PEEK (60 shots × 4 variants); dist byte-verified. GOTCHA for later:
+mscenes' old say() texts referenced K1+K2 UNDO / K1+K3 SAFE — the two safety
+strings were reworded to the ◄ vocabulary; if any other user-facing string
+still names the OLD key map, fix it on sight. Save + reload.
+
+Forty-second change — **NU-4: the grid spine + polish + docs (Lua-only,
+fingerprint STAYS 61, renders + dist verified; GRID CODE IS UNTESTED — the
+sim stubs the grid, so NU-4's device gate is the real test)**: lib/mgrid.lua
+rewritten to the spine (doc/redesign.md §7): **rows 1-2 and 7-8 never change
+meaning** — row 1 = the SCENE BANK from any page (tap = recall · **hold =
+PEEK**, the same punch law as the key, via per-slot press frames +
+ctx.peek_on/peek_back; CAP/CLR modifiers still capture/clear), row 2 = the
+STATE STRIP (rec · tape rec · tape rev(hold) · pv frz · tape frz · seq run ·
+DRY · STOP — writes blink fast like the header flags, STOP steady), rows 7-8
+= ONE piano octave (was two; octave −/+ at the row-7 corners; ids 2000+
+unchanged). **Rows 3-6 = the workspace**, following the page: main = window
+span (row 3, with rec-head glow) + tape-loop span (row 4) + mode radio x1-5
+/ pitch-reset x7 / pitch-quant x8 (row 5); PADS = 16 steps (3-4) + slice
+select (5) + run/clear (6); SCENE = AIM (3) + morph bar (5) + CAP·CLR·
+CHAOS(hold)·◄ (6). key_surface press-routing kept for the workspace rows
+(rows 1-2/7-8 are page-independent, so they don't need it). POLISH:
+body_SCENE gained the **refusal shake** (an EMPTY-slot action shakes its
+cell ±1px for 4 frames — the no-op that explains itself) and the **queued
+wedge** (an emptying pie beside the slot row counting to the sync point,
+driven by clock.get_beats guarded with pcall — absent in the sim, so renders
+stay deterministic). DOCS: README rewritten to the nine-station instrument
+(punch law, ◇, ◄, the spine; gallery images renamed take/voice-*/tape/
+filter/space/mix/pads/motion/scene + state shots, doc/ui regenerated at 4x);
+mangler.lua's header comment updated to the new grammar; doc/redesign.md
+status flipped to IMPLEMENTED-pending-device-gate. 60 shots × 4 variants;
+dist rebuilt + byte-verified. DEVICE GATE (the one thing left, needs
+hardware): rsync, SYSTEM > RESTART (the S21 engine is STILL ungated —
+confirm `count: 61`), then walk all nine pages · tap-vs-hold feel at the
+5-frame threshold · K1+K3 DRY tap / erase arc + abort zone · SCENE peek,
+commit, ◄ undo, chaos release · MOTION capture from real encoders · the
+whole grid spine, especially scene-row peek and held-pad page-changes ·
+◇ lights on a fresh take and dies on the first mangle.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

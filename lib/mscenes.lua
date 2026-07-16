@@ -357,7 +357,15 @@ end
 -- capture the live state of SCENE_RECALL_IDS into a slot (default: the
 -- selected one). overwrites without ceremony — like every other throw in this
 -- instrument, the key does the thing.
+-- NU-3: slot 0 is the ◄ cell — the way back. capturing into it marks the
+-- safe state, recalling it restores, clearing it forgets. the bank proper
+-- stays 1..8; every ◄ caller branches here BEFORE slot_idx clamps.
+local function is_back(slot)
+  return floor((slot or pget("scene_slot", 1)) + 0.5) < 1
+end
+
 function M.capture(slot)
+  if is_back(slot) then return M.safe_capture() end
   slot = slot_idx(slot)
   local t, n = snapshot_ids(SCENE_RECALL_IDS)
   M.slots[slot] = t
@@ -373,6 +381,7 @@ end
 -- to quantize; otherwise scene_recall_mode decides (NOW / next BEAT / next
 -- BAR). a queued recall replaces any other queued recall — last press wins.
 function M.recall(slot, opts)
+  if is_back(slot) then return M.safe_restore() end
   slot = slot_idx(slot)
   local scene = M.slots[slot]
   if not scene then
@@ -396,15 +405,27 @@ function M.recall(slot, opts)
     pending_clock = clock.run(function()
       clock.sync(beats)
       pending_clock, M.pending = nil, nil
+      M.auto_safe()   -- ◄ = where you just were, even for a queued landing
       say_recall(slot, apply(M.slots[slot], SCENE_RECALL_IDS))
     end)
     return true
   end
+  -- NU-3: every commit auto-captures the pre-state into the ◄ cell — an
+  -- undo that never needed arming. (quiet: the recall is the news here.)
+  M.auto_safe()
   say_recall(slot, apply(scene, SCENE_RECALL_IDS))
   return true
 end
 
 function M.clear(slot)
+  if is_back(slot) then
+    local had = M.safe ~= nil
+    M.safe = nil
+    say(had and "CLEARED <" or "< EMPTY",
+      had and "the ◄ way-back state was cleared"
+      or "the ◄ cell was already empty")
+    return true
+  end
   slot = slot_idx(slot)
   local had = M.slots[slot] ~= nil
   -- mutate in place: ctx.scenes points AT this table
@@ -468,6 +489,7 @@ local MORPH_EPS = 1 / 400
 -- at 0 with no sweep in progress — at rest the sound is just the sound).
 function M.morph(slot, amt, opts)
   if morphing then return false end    -- a param action can never recurse in
+  if is_back(slot) then return false end   -- ◄ is a recall, not a target
   local B = M.slots[slot_idx(slot)]
   if not B then return false end
   opts = opts or {}
@@ -554,10 +576,17 @@ function M.safe_capture()
   local t, n = snapshot_ids(SAFE_SNAPSHOT_IDS)
   M.safe = t
   M.safe_at = C.frame
-  say("SAFE MARKED",
-    "safe state marked — " .. n .. " params. K1+K2 (UNDO) brings this exact"
-    .. " sound back from anywhere.")
+  say("MARKED <",
+    "way-back state marked — " .. n .. " params. select the ◄ cell and K2"
+    .. " brings this exact sound back.")
   return true
+end
+
+-- the quiet version: every commit recall / chaos throw parks the pre-state
+-- in ◄ without stealing the headline from the action itself
+function M.auto_safe()
+  M.safe = snapshot_ids(SAFE_SNAPSHOT_IDS)
+  M.safe_at = C.frame
 end
 
 -- back to the last known good state, now. control state only: it does not
@@ -621,9 +650,9 @@ local function throw(id, lo, hi)
 end
 
 function M.chaos()
-  -- never strand the performer: if they never marked a safe state, the throw
-  -- marks one for them, so the release always has somewhere to land
-  if not M.safe then M.safe_capture() end
+  -- never strand the performer: the throw parks where-you-were in ◄, so the
+  -- release always has somewhere to land (and ◄ is always the LAST ground)
+  M.auto_safe()
   for i = 1, #CHAOS do
     local c = CHAOS[i]
     throw(c[1], c[2], c[3])

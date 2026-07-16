@@ -13,38 +13,40 @@
 -- the drone defaults to CLEAN PLAY — a straight loop of your take, exactly as
 -- recorded. GRAIN / WARP / PV are mangling modes you switch on from STRETCH.
 --
--- PLAY IT
---   LEVEL   set input so the meters peak just below the top
---   REC     K2, play a phrase, K2 — the window snaps to your take and loops it
---   STRETCH pick the drone engine (PLAY clean · GRAIN · WARP · PV) · GRAIN tunes it
---   DELAY / REVERB   start dry (mix 0); turn E2 up to add them
---   PADS    K1+K3 -> PLAY>PADS: MIDI/grid notes play 8 slices of the take
+-- PLAY IT (the redesign, doc/redesign.md)
+--   TAKE    K2, play a phrase, K2 — the window snaps to your take and loops
+--           it, dry. the ◇ by the title = "you hear the recording, verbatim"
+--   VOICE   K3 cycles PLAY (clean) · GRAIN · WARP · PV; the texture IS the mode
+--   SPACE   echoes + reverb, one picture; both start at zero
+--   PADS    the take chopped into 8 slices + a euclidean step row
+--   SCENE   capture whole sounds; HOLD K2 to peek, tap to keep; ◄ = way back
+--
+-- THE PUNCH LAW (every key, every page):
+--   press = engage NOW · release quickly = it latches · held = a punch,
+--   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page          (hold K1: jump between page families)
---   E2/E3  the page's two knobs  (hold K1: the alt pair; footer shows values)
---   K1     alt / shift (hold)
---   K2/K3  the page's two actions (on banked pages K2 pages E2/E3 through
---          the parameter pairs — e.g. all of REVERB and GRAIN)
---   K1+K2  STOP / START: mute everything, press again for the exact mix back
---          (also SPACE on a typing keyboard · grid (8,2) · MIDI-map). global,
---          except pages whose alt-K2 has a job (GRAIN, TAPE, PADS)
---   K1+K3  DRY: throw the playback path clean — delay/reverb/shimmer/drive/
---          clouds-fb to zero, filter open. the take is always recorded clean;
---          DRY makes what you HEAR the bare sample (also grid (7,2)). global,
---          except GRAIN / TAPE / REVERB / PADS
+--   E1     select page (nine stations: TAKE VOICE TAPE · FILTER SPACE · MIX
+--          · PADS MOTION SCENE — the header dots are the signal map)
+--   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
+--          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
+--   K1     shift (hold). the footer swaps whole while it's down
+--   K2/K3  the page's two gestures, named in the footer, punch law above
+--   K1+K2  STOP / START — GLOBAL, every page, no exceptions. tap = choke
+--          (title inverts), tap again = the exact mix back, hold = mute stab
+--          (also SPACE on a typing keyboard · grid row 2 · MIDI `stop all`)
+--   K1+K3  DRY (tap): playback path thrown clean — delay/reverb/shimmer/
+--          drive/clouds-fb zero, filter open. HELD ~1s = the ERASER: an arc
+--          fills, and at the ring the page's material is wiped (take / tape
+--          loop / pattern / lane / slot). GLOBAL, every page.
+--   K1+E1  the MORPH, from anywhere: sweep toward the selected scene; back
+--          to zero lands exactly home
 --
--- PAGES   MIX  LEVEL  REC  WINDOW  GRAIN  STRETCH  TAPE  FILTER  DELAY  REVERB
---         PADS  MOTION  SEQ  SCENE
---
--- SCENE   8 slots that remember the whole sound (not the audio): K3 CAP, K2
---   RCL (immediately or on the next beat/bar). E3 MORPHS from the sound you
---   have toward the selected slot — one scene is enough to play with. the alt
---   keys are the way back:
---   K1+K3 SAFE marks a state, K1+K2 UNDO returns to it, so you can throw the
---   thing off a cliff and be home in one press. PARAMS > scenes maps all of
---   it to MIDI (a capture/recall/undo footswitch, a morph fader, and
---   `chaos throw` — hold for bounded mayhem, release to land safe).
+-- SCENE   8 slots + the ◄ cell. K3 captures, K2 recalls (HOLD = peek: borrow
+--   the scene, release comes home; tap = commit), E3 morphs from LIVE toward
+--   the selected slot. every commit parks the previous sound in ◄
+--   automatically — select ◄ and tap K2 to undo. `chaos throw` (PARAMS/grid):
+--   hold for bounded mayhem, release to land back on ◄.
 --
 -- NOTES   a MIDI keyboard (or USB typing keyboard, ableton-style: A-row =
 --   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
@@ -79,14 +81,15 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
+-- NU-1 (doc/redesign.md §5): nine stations on one signal path —
+-- TAKE VOICE TAPE | FILTER SPACE | MIX | PADS MOTION SCENE
 local PAGES = {
-  "MIX", "LEVEL", "REC", "WINDOW", "GRAIN", "STRETCH", "TAPE",
-  "FILTER", "DELAY", "REVERB", "PADS", "MOTION", "SEQ", "SCENE",
+  "TAKE", "VOICE", "TAPE", "FILTER", "SPACE", "MIX",
+  "PADS", "MOTION", "SCENE",
 }
 
 local FPS = 15
 
-local held_gesture = {}    -- held_gesture[n] = param id to zero when key n releases
 local tape_arm_phase = 0   -- head position when tape rec was armed
 local polls = {}
 local redraw_clock
@@ -207,324 +210,293 @@ Mscenes.init(ctx)
 Mpages.init(ctx)
 
 -- ============================================================================
--- gestures
+-- keys: the punch law (NU-1, doc/redesign.md §3)
 -- ============================================================================
--- a momentary hold registers held_gesture[n] = param id on press; release
--- zeroes it here, page-independently, so switching pages mid-hold is safe.
+-- ONE physical rule for every key:
+--   press = engage NOW · release within TAP_FRAMES = it latches ·
+--   held past TAP_FRAMES = it was a punch, release disengages ·
+--   already latched = any press turns it off.
+-- defs come in two shapes:
+--   { label, act }                 -- tap-cycle: fires on PRESS, no punch
+--   { label, pon, poff, lit }      -- punchable; lit() feeds the footer
+--   (gate = true                   -- always momentary, e.g. the PADS pad)
+-- K1+K2 = STOP and K1+K3 = DRY (tap) / ERASE (1s arc) are GLOBAL — no page
+-- claims them, so the rescue reflexes are unconditional muscle memory.
 
-local function gesture_release(n)
-  local id = held_gesture[n]
-  if id then
-    params:set(id, 0)
-    held_gesture[n] = nil
+local TAP_FRAMES = 5     -- <=4 frames (~300ms at 15fps) reads as a tap
+local ERASE_FRAMES = 15  -- K1+K3 held ~1s (the drawn arc) erases material
+
+-- punchable binary param: the common case
+local function pk(label, id)
+  return {
+    label = label,
+    lit = function() return pget(id, 0) > 0 end,
+    pon = function() params:set(id, 1) end,
+    poff = function() params:set(id, 0) end,
+  }
+end
+
+-- throw: engage() applies a gesture and returns {id=prior} to restore on
+-- disengage. hold = ride it and come back, tap = latch, tap again = back.
+local throw_mem = {}
+local function throw(label, engage)
+  return {
+    label = label,
+    lit = function() return throw_mem[label] ~= nil end,
+    pon = function() throw_mem[label] = engage() end,
+    poff = function()
+      local m = throw_mem[label]
+      if m then for id, v in pairs(m) do params:set(id, v) end end
+      throw_mem[label] = nil
+    end,
+  }
+end
+
+-- pulse a momentary param (the footswitch-shaped SCENE binaries: their
+-- actions fire on the rising edge, so 1-then-0 is one clean press)
+local function pulse(id)
+  params:set(id, 1)
+  params:set(id, 0)
+end
+
+-- TAKE K3: window full <-> back where you had it (a round trip, so a
+-- fat-fingered snap is always recoverable)
+local snap_mem
+local function snap_window()
+  local lo, hi = pget("pos_start", 0), pget("pos_end", 1)
+  if hi < lo then lo, hi = hi, lo end
+  if hi - lo > 0.98 then
+    if snap_mem then
+      params:set("pos_start", snap_mem[1])
+      params:set("pos_end", snap_mem[2])
+    end
+  else
+    snap_mem = { lo, hi }
+    params:set("pos_start", 0)
+    params:set("pos_end", 1)
   end
 end
 
--- page key actions + footer pill labels, ONE table: k2/k3 (and k2_alt/k3_alt
--- while K1 is held) each carry the pill label, an optional `lit` param id
--- (pill draws inverted while it reads 1), and the action. behavior and UI
--- come from the same definition, so they can never drift apart.
--- all actions drive params, never locals, so MIDI mappings stay in lockstep.
+-- page key defs (+ each page's `erase`: what the K1+K3 arc wipes)
 local KEYS = {
-  MIX = {
-    -- crossfade throws: snap hard to either deck; the encoder recovers
-    k2 = { label = "ENG",
-      act = function() params:set("mix", 0) end },
-    k3 = { label = "TAPE",
-      act = function() params:set("mix", 1) end },
-    -- (the alt layer here is the global STOP/DRY pair — see key_def)
+  TAKE = {
+    k2 = pk("REC", "rec"),
+    k3 = { label = "SNAP", act = snap_window },
+    erase = function() pulse("clear_rec") end,   -- audio: NOT undoable
   },
-  LEVEL = {
-    -- unity resets: the system level params are dB tapers, 0 = 0 dB
-    k2 = { label = "IN=0",
-      act = function() params:set("input_level", 0) end },
-    k3 = { label = "OUT=0",
-      act = function() params:set("output_level", 0) end },
-  },
-  REC = {
-    k2 = { label = "REC", lit = "rec",
-      act = function() ptoggle("rec") end },
-    k3 = { label = "FRZ", lit = "freeze",
-      act = function() ptoggle("freeze") end },
-    -- S21: wipe the take. same key as the TAPE page's CLR, on purpose — the
-    -- two decks now clear the same way. (REC keeps the global STOP on K1+K2;
-    -- it gives up the global DRY for this, like TAPE does.)
-    k3_alt = { label = "CLR",
-      act = function()
-        params:set("clear_rec", 1)
-        held_gesture[3] = "clear_rec"
-      end },
-  },
-  WINDOW = {
-    k2 = { label = "RST",
-      act = function() params:set("pos_start", 0) params:set("pos_end", 1) end },
-    -- reverse the scan direction — the classic throw-it-backwards move
-    k3 = { label = "FLIP",
-      act = function() params:set("scan", -params:get("scan")) end },
-  },
-  GRAIN = {
-    -- S11: BANK pages E2/E3 through the granular attributes (like REVERB);
-    -- MODE cycles the four Clouds modes. octave throws move to the alt layer.
-    k2 = { label = "BANK",
-      act = function() ctx.grain_next_bank() end },
-    k2_alt = { label = "OCT-",
-      act = function()
-        params:set("pitch", math.max(params:get("pitch") * 0.5, 0.25))
-      end },
+  VOICE = {
+    k2 = pk("FRZ", "pv_freeze"),
+    -- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
+    -- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS)
     k3 = { label = "MODE",
       act = function()
-        params:set("clouds_mode", (params:get("clouds_mode") % 4) + 1)
+        local m = pget("mode", 5)
+        params:set("mode", m >= 5 and 2 or (m < 2 and 5 or m + 1))
       end },
-    k3_alt = { label = "OCT+",
-      act = function()
-        params:set("pitch", math.min(params:get("pitch") * 2, 4))
-      end },
-  },
-  STRETCH = {
-    -- K2 cycles OFF -> GRAIN -> WARP -> PV -> PLAY -> OFF; K3 spectral freeze
-    k2 = { label = "MODE",
-      act = function() params:set("mode", (params:get("mode") % 5) + 1) end },
-    k3 = { label = "PVFZ", lit = "pv_freeze",
-      act = function() ptoggle("pv_freeze") end },
   },
   TAPE = {
-    k2 = { label = "REC", lit = "tape_rec",
-      act = function() ptoggle("tape_rec") end },
-    k3 = { label = "FRZ", lit = "tape_freeze",
-      act = function() ptoggle("tape_freeze") end },
-    -- alt layer: momentary reverse + clear
-    k2_alt = { label = "REV", lit = "tape_reverse",
-      act = function()
-        params:set("tape_reverse", 1)
-        held_gesture[2] = "tape_reverse"
-      end },
-    k3_alt = { label = "CLR",
-      act = function()
-        -- clear tape: wipe the loop and start over
-        Mtape.clear_buffer()
-        Mpages.clear_twave()
-        params:set("tape_freeze", 0)
-        params:set("loop_start", 0)
-        params:set("loop_end", 1)
-      end },
+    k2 = pk("REC", "tape_rec"),
+    k3 = pk("REV", "tape_reverse"),
+    erase = function()
+      Mtape.clear_buffer()
+      Mpages.clear_twave()
+      params:set("tape_freeze", 0)
+      params:set("loop_start", 0)
+      params:set("loop_end", 1)
+    end,
   },
   FILTER = {
-    k2 = { label = "TYPE",
-      act = function() params:set("filt_type", (params:get("filt_type") % 3) + 1) end },
-    -- neutralize: open the filter as far as its type allows, kill the res
-    k3 = { label = "OPEN",
-      act = function()
-        local ft = params:get("filt_type")
-        params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
-        params:set("resonance", 0)
-      end },
-  },
-  DELAY = {
-    -- dub throws: INF pins the loop at the (soft-clipped) edge, KILL drops it
-    k2 = { label = "INF",
-      act = function() params:set("delay_fb", 0.95) end },
-    k3 = { label = "KILL",
-      act = function() params:set("delay_fb", 0) end },
-  },
-  REVERB = {
-    -- BANK pages E2/E3 through the JPverb param pairs; KILL dries it out
-    k2 = { label = "BANK",
-      act = function() ctx.rev_next_bank() end },
-    k3 = { label = "KILL",
-      act = function() params:set("rev_mix", 0) end },
-    -- S15 alt: SHMR blooms the shimmer on/off, remembering the last amount
-    k3_alt = { label = "SHMR",
-      act = function()
-        if pget("shimmer", 0) > 0.001 then
-          ctx.shimmer_mem = pget("shimmer", 0)
-          params:set("shimmer", 0)
-        else
-          params:set("shimmer", ctx.shimmer_mem or 0.6)
-        end
-      end },
-  },
-  PADS = {
-    -- K2 steps the cursor through the 8 pads; K1+K2 auditions the selected
-    -- pad (momentary voice); K3 toggles the selected pad's grain/slice type
-    k2 = { label = "SEL",
-      act = function() ctx.pad_cursor = (ctx.pad_cursor + 1) % ctx.pad_n end },
-    -- audition the cursor pad while held (fixed voice id 8, closed on any
-    -- K2 release in the key handler so an alt-release can't strand it)
-    k2_alt = { label = "PLAY",
-      act = function() ctx.pad_trigger(8, ctx.pad_cursor, 1) end },
+    -- OPEN as a throw: hold = a sweep that returns by itself, tap = park
+    -- it open, tap again = back to the carved tone
+    k2 = throw("OPEN", function()
+      local mem = { cutoff = pget("cutoff", 20000),
+        resonance = pget("resonance", 0) }
+      local ft = pget("filt_type", 1)
+      params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+      params:set("resonance", 0)
+      return mem
+    end),
     k3 = { label = "TYPE",
       act = function()
-        local i = ctx.pad_cursor
-        ctx.pad_type[i] = (ctx.pad_type[i] == 0) and 1 or 0
+        params:set("filt_type", (pget("filt_type", 1) % 3) + 1)
       end },
-    -- alt: route MIDI/grid notes to the pads (vs the drone) — the header
-    -- flips PLAY>DRONE / PLAY>PADS
-    k3_alt = { label = "ROUTE", lit = "pad_input",
-      act = function() ptoggle("pad_input") end },
+  },
+  SPACE = {
+    k2 = throw("INF", function()   -- dub grab: pin the delay loop
+      local mem = { delay_fb = pget("delay_fb", 0) }
+      params:set("delay_fb", 0.95)
+      return mem
+    end),
+    k3 = throw("BLOOM", function() -- shimmer surge
+      local mem = { shimmer = pget("shimmer", 0) }
+      params:set("shimmer", ctx.shimmer_mem or 0.6)
+      return mem
+    end),
+  },
+  MIX = {
+    k2 = throw("ENG", function()   -- crossfade stab to the engine deck
+      local mem = { mix = pget("mix", 0.5) }
+      params:set("mix", 0)
+      return mem
+    end),
+    k3 = throw("TAPE", function()
+      local mem = { mix = pget("mix", 0.5) }
+      params:set("mix", 1)
+      return mem
+    end),
+  },
+  PADS = {
+    -- a pad under the punch law: hold = gate the slice, tap = fire it
+    -- short. gate: the release ALWAYS closes the voice — a latched voice
+    -- is a drone, and the drone already exists.
+    k2 = { label = "PAD", gate = true,
+      lit = function() return ctx.pad_held[8] ~= nil end,
+      pon = function() ctx.pad_trigger(8, pget("seq_slice", 0), 1) end,
+      poff = function() ctx.pad_trigger(8, 0, 0) end },
+    k3 = pk("RUN", "seq_play"),
+    erase = function() Mseq.clear() end,
   },
   MOTION = {
-    -- the gesture looper (S16). K2 arms recording of the param stream (a
-    -- fresh loop from empty, or a punch-in overdub onto the running loop);
-    -- K3 starts/stops playback. the page claims its alt slots (like GRAIN/
-    -- TAPE/PADS) so K1+K2 = CLR-L (clear the selected lane) and K1+K3 = CLR
-    -- (wipe all lanes); clearing leaves every param at its last value.
-    k2 = { label = "REC", lit = "motion_rec",
-      act = function() ptoggle("motion_rec") end },
-    k3 = { label = "PLAY", lit = "motion_play",
-      act = function() ptoggle("motion_play") end },
-    k2_alt = { label = "CLR-L",
-      act = function() ctx.motion.clear_lane() end },
-    k3_alt = { label = "CLR",
-      act = function() ctx.motion.clear_all() end },
-  },
-  SEQ = {
-    -- the step sequencer (S18). K2 runs/stops the clock; K3 cycles which
-    -- slice the active steps trigger. E2 sets the Euclidean hit count (it
-    -- regenerates the pattern live). alt slots stay global STOP/DRY.
-    k2 = { label = "PLAY", lit = "seq_play",
-      act = function() ptoggle("seq_play") end },
-    k3 = { label = "SLICE",
-      act = function()
-        params:set("seq_slice", (params:get("seq_slice") + 1) % ctx.pad_n)
-      end },
+    k2 = pk("REC", "motion_rec"),
+    k3 = pk("PLAY", "motion_play"),
+    erase = function() ctx.motion.clear_lane() end,
   },
   SCENE = {
-    -- the scene bank (S19). K2 recalls the selected slot (immediately, or on
-    -- the next beat/bar per scene_recall_mode), K3 captures the live sound
-    -- into it. the page claims its ALT layer for the SAFETY pair — K1+K2
-    -- UNDO drops you back on the last safe state, K1+K3 SAFE marks the
-    -- current one — so on this one page the alt keys are the rescue instead
-    -- of the global STOP/DRY. (that's the whole job of the page: the ways
-    -- back.)
-    -- every key drives a MOMENTARY param and hands the release to
-    -- held_gesture (the TAPE REV pattern), so a MIDI-mapped footswitch and
-    -- the key are literally the same action.
+    -- NU-3: RCL under the punch law — hold = PEEK (borrow the scene via the
+    -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
+    -- (slot 0) a tap is the way back (safe restore). CAP captures into the
+    -- selected slot — into ◄ it marks the way-back state by hand.
     k2 = { label = "RCL",
-      act = function()
-        params:set("scene_recall", 1)
-        held_gesture[2] = "scene_recall"
+      lit = function() return ctx.peek_on == true end,
+      pon = function()
+        local sel = math.floor(pget("scene_slot", 1) + 0.5)
+        if sel >= 1 and ctx.scenes[sel] then
+          ctx.peek_on, ctx.peek_back = true, false
+        end
+      end,
+      tap = function()
+        local sel = math.floor(pget("scene_slot", 1) + 0.5)
+        ctx.peek_on = false
+        pulse("scene_recall")
+        if sel >= 1 then
+          -- the scene landed: it IS the new LIVE, so the rail goes home
+          -- without sweeping (recall invalidated the morph's "from")
+          params:set("scene_morph_amt", 0)
+        end
+      end,
+      poff = function()   -- punch release: it was borrowed — sweep home
+        ctx.peek_on = false
+        ctx.peek_back = true
       end },
-    k3 = { label = "CAP",
-      act = function()
-        params:set("scene_capture", 1)
-        held_gesture[3] = "scene_capture"
-      end },
-    k2_alt = { label = "UNDO",
-      act = function()
-        params:set("scene_safe_restore", 1)
-        held_gesture[2] = "scene_safe_restore"
-      end },
-    k3_alt = { label = "SAFE",
-      act = function()
-        params:set("scene_safe_capture", 1)
-        held_gesture[3] = "scene_safe_capture"
-      end },
+    k3 = { label = "CAP", act = function() pulse("scene_capture") end },
+    erase = function() pulse("scene_clear") end,
   },
 }
 
--- the key def addressed by key n on the current page, alt-aware. any alt
--- slot a page doesn't claim carries the GLOBAL transport pair instead:
--- K1+K2 = STOP (master mute) and K1+K3 = DRY (throw playback clean) — the
--- two rescue keys work on every page except where the alt layer already
--- has a job (GRAIN octaves, TAPE rev/clear, PADS play/route, REVERB shmr).
--- hold K1 anywhere: the footer pills SHOW which pair you have.
-local ALT_STOP = { label = "STOP", lit = "stop_all",
-  act = function() ptoggle("stop_all") end }
-local ALT_DRY = { label = "DRY",
-  act = function() ctx.fx_dry() end }
+-- the global alt pair — identical on every page
+local ALT_STOP = pk("STOP", "stop_all")
+local ALT_DRY = { label = "DRY", dryerase = true }
+
 local function key_def(n)
+  if ctx.alt then
+    return n == 2 and ALT_STOP or ALT_DRY
+  end
   local defs = KEYS[PAGES[ctx.page]]
   if not defs then return nil end
-  if n == 2 then
-    if ctx.alt then return defs.k2_alt or ALT_STOP end
-    return defs.k2
-  end
-  if ctx.alt then return defs.k3_alt or ALT_DRY end
-  return defs.k3
+  return n == 2 and defs.k2 or defs.k3
 end
 
--- S10: REVERB has more (JPverb) attributes than 4 encoder slots, so E2/E3
--- edit one PAIR at a time and K2 (BANK) pages through them. the KEYS.REVERB
--- BANK action rewrites ENC_MAP.REVERB[1]/[3] in place, so the footer + encoder
--- resolver keep working unchanged.
--- Banked editors (REVERB, GRAIN): each bank holds FOUR params — E2/E3 plus
--- their alt (hold K1) pair — so K2 pages through half as many banks and the
--- alt layer earns its keep. entry order: { E2, E3, E2_alt, E3_alt }.
-local REVERB_BANKS = {
-  { "rev_decay", "rev_mix", "rev_damp", "rev_size" },      -- SPACE
-  { "rev_low", "rev_mid", "rev_high", "rev_early" },        -- TONE + diffusion
-  { "rev_moddepth", "rev_modfreq", "rev_lowcut", "rev_highcut" },  -- MOD + cuts
-  { "shimmer", "shimmer_pitch", "shimmer_tone", "rev_mix" },  -- SHIMMER (S15)
-}
-local GRAIN_BANKS = {
-  { "size", "density", "spread", "clouds_tex" },
-  { "clouds_pos", "clouds_fb", "grain_level", "clouds_lofi" },
-}
+-- what the eraser would wipe on the current page (nil = nothing here; the
+-- footer only draws the arc when there is something to erase)
+local function page_erase()
+  local defs = KEYS[PAGES[ctx.page]]
+  return defs and defs.erase or nil
+end
 
+-- ============================================================================
+-- encoders
+-- ============================================================================
 -- which params each page's encoders address: { e2, e2_alt, e3, e3_alt }.
--- nil entries draw as "--" until the owning stage wires them.
+-- targets starting with "@" are compound gestures resolved in enc().
 local ENC_MAP = {
-  MIX     = { "mix", "out_level", "sc_level", "cut_level" },
-  -- LEVEL drives the SYSTEM params directly (they share the script paramset);
-  -- never ADD params with these ids — referencing them is fine
-  LEVEL   = { "input_level", "monitor_level", "output_level", "headphone_gain" },
-  -- REC E3/E3-alt are the two "output -> buffer" controls: resample (bake the
-  -- output into an armed take) and regen (S17 continuous self-resampling).
-  -- dry_wet moved off REC (still reachable on FILTER + K1).
-  REC     = { "rec_level", "pre_level", "resample", "regen" },
-  WINDOW  = { "pos_start", "scan", "pos_end", "pos_jitter" },
-  -- GRAIN/REVERB track the current bank; BANK (K2) rewrites all four slots.
-  -- seed with bank 1. format {e2, e2_alt, e3, e3_alt}.
-  GRAIN   = { "size", "spread", "density", "clouds_tex" },
-  STRETCH = { "scan", "pitch", "warp_window", "warp_rand" },
-  TAPE    = { "tape_rate", "tape_pre", "loop_start", "loop_end" },
-  -- FILTER/REVERB gain an ALT layer (K1): the wet-path controls the filter
-  -- itself can't expose (RLPF/RHPF/BPF are freq+rq only)
-  FILTER  = { "cutoff", "dry_wet", "resonance", "grain_level" },
-  DELAY   = { "delay_mix", "delay_time", "delay_fb", "drive" },
-  REVERB  = { "rev_decay", "rev_damp", "rev_mix", "rev_size" },
-  PADS    = { "voices", "voice_atk", "voice_rel", nil },
-  -- MOTION (S16): E2 browses lanes, E3 is the global automation amount.
-  -- no alt pair — the page claims K1 for CLR-L/CLR instead.
-  MOTION  = { "motion_lane", nil, "motion_depth", nil },
-  -- SEQ (S18): E2 Euclidean hits / tempo (alt), E3 length / division (alt).
-  -- clock_tempo is a SYSTEM param (referenced, never added).
-  SEQ     = { "seq_euclid", "clock_tempo", "seq_len", "seq_div" },
-  -- SCENE (S19): E2 picks the slot — the ONE selector: K2 recalls it, K3
-  -- captures into it, and E3 morphs toward it from wherever you are. K1+E2
-  -- sets when a recall lands (now / next beat / next bar).
-  SCENE   = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
+  TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
+  VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
+  TAPE   = { "tape_rate", "tape_pre", "loop_end", "@loop_move" },
+  FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
+  SPACE  = { "delay_mix", "delay_time", "rev_mix", "rev_decay" },
+  MIX    = { "mix", "input_level", "out_level", "monitor_level" },
+  PADS   = { "seq_slice", "seq_len", "seq_euclid", "seq_div" },
+  MOTION = { "motion_lane", nil, "motion_depth", nil },
+  SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
 }
 
--- S10: page E2/E3 through the REVERB param banks (rewrites ENC_MAP.REVERB in
--- place so the footer/encoder resolver stay unchanged). called by KEYS.REVERB.
--- bank entry {E2,E3,E2alt,E3alt} maps to ENC_MAP {e2, e2_alt, e3, e3_alt}
-function ctx.rev_next_bank()
-  ctx.rev_bank = (ctx.rev_bank % #REVERB_BANKS) + 1
-  local b = REVERB_BANKS[ctx.rev_bank]
-  ENC_MAP.REVERB[1], ENC_MAP.REVERB[2], ENC_MAP.REVERB[3], ENC_MAP.REVERB[4] =
-    b[1], b[3], b[2], b[4]
-end
+-- VOICE face pair per engine mode (the S-4 move: the encoders always
+-- control what you're hearing). mode options: OFF GRAIN WARP PV PLAY.
+local VOICE_FACE = {
+  { "scan", "pitch" },            -- OFF (the universal pair still)
+  { "size", "density" },          -- GRAIN
+  { "warp_window", "warp_rand" }, -- WARP
+  { "scan", "pitch" },            -- PV
+  { "scan", "pitch" },            -- PLAY
+}
 
-function ctx.grain_next_bank()
-  ctx.grain_bank = (ctx.grain_bank % #GRAIN_BANKS) + 1
-  local b = GRAIN_BANKS[ctx.grain_bank]
-  ENC_MAP.GRAIN[1], ENC_MAP.GRAIN[2], ENC_MAP.GRAIN[3], ENC_MAP.GRAIN[4] =
-    b[1], b[3], b[2], b[4]
-end
-
--- the param id addressed by encoder n (2 or 3) on the current page, alt-aware.
+-- the param id addressed by encoder n (2 or 3), page + alt + mode aware
 local function enc_param(n)
-  local m = ENC_MAP[PAGES[ctx.page]]
+  local page = PAGES[ctx.page]
+  if page == "VOICE" and not ctx.alt then
+    local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
+    return n == 2 and f[1] or f[2]
+  end
+  local m = ENC_MAP[page]
   if not m then return nil end
   if n == 2 then return ctx.alt and m[2] or m[1]
   elseif n == 3 then return ctx.alt and m[4] or m[3] end
   return nil
 end
 
+-- compound encoder gesture: slide a lo/hi pair together, width preserved,
+-- with the same span-scaled fine step the edges get
+local function move_pair(lo_id, hi_id, d)
+  local lo, hi = pget(lo_id, 0), pget(hi_id, 1)
+  if hi < lo then lo, hi = hi, lo end
+  local p = params:lookup_param(lo_id)
+  local q = (p and p.controlspec and p.controlspec.quantum) or 0.01
+  local nlo = clamp(lo + fine_delta(lo_id, d) * q, 0, 1 - (hi - lo))
+  params:set(lo_id, nlo)
+  params:set(hi_id, nlo + (hi - lo))
+end
+
+-- K1+K3 held to the arc: the erase fires AT the threshold (not on the
+-- release), from the redraw clock, so the arc is a promise that lands.
+-- the same tick animates the scene PEEK ramp: holding RCL drives the morph
+-- amount toward the slot (~4 frames in), releasing sweeps it home — all
+-- through the scene_morph_amt param, so motion capture and MIDI stay true.
+local function tick_keys()
+  if ctx.k13_frame and not ctx.k13_fired
+      and ctx.frame - ctx.k13_frame >= ERASE_FRAMES then
+    local e = page_erase()
+    if e then e() end
+    ctx.k13_fired = true
+  end
+  if ctx.peek_on then
+    local a = pget("scene_morph_amt", 0)
+    if a < 1 then params:set("scene_morph_amt", clamp(a + 0.34, 0, 1)) end
+  elseif ctx.peek_back then
+    local a = pget("scene_morph_amt", 0)
+    if a > 0 then
+      params:set("scene_morph_amt", clamp(a - 0.34, 0, 1))
+    else
+      ctx.peek_back = false
+    end
+  end
+end
+
 -- the footer draws what the encoders and keys currently address
 ctx.enc_param = enc_param
 ctx.key_def = key_def
+ctx.page_erase = page_erase
+ctx.ERASE_FRAMES = ERASE_FRAMES
+ctx.TAP_FRAMES = TAP_FRAMES
 
 -- ============================================================================
 -- S8 polyphonic pad voices
@@ -698,7 +670,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "rec", 9)
+  params:add_group("grp_rec", "take - record", 9)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -746,7 +718,7 @@ local function init_params()
   params:add_file("sample_file", "load sample", _path.audio)
   params:set_action("sample_file", function(f) ctx.load_sample(f) end)
 
-  params:add_group("grp_window", "window", 4)
+  params:add_group("grp_window", "take - window", 4)
   -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s
   -- buffer: way too coarse to set a loop. 0.002 base + fine_delta's span
   -- scaling in enc() gets down to ~10ms nudges on a tight window.
@@ -761,7 +733,7 @@ local function init_params()
   add_eng_control("pos_jitter", "jitter",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_grain", "grain", 9)
+  params:add_group("grp_grain", "voice - grain", 9)
   add_eng_control("size", "size",
     controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
   add_eng_control("density", "density",
@@ -808,7 +780,7 @@ local function init_params()
   -- ignored — same guarded philosophy as the JPverb-only reverb params). the
   -- shared size/density/spread/pitch already remap to Clouds; these are the
   -- Clouds-specific attributes. edited on the GRAIN page + PARAMS.
-  params:add_group("grp_clouds", "clouds", 5)
+  params:add_group("grp_clouds", "voice - clouds", 5)
   add_eng_control("clouds_pos", "grain position",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
   add_eng_control("clouds_tex", "grain texture",
@@ -823,7 +795,7 @@ local function init_params()
   add_eng_control("clouds_lofi", "grain lofi",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_stretch", "stretch", 5)
+  params:add_group("grp_stretch", "voice - stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
   -- costs CPU; OFF frees the SC voice entirely
   -- S14: PLAY (clean straight loop = the exact recorded sample) is the
@@ -904,7 +876,7 @@ local function init_params()
   add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_delay", "delay", 3)
+  params:add_group("grp_delay", "space - delay", 3)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
   add_eng_control("delay_fb", "feedback",
@@ -915,7 +887,7 @@ local function init_params()
   -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
   -- hardcoded. edited on the REVERB page in banks (K2 pages through them).
-  params:add_group("grp_reverb", "reverb", 15)
+  params:add_group("grp_reverb", "space - reverb", 15)
   add_eng_control("rev_decay", "reverb decay",
     controlspec.new(0.1, 30, "exp", 0, 2.0, "s"))
   add_eng_control("rev_damp", "reverb damp",
@@ -952,7 +924,7 @@ local function init_params()
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
   -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
-  params:add_group("grp_voice", "voices", 4)
+  params:add_group("grp_voice", "pads - voices", 4)
   params:add_binary("pad_input", "pad input", "toggle", 0)
   params:set_action("pad_input", function(v)
     if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
@@ -1010,7 +982,7 @@ local function init_params()
   -- PADS slice one-shots (see lib/mseq). all Lua-only (drives engine.note_one_
   -- shot) — no engine command, so the fingerprint is unchanged. seq_play is a
   -- binary (MIDI-map it to a footswitch); seq_euclid/seq_len regen the pattern.
-  params:add_group("grp_seq", "sequencer", 5)
+  params:add_group("grp_seq", "pads - sequencer", 5)
   params:add_binary("seq_play", "seq play", "toggle", 0)
   params:set_action("seq_play", function(v) ctx.seq.set_playing(v == 1) end)
   params:add_option("seq_div", "seq division", Mseq.DIV_LABELS, 2)
@@ -1019,6 +991,9 @@ local function init_params()
   params:add_number("seq_len", "seq length", 1, 16, 16)
   params:set_action("seq_len", function() ctx.seq.regen() end)
   params:add_number("seq_slice", "seq slice", 0, 7, 0)
+  -- NU-1 glue until the NU-3 `slice` merge: the sequencer's target and the
+  -- PADS cursor are ONE selection (browsing slices retargets the sequence)
+  params:set_action("seq_slice", function(v) ctx.pad_cursor = v end)
 
   -- S19 scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
@@ -1030,7 +1005,8 @@ local function init_params()
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
-  params:add_number("scene_slot", "scene slot", 1, 8, 1)
+  -- NU-3: slot 0 is the ◄ cell — the way back (mscenes branches on it)
+  params:add_number("scene_slot", "scene slot", 0, 8, 1)
   params:set_action("scene_slot", function()
     -- re-aim a sweep in progress; at rest, picking a slot must stay silent
     if pget("scene_morph_amt", 0) > 0 then Mscenes.touch() end
@@ -1149,6 +1125,7 @@ function init()
       -- S19: apply a pending morph sweep. AFTER motion, which may have just
       -- replayed a recorded scene_morph_amt move for us to act on.
       Mscenes.tick()
+      tick_keys()  -- NU-1: the K1+K3 erase arc fires AT its threshold
       -- never draw over the system menu; the grid stays live inside it
       if norns.menu.status() == false then redraw() end
       Mgrid.redraw()
@@ -1171,28 +1148,37 @@ function cleanup()
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
--- K1+E1 leaps between the page families the header dots draw: source
--- (MIX·LEVEL·REC) · shape (WINDOW·GRAIN·STRETCH) · TAPE · fx · motion · seq
--- · scene
-local PAGE_GROUPS = { 1, 4, 7, 8, 12, 13, 14 }
+-- per-key press bookkeeping for the punch law: the def is resolved at the
+-- PRESS and the release routes back to it, so an alt released mid-hold can
+-- never hand the release to the wrong action (the grid learned this in S19)
+local key_state = { [2] = {}, [3] = {} }
 
 function enc(n, d)
   if n == 1 then
     if ctx.alt then
-      local gi = 1
-      for i = 1, #PAGE_GROUPS do
-        if ctx.page >= PAGE_GROUPS[i] then gi = i end
+      -- K1+E1 = the everything-knob: morph toward the selected scene from
+      -- ANY page (sweeping home to 0 lands exactly where you started)
+      if params.lookup["scene_morph_amt"] then
+        params:delta("scene_morph_amt", d)
+        ctx.flash_id = "scene_morph_amt"
+        ctx.flash_until = ctx.frame + math.floor(FPS * 1.2)
       end
-      ctx.page = PAGE_GROUPS[clamp(gi + (d > 0 and 1 or -1), 1, #PAGE_GROUPS)]
     else
       ctx.page = clamp(ctx.page + d, 1, #PAGES)
     end
   else
     local id = enc_param(n)
-    -- params.lookup guard: a missing param must not throw
-    if id and params.lookup[id] then
+    if id == "@win_move" then
+      move_pair("pos_start", "pos_end", d)
+    elseif id == "@loop_move" then
+      move_pair("loop_start", "loop_end", d)
+    elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
-      -- mark the param actively-turning: its footer knob fills for ~1.2s
+    else
+      id = nil
+    end
+    if id then
+      -- mark the param actively-turning: its footer value swells for ~1.2s
       ctx.flash_id, ctx.flash_until = id, ctx.frame + math.floor(FPS * 1.2)
     end
   end
@@ -1202,17 +1188,51 @@ end
 function key(n, z)
   if n == 1 then
     ctx.alt = (z == 1)
-  else
-    ctx.held[n] = (z == 1)
-    if z == 1 then
-      local def = key_def(n)
-      if def and def.act then def.act() end
-    else
-      gesture_release(n)
-      -- close the PADS-page audition voice (id 8) on K2 release, whatever
-      -- the alt state is now — momentary holds must never strand a voice
-      if n == 2 and ctx.pad_held[8] then ctx.pad_trigger(8, 0, 0) end
+    redraw()
+    return
+  end
+  local st = key_state[n]
+  ctx.held[n] = (z == 1)
+  if z == 1 then
+    local def = key_def(n)
+    st.def, st.frame, st.engaged = def, ctx.frame, false
+    if def then
+      if def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
+        ctx.k13_frame, ctx.k13_fired = ctx.frame, false
+      elseif def.pon then           -- punchable
+        if def.lit and def.lit() then
+          def.poff()                -- already latched: press = off
+        else
+          def.pon()
+          st.engaged = true
+        end
+      elseif def.act then           -- tap-cycle: fires on the press
+        def.act()
+      end
     end
+  else
+    local def = st.def
+    st.def = nil
+    if def then
+      if def.dryerase then
+        local dt = ctx.frame - (ctx.k13_frame or ctx.frame)
+        -- tap = DRY; the frames between tap and arc = the abort zone
+        if not ctx.k13_fired and dt < TAP_FRAMES then ctx.fx_dry() end
+        ctx.k13_frame, ctx.k13_fired = nil, false
+      elseif st.engaged then
+        local dt = ctx.frame - st.frame
+        if dt < TAP_FRAMES and def.tap then
+          def.tap()               -- tap with its own meaning (RCL = commit)
+        elseif def.poff and (def.gate or dt >= TAP_FRAMES) then
+          def.poff()
+        end
+        -- else: a tap — it latches, still engaged with the finger off
+      elseif def.tap and ctx.frame - st.frame < TAP_FRAMES then
+        def.tap()                 -- tap on a def whose pon declined to engage
+      end
+    end
+    -- belt-and-braces: the PADS audition voice must never strand
+    if n == 2 and ctx.pad_held[8] then ctx.pad_trigger(8, 0, 0) end
   end
   redraw()
 end
