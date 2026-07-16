@@ -114,34 +114,42 @@ local function cancel_load()
   if load_pending then pcall(function() load_pending.f:close() end); load_pending = nil end
 end
 
-function M.load_wave(path, buf_secs)
-  cancel_load()
-  local f = io.open(path, "rb")
-  if not f then return nil end
+-- walk a RIFF/WAVE file to its fmt + data chunks, leaving f positioned at the
+-- data. returns afmt, ch, bits, sr, dpos, dlen — or nil if not RIFF/WAVE. shared
+-- by load_wave (the preview) and open_pcm16_mono (the Phase B export).
+local function riff_parse(f)
   local hdr = f:read(12)
   if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
-    f:close()
     return nil
   end
-  local ch, bits, afmt, dpos, dlen = 1, 16, 1, nil, 0
+  local afmt, ch, bits, sr, dpos, dlen = 1, 1, 16, 48000, nil, 0
   while true do
     local c = f:read(8)
     if not c or #c < 8 then break end
-    local id = c:sub(1, 4)
-    local sz = string.unpack("<I4", c, 5)
+    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
     if id == "fmt " then
       local fmt = f:read(sz)
       if not fmt or #fmt < 16 then break end
       afmt = string.unpack("<I2", fmt, 1)     -- 1 = PCM int, 3 = IEEE float
       ch = string.unpack("<I2", fmt, 3)
+      sr = string.unpack("<I4", fmt, 5)
       bits = string.unpack("<I2", fmt, 15)
     elseif id == "data" then
       dpos, dlen = f:seek(), sz
       break
     else
-      f:seek("cur", sz + (sz % 2))   -- riff chunks are word-aligned
+      f:seek("cur", sz + (sz % 2))            -- riff chunks are word-aligned
     end
   end
+  return afmt, ch, bits, sr, dpos, dlen
+end
+
+function M.load_wave(path, buf_secs)
+  cancel_load()
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
+  if not afmt then f:close(); return nil end
   -- WAVE_FORMAT_EXTENSIBLE → treat as PCM int of the stated depth (the common
   -- 24-bit case; the rare float-extensible falls through to "no preview").
   if afmt == 0xFFFE then afmt = 1 end
@@ -219,32 +227,13 @@ end
 -- cancel any in-flight fill (cleanup, or a superseding load)
 function M.cancel_load() cancel_load() end
 
--- true while a waveform is still drawing in (for a "loading" hint if wanted)
-function M.load_busy() return load_pending ~= nil end
--- read one waveform bin's peak (0..1) — the display reads these; also for tests
-function M.wave_at(i) return wave[i] or 0 end
-
 -- S22 Phase B: interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
 -- into one stereo 16-bit wav — a browsable export that reloads via load sample,
 -- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
 local function open_pcm16_mono(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local hdr = f:read(12)
-  if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
-    f:close(); return nil
-  end
-  local bits, ch, sr, dpos, dlen = 16, 1, 48000, nil, 0
-  while true do
-    local c = f:read(8); if not c or #c < 8 then break end
-    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
-    if id == "fmt " then
-      local fmt = f:read(sz); if not fmt or #fmt < 16 then break end
-      ch = string.unpack("<I2", fmt, 3); sr = string.unpack("<I4", fmt, 5)
-      bits = string.unpack("<I2", fmt, 15)
-    elseif id == "data" then dpos, dlen = f:seek(), sz; break
-    else f:seek("cur", sz + (sz % 2)) end
-  end
+  local _, ch, bits, sr, dpos, dlen = riff_parse(f)
   if not dpos or bits ~= 16 or ch ~= 1 then f:close(); return nil end
   f:seek("set", dpos)
   return f, floor(dlen / 2), sr   -- handle, frames, sample rate

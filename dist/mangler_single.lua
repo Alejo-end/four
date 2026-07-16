@@ -190,8 +190,8 @@ local ctx = {
   -- `pad_voice`/`pad_pitch` params are the cursor EDITOR (Elektron data-knob
   -- style — they read/write the pad under pad_cursor); these arrays hold the 8
   -- locks and ride the PSET (ctx.padlock_pset_*). note_on reads them per pad.
-  pad_type = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
-  pad_pitch = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  pad_type = {},             -- per-pad voice (0 grain / 1 slice); every read is `or 0`
+  pad_pitch = {},            -- per-pad pitch (semitones); every read is `or 0`
   pad_sync = false,          -- guard: syncing the editor params FROM the arrays
   pad_cursor = 0,
   pad_n = 8,
@@ -2638,34 +2638,42 @@ local function cancel_load()
   if load_pending then pcall(function() load_pending.f:close() end); load_pending = nil end
 end
 
-function M.load_wave(path, buf_secs)
-  cancel_load()
-  local f = io.open(path, "rb")
-  if not f then return nil end
+-- walk a RIFF/WAVE file to its fmt + data chunks, leaving f positioned at the
+-- data. returns afmt, ch, bits, sr, dpos, dlen — or nil if not RIFF/WAVE. shared
+-- by load_wave (the preview) and open_pcm16_mono (the Phase B export).
+local function riff_parse(f)
   local hdr = f:read(12)
   if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
-    f:close()
     return nil
   end
-  local ch, bits, afmt, dpos, dlen = 1, 16, 1, nil, 0
+  local afmt, ch, bits, sr, dpos, dlen = 1, 1, 16, 48000, nil, 0
   while true do
     local c = f:read(8)
     if not c or #c < 8 then break end
-    local id = c:sub(1, 4)
-    local sz = string.unpack("<I4", c, 5)
+    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
     if id == "fmt " then
       local fmt = f:read(sz)
       if not fmt or #fmt < 16 then break end
       afmt = string.unpack("<I2", fmt, 1)     -- 1 = PCM int, 3 = IEEE float
       ch = string.unpack("<I2", fmt, 3)
+      sr = string.unpack("<I4", fmt, 5)
       bits = string.unpack("<I2", fmt, 15)
     elseif id == "data" then
       dpos, dlen = f:seek(), sz
       break
     else
-      f:seek("cur", sz + (sz % 2))   -- riff chunks are word-aligned
+      f:seek("cur", sz + (sz % 2))            -- riff chunks are word-aligned
     end
   end
+  return afmt, ch, bits, sr, dpos, dlen
+end
+
+function M.load_wave(path, buf_secs)
+  cancel_load()
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
+  if not afmt then f:close(); return nil end
   -- WAVE_FORMAT_EXTENSIBLE → treat as PCM int of the stated depth (the common
   -- 24-bit case; the rare float-extensible falls through to "no preview").
   if afmt == 0xFFFE then afmt = 1 end
@@ -2743,32 +2751,13 @@ end
 -- cancel any in-flight fill (cleanup, or a superseding load)
 function M.cancel_load() cancel_load() end
 
--- true while a waveform is still drawing in (for a "loading" hint if wanted)
-function M.load_busy() return load_pending ~= nil end
--- read one waveform bin's peak (0..1) — the display reads these; also for tests
-function M.wave_at(i) return wave[i] or 0 end
-
 -- S22 Phase B: interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
 -- into one stereo 16-bit wav — a browsable export that reloads via load sample,
 -- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
 local function open_pcm16_mono(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local hdr = f:read(12)
-  if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
-    f:close(); return nil
-  end
-  local bits, ch, sr, dpos, dlen = 16, 1, 48000, nil, 0
-  while true do
-    local c = f:read(8); if not c or #c < 8 then break end
-    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
-    if id == "fmt " then
-      local fmt = f:read(sz); if not fmt or #fmt < 16 then break end
-      ch = string.unpack("<I2", fmt, 3); sr = string.unpack("<I4", fmt, 5)
-      bits = string.unpack("<I2", fmt, 15)
-    elseif id == "data" then dpos, dlen = f:seek(), sz; break
-    else f:seek("cur", sz + (sz % 2)) end
-  end
+  local _, ch, bits, sr, dpos, dlen = riff_parse(f)
   if not dpos or bits ~= 16 or ch ~= 1 then f:close(); return nil end
   f:seek("set", dpos)
   return f, floor(dlen / 2), sr   -- handle, frames, sample rate
@@ -4647,6 +4636,15 @@ local function take_stem(number)
   return norns.state.data .. "take-" .. number
 end
 
+-- how many frames of the buffer a write should cover: the take_len high-water
+-- mark (from frame 0), +50ms margin so rounding at the take boundary never clips
+-- the tail, capped at the 60s buffer; take_len 0 (empty) -> the full buffer.
+local function take_frames()
+  local total = 48000 * 60
+  local tl = ctx.take_len or 1
+  return (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
+end
+
 function ctx.take_pset_write(number)
   if not engine.write_take then return end   -- old engine: no-op (like read_file)
   if not ctx.wave_any then
@@ -4656,13 +4654,8 @@ function ctx.take_pset_write(number)
     ctx.take_pset_delete(number)
     return
   end
-  -- bound the write to the TAKE (from frame 0), not the full 60s buffer of
-  -- mostly silence — a 3s take was ~11.5MB. +50ms margin so rounding at the take
-  -- boundary can never clip the tail; capped at the buffer; take_len 0 = full.
-  local total = 48000 * 60
-  local tl = ctx.take_len or 1
-  local frames = (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
-  engine.write_take(take_stem(number), frames)
+  -- bound the write to the TAKE, not the full 60s buffer of mostly silence.
+  engine.write_take(take_stem(number), take_frames())
 end
 
 function ctx.take_pset_read(number)
@@ -4741,10 +4734,7 @@ function ctx.export_take(name)
   name = name or next_export_name()
   local out = _path.audio .. name
   local tmp = norns.state.data .. "mexport-tmp"
-  local total = 48000 * 60
-  local tl = ctx.take_len or 1
-  local frames = (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
-  engine.write_take(tmp, frames)      -- async dump to tmp_L.wav / tmp_R.wav
+  engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
   if export_clock then clock.cancel(export_clock) end
   export_clock = clock.run(function()
     local pL, pR, stable = -1, -1, 0
@@ -4785,12 +4775,17 @@ end
 -- every param's action sends the engine command of the same id, so the
 -- engine command table and these ids must stay in lockstep (see the .sc file).
 
-local function add_eng_control(id, name, spec)
+-- `map` (optional) is a response curve applied to the param value before it
+-- reaches the engine — e.g. the FX sends pass `square` so the engine's
+-- equal-power .sqrt crossfade reads LINEAR in the knob (0 stays truthy in Lua,
+-- so a 0 map result still short-circuits correctly).
+local function add_eng_control(id, name, spec, map)
   params:add_control(id, name, spec)
   params:set_action(id, function(v)
-    if engine[id] then engine[id](v) end
+    if engine[id] then engine[id](map and map(v) or v) end
   end)
 end
+local function square(v) return v * v end
 
 local function add_eng_binary(id, name)
   params:add_binary(id, name, "toggle", 0)
@@ -5058,15 +5053,12 @@ local function init_params()
     controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
   add_eng_control("delay_fb", "feedback",
     controlspec.new(0, 0.95, "lin", 0, 0.3, ""))
-  add_eng_control("delay_mix", "delay mix",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
   -- FX SEND response curve: the engine crossfades the wet with an equal-power
-  -- .sqrt, so 3% on the knob already reads ~17% wet ("way too blunt"). send the
-  -- SQUARE so the effective wet gain is LINEAR in the knob — a progressive fade
-  -- (dry stays ~full at the bottom, reaches full wet at 1). same for reverb.
-  params:set_action("delay_mix", function(v)
-    if engine.delay_mix then engine.delay_mix(v * v) end
-  end)
+  -- .sqrt (Engine_Mangler.sc), so a raw 3% knob already reads ~17% wet ("way too
+  -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
+  -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
+  add_eng_control("delay_mix", "delay mix",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""), square)
 
   -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
@@ -5095,10 +5087,7 @@ local function init_params()
   add_eng_control("rev_highcut", "high crossover",
     controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  params:set_action("rev_mix", function(v)   -- progressive fade-in (see delay_mix)
-    if engine.rev_mix then engine.rev_mix(v * v) end
-  end)
+    controlspec.new(0, 1, "lin", 0, 0.0, ""), square)   -- progressive fade (see delay_mix)
   -- S15 shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
   add_eng_control("shimmer", "shimmer",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
