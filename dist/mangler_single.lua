@@ -623,13 +623,31 @@ local KB_NOTES = {
   SEMICOLON = 16, APOSTROPHE = 17,
 }
 
+-- key code -> the semitone it was pressed AT, while held. the id a voice is
+-- opened with must be keyed on the physical KEY, not the note, or an octave
+-- shift mid-hold would compute a different id at release and strand the voice
+-- (the grid keys on the pad coordinate for the same reason).
+local kb_held = {}
+
 local M = {}
 
 function M.init(ctx)
   C = ctx
   pget, ptoggle, FPS = ctx.pget, ctx.ptoggle, ctx.FPS
   keyboard.code = function(code, value)
-    if value ~= 1 then return end           -- key-down only (2 = autorepeat)
+    if value == 2 then return end           -- autorepeat: a held key is not a new press
+    -- a release belongs to the press that opened it: if this key started a
+    -- voice, close it whatever the gates say NOW. the menu opening or
+    -- keys_enable going off mid-hold must never leave a note sounding.
+    if value == 0 then
+      local st = kb_held[code]
+      if st then
+        kb_held[code] = nil
+        local semi = st + 12 * pget("kb_octave", 0)
+        C.route_note(3000 + st, 2 ^ (semi / 12), semi, 0)
+      end
+      return
+    end
     if norns.menu.status() then return end  -- the menu owns typing (PSET names)
     -- SPACE = master stop/start, ableton muscle memory. it's transport, not
     -- note input, so it works even with keys_enable off
@@ -644,8 +662,19 @@ function M.init(ctx)
     else
       local st = KB_NOTES[code]
       if st then
-        params:set("pitch", 2 ^ ((st + 12 * pget("kb_octave", 0)) / 12))
-        C.flash_id, C.flash_until = "pitch", C.frame + FPS
+        local semi = st + 12 * pget("kb_octave", 0)
+        -- both edges, like the grid: route_note plays pad (semi mod 8) as a
+        -- polyphonic voice in pad mode, or retunes the mono drone (which
+        -- ignores the release) otherwise. ids 3000+ keep typing-keyboard
+        -- voices clear of MIDI (1000+), grid (2000+), seq (2500) and the
+        -- screen bank (0..8).
+        kb_held[code] = st
+        C.route_note(3000 + st, 2 ^ (semi / 12), semi, 1)
+        -- in pad mode `pitch` doesn't move, so don't swell a value that isn't
+        -- changing — the pad cell lighting is the feedback there
+        if pget("pad_input", 0) == 0 then
+          C.flash_id, C.flash_until = "pitch", C.frame + FPS
+        end
       end
     end
   end
@@ -662,6 +691,7 @@ end
 function M.cleanup()
   for _, d in ipairs(midi_devices) do d.event = nil end
   keyboard.code = nil
+  kb_held = {}   -- the voices themselves are released by ctx.pads_all_off()
 end
 
 return M

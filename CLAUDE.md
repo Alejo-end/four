@@ -1001,6 +1001,49 @@ commit, ◄ undo, chaos release · MOTION capture from real encoders · the
 whole grid spine, especially scene-row peek and held-pad page-changes ·
 ◇ lights on a fresh take and dies on the first mangle.
 
+Forty-third change — **typing keyboard drives PADS (Lua-only, fingerprint
+STAYS 61, renders byte-identical, untested on device)**: the USB typing
+keyboard was the ONE note driver still wired only to the mono drone — MIDI
+(minput) and grid (mgrid.grid_note_key) both route through `ctx.route_note`
+on BOTH edges into the polyphonic voices when `pad_input=1`, but the keyboard
+did a bare `params:set("pitch", …)` on key-down only. Now it routes through
+`route_note` like the other two: A-row/W-row notes play pad `(semi mod 8)` as
+held polyphonic voices in pad mode, or retune the drone otherwise (byte-
+preserved — route_note's drone branch ignores the release). Voice ids **3000+
+st** keep it clear of MIDI (1000+), grid (2000+), seq (2500), screen bank
+(0..8). TWO TRAPS, both guarded + mutation-tested (each fix proven to FAIL a
+regression when reverted):
+(1) **THE OCTAVE TRAP** — the id MUST key on the physical KEY code
+(`3000 + st`, octave-independent), NOT the sounding semitone. A prior sketch
+used `3000 + semi`; then holding a key, tapping X (octave up) mid-hold, and
+releasing computes a DIFFERENT id at release → note_off misses → the voice
+sounds forever. This is exactly why the grid keys its voice on the pad
+coordinate, not the note (S8/S19 lesson). `kb_held[code]=st` records the
+semitone AT PRESS so the release fires the same id.
+(2) **THE STRAND TRAP** — the old handler gated everything behind
+`norns.menu.status()` + `keys_enable`; harmless when it only set `pitch`, but
+once it opens voices, opening the norns menu (or keys_enable going off)
+mid-hold would SWALLOW the release → stuck voice. Releases are now honored
+UNCONDITIONALLY, and ONLY for keys we actually opened (the `kb_held` guard —
+a release can't fire for a note that never started). SPACE (stop_all) and Z/X
+(octave) stay strictly key-down. No `pitch` footer-flash in pad mode (`pitch`
+doesn't move there — the lit pad cell is the feedback; drone mode still
+flashes). `M.cleanup` clears `kb_held` (the voices themselves are released by
+the existing `ctx.pads_all_off()` in script `cleanup()` and the `pad_input`→0
+action — this table is display/id bookkeeping only). INHERITED, stated not
+hidden: 18 keys wrap onto 8 pads (`mod 8`), same as MIDI/grid; per-key
+absolute pad mapping is not a goal. VERIFIED: a 23-assertion harness drives
+the REAL lib/minput.lua against a faithful slice of the pad path
+(route_note/pad_trigger) and asserts what reaches the ENGINE — polyphony,
+autorepeat-not-retriggering, both traps, drone path unchanged; and two
+mutants (`3000+semi`; release re-gated behind the menu) each fail exactly
+their 2 guard assertions. All 44 base render shots byte-identical to HEAD
+(input-only, no draw code); dist rebuilt + byte-verified (source==dist, 9
+modules). DEVICE GATE: plug a USB keyboard, `pad_input=1`, confirm keys play
+polyphonic slices + release cleanly, and specifically hold a key → tap X →
+release → NO stuck voice. Save + reload (Lua-only — the S21 engine RESTART
+for count 61 is still separately pending).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
