@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **S22 Phase A (fingerprint 61 → 63) — ENGINE `write_take`/`read_take` so the LIVE take rides the PSET (L/R wav pair); Lua-verified (12-assertion harness, renders + dist byte-verified 2026-07-16), UNTESTED on device. This STACKS on the still-pending S21 count-61 restart: confirm `count: 63` covers BOTH. · S21 (61) ENGINE RESTART gate STILL PENDING · NU-1..NU-4 UI redesign (doc/redesign.md) fully landed in Lua, its on-device gate also pending: save+reload, walk the nine pages, punch-law feel, erase arc, scene peek/◄, and the whole grid spine (grid code is sim-stubbed, device-only)**
+         ## CURRENT STAGE: **DEVICE-CONFIRMED, running on norns (2026-07-16, `count: 63`).** S21 + S22 Phase A engine, the NU-1..4 nine-station redesign, and everything since are live on hardware: the UI play-test refinements (reels / square slice cell / uniform dots / full-word labels / MOTION scroll — 45th change), the **native Launchpad Mini MK3 RGB colour driver + semantic colour language** (46th — red=recording, STOP pulses, purple=destructive; tune `LP_HUE`), and the **xhigh code-review batch** — 14 Lua fixes + **#14 bounded `write_take`** (47th). NOTE: #14's `write_take` numFrames arg is an **ARITY change → `count` STAYS 63** (confirm it hasn't moved on the next restart). PARKED follow-ups (not built): per-pad sound-locks (extends `pad_voice`), async `load_wave` for the session-recall load hitch (#15), S22 **Phase B** browsable stereo export (now unblocked by the count-63 gate). Grid code is sim-stubbed → any further grid change is device-only.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1085,13 +1085,105 @@ page says EMPTY) → PSET LOAD → the take is back, audible, drawn; confirm
 `take-N_L/_R.wav` exist non-truncated (async `/b_write` — a save-then-quit is the
 risk); an empty take writes NO file; a pre-S22 pset doesn't resurrect a buffer.
 
+Forty-fifth change — **UI refinements from play-testing (Lua-only, DEVICE-
+CONFIRMED running 2026-07-16; committed as d87738a)**: six fixes on the NU
+redesign, all lib/mpages.lua + lib/mgrid.lua. (a) **TAPE reels restored** — the
+NU-2 "belt" (a moving line + return run) reverted to the physical **spinning
+reels** from 94db129 (two reels, hub + 3 spokes, `reel_angle` accumulator driven
+by `tape_rate × tape_reverse` — reverse spins backward, stopped stands still),
+keeping the loop track + head + loop-seconds. (b) **Selected PADS slice cell →
+square**: the cursor cell was the same 12×10 rectangle as the rest (just
+brighter); now a 14×14 square standing 1px proud on every side. (c) **Uniform
+page dots restored** — NU-1's grouped 3·2·1·3 dots reverted to the pre-redesign
+uniform ones (first x=81, pitch `min(5, floor(45/(#PAGES-1)))`, current page a
+rounded 4×4 block with corners punched to 0). (d) **Full-word footer labels** — a
+new `FULL` table; the footer shows the WHOLE word at rest (START/END/CUTOFF/
+REVERB/MONITOR…) and drops to the SHORT abbreviation + value only while
+`is_turning`; a `keys_right` collision guard falls back to SHORT if a full word
+would cross the key words. (e) **MOTION scroll** — VIS 3→4 with a scroll window
+following `motion_lane` + a right-edge scrollbar, so all recorded lanes are
+reachable (was a dead "+N" hint). (f) **Grid sequencer brightness** — SEQ step
+levels pushed apart (rest 3, on 9, playhead 15) at values unique on the grid.
+Only pads.png changed in the gallery; dist byte-verified.
+
+Forty-sixth change — **Launchpad Mini MK3 native colour driver + semantic colour
+language (Lua-only, lib/mgrid.lua + lib/minput.lua, DEVICE-CONFIRMED running;
+driver committed 6ec63f1, colour language in the working tree)**: midigrid
+emulates a MONOCHROME grid (brightness → one hue), so a launchpad showed every
+state as shades of yellow. This drives a **Mini MK3 DIRECTLY in Programmer mode
+with real RGB**, bypassing midigrid, while pad presses still flow through
+`grid_key`. Architecture: a `gg`-shaped shim (led/all/refresh/key) so ALL
+existing grid draw code works unchanged; **device-level** MIDI binding
+(`midi.devices[id].event`, like midigrid — separate from minput's vport-level, so
+`is_grid_vport` (extended to `have_launchpad`) filters pad-notes out of chromatic
+input); detection prefers the MIDI/surface port over DAW; **RGB LED SysEx**
+(`F0 00 20 29 02 0D 03` + `03 note R G B`, verified against Novation's
+Programmer's Reference); enters Programmer mode on connect, returns to Live on
+cleanup; every device call `pcall`-guarded → falls back to midigrid/native, can't
+brick. **Colour language** (chosen with the user): `gg:led(x,y,z,hue)` takes an
+optional semantic hue name — red=recording (**STOP pulses red**), green=playing,
+blue=available/empty, white=playhead/selection, yellow=mode/queued, orange=slice,
+cyan=frozen, purple=destructive(clear/chaos)/reverse, teal=active region;
+brightness scales the hue (so blinks/pulses read) and the monome/midigrid path
+ignores the 4th arg. Verified with a 27-assertion offscreen harness (detection,
+Programmer mode, note↔xy orientation, RGB framing, brightness scaling, the real
+draw code on all 3 workspaces, input parse, Live restore). LP facts: note =
+10·row+col (bottom-left 11, top-right 88); two USB ports — use the **MIDI/2nd**,
+not DAW. Tunable palette: `LP_HUE` in lib/mgrid.lua. GOTCHA: the sim stubs the
+grid, so ALL grid code (this driver, the colour language, and the review batch's
+grid fixes) is device-only — the offscreen harness is the only pre-device check.
+
+Forty-seventh change — **xhigh code-review batch: 14 Lua fixes + #14 ENGINE
+bounded write_take (DEVICE-CONFIRMED running 2026-07-16)**: a workflow-backed
+review (Torso-S4 · Elektron audio-engineer lens) surfaced 15 verified defects;
+all addressed. **Destructive safety** (the cardinal rule): (#1) releasing K1
+ABORTS a pending K1+K3 erase — can't misfire after an abort or retarget another
+station (you can't navigate while K1 is held; K1+E1 is the morph); (#2) scene
+CAP/CLR modifiers clear on page-change AND only fire on the SCENE page — no silent
+bank-tap overwrites; (#3) an empty-buffer PSET save DELETES the stale take-N pair
+so a cleared session can't resurrect old audio. **Regressions:** (#4) the slice
+voice is back as a real MIDI-mappable **`pad_voice`** option (GRAIN/SLICE) feeding
+every `note_on` — the NU redesign deleted the only writer of the per-pad type
+table, so `mangler_voice_slice` was unreachable and every slice played granular;
+surfaced on PADS grid row 6 + screen header + PARAMS (grp_voice 4→5); (#5)
+`load_wave` now parses **16/24/32-bit int + 32-bit float** WAV (+ extensible-as-
+int), so a 24-bit drop-in draws + windows correctly, and `load_sample` sets
+`wave_any` unconditionally so audible audio never shows EMPTY. **Scene/morph
+fidelity:** (#6) `mode` out of the morph set (no voice-respawn click mid-sweep);
+(#7) `M.safe` cleared on pset load (no cross-session ◄ bleed); (#9) a queued
+BEAT/BAR recall cancelled BEFORE the pset early-return; (#10) `tape_reverse` back
+in scenes (recall-only, morph-excluded) — the punch law LATCHES it now, so the old
+"stored as a negative rate" comment was wrong (direction lives only in
+`tape_reverse`); (#11) per-pad grid scene-peek ownership (a two-finger peek can't
+recall the wrong slot). **Control surface:** (#8) `enc_param` explicit alt no-op —
+`alt and m[2] or m[1]` fell through to the base param when the alt slot was nil
+(MOTION/SCENE), so K1+E2/E3 could wipe the wrong MOTION lane; (#12) MIX ENG/TAPE
+are MUTUALLY-EXCLUSIVE throws of `mix` (engaging one restores + un-latches the
+other first, so the crossfader restores true center and both pills can't light).
+**Robustness:** (#13) `load_wave` clamps to the 60s buffer (>60s no longer drawn
+stretched); (#15) the whole-file read is bounded by that clamp (async load is the
+noted follow-up, not degrading transients). **#14 — ENGINE bounded write_take:**
+was dumping the full 60s buffer (~11.5MB) on every save; now writes only the take.
+`write_take` format `"s"`→`"si"` (numFrames arg; `n≤0` = full — an **ARITY change,
+NOT a new command, so fingerprint STAYS 63**). Lua tracks `ctx.take_len` (0..1
+high-water mark: rec-stop window end / loaded length / forced 1 when `regen` fills
+the buffer / 0 on clear) and passes `ceil(take_len·bufFrames)+50ms` margin —
+**never bounds below the current take** (fails safe toward extra silence, never
+audio loss). Verified: S22 harness now 16 (incl. a 0.2s take saving 12000 frames
+not 2.88M + the empty-delete), LP 27, a new wave-format harness 11; dist byte-
+verified. **DEPLOY: the write_take change is ENGINE — rides SYSTEM > RESTART,
+count STILL 63** (arity, not a new command). Everything else Lua-only. #14 device-
+check: short take → small wav pair; CLR+save → deleted; `regen` up → full write.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
    S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = 61, S22 Phase A = **63**).
-   Wrong count = old engine still live.
+   Wrong count = old engine still live. (The #14 `write_take` numFrames arg is an
+   ARITY change, not a new command — `count` STAYS **63**; if it moved, something
+   else changed.)
 Lua-only changes skip all this: save + reload the script.
 
 ---

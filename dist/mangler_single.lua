@@ -179,11 +179,20 @@ local ctx = {
   -- display-model flags (mpages paints them, mparticles gates on them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
+  -- normalized 0..1 high-water mark of buffer content worth saving (from frame
+  -- 0): the take end at rec-stop, a loaded sample's length, or 1 when regen has
+  -- filled the whole buffer. write_take bounds the PSET save to it. 0 = empty.
+  take_len = 0,
   -- S8 pad bank: 8 slice pads, per-pad type (0 grain / 1 slice), a screen
   -- cursor for standalone select/audition. shared by the PADS page + the
   -- MIDI/grid note routing (they map an incoming note to a pad index).
-  pad_type = { [0] = 0, [1] = 0, [2] = 0, [3] = 0,
-    [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  -- SOUND-LOCKS: per-pad voice (0 grain / 1 slice) + pitch (semitones). the
+  -- `pad_voice`/`pad_pitch` params are the cursor EDITOR (Elektron data-knob
+  -- style — they read/write the pad under pad_cursor); these arrays hold the 8
+  -- locks and ride the PSET (ctx.padlock_pset_*). note_on reads them per pad.
+  pad_type = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  pad_pitch = { [0] = 0, [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0, [6] = 0, [7] = 0 },
+  pad_sync = false,          -- guard: syncing the editor params FROM the arrays
   pad_cursor = 0,
   pad_n = 8,
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
@@ -964,19 +973,27 @@ end
 -- ============================================================================
 local scene_mod = { cap = false, clr = false }
 local srow_frame = {}     -- per-slot press frame, for the tap/punch split
+local peek_pad = nil      -- which scene pad OWNS the peek (one morph, one owner)
 
 local function scene_row_key(x, z)
+  -- CAP/CLR only capture/clear while the SCENE workspace is showing (that's the
+  -- only place their modifier pads live); from any other page row 1 is a plain
+  -- recall/peek, so a modifier held while navigating away can't overwrite.
+  local on_scene = C.PAGES[C.page] == "SCENE"
   if z == 1 then
     params:set("scene_slot", x)              -- the screen follows the finger
-    if scene_mod.cap then
+    if scene_mod.cap and on_scene then
       C.scene_capture(x)
       srow_frame[x] = nil
-    elseif scene_mod.clr then
+    elseif scene_mod.clr and on_scene then
       C.scene_clear(x)
       srow_frame[x] = nil
     elseif C.scenes[x] then
-      -- begin the PEEK: the ramp in mangler's tick drives the morph param
+      -- begin the PEEK: the ramp in mangler's tick drives the morph param.
+      -- this pad becomes the owner (a later pad press takes over) so releasing
+      -- the FIRST of two held pads can't cancel the second's peek.
       C.peek_on, C.peek_back = true, false
+      peek_pad = x
       srow_frame[x] = C.frame
     else
       -- empty slot: recall it anyway so the page says SLOT EMPTY
@@ -987,8 +1004,12 @@ local function scene_row_key(x, z)
   else
     local f = srow_frame[x]
     srow_frame[x] = nil
-    if f then
+    -- only the pad that OWNS the peek ends it; a superseded pad's release is a
+    -- no-op (else it recalls whatever slot is now selected, not its own)
+    if f and peek_pad == x then
       C.peek_on = false
+      peek_pad = nil
+      params:set("scene_slot", x)            -- recall THIS pad's slot
       if C.frame - f < (C.TAP_FRAMES or 5) then
         -- a tap: COMMIT the recall; the scene is the new LIVE
         params:set("scene_recall", 1)
@@ -1044,6 +1065,7 @@ local function pads_ws_key(x, y, z)
   elseif y == 5 then params:set("seq_slice", x - 1)
   elseif y == 6 then
     if x == 1 then ptoggle("seq_play")
+    elseif x == 4 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
     elseif x == 8 then C.seq.clear() end
   end
 end
@@ -1216,6 +1238,7 @@ local function draw_pads_ws()
     gg:led(x, 5, selq and 15 or 6, selq and "orange" or "blue")   -- slice select
   end
   gg:led(1, 6, playing and 15 or 6, playing and "green" or nil)   -- run
+  gg:led(4, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")  -- voice: SLICE/GRAIN
   gg:led(8, 6, 11, "purple")                                      -- clear (destructive)
 end
 
@@ -1244,9 +1267,13 @@ end
 
 function M.redraw()
   if not (gg and gg.device) then return end
+  local s = surface()
+  -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
+  -- SCENE page they must not linger held — otherwise a page-independent
+  -- scene-bank (row 1) tap silently captures/clears instead of recalling.
+  if s ~= "scene" then scene_mod.cap, scene_mod.clr = false, false end
   gg:all(0)
   draw_spine()
-  local s = surface()
   if s == "pads" then draw_pads_ws()
   elseif s == "scene" then draw_scene_ws()
   else draw_main_ws() end
@@ -1673,7 +1700,11 @@ local function fire()
   local slice = clamp(pget("seq_slice", 0), 0, n - 1)
   if engine.note_off then engine.note_off(SEQ_VOICE) end
   if engine.note_on then
-    engine.note_on(SEQ_VOICE, C.pad_pos(slice), 1.0, C.pad_type[slice] or 0)
+    -- the sequenced slice fires with its own SOUND-LOCK (pitch + voice), LOUD by
+    -- default (seq_level) so it cuts over the drone — the "no sound" report
+    engine.note_on(SEQ_VOICE, C.pad_pos(slice),
+      2 ^ ((C.pad_pitch[slice] or 0) / 12), C.pad_type[slice] or 0,
+      pget("seq_level", 0.85))
   end
   voicing = true
 end
@@ -1828,15 +1859,17 @@ local SPACE_IDS = {
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape", "seq_div",
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
+  "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "mode",   -- last of the last: this one respawns the voice
 }
 
--- NOT here on purpose: `tape_reverse`. it's a MOMENTARY param — the TAPE key
--- and the grid pad hold it and hand the release to held_gesture, so its
--- resting value is 0 and a captured 1 is a transient, not a state. recalling
--- that 1 would latch the tape backwards with nothing left to release it.
--- nothing is lost: `tape_rate` is bipolar (-2..2) and IS in the list, so "this
--- scene plays backwards" stores as a negative rate.
+-- `tape_reverse` IS captured/recalled (added back). The NU punch law made TAPE
+-- K3 a LATCHING toggle (a tap holds tape_reverse=1 until tapped again), so it is
+-- now a real state, not the momentary held-gesture it was under S19 — and the
+-- direction lives ONLY here: Mtape.update_tape_rate does
+-- `tape_rate * (tape_reverse==1 and -1 or 1)` with tape_rate kept positive, so a
+-- backwards scene is NOT stored in tape_rate. It is in MORPH_EXCLUDE, though: a
+-- morph must not flip the tape mid-sweep (a hard event, like a freeze).
 
 local function append(dst, src)
   for i = 1, #src do dst[#dst + 1] = src[i] end
@@ -1865,6 +1898,11 @@ append(SCENE_RECALL_IDS, SWITCH_IDS)
 local MORPH_EXCLUDE = {
   freeze = true, pv_freeze = true, tape_freeze = true,
   pad_input = true, resample = true, regen = true, voices = true,
+  -- mode respawns the SC voice: crossing 0.5 mid-sweep is a click + a voice
+  -- born with half-morphed params, not a texture. tape_reverse flips playback
+  -- direction: also a hard event, not something to cross gradually. recall
+  -- carries both; a morph leaves them (sweep to 1, then K2 RCL to land).
+  mode = true, tape_reverse = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -2429,6 +2467,10 @@ function M.pset_read(number)
   -- and saved, one frame after the load, silently. the morph re-engages on the
   -- next move of the knob. (this runs from action_read, i.e. after the values.)
   dirty = false
+  -- a LOAD is authoritative: cancel any queued (BEAT/BAR) recall FIRST, before
+  -- any early return — otherwise a coroutine armed just before the load survives
+  -- and fires an old slot over the freshly loaded session a beat later.
+  cancel_pending()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
   -- exactly like mtape leaves the tape audio alone when there's no wav
@@ -2438,11 +2480,13 @@ function M.pset_read(number)
     print("mangler: scene file unreadable — " .. tostring(t))
     return
   end
-  cancel_pending()
   for i = 1, NUM_SLOTS do
     M.slots[i] = type(t.slots[i]) == "table" and t.slots[i] or nil
   end
-  if type(t.safe) == "table" then M.safe = t.safe end
+  -- CLEAR safe when the loaded pset has none, like the slots — otherwise the
+  -- previous session's ◄/safe-state bleeds into this one and its recall jumps
+  -- the instrument to a sound this session never captured.
+  M.safe = type(t.safe) == "table" and t.safe or nil
   M.invalidate()
 end
 
@@ -2567,6 +2611,7 @@ end
 -- wipe the engine's picture (S21 `clear`): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
+  if M.cancel_load then M.cancel_load() end  -- #15: stop an in-flight fill first
   for i = 1, 128 do wave[i] = 0 end
   wave_bin = 0
   C.wave_any = false
@@ -2582,7 +2627,19 @@ end
 -- 16-bit PCM wav only (what norns records and what dust ships). anything else
 -- returns nil and the caller leaves the display alone rather than draw a lie.
 -- returns: the seconds the sample occupies IN THE BUFFER, or nil.
+-- async waveform read: the FAST part (header → dur, window, wave_any) runs now
+-- and RETURNS immediately; the slow per-bin peak read is deferred to load_tick
+-- (BINS_PER_TICK bins/frame on the redraw clock) so a long take/sample load
+-- draws IN over ~1s instead of freezing the screen. A new load supersedes the
+-- previous fill; the file handle lives on load_pending until the fill finishes.
+local load_pending = nil
+local BINS_PER_TICK = 10
+local function cancel_load()
+  if load_pending then pcall(function() load_pending.f:close() end); load_pending = nil end
+end
+
 function M.load_wave(path, buf_secs)
+  cancel_load()
   local f = io.open(path, "rb")
   if not f then return nil end
   local hdr = f:read(12)
@@ -2590,7 +2647,7 @@ function M.load_wave(path, buf_secs)
     f:close()
     return nil
   end
-  local ch, bits, dpos, dlen = 1, 16, nil, 0
+  local ch, bits, afmt, dpos, dlen = 1, 16, 1, nil, 0
   while true do
     local c = f:read(8)
     if not c or #c < 8 then break end
@@ -2599,6 +2656,7 @@ function M.load_wave(path, buf_secs)
     if id == "fmt " then
       local fmt = f:read(sz)
       if not fmt or #fmt < 16 then break end
+      afmt = string.unpack("<I2", fmt, 1)     -- 1 = PCM int, 3 = IEEE float
       ch = string.unpack("<I2", fmt, 3)
       bits = string.unpack("<I2", fmt, 15)
     elseif id == "data" then
@@ -2608,48 +2666,142 @@ function M.load_wave(path, buf_secs)
       f:seek("cur", sz + (sz % 2))   -- riff chunks are word-aligned
     end
   end
-  if not dpos or bits ~= 16 or ch < 1 then
+  -- WAVE_FORMAT_EXTENSIBLE → treat as PCM int of the stated depth (the common
+  -- 24-bit case; the rare float-extensible falls through to "no preview").
+  if afmt == 0xFFFE then afmt = 1 end
+  -- one sample → a normalized 0..1 magnitude, per format. 16/24/32-bit PCM and
+  -- 32-bit float are what the engine's SoundFile loads, so a 24-bit drop-in now
+  -- draws + windows correctly instead of "loads audibly but shows EMPTY" (S21's
+  -- bug, previously only fixed for 16-bit).
+  local readpeak
+  if afmt == 1 and bits == 16 then
+    readpeak = function(s, p) local v = string.unpack("<i2", s, p); return (v < 0 and -v or v) / 32768 end
+  elseif afmt == 1 and bits == 24 then
+    readpeak = function(s, p) local v = string.unpack("<i3", s, p); return (v < 0 and -v or v) / 8388608 end
+  elseif afmt == 1 and bits == 32 then
+    readpeak = function(s, p) local v = string.unpack("<i4", s, p); return (v < 0 and -v or v) / 2147483648 end
+  elseif afmt == 3 and bits == 32 then
+    readpeak = function(s, p) local v = string.unpack("<f", s, p); return v < 0 and -v or v end
+  end
+  if not dpos or ch < 1 or not readpeak then
     f:close()
     return nil
   end
-  local fbytes = ch * 2
-  local frames = floor(dlen / fbytes)
-  -- the engine reads WITHOUT sample-rate conversion into a 60s buffer at the
-  -- server's 48k, so what decides the picture is how many FRAMES the file
-  -- occupies — not its own duration at its own rate.
+  local bps = bits // 8
+  local fbytes = ch * bps
+  -- the engine reads WITHOUT sample-rate conversion into a `buf_secs` buffer at
+  -- the server's 48k and CLAMPS to it (readChannel numFrames), so the picture
+  -- must clamp too — a file longer than the buffer only occupies buf_secs of it;
+  -- drawing all of it would stretch the wave and misalign every playhead/slice.
   local SR = 48000
+  local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
   local span = clamp(frames / (SR * buf_secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
   for i = 1, 128 do wave[i] = 0 end
-  -- peak across the WHOLE of each bin, striding so the work stays bounded
-  -- whatever the file length. sampling a few small windows per bin instead
-  -- looks fine on continuous material and loses TRANSIENTS entirely — a 40ms
-  -- drum hit vanished from the picture, which is the exact wrong failure for a
-  -- sampler. ~200k unpacks total (tens of ms even on a pi4), and a stride of
-  -- N still lands many hits inside any transient worth drawing.
+  wave_bin = 0
+  C.wave_any = span > 0
+  -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
+  -- (not the disk read) so a transient is never skipped — a 40ms drum hit
+  -- vanished when this sampled a few windows per bin instead.
   local stride = max(1, floor(frames * ch / 200000))
-  local step = stride * 2                    -- bytes; even, so shorts stay aligned
-  for i = 1, nb do
-    local b0 = floor((i - 1) / nb * frames)
-    local n = floor(i / nb * frames) - b0
+  if nb >= 1 and frames > 0 then
+    load_pending = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
+      nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0 }
+  else
+    f:close()
+  end
+  return frames / SR
+end
+
+-- fill up to BINS_PER_TICK waveform bins per call (driven by the redraw clock),
+-- then close the file. bounded work per frame → the read never blocks the UI;
+-- the waveform draws IN over ~ceil(nb/BINS_PER_TICK) frames.
+function M.load_tick()
+  local p = load_pending
+  if not p then return end
+  local last = min(p.i + BINS_PER_TICK, p.nb)
+  for i = p.i + 1, last do
+    local b0 = floor((i - 1) / p.nb * p.frames)
+    local n = floor(i / p.nb * p.frames) - b0
     local peak = 0
     if n > 0 then
-      f:seek("set", dpos + b0 * fbytes)
-      local chunk = f:read(n * fbytes)
+      p.f:seek("set", p.dpos + b0 * p.fbytes)
+      local chunk = p.f:read(n * p.fbytes)
       if chunk then
-        for p = 1, #chunk - 1, step do
-          local v = string.unpack("<i2", chunk, p)
-          if v < 0 then v = -v end
+        for pp = 1, #chunk - (p.bps - 1), p.step do
+          local v = p.readpeak(chunk, pp)
           if v > peak then peak = v end
         end
       end
     end
-    wave[i] = peak / 32768
+    wave[i] = peak > 1 and 1 or peak
   end
-  f:close()
-  wave_bin = 0
-  C.wave_any = span > 0
-  return frames / SR
+  p.i = last
+  if p.i >= p.nb then p.f:close(); load_pending = nil end
+end
+
+-- cancel any in-flight fill (cleanup, or a superseding load)
+function M.cancel_load() cancel_load() end
+
+-- true while a waveform is still drawing in (for a "loading" hint if wanted)
+function M.load_busy() return load_pending ~= nil end
+-- read one waveform bin's peak (0..1) — the display reads these; also for tests
+function M.wave_at(i) return wave[i] or 0 end
+
+-- S22 Phase B: interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
+-- into one stereo 16-bit wav — a browsable export that reloads via load sample,
+-- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
+local function open_pcm16_mono(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local hdr = f:read(12)
+  if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
+    f:close(); return nil
+  end
+  local bits, ch, sr, dpos, dlen = 16, 1, 48000, nil, 0
+  while true do
+    local c = f:read(8); if not c or #c < 8 then break end
+    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
+    if id == "fmt " then
+      local fmt = f:read(sz); if not fmt or #fmt < 16 then break end
+      ch = string.unpack("<I2", fmt, 3); sr = string.unpack("<I4", fmt, 5)
+      bits = string.unpack("<I2", fmt, 15)
+    elseif id == "data" then dpos, dlen = f:seek(), sz; break
+    else f:seek("cur", sz + (sz % 2)) end
+  end
+  if not dpos or bits ~= 16 or ch ~= 1 then f:close(); return nil end
+  f:seek("set", dpos)
+  return f, floor(dlen / 2), sr   -- handle, frames, sample rate
+end
+
+function M.interleave_wav(pathL, pathR, out)
+  local fL, nL, sr = open_pcm16_mono(pathL)
+  if not fL then return false end
+  local fR, nR = open_pcm16_mono(pathR)
+  if not fR then fL:close(); return false end
+  local frames = min(nL, nR)
+  local of = io.open(out, "wb")
+  if not of then fL:close(); fR:close(); return false end
+  local datalen = frames * 4                      -- stereo 16-bit = 4 bytes/frame
+  of:write("RIFF", string.pack("<I4", 36 + datalen), "WAVE")
+  of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
+    string.pack("<I4", sr), string.pack("<I4", sr * 4), string.pack("<I2", 4), string.pack("<I2", 16))
+  of:write("data", string.pack("<I4", datalen))
+  local CHUNK = 8192                               -- frames per pass
+  local i = 0
+  while i < frames do
+    local n = min(CHUNK, frames - i)
+    local lc, rc = fL:read(n * 2), fR:read(n * 2)
+    if not lc or not rc or #lc < n * 2 or #rc < n * 2 then break end
+    local buf = {}
+    for p = 1, n * 2, 2 do
+      buf[#buf + 1] = lc:sub(p, p + 1); buf[#buf + 1] = rc:sub(p, p + 1)
+    end
+    of:write(table.concat(buf))
+    i = i + n
+  end
+  fL:close(); fR:close(); of:close()
+  return true
 end
 
 -- deterministic dither, same trick as the mockups
@@ -2685,6 +2837,7 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT",
   seq_euclid = "HITS", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLICE",
+  pad_pitch = "PTCH",
   clock_tempo = "BPM",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
@@ -2720,6 +2873,7 @@ local FULL = {
   voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH",
   seq_euclid = "HITS", seq_len = "LENGTH", seq_div = "DIV", seq_slice = "SLICE",
+  pad_pitch = "PITCH",
   clock_tempo = "TEMPO",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
 }
@@ -3514,6 +3668,12 @@ local function body_PADS(frame)
   end
   local routed = pget("pad_input", 0) == 1
   ptext(routed and "PLAY>PADS" or "PLAY>DRONE", 2, 12, 1, routed and 12 or 3)
+  -- the SELECTED pad's sound-lock: voice + pitch (the cursor editor). e.g. SLC+5
+  local cvi = clamp(floor(pget("seq_slice", 0) + 0.5), 0, 7)
+  local cp = C.pad_pitch and (C.pad_pitch[cvi] or 0) or 0
+  local lk = ((C.pad_type and C.pad_type[cvi] or 0) == 1 and "SLC" or "GRN")
+    .. (cp ~= 0 and ((cp > 0 and "+" or "") .. cp) or "")
+  ptext_c(lk, 72, 12, 1, 6)
   ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 12, 1, 4)
   if not C.wave_any and pget("rec", 0) == 0 then
     ptext_c("EMPTY - K2 REC", 64, 28, 1, 6)
@@ -3572,6 +3732,17 @@ local function body_PADS(frame)
       screen.fill()
     end
     ptext_c(tostring(i + 1), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
+    -- SOUND-LOCK markers: a bottom bar = SLICE voice, a top-corner dot = pitched
+    if (C.pad_type and C.pad_type[i] or 0) == 1 then
+      screen.level(lit and 0 or (cur and 15 or 6))
+      screen.rect(cx + sw / 2 - 2, 36, 4, 1)
+      screen.fill()
+    end
+    if C.pad_pitch and (C.pad_pitch[i] or 0) ~= 0 then
+      screen.level(cur and 15 or 6)
+      screen.rect(cx + sw / 2 + 3, 28, 1, 1)
+      screen.fill()
+    end
   end
   -- the 16-step row: the rhythm that fires the selected slice
   local len = pget("seq_len", 16)
@@ -4162,12 +4333,17 @@ local KEYS = {
     end),
   },
   MIX = {
+    -- ENG and TAPE are MUTUALLY EXCLUSIVE throws of the same `mix`: engaging one
+    -- restores + un-latches the other FIRST, so the value cached is the true home
+    -- (not one the sibling already displaced) and both pills can't light at once.
     k2 = throw("ENG", function()   -- crossfade stab to the engine deck
+      if throw_mem["TAPE"] then params:set("mix", throw_mem["TAPE"].mix); throw_mem["TAPE"] = nil end
       local mem = { mix = pget("mix", 0.5) }
       params:set("mix", 0)
       return mem
     end),
     k3 = throw("TAPE", function()
+      if throw_mem["ENG"] then params:set("mix", throw_mem["ENG"].mix); throw_mem["ENG"] = nil end
       local mem = { mix = pget("mix", 0.5) }
       params:set("mix", 1)
       return mem
@@ -4253,7 +4429,7 @@ local ENC_MAP = {
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
   SPACE  = { "delay_mix", "delay_time", "rev_mix", "rev_decay" },
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
-  PADS   = { "seq_slice", "seq_len", "seq_euclid", "seq_div" },
+  PADS   = { "seq_slice", "seq_len", "seq_euclid", "pad_pitch" },
   MOTION = { "motion_lane", nil, "motion_depth", nil },
   SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
 }
@@ -4277,8 +4453,16 @@ local function enc_param(n)
   end
   local m = ENC_MAP[page]
   if not m then return nil end
-  if n == 2 then return ctx.alt and m[2] or m[1]
-  elseif n == 3 then return ctx.alt and m[4] or m[3] end
+  -- explicit, NOT `alt and m[2] or m[1]`: a nil alt slot (MOTION/SCENE) must be
+  -- a genuine no-op, not fall through to the base param and edit it while K1 is
+  -- held (which could wipe the wrong MOTION lane and leak a value in the footer)
+  if n == 2 then
+    if ctx.alt then return m[2] end
+    return m[1]
+  elseif n == 3 then
+    if ctx.alt then return m[4] end
+    return m[3]
+  end
   return nil
 end
 
@@ -4351,7 +4535,10 @@ function ctx.pad_trigger(id, i, z)
   if z == 1 then
     if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
     if engine.note_on then
-      engine.note_on(id, pad_pos(i), 1.0, ctx.pad_type[i] or 0)
+      -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
+      -- the pad voice level (chord-safe default, unlike the loud sequencer)
+      engine.note_on(id, pad_pos(i), 2 ^ ((ctx.pad_pitch[i] or 0) / 12),
+        ctx.pad_type[i] or 0, pget("pad_level", 0.3))
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
   elseif ctx.pad_held[id] then
@@ -4380,6 +4567,16 @@ function ctx.pads_all_off()
   end
 end
 
+-- SOUND-LOCK editor sync: point the pad_voice/pad_pitch editor params at the pad
+-- now under the cursor (guarded, so their actions don't write the value back).
+function ctx.pad_edit_sync()
+  local i = ctx.pad_cursor
+  ctx.pad_sync = true
+  if params.lookup["pad_voice"] then params:set("pad_voice", (ctx.pad_type[i] or 0) + 1) end
+  if params.lookup["pad_pitch"] then params:set("pad_pitch", ctx.pad_pitch[i] or 0) end
+  ctx.pad_sync = false
+end
+
 -- S21 — the two things a sampler needs and this didn't have: a way to DELETE
 -- the recording, and a source other than the live input.
 -- the engine's 60s buffer is the thing everything slices (window, drone, pads,
@@ -4398,6 +4595,7 @@ function ctx.clear_recording()
     return
   end
   Mpages.clear_wave()
+  ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
   params:set("pos_start", 0)
   params:set("pos_end", 1)
   print("mangler: recording cleared")
@@ -4419,16 +4617,22 @@ function ctx.load_sample(path)
     return
   end
   engine.read_file(path)
+  ctx.wave_any = true    -- audio is in the buffer now, drawable or not — never
+                         -- lie "EMPTY" over an audible sample (the S21 fix, now
+                         -- also honoured for formats the preview can't draw)
   local dur = Mpages.load_wave(path, 60)
+  -- the loaded length bounds a PSET save; unknown length (no preview) -> full
+  ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1
   if dur then
     params:set("pos_start", 0)
     params:set("pos_end", clamp(dur / 60, 0.002, 1))
     print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
       path, dur))
   else
-    -- audio is in, but we have no picture for it: say so rather than draw a lie
+    -- audible, but no picture for this format (8-bit / aiff / float-extensible):
+    -- leave the window for the performer to set rather than draw a lie
     print("mangler: loaded " .. path
-      .. " (no waveform preview — not a 16-bit PCM wav)")
+      .. " (playing; no waveform preview for this format)")
   end
 end
 
@@ -4445,8 +4649,20 @@ end
 
 function ctx.take_pset_write(number)
   if not engine.write_take then return end   -- old engine: no-op (like read_file)
-  if not ctx.wave_any then return end         -- nothing recorded — write nothing
-  engine.write_take(take_stem(number))
+  if not ctx.wave_any then
+    -- nothing recorded: DELETE any take saved into this slot before, so a
+    -- session the performer cleared and re-saved as empty can't resurrect the
+    -- old audio on load (norns overwrite-save never calls action_delete).
+    ctx.take_pset_delete(number)
+    return
+  end
+  -- bound the write to the TAKE (from frame 0), not the full 60s buffer of
+  -- mostly silence — a 3s take was ~11.5MB. +50ms margin so rounding at the take
+  -- boundary can never clip the tail; capped at the buffer; take_len 0 = full.
+  local total = 48000 * 60
+  local tl = ctx.take_len or 1
+  local frames = (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
+  engine.write_take(take_stem(number), frames)
 end
 
 function ctx.take_pset_read(number)
@@ -4460,14 +4676,91 @@ function ctx.take_pset_read(number)
   -- repaint from the file or the restored take is INVISIBLE (the "audio you can
   -- hear over EMPTY - K2 REC" bug S21 fixed for loaded samples). do NOT snap the
   -- window — params:read already restored the saved pos_start/pos_end.
-  Mpages.load_wave(stem .. "_L.wav", 60)
+  local dur = Mpages.load_wave(stem .. "_L.wav", 60)
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
+  ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1  -- bounds a re-save
 end
 
 function ctx.take_pset_delete(number)
   local stem = take_stem(number)
   os.remove(stem .. "_L.wav")
   os.remove(stem .. "_R.wav")
+end
+
+-- SOUND-LOCKS ride the PSET like the take + scenes: the 8 per-pad voice+pitch
+-- locks save as a small lua table beside the pset (params:read only restores the
+-- editor params, i.e. the cursor pad — this restores all 8).
+local function padlock_path(number)
+  return norns.state.data .. "padlock-" .. number .. ".lua"
+end
+
+function ctx.padlock_pset_write(number)
+  local t = { v = 1, type = {}, pitch = {} }
+  for i = 0, 7 do t.type[i] = ctx.pad_type[i] or 0; t.pitch[i] = ctx.pad_pitch[i] or 0 end
+  tab.save(t, padlock_path(number))
+end
+
+function ctx.padlock_pset_read(number)
+  local path = padlock_path(number)
+  if not util.file_exists(path) then return end
+  local ok, t = pcall(tab.load, path)
+  if not (ok and type(t) == "table" and type(t.type) == "table") then return end
+  for i = 0, 7 do
+    ctx.pad_type[i] = t.type[i] or 0
+    ctx.pad_pitch[i] = (t.pitch and t.pitch[i]) or 0
+  end
+  ctx.pad_edit_sync()   -- editor params -> the restored cursor pad
+end
+
+function ctx.padlock_pset_delete(number)
+  os.remove(padlock_path(number))
+end
+
+-- S22 Phase B: browsable stereo EXPORT. write_take dumps the DRY take to a temp
+-- L/R pair; we wait for the async /b_write to finish (sizes stop growing), then
+-- interleave into a named stereo wav in dust/audio that reloads via `load
+-- sample` (zero new load code). Lua-only — fingerprint unchanged.
+local export_clock
+local function filesize(p)
+  local f = io.open(p, "rb"); if not f then return nil end
+  local s = f:seek("end"); f:close(); return s
+end
+local function next_export_name()
+  for n = 1, 999 do
+    local name = "mangler-" .. string.format("%03d", n) .. ".wav"
+    if not util.file_exists(_path.audio .. name) then return name end
+  end
+  return "mangler-000.wav"
+end
+
+function ctx.export_take(name)
+  if not engine.write_take then
+    print("mangler: engine has no write_take — SYSTEM > RESTART"); return
+  end
+  if not ctx.wave_any then print("mangler: nothing to export"); return end
+  name = name or next_export_name()
+  local out = _path.audio .. name
+  local tmp = norns.state.data .. "mexport-tmp"
+  local total = 48000 * 60
+  local tl = ctx.take_len or 1
+  local frames = (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
+  engine.write_take(tmp, frames)      -- async dump to tmp_L.wav / tmp_R.wav
+  if export_clock then clock.cancel(export_clock) end
+  export_clock = clock.run(function()
+    local pL, pR, stable = -1, -1, 0
+    for _ = 1, 60 do                  -- wait up to ~3s for the async write
+      clock.sleep(0.05)
+      local sL, sR = filesize(tmp .. "_L.wav"), filesize(tmp .. "_R.wav")
+      if sL and sR and sL > 44 and sL == pL and sR == pR then
+        stable = stable + 1; if stable >= 2 then break end
+      else stable = 0 end
+      pL, pR = sL, sR
+    end
+    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out)
+    os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
+    print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
+    export_clock = nil
+  end)
 end
 
 -- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
@@ -4536,7 +4829,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "take - record", 9)
+  params:add_group("grp_rec", "take - record", 10)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -4556,6 +4849,11 @@ local function init_params()
       params:set("pos_start", 0)
       params:set("pos_end", 1)
     end
+    if v == 0 then
+      -- the take now bounds what a PSET save writes (write head runs 0..pos_end).
+      -- regen fills the whole buffer, so it forces a full save.
+      ctx.take_len = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
+    end
   end)
   add_eng_control("rec_level", "rec level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
@@ -4572,6 +4870,13 @@ local function init_params()
   -- convex crossfade so it can't run away.
   add_eng_control("regen", "regen (self-resample)",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("regen", function(v)
+    if engine.regen then engine.regen(v) end
+    -- regen's record head traverses the WHOLE buffer, so once it runs the take
+    -- can be anywhere: force a full-buffer PSET save (sticky until the next
+    -- fresh rec / load / clear resets take_len), never truncate its decay tail.
+    if v > 0 then ctx.take_len = 1 end
+  end)
   -- S21: delete the take (REC K1+K3, mirroring TAPE's CLR) and load one off the
   -- disk. clear is a MOMENTARY binary so a footswitch can wipe between takes;
   -- both fire on the press edge only, so a stray 0 from bang/pset does nothing.
@@ -4583,6 +4888,12 @@ local function init_params()
   -- so a saved session reloads its sample
   params:add_file("sample_file", "load sample", _path.audio)
   params:set_action("sample_file", function(f) ctx.load_sample(f) end)
+  -- S22 Phase B: export the take as a browsable stereo wav in dust/audio.
+  -- momentary so a footswitch/grid can fire it; press edge only.
+  params:add_binary("export_take", "export take (wav)", "momentary", 0)
+  params:set_action("export_take", function(v)
+    if v == 1 then ctx.export_take() end
+  end)
 
   params:add_group("grp_window", "take - window", 4)
   -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s
@@ -4749,6 +5060,13 @@ local function init_params()
     controlspec.new(0, 0.95, "lin", 0, 0.3, ""))
   add_eng_control("delay_mix", "delay mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  -- FX SEND response curve: the engine crossfades the wet with an equal-power
+  -- .sqrt, so 3% on the knob already reads ~17% wet ("way too blunt"). send the
+  -- SQUARE so the effective wet gain is LINEAR in the knob — a progressive fade
+  -- (dry stays ~full at the bottom, reaches full wet at 1). same for reverb.
+  params:set_action("delay_mix", function(v)
+    if engine.delay_mix then engine.delay_mix(v * v) end
+  end)
 
   -- S10: the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
@@ -4778,6 +5096,9 @@ local function init_params()
     controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("rev_mix", function(v)   -- progressive fade-in (see delay_mix)
+    if engine.rev_mix then engine.rev_mix(v * v) end
+  end)
   -- S15 shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
   add_eng_control("shimmer", "shimmer",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
@@ -4790,10 +5111,23 @@ local function init_params()
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
   -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
-  params:add_group("grp_voice", "pads - voices", 4)
+  params:add_group("grp_voice", "pads - voices", 7)
   params:add_binary("pad_input", "pad input", "toggle", 0)
   params:set_action("pad_input", function(v)
     if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
+  end)
+  -- SOUND-LOCK EDITORS (Elektron data-knob style): pad_voice + pad_pitch read/
+  -- write the pad under pad_cursor, so selecting a pad and turning these edits
+  -- THAT pad's lock. GRAIN = granular texture, SLICE = clean chop. MIDI-map them
+  -- to edit the current pad live; the 8 locks ride the PSET (padlock_pset_*).
+  params:add_option("pad_voice", "pad voice (sel)", { "GRAIN", "SLICE" }, 1)
+  params:set_action("pad_voice", function(v)
+    if not ctx.pad_sync then ctx.pad_type[ctx.pad_cursor] = v - 1 end
+  end)
+  params:add_number("pad_pitch", "pad pitch (sel)", -24, 24, 0,
+    function(p) local v = p:get(); return (v >= 0 and "+" or "") .. v .. "st" end)
+  params:set_action("pad_pitch", function(v)
+    if not ctx.pad_sync then ctx.pad_pitch[ctx.pad_cursor] = v end
   end)
   params:add_number("voices", "poly voices", 1, 16, 8)
   params:set_action("voices", function(v)
@@ -4803,6 +5137,10 @@ local function init_params()
     controlspec.new(0.001, 1, "exp", 0, 0.005, "s"))
   add_eng_control("voice_rel", "voice release",
     controlspec.new(0.01, 4, "exp", 0, 0.6, "s"))
+  -- pad voice LEVEL (per-note amp): the chord-safe default (0.3, the old S9
+  -- level that stops poly stacks slamming the master limiter). read at note-on.
+  params:add_control("pad_level", "pad level",
+    controlspec.new(0, 1, "lin", 0, 0.3, ""))
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
@@ -4848,7 +5186,7 @@ local function init_params()
   -- PADS slice one-shots (see lib/mseq). all Lua-only (drives engine.note_one_
   -- shot) — no engine command, so the fingerprint is unchanged. seq_play is a
   -- binary (MIDI-map it to a footswitch); seq_euclid/seq_len regen the pattern.
-  params:add_group("grp_seq", "pads - sequencer", 5)
+  params:add_group("grp_seq", "pads - sequencer", 6)
   params:add_binary("seq_play", "seq play", "toggle", 0)
   params:set_action("seq_play", function(v) ctx.seq.set_playing(v == 1) end)
   params:add_option("seq_div", "seq division", Mseq.DIV_LABELS, 2)
@@ -4859,7 +5197,14 @@ local function init_params()
   params:add_number("seq_slice", "seq slice", 0, 7, 0)
   -- NU-1 glue until the NU-3 `slice` merge: the sequencer's target and the
   -- PADS cursor are ONE selection (browsing slices retargets the sequence)
-  params:set_action("seq_slice", function(v) ctx.pad_cursor = v end)
+  params:set_action("seq_slice", function(v)
+    ctx.pad_cursor = v
+    ctx.pad_edit_sync()          -- the sound-lock editors follow the selected pad
+  end)
+  -- sequencer voice LEVEL (per-note amp): LOUD by default so the rhythm cuts
+  -- over the drone (the "makes no sound" report — it's mono, so no chord-clip).
+  params:add_control("seq_level", "seq level",
+    controlspec.new(0, 1, "lin", 0, 0.85, ""))
 
   -- S19 scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
@@ -4928,16 +5273,19 @@ local function init_params()
     Mtape.pset_write(number)
     Mscenes.pset_write(number)
     ctx.take_pset_write(number)   -- S22: the engine take, as an L/R pair
+    ctx.padlock_pset_write(number)  -- per-pad sound-locks
   end
   params.action_read = function(filename, silent, number)
     Mtape.pset_read(number)
     Mscenes.pset_read(number)
     ctx.take_pset_read(number)
+    ctx.padlock_pset_read(number)
   end
   params.action_delete = function(filename, name, number)
     Mtape.pset_delete(number)
     Mscenes.pset_delete(number)
     ctx.take_pset_delete(number)
+    ctx.padlock_pset_delete(number)
   end
 
   params:bang()
@@ -4987,6 +5335,7 @@ function init()
     while true do
       clock.sleep(1 / FPS)
       ctx.frame = ctx.frame + 1
+      Mpages.load_tick()   -- #15: fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
       Mparticles.update()
@@ -5008,6 +5357,8 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  if export_clock then clock.cancel(export_clock) end  -- S22B: stop a pending export
+  Mpages.cancel_load()  -- #15: close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   Mgrid.cleanup()
@@ -5057,6 +5408,13 @@ end
 function key(n, z)
   if n == 1 then
     ctx.alt = (z == 1)
+    -- releasing K1 ABORTS a pending K1+K3 erase. the arc is gated on K1, so
+    -- letting go reads as "abort" — honour that instead of firing anyway. (you
+    -- can't navigate stations while K1 is held — K1+E1 is the morph — so the
+    -- erase can also never retarget onto a different station's material.)
+    if z == 0 and ctx.k13_frame and not ctx.k13_fired then
+      ctx.k13_frame = nil
+    end
     redraw()
     return
   end

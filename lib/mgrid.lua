@@ -264,19 +264,27 @@ end
 -- ============================================================================
 local scene_mod = { cap = false, clr = false }
 local srow_frame = {}     -- per-slot press frame, for the tap/punch split
+local peek_pad = nil      -- which scene pad OWNS the peek (one morph, one owner)
 
 local function scene_row_key(x, z)
+  -- CAP/CLR only capture/clear while the SCENE workspace is showing (that's the
+  -- only place their modifier pads live); from any other page row 1 is a plain
+  -- recall/peek, so a modifier held while navigating away can't overwrite.
+  local on_scene = C.PAGES[C.page] == "SCENE"
   if z == 1 then
     params:set("scene_slot", x)              -- the screen follows the finger
-    if scene_mod.cap then
+    if scene_mod.cap and on_scene then
       C.scene_capture(x)
       srow_frame[x] = nil
-    elseif scene_mod.clr then
+    elseif scene_mod.clr and on_scene then
       C.scene_clear(x)
       srow_frame[x] = nil
     elseif C.scenes[x] then
-      -- begin the PEEK: the ramp in mangler's tick drives the morph param
+      -- begin the PEEK: the ramp in mangler's tick drives the morph param.
+      -- this pad becomes the owner (a later pad press takes over) so releasing
+      -- the FIRST of two held pads can't cancel the second's peek.
       C.peek_on, C.peek_back = true, false
+      peek_pad = x
       srow_frame[x] = C.frame
     else
       -- empty slot: recall it anyway so the page says SLOT EMPTY
@@ -287,8 +295,12 @@ local function scene_row_key(x, z)
   else
     local f = srow_frame[x]
     srow_frame[x] = nil
-    if f then
+    -- only the pad that OWNS the peek ends it; a superseded pad's release is a
+    -- no-op (else it recalls whatever slot is now selected, not its own)
+    if f and peek_pad == x then
       C.peek_on = false
+      peek_pad = nil
+      params:set("scene_slot", x)            -- recall THIS pad's slot
       if C.frame - f < (C.TAP_FRAMES or 5) then
         -- a tap: COMMIT the recall; the scene is the new LIVE
         params:set("scene_recall", 1)
@@ -344,6 +356,7 @@ local function pads_ws_key(x, y, z)
   elseif y == 5 then params:set("seq_slice", x - 1)
   elseif y == 6 then
     if x == 1 then ptoggle("seq_play")
+    elseif x == 4 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
     elseif x == 8 then C.seq.clear() end
   end
 end
@@ -516,6 +529,7 @@ local function draw_pads_ws()
     gg:led(x, 5, selq and 15 or 6, selq and "orange" or "blue")   -- slice select
   end
   gg:led(1, 6, playing and 15 or 6, playing and "green" or nil)   -- run
+  gg:led(4, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")  -- voice: SLICE/GRAIN
   gg:led(8, 6, 11, "purple")                                      -- clear (destructive)
 end
 
@@ -544,9 +558,13 @@ end
 
 function M.redraw()
   if not (gg and gg.device) then return end
+  local s = surface()
+  -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
+  -- SCENE page they must not linger held — otherwise a page-independent
+  -- scene-bank (row 1) tap silently captures/clears instead of recalling.
+  if s ~= "scene" then scene_mod.cap, scene_mod.clr = false, false end
   gg:all(0)
   draw_spine()
-  local s = surface()
   if s == "pads" then draw_pads_ws()
   elseif s == "scene" then draw_scene_ws()
   else draw_main_ws() end

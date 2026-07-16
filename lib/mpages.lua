@@ -87,6 +87,7 @@ end
 -- wipe the engine's picture (S21 `clear`): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
+  if M.cancel_load then M.cancel_load() end  -- #15: stop an in-flight fill first
   for i = 1, 128 do wave[i] = 0 end
   wave_bin = 0
   C.wave_any = false
@@ -102,7 +103,19 @@ end
 -- 16-bit PCM wav only (what norns records and what dust ships). anything else
 -- returns nil and the caller leaves the display alone rather than draw a lie.
 -- returns: the seconds the sample occupies IN THE BUFFER, or nil.
+-- async waveform read: the FAST part (header → dur, window, wave_any) runs now
+-- and RETURNS immediately; the slow per-bin peak read is deferred to load_tick
+-- (BINS_PER_TICK bins/frame on the redraw clock) so a long take/sample load
+-- draws IN over ~1s instead of freezing the screen. A new load supersedes the
+-- previous fill; the file handle lives on load_pending until the fill finishes.
+local load_pending = nil
+local BINS_PER_TICK = 10
+local function cancel_load()
+  if load_pending then pcall(function() load_pending.f:close() end); load_pending = nil end
+end
+
 function M.load_wave(path, buf_secs)
+  cancel_load()
   local f = io.open(path, "rb")
   if not f then return nil end
   local hdr = f:read(12)
@@ -110,7 +123,7 @@ function M.load_wave(path, buf_secs)
     f:close()
     return nil
   end
-  local ch, bits, dpos, dlen = 1, 16, nil, 0
+  local ch, bits, afmt, dpos, dlen = 1, 16, 1, nil, 0
   while true do
     local c = f:read(8)
     if not c or #c < 8 then break end
@@ -119,6 +132,7 @@ function M.load_wave(path, buf_secs)
     if id == "fmt " then
       local fmt = f:read(sz)
       if not fmt or #fmt < 16 then break end
+      afmt = string.unpack("<I2", fmt, 1)     -- 1 = PCM int, 3 = IEEE float
       ch = string.unpack("<I2", fmt, 3)
       bits = string.unpack("<I2", fmt, 15)
     elseif id == "data" then
@@ -128,48 +142,142 @@ function M.load_wave(path, buf_secs)
       f:seek("cur", sz + (sz % 2))   -- riff chunks are word-aligned
     end
   end
-  if not dpos or bits ~= 16 or ch < 1 then
+  -- WAVE_FORMAT_EXTENSIBLE → treat as PCM int of the stated depth (the common
+  -- 24-bit case; the rare float-extensible falls through to "no preview").
+  if afmt == 0xFFFE then afmt = 1 end
+  -- one sample → a normalized 0..1 magnitude, per format. 16/24/32-bit PCM and
+  -- 32-bit float are what the engine's SoundFile loads, so a 24-bit drop-in now
+  -- draws + windows correctly instead of "loads audibly but shows EMPTY" (S21's
+  -- bug, previously only fixed for 16-bit).
+  local readpeak
+  if afmt == 1 and bits == 16 then
+    readpeak = function(s, p) local v = string.unpack("<i2", s, p); return (v < 0 and -v or v) / 32768 end
+  elseif afmt == 1 and bits == 24 then
+    readpeak = function(s, p) local v = string.unpack("<i3", s, p); return (v < 0 and -v or v) / 8388608 end
+  elseif afmt == 1 and bits == 32 then
+    readpeak = function(s, p) local v = string.unpack("<i4", s, p); return (v < 0 and -v or v) / 2147483648 end
+  elseif afmt == 3 and bits == 32 then
+    readpeak = function(s, p) local v = string.unpack("<f", s, p); return v < 0 and -v or v end
+  end
+  if not dpos or ch < 1 or not readpeak then
     f:close()
     return nil
   end
-  local fbytes = ch * 2
-  local frames = floor(dlen / fbytes)
-  -- the engine reads WITHOUT sample-rate conversion into a 60s buffer at the
-  -- server's 48k, so what decides the picture is how many FRAMES the file
-  -- occupies — not its own duration at its own rate.
+  local bps = bits // 8
+  local fbytes = ch * bps
+  -- the engine reads WITHOUT sample-rate conversion into a `buf_secs` buffer at
+  -- the server's 48k and CLAMPS to it (readChannel numFrames), so the picture
+  -- must clamp too — a file longer than the buffer only occupies buf_secs of it;
+  -- drawing all of it would stretch the wave and misalign every playhead/slice.
   local SR = 48000
+  local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
   local span = clamp(frames / (SR * buf_secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
   for i = 1, 128 do wave[i] = 0 end
-  -- peak across the WHOLE of each bin, striding so the work stays bounded
-  -- whatever the file length. sampling a few small windows per bin instead
-  -- looks fine on continuous material and loses TRANSIENTS entirely — a 40ms
-  -- drum hit vanished from the picture, which is the exact wrong failure for a
-  -- sampler. ~200k unpacks total (tens of ms even on a pi4), and a stride of
-  -- N still lands many hits inside any transient worth drawing.
+  wave_bin = 0
+  C.wave_any = span > 0
+  -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
+  -- (not the disk read) so a transient is never skipped — a 40ms drum hit
+  -- vanished when this sampled a few windows per bin instead.
   local stride = max(1, floor(frames * ch / 200000))
-  local step = stride * 2                    -- bytes; even, so shorts stay aligned
-  for i = 1, nb do
-    local b0 = floor((i - 1) / nb * frames)
-    local n = floor(i / nb * frames) - b0
+  if nb >= 1 and frames > 0 then
+    load_pending = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
+      nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0 }
+  else
+    f:close()
+  end
+  return frames / SR
+end
+
+-- fill up to BINS_PER_TICK waveform bins per call (driven by the redraw clock),
+-- then close the file. bounded work per frame → the read never blocks the UI;
+-- the waveform draws IN over ~ceil(nb/BINS_PER_TICK) frames.
+function M.load_tick()
+  local p = load_pending
+  if not p then return end
+  local last = min(p.i + BINS_PER_TICK, p.nb)
+  for i = p.i + 1, last do
+    local b0 = floor((i - 1) / p.nb * p.frames)
+    local n = floor(i / p.nb * p.frames) - b0
     local peak = 0
     if n > 0 then
-      f:seek("set", dpos + b0 * fbytes)
-      local chunk = f:read(n * fbytes)
+      p.f:seek("set", p.dpos + b0 * p.fbytes)
+      local chunk = p.f:read(n * p.fbytes)
       if chunk then
-        for p = 1, #chunk - 1, step do
-          local v = string.unpack("<i2", chunk, p)
-          if v < 0 then v = -v end
+        for pp = 1, #chunk - (p.bps - 1), p.step do
+          local v = p.readpeak(chunk, pp)
           if v > peak then peak = v end
         end
       end
     end
-    wave[i] = peak / 32768
+    wave[i] = peak > 1 and 1 or peak
   end
-  f:close()
-  wave_bin = 0
-  C.wave_any = span > 0
-  return frames / SR
+  p.i = last
+  if p.i >= p.nb then p.f:close(); load_pending = nil end
+end
+
+-- cancel any in-flight fill (cleanup, or a superseding load)
+function M.cancel_load() cancel_load() end
+
+-- true while a waveform is still drawing in (for a "loading" hint if wanted)
+function M.load_busy() return load_pending ~= nil end
+-- read one waveform bin's peak (0..1) — the display reads these; also for tests
+function M.wave_at(i) return wave[i] or 0 end
+
+-- S22 Phase B: interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
+-- into one stereo 16-bit wav — a browsable export that reloads via load sample,
+-- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
+local function open_pcm16_mono(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local hdr = f:read(12)
+  if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
+    f:close(); return nil
+  end
+  local bits, ch, sr, dpos, dlen = 16, 1, 48000, nil, 0
+  while true do
+    local c = f:read(8); if not c or #c < 8 then break end
+    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
+    if id == "fmt " then
+      local fmt = f:read(sz); if not fmt or #fmt < 16 then break end
+      ch = string.unpack("<I2", fmt, 3); sr = string.unpack("<I4", fmt, 5)
+      bits = string.unpack("<I2", fmt, 15)
+    elseif id == "data" then dpos, dlen = f:seek(), sz; break
+    else f:seek("cur", sz + (sz % 2)) end
+  end
+  if not dpos or bits ~= 16 or ch ~= 1 then f:close(); return nil end
+  f:seek("set", dpos)
+  return f, floor(dlen / 2), sr   -- handle, frames, sample rate
+end
+
+function M.interleave_wav(pathL, pathR, out)
+  local fL, nL, sr = open_pcm16_mono(pathL)
+  if not fL then return false end
+  local fR, nR = open_pcm16_mono(pathR)
+  if not fR then fL:close(); return false end
+  local frames = min(nL, nR)
+  local of = io.open(out, "wb")
+  if not of then fL:close(); fR:close(); return false end
+  local datalen = frames * 4                      -- stereo 16-bit = 4 bytes/frame
+  of:write("RIFF", string.pack("<I4", 36 + datalen), "WAVE")
+  of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
+    string.pack("<I4", sr), string.pack("<I4", sr * 4), string.pack("<I2", 4), string.pack("<I2", 16))
+  of:write("data", string.pack("<I4", datalen))
+  local CHUNK = 8192                               -- frames per pass
+  local i = 0
+  while i < frames do
+    local n = min(CHUNK, frames - i)
+    local lc, rc = fL:read(n * 2), fR:read(n * 2)
+    if not lc or not rc or #lc < n * 2 or #rc < n * 2 then break end
+    local buf = {}
+    for p = 1, n * 2, 2 do
+      buf[#buf + 1] = lc:sub(p, p + 1); buf[#buf + 1] = rc:sub(p, p + 1)
+    end
+    of:write(table.concat(buf))
+    i = i + n
+  end
+  fL:close(); fR:close(); of:close()
+  return true
 end
 
 -- deterministic dither, same trick as the mockups
@@ -205,6 +313,7 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT",
   seq_euclid = "HITS", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLICE",
+  pad_pitch = "PTCH",
   clock_tempo = "BPM",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
@@ -240,6 +349,7 @@ local FULL = {
   voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH",
   seq_euclid = "HITS", seq_len = "LENGTH", seq_div = "DIV", seq_slice = "SLICE",
+  pad_pitch = "PITCH",
   clock_tempo = "TEMPO",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
 }
@@ -1034,6 +1144,12 @@ local function body_PADS(frame)
   end
   local routed = pget("pad_input", 0) == 1
   ptext(routed and "PLAY>PADS" or "PLAY>DRONE", 2, 12, 1, routed and 12 or 3)
+  -- the SELECTED pad's sound-lock: voice + pitch (the cursor editor). e.g. SLC+5
+  local cvi = clamp(floor(pget("seq_slice", 0) + 0.5), 0, 7)
+  local cp = C.pad_pitch and (C.pad_pitch[cvi] or 0) or 0
+  local lk = ((C.pad_type and C.pad_type[cvi] or 0) == 1 and "SLC" or "GRN")
+    .. (cp ~= 0 and ((cp > 0 and "+" or "") .. cp) or "")
+  ptext_c(lk, 72, 12, 1, 6)
   ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 12, 1, 4)
   if not C.wave_any and pget("rec", 0) == 0 then
     ptext_c("EMPTY - K2 REC", 64, 28, 1, 6)
@@ -1092,6 +1208,17 @@ local function body_PADS(frame)
       screen.fill()
     end
     ptext_c(tostring(i + 1), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
+    -- SOUND-LOCK markers: a bottom bar = SLICE voice, a top-corner dot = pitched
+    if (C.pad_type and C.pad_type[i] or 0) == 1 then
+      screen.level(lit and 0 or (cur and 15 or 6))
+      screen.rect(cx + sw / 2 - 2, 36, 4, 1)
+      screen.fill()
+    end
+    if C.pad_pitch and (C.pad_pitch[i] or 0) ~= 0 then
+      screen.level(cur and 15 or 6)
+      screen.rect(cx + sw / 2 + 3, 28, 1, 1)
+      screen.fill()
+    end
   end
   -- the 16-step row: the rhythm that fires the selected slice
   local len = pget("seq_len", 16)

@@ -90,7 +90,11 @@ local function fire()
   local slice = clamp(pget("seq_slice", 0), 0, n - 1)
   if engine.note_off then engine.note_off(SEQ_VOICE) end
   if engine.note_on then
-    engine.note_on(SEQ_VOICE, C.pad_pos(slice), 1.0, C.pad_type[slice] or 0)
+    -- the sequenced slice fires with its own SOUND-LOCK (pitch + voice), LOUD by
+    -- default (seq_level) so it cuts over the drone — the "no sound" report
+    engine.note_on(SEQ_VOICE, C.pad_pos(slice),
+      2 ^ ((C.pad_pitch[slice] or 0) / 12), C.pad_type[slice] or 0,
+      pget("seq_level", 0.85))
   end
   voicing = true
 end

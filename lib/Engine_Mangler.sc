@@ -131,12 +131,12 @@ Engine_Mangler : CroneEngine {
     // ---- S8 voice allocation ------------------------------------------------
     // shared spawn args: buffers, bus, envelope, and the CURRENT drone grain
     // params so a grain-cloud voice tracks the drone's character.
-    voiceArgs { arg pos, pitch, oneShot;
+    voiceArgs { arg pos, pitch, oneShot, amp;
         ^[
             \buf_l, bufL, \buf_r, bufR, \play_bus, playBus,
             \note_pos, pos, \note_pitch, pitch,
             \gate, 1, \one_shot, oneShot,
-            \amp, voiceParams[\amp],
+            \amp, amp ? voiceParams[\amp],   // per-note level (nil -> the default)
             \atk, voiceParams[\voice_atk], \rel, voiceParams[\voice_rel],
             \grain_env1, grainEnv1, \grain_env2, grainEnv2,
             \size, playParams[\size], \density, playParams[\density],
@@ -147,7 +147,7 @@ Engine_Mangler : CroneEngine {
         ];
     }
 
-    noteOn { arg id, pos, pitch, type;
+    noteOn { arg id, pos, pitch, type, amp;
         var def, syn;
         // enforce polyphony cap: release-steal the oldest held voice
         (voiceOrder.size >= maxVoices).if({
@@ -157,7 +157,7 @@ Engine_Mangler : CroneEngine {
             activeVoices.removeAt(oldId);
         });
         def = (type > 0.5).if({ \mangler_voice_slice }, { \mangler_voice_grain });
-        syn = Synth.new(def, this.voiceArgs(pos, pitch, 0), playGroup);
+        syn = Synth.new(def, this.voiceArgs(pos, pitch, 0, amp), playGroup);
         activeVoices[id] = syn;
         voiceOrder = voiceOrder.add(id);
     }
@@ -171,10 +171,10 @@ Engine_Mangler : CroneEngine {
         });
     }
 
-    noteOneShot { arg pos, pitch, type;
+    noteOneShot { arg pos, pitch, type, amp;
         var def = (type > 0.5).if({ \mangler_voice_slice }, { \mangler_voice_grain });
         // fire-and-forget: internal gate self-terminates, synth self-frees
-        Synth.new(def, this.voiceArgs(pos, pitch, 1), playGroup);
+        Synth.new(def, this.voiceArgs(pos, pitch, 1, amp), playGroup);
     }
 
     alloc {
@@ -567,6 +567,12 @@ Engine_Mangler : CroneEngine {
             runW = recRun.max(regenRun);
             srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
             srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
+            // record-SAFETY limiter: the take can no longer hard-clip from a hot
+            // input (the OUTPUT had a limiter, the record path did not). transparent
+            // below 0.99, so a normal-level take is unchanged bar ~2ms lookahead —
+            // a limited take beats a clipped one, and dry stays dry under 0.99.
+            srcL = Limiter.ar(srcL, 0.99, 0.002);
+            srcR = Limiter.ar(srcR, 0.99, 0.002);
             recLvl = (rec_level * (1 - regenRun)) + (regen * regenRun);
             preLvl = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
             RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
@@ -610,15 +616,18 @@ Engine_Mangler : CroneEngine {
             this.setMode(msg[1]);
         });
 
-        // ---- S8 polyphony commands
-        this.addCommand(\note_on, "ifff", { arg msg;
-            this.noteOn(msg[1], msg[2], msg[3], msg[4]);
+        // ---- S8 polyphony commands. note_on/one_shot gained a trailing AMP
+        // (per-note level) — an ARITY change, NOT a new command, so the
+        // fingerprint COUNT is unchanged. amp nil (an old 4-arg caller) -> the
+        // voiceParams default, so it degrades cleanly both ways.
+        this.addCommand(\note_on, "iffff", { arg msg;
+            this.noteOn(msg[1], msg[2], msg[3], msg[4], msg[5]);
         });
         this.addCommand(\note_off, "i", { arg msg;
             this.noteOff(msg[1]);
         });
-        this.addCommand(\note_one_shot, "fff", { arg msg;
-            this.noteOneShot(msg[1], msg[2], msg[3]);
+        this.addCommand(\note_one_shot, "ffff", { arg msg;
+            this.noteOneShot(msg[1], msg[2], msg[3], msg[4]);
         });
         this.addCommand(\voices, "i", { arg msg;
             maxVoices = msg[1].max(1);
@@ -674,11 +683,17 @@ Engine_Mangler : CroneEngine {
         // direct buffer dump, NOT realtime playback), bounded by the buffer,
         // all core UGens: cannot brick. Write 16-bit PCM wav specifically so
         // the Lua side (Mpages.load_wave) can repaint the restored take.
-        this.addCommand(\write_take, "s", { arg msg;
+        // numFrames bounds the write to the TAKE (from frame 0), not the whole
+        // 60s buffer — a 3s take was writing ~11.5MB of mostly silence. n <= 0
+        // (or no arg, an old caller) writes the whole buffer, as before.
+        this.addCommand(\write_take, "si", { arg msg;
             var stem = msg[1].asString;
-            bufL.write(stem ++ "_L.wav", "wav", "int16");
-            bufR.write(stem ++ "_R.wav", "wav", "int16");
-            ("mangler: wrote take " ++ stem).postln;
+            var n = (msg.size > 2).if({ msg[2].asInteger }, { -1 });
+            if(n <= 0, { n = -1 });
+            bufL.write(stem ++ "_L.wav", "wav", "int16", n);
+            bufR.write(stem ++ "_R.wav", "wav", "int16", n);
+            ("mangler: wrote take " ++ stem ++ " ("
+                ++ (n < 0).if("full", { n.asString ++ " frames" }) ++ ")").postln;
         });
 
         // read the pair back into the SAME bufL/bufR (readChannel into an

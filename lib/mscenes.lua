@@ -98,15 +98,17 @@ local SPACE_IDS = {
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape", "seq_div",
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
+  "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "mode",   -- last of the last: this one respawns the voice
 }
 
--- NOT here on purpose: `tape_reverse`. it's a MOMENTARY param — the TAPE key
--- and the grid pad hold it and hand the release to held_gesture, so its
--- resting value is 0 and a captured 1 is a transient, not a state. recalling
--- that 1 would latch the tape backwards with nothing left to release it.
--- nothing is lost: `tape_rate` is bipolar (-2..2) and IS in the list, so "this
--- scene plays backwards" stores as a negative rate.
+-- `tape_reverse` IS captured/recalled (added back). The NU punch law made TAPE
+-- K3 a LATCHING toggle (a tap holds tape_reverse=1 until tapped again), so it is
+-- now a real state, not the momentary held-gesture it was under S19 — and the
+-- direction lives ONLY here: Mtape.update_tape_rate does
+-- `tape_rate * (tape_reverse==1 and -1 or 1)` with tape_rate kept positive, so a
+-- backwards scene is NOT stored in tape_rate. It is in MORPH_EXCLUDE, though: a
+-- morph must not flip the tape mid-sweep (a hard event, like a freeze).
 
 local function append(dst, src)
   for i = 1, #src do dst[#dst + 1] = src[i] end
@@ -135,6 +137,11 @@ append(SCENE_RECALL_IDS, SWITCH_IDS)
 local MORPH_EXCLUDE = {
   freeze = true, pv_freeze = true, tape_freeze = true,
   pad_input = true, resample = true, regen = true, voices = true,
+  -- mode respawns the SC voice: crossing 0.5 mid-sweep is a click + a voice
+  -- born with half-morphed params, not a texture. tape_reverse flips playback
+  -- direction: also a hard event, not something to cross gradually. recall
+  -- carries both; a morph leaves them (sweep to 1, then K2 RCL to land).
+  mode = true, tape_reverse = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -699,6 +706,10 @@ function M.pset_read(number)
   -- and saved, one frame after the load, silently. the morph re-engages on the
   -- next move of the knob. (this runs from action_read, i.e. after the values.)
   dirty = false
+  -- a LOAD is authoritative: cancel any queued (BEAT/BAR) recall FIRST, before
+  -- any early return — otherwise a coroutine armed just before the load survives
+  -- and fires an old slot over the freshly loaded session a beat later.
+  cancel_pending()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
   -- exactly like mtape leaves the tape audio alone when there's no wav
@@ -708,11 +719,13 @@ function M.pset_read(number)
     print("mangler: scene file unreadable — " .. tostring(t))
     return
   end
-  cancel_pending()
   for i = 1, NUM_SLOTS do
     M.slots[i] = type(t.slots[i]) == "table" and t.slots[i] or nil
   end
-  if type(t.safe) == "table" then M.safe = t.safe end
+  -- CLEAR safe when the loaded pset has none, like the slots — otherwise the
+  -- previous session's ◄/safe-state bleeds into this one and its recall jumps
+  -- the instrument to a sound this session never captured.
+  M.safe = type(t.safe) == "table" and t.safe or nil
   M.invalidate()
 end
 
