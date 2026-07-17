@@ -146,6 +146,10 @@ end
 
 function M.load_wave(path, buf_secs)
   cancel_load()
+  -- clear the strip FIRST, so an unsupported-format / unreadable early return
+  -- leaves a flat strip instead of the previous take's waveform.
+  for i = 1, 128 do wave[i] = 0 end
+  wave_bin = 0
   local f = io.open(path, "rb")
   if not f then return nil end
   local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
@@ -181,8 +185,6 @@ function M.load_wave(path, buf_secs)
   local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
   local span = clamp(frames / (SR * buf_secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
-  for i = 1, 128 do wave[i] = 0 end
-  wave_bin = 0
   C.wave_any = span > 0
   -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
@@ -239,7 +241,7 @@ local function open_pcm16_mono(path)
   return f, floor(dlen / 2), sr   -- handle, frames, sample rate
 end
 
-function M.interleave_wav(pathL, pathR, out)
+function M.interleave_wav(pathL, pathR, out, yield)
   local fL, nL, sr = open_pcm16_mono(pathL)
   if not fL then return false end
   local fR, nR = open_pcm16_mono(pathR)
@@ -253,7 +255,7 @@ function M.interleave_wav(pathL, pathR, out)
     string.pack("<I4", sr), string.pack("<I4", sr * 4), string.pack("<I2", 4), string.pack("<I2", 16))
   of:write("data", string.pack("<I4", datalen))
   local CHUNK = 8192                               -- frames per pass
-  local i = 0
+  local i, since = 0, 0
   while i < frames do
     local n = min(CHUNK, frames - i)
     local lc, rc = fL:read(n * 2), fR:read(n * 2)
@@ -264,6 +266,15 @@ function M.interleave_wav(pathL, pathR, out)
     end
     of:write(table.concat(buf))
     i = i + n
+    since = since + 1
+    if yield and since >= 8 then since = 0; yield() end   -- ~64k frames / yield
+  end
+  -- a short read means the declared header over-states the data; backpatch the
+  -- RIFF + data sizes to what we actually wrote so the wav isn't malformed.
+  if i < frames then
+    local dl = i * 4
+    of:seek("set", 4); of:write(string.pack("<I4", 36 + dl))
+    of:seek("set", 40); of:write(string.pack("<I4", dl))
   end
   fL:close(); fR:close(); of:close()
   return true
@@ -839,8 +850,8 @@ local function body_TAPE(frame)
 end
 
 -- ============================================================================
--- 4 · FILTER — tone (the REAL biquad magnitude, with labeled measurement
---     rails; drive = grit on the line, not a number)
+-- 4 · FILTER — tone (approx DFM1 response, with labeled measurement rails;
+--     drive = grit on the line, not a number)
 -- ============================================================================
 local function body_FILTER(frame)
   local cut = pget("cutoff", 20000)
@@ -860,7 +871,6 @@ local function body_FILTER(frame)
   end
   local rq = max(1 - res * 0.92, 0.05)
   local rq2 = rq * rq
-  local bpg = (1 + res) * (1 + res)
   local px_per_db = (FILT_BOT - FILT_TOP) / FILT_DB_RANGE
   for x = 0, 127 do
     local w = FILT_FREQ[x + 1] / cut
@@ -870,7 +880,11 @@ local function body_FILTER(frame)
     local h2
     if ft == 1 then h2 = 1 / d
     elseif ft == 2 then h2 = (w2 * w2) / d
-    else h2 = (w2 * rq2) / d * bpg end
+    else                              -- BP = resonant LP peak, high-passed below cutoff/2
+      local u = w + w                 -- freq / (cutoff*0.5), the engine's HP corner
+      local u4 = u * u * u * u
+      h2 = (1 / d) * u4 / (1 + u4)
+    end
     local y = FILT_TOP + (FILT_DB_TOP - 4.342944819 * log(h2)) * px_per_db
     if y < FILT_TOP then y = FILT_TOP elseif y > FILT_BOT then y = FILT_BOT end
     FILT_Y[x + 1] = y

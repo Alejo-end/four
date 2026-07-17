@@ -186,8 +186,6 @@ local ctx = {
   pad_cursor = 0,
   pad_n = 8,
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
-  rev_bank = 1,              -- which REVERB param pair E2/E3 edit
-  grain_bank = 1,            -- which GRAIN param pair E2/E3 edit
   shimmer_mem = 0.6,         -- last shimmer amount, for the SHMR bloom key
 }
 
@@ -755,17 +753,27 @@ function ctx.export_take(name)
   local tmp = norns.state.data .. "mexport-tmp"
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
   if export_clock then clock.cancel(export_clock) end
+  -- expected bytes per mono 16-bit wav (2 B/frame + 44 B header). we wait for
+  -- BOTH files to REACH that size and stop growing, not just plateau — a slow
+  -- SD card could stall mid-write and read as "stable" at a partial size, which
+  -- would export a truncated take. the cap scales with the take so a big
+  -- (regen/60s) dump gets time to finish; it's only a backstop.
+  local exp = take_frames() * 2 + 44
+  local cap = math.max(100, math.ceil(exp / 200000) + 80)
   export_clock = clock.run(function()
     local pL, pR, stable = -1, -1, 0
-    for _ = 1, 60 do                  -- wait up to ~3s for the async write
+    for _ = 1, cap do
       clock.sleep(0.05)
       local sL, sR = filesize(tmp .. "_L.wav"), filesize(tmp .. "_R.wav")
-      if sL and sR and sL > 44 and sL == pL and sR == pR then
+      if sL and sR and sL >= exp * 0.98 and sR >= exp * 0.98
+        and sL == pL and sR == pR then
         stable = stable + 1; if stable >= 2 then break end
       else stable = 0 end
       pL, pR = sL, sR
     end
-    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out)
+    -- yield between chunks so a large interleave doesn't freeze the UI thread
+    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
+      function() clock.sleep(0) end)
     os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
     print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
     export_clock = nil
@@ -1421,7 +1429,9 @@ function key(n, z)
     -- can't navigate stations while K1 is held — K1+E1 is the morph — so the
     -- erase can also never retarget onto a different station's material.)
     if z == 0 and ctx.k13_frame and not ctx.k13_fired then
-      ctx.k13_frame = nil
+      -- mark it RESOLVED (not just clear the arc) so the still-held K3's release
+      -- doesn't fall into the dry/erase tap branch and fire DRY after the abort.
+      ctx.k13_frame, ctx.k13_fired = nil, true
     end
     redraw()
     return

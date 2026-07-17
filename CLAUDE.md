@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **DEVICE-CONFIRMED, running on norns (2026-07-16, `count: 63`).** S21 + S22 Phase A engine, the NU-1..4 nine-station redesign, and everything since are live on hardware: the UI play-test refinements (reels / square slice cell / uniform dots / full-word labels / MOTION scroll — 45th change), the **native Launchpad Mini MK3 RGB colour driver + semantic colour language** (46th — red=recording, STOP pulses, purple=destructive; tune `LP_HUE`), and the **xhigh code-review batch** — 14 Lua fixes + **#14 bounded `write_take`** (47th). NOTE: #14's `write_take` numFrames arg is an **ARITY change → `count` STAYS 63** (confirm it hasn't moved on the next restart). PARKED follow-ups (not built): per-pad sound-locks (extends `pad_voice`), async `load_wave` for the session-recall load hitch (#15), S22 **Phase B** browsable stereo export (now unblocked by the count-63 gate). Grid code is sim-stubbed → any further grid change is device-only.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1175,6 +1175,83 @@ verified. **DEPLOY: the write_take change is ENGINE — rides SYSTEM > RESTART,
 count STILL 63** (arity, not a new command). Everything else Lua-only. #14 device-
 check: short take → small wav pair; CLR+save → deleted; `regen` up → full write.
 
+Forty-eighth change — **BATCH: Pi-4 perf + DFM1 filter + parked follow-ups +
+code-review fixes (ENGINE + Lua, fingerprint STAYS 63, UNTESTED — no sclang/device
+here, pending the next gate)**. A large multi-part session; every part guarded, all
+count-63.
+PARKED FOLLOW-UPS now BUILT (were listed parked in the 47th marker):
+* **Per-pad sound-locks** — `pad_voice` (GRAIN/SLICE) + `pad_pitch` (semitones) per
+  slice, real MIDI-mappable params, PSET-persisted (`padlock-N.lua`); `pad_level`/
+  `seq_level` set note amplitude. This makes `mangler_voice_slice` reachable again —
+  the NU redesign had orphaned the per-pad type table, so every slice played grain.
+  Surfaced on PADS grid row 6 + header + PARAMS (grp_voice grew).
+* **Async `load_wave`** (#15) — the per-bin peak read is deferred to
+  `Mpages.load_tick` (BINS_PER_TICK/frame on the redraw clock); load_wave returns dur
+  immediately so the window snaps at once and the waveform draws IN over ~0.9s (no
+  load hitch). GOTCHA fixed in review: it clears `wave[]` FIRST so an unsupported-
+  format early return leaves a flat strip, not the previous take's waveform.
+* **S22 Phase B** — `ctx.export_take` dumps the take via `write_take` to a temp L/R
+  pair, waits in a clock coroutine for the async `/b_write`, then `Mpages.
+  interleave_wav` zips them into one browsable stereo wav in the audio dir (Lua-only,
+  no engine interleave). Review-hardened: waits for the files to REACH their expected
+  size (not just plateau), the interleave YIELDS between chunks (no UI freeze), and
+  backpatches the header on a short read.
+* **Progressive FX curves** — delay_mix/rev_mix pass `v*v` (`square`) so the engine's
+  equal-power `.sqrt` law nets a LINEAR knob (3% is subtle, not a cliff).
+* **Record-safety Limiter** (0.99, 0.002) on the io record path (transparent < 0.99,
+  stops a hot take hard-clipping) + per-note `amp` on note_on/note_one_shot (ARITY
+  change, count unmoved).
+PI-4 PERF PASS (realtime-optimizer analysis, biggest always-on load was the io synth):
+* **#8** — hoisted the last per-frame draw closures (`wflag`, `flabel_r`'s labfor/
+  total) to module scope; the redraw path now allocates ZERO closures/frame. Byte-
+  identical renders.
+* **#1** — reverb+shimmer moved OUT of the always-on io synth into a spawn/free
+  `\mangler_reverb` synth (`updateReverb`, spawned only while rev_mix > 0, freed at 0)
+  so JPverb+PitchShift stop costing CPU in the default state. io SENDS the post-delay
+  wet via `Out.ar(rev_send)` and READS the tail via **`InFeedback.ar(rev_ret, 2)`** —
+  a backward edge across the node boundary, so plain `In.ar` would read 0. NOT a
+  feedback loop (rv is mixed into io OUTPUT, never back into the send); at rev_mix=0
+  the return reads 0 → bit-identical to the old rev_mix=0 path. The delay's LocalIn
+  un-merges S15's shared `LocalIn.ar(4)` back to `LocalIn.ar(2)` (shimmer's loop now
+  lives in the reverb synth). `revParams` route like `playParams`; (ioKeys ∪ revParams)
+  = the old ioKeys → count unchanged. ACCEPTED TRADE: freeing at rev_mix=0 discards the
+  JPverb tail, so automating rev_mix THROUGH 0 hard-cuts it (inaudible at 0 anyway;
+  keeping it alive would undo the CPU win).
+DFM1 DIODE-LADDER FILTER (the "better-sounding sc lib" for the filter):
+* The 3× always-on RLPF+RHPF+BPF (6 filter instances, one mixed) → ONE guarded
+  **DFM1** (sc3-plugins): `type = (filt_type>0.5)*(filt_type<1.5)` → LP for LP+BP
+  modes, HP for HP. **BP** = `HPF(resonant DFM1 low-pass, cutoff*0.5)` — DFM1 has no
+  bandpass mode, so a resonant LP peak high-passed below the peak = a band with diode
+  character (the `0.5` band-width is the device tunable). GUARDED (`.asClass` + `try`)
+  → stock RLPF/RHPF/BPF fallback if DFM1 absent/mismatched, never bricks. `res` clip
+  **0.9** (below DFM1's self-oscillation onset; raise toward 0.95 to let it self-osc).
+  A short-lived SVF-vs-DFM1 runtime toggle (`filt_model`) was built then removed once
+  DFM1 was chosen (count went 63→64→63). FILTER page curve redrawn to approximate the
+  DFM1 build (BP = resonant LP peak high-passed below cutoff/2), not the old biquad.
+PRISTINE (user chose max fidelity): the perf pass's cheaper-but-lossy swaps were
+REVERTED — cubic interp (4), tanh drive, transparent record Limiter, STEREO shimmer
+all KEPT. Only #1 (transparent) + #8 (screen-only) + DFM1 stayed. #1's reclaimed CPU
+is what funds the pristine choices without xruns.
+COMMENT CLEANUP: engine header 87→17 lines (kept the one-engine-file rule, the in_b
+array gotcha, SC-tab/RESTART); PERF labels + verbose blocks condensed; the Lua files
+trimmed of historical stage-tags — every device-lesson note kept, proven byte-
+identical renders.
+CODE-REVIEW FIX BATCH (xhigh workflow; stopped mid-run but all 21 findings verdicted
+from the journal): fixed — DFM1 res floor (0.9); K1+K3 erase-abort no longer leaks a
+DRY throw (releasing K1 marks `k13_fired` so the held K3's release can't fire
+`fx_dry`); FILTER page BP curve; export robustness (above); load_wave strip clear;
+grid seq brightness back to 15/9/3 (monochrome readability, hues intact on the LP);
+dead `rev_bank`/`grain_bank` removed. ACCEPTED (not bugs): the reverb through-0 hard-
+cut (above); `seq_div` PARAMS-only (all PADS encoder slots claimed). REFUTED (designs
+held): InFeedback "NaN forever" (reads stale ≤1 block then zeros), record-limiter
+"comb smear" (constant offset), rev_mix "square²" (nets linear).
+VERIFIED here: luac clean, engine paren-balanced, renders byte-identical to HEAD,
+source==dist, harnesses pass (s22 16, export 12, wave-fmt 11, padlock, LP 27).
+DEPLOY: ENGINE change (DFM1 filter, reverb spawn/free, res clip, record Limiter, note
+amp) → rsync, SYSTEM > RESTART, **confirm count STILL 63** (no new command). Then gate:
+DFM1 LP/HP/BP character; reverb %CPU drops at rev_mix=0; DFM1 res at max is resonant
+but stable; no LOADING hang / SC-tab error.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -1183,7 +1260,8 @@ check: short take → small wav pair; CLR+save → deleted; `regen` up → full 
    S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = 61, S22 Phase A = **63**).
    Wrong count = old engine still live. (The #14 `write_take` numFrames arg is an
    ARITY change, not a new command — `count` STAYS **63**; if it moved, something
-   else changed.)
+   else changed. The 48th batch — DFM1 filter, reverb spawn/free split, `res` clip,
+   record Limiter — also adds NO command, so `count` STAYS **63**.)
 Lua-only changes skip all this: save + reload the script.
 
 ---

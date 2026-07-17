@@ -148,12 +148,13 @@ stands still) above the loop track and playhead. **K2** records (hold = punch-in
 
 ### FILTER
 
-![FILTER: the real biquad response curve with labeled 100 Hz / 1k / 10k rails and a node at the cutoff](doc/ui/filter.png)
+![FILTER: the DFM1 filter response curve with labeled 100 Hz / 1k / 10k rails and a node at the cutoff](doc/ui/filter.png)
 
-The curve is the engine's real filter response. **E2** is the cutoff (the node on the labeled
-rails), **E3** the resonance, **K1+E2** the drive (post-filter tanh saturation; grit on the
-curve, a true bypass at zero). **K2 OPEN** throws the filter wide — hold for a sweep that
-returns on release, tap to park it open. **K3** cycles LP / HP / BP.
+The filter is a DFM1 diode ladder (analog resonance and drive character); the curve
+approximates its response. **E2** is the cutoff (the node on the labeled rails), **E3** the
+resonance, **K1+E2** the drive (post-filter tanh saturation; grit on the curve, a true bypass
+at zero). **K2 OPEN** throws the filter wide — hold for a sweep that returns on release, tap to
+park it open. **K3** cycles LP / HP / BP.
 
 ### SPACE
 
@@ -281,13 +282,16 @@ WARP (Warp1 time-stretch) · PV (phase vocoder) · PLAY (clean varispeed loop). 
 mode switch — scsynth runs on one Pi-4 core, so the algorithms are never summed. Speed is
 bipolar (negative = reverse); pitch is independent of speed.
 
-**Filter.** LP / HP / BP biquad; cutoff, resonance, and drive (post-filter tanh saturation,
-bypassed at 0).
+**Filter.** LP / HP / BP through a DFM1 diode-ladder filter (analog resonance and drive
+character), guarded so a missing sc3-plugins falls back to a stock biquad. DFM1 has no
+bandpass mode, so BP is built from a resonant low-pass peak high-passed into a band. Separate
+cutoff, resonance, and drive (post-filter tanh saturation, bypassed at 0).
 
 **Delay / reverb.** Feedback delay with time, feedback and mix (feedback low-passed and
 soft-clipped). Reverb is JPverb's full attribute set when installed, else FreeVerb; a
-pitch-shifted, band-limited shimmer recirculates into the reverb input. The delay and reverb
-mixes fade in progressively (linear in the knob).
+pitch-shifted, band-limited shimmer recirculates into the reverb input. The reverb runs in its
+own synth that is spawned only while its mix is up and freed at zero, so it costs no CPU when
+off. The delay and reverb mixes fade in progressively (linear in the knob).
 
 **Pads and sound-locks.** The window is chopped into 8 slices played polyphonically over the
 drone. Each slice has an independent voice (grain/slice) and pitch — sound-locks — that are
@@ -304,9 +308,9 @@ redraw clock (one loop, punch-in overdub, depth scaling).
 beat/bar-quantised), morph (interpolated in each parameter's own warped space), and a bounded
 chaos throw. Control state only — no audio.
 
-**Engine safety.** Optional plugins (JPverb, MiClouds) are resolved by class at SynthDef build
-time, so a missing plugin selects a stock fallback instead of failing to compile — it can never
-hang loading. The project ships exactly one `Engine_Mangler` class. Parameters are the single
+**Engine safety.** Optional plugins (JPverb, MiClouds, DFM1) are resolved by class at SynthDef
+build time, so a missing plugin selects a stock fallback instead of failing to compile — it can
+never hang loading. The project ships exactly one `Engine_Mangler` class. Parameters are the single
 source of truth: keys, encoders, MIDI and the grid all drive `params:*`, which is what makes
 every parameter MIDI-mappable.
 

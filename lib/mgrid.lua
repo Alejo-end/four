@@ -520,8 +520,8 @@ local function draw_pads_ws()
     local y = i <= 8 and 3 or 4
     if i > len then gg:led(x, y, 0)                          -- beyond length: off
     elseif playing and i == pos then gg:led(x, y, 15, "white")   -- playhead
-    elseif sq.pattern[i] then gg:led(x, y, 14, "green")      -- placed note
-    else gg:led(x, y, 7, "blue") end                         -- empty step
+    elseif sq.pattern[i] then gg:led(x, y, 9, "green")       -- placed note
+    else gg:led(x, y, 3, "blue") end                         -- empty step
   end
   local slice = pget("seq_slice", 0)
   for x = 1, 8 do

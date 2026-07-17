@@ -196,8 +196,6 @@ local ctx = {
   pad_cursor = 0,
   pad_n = 8,
   pad_held = {},             -- voice id -> true while sounding (matches note_off)
-  rev_bank = 1,              -- which REVERB param pair E2/E3 edit
-  grain_bank = 1,            -- which GRAIN param pair E2/E3 edit
   shimmer_mem = 0.6,         -- last shimmer amount, for the SHMR bloom key
 }
 
@@ -1229,8 +1227,8 @@ local function draw_pads_ws()
     local y = i <= 8 and 3 or 4
     if i > len then gg:led(x, y, 0)                          -- beyond length: off
     elseif playing and i == pos then gg:led(x, y, 15, "white")   -- playhead
-    elseif sq.pattern[i] then gg:led(x, y, 14, "green")      -- placed note
-    else gg:led(x, y, 7, "blue") end                         -- empty step
+    elseif sq.pattern[i] then gg:led(x, y, 9, "green")       -- placed note
+    else gg:led(x, y, 3, "blue") end                         -- empty step
   end
   local slice = pget("seq_slice", 0)
   for x = 1, 8 do
@@ -2658,6 +2656,10 @@ end
 
 function M.load_wave(path, buf_secs)
   cancel_load()
+  -- clear the strip FIRST, so an unsupported-format / unreadable early return
+  -- leaves a flat strip instead of the previous take's waveform.
+  for i = 1, 128 do wave[i] = 0 end
+  wave_bin = 0
   local f = io.open(path, "rb")
   if not f then return nil end
   local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
@@ -2693,8 +2695,6 @@ function M.load_wave(path, buf_secs)
   local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
   local span = clamp(frames / (SR * buf_secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
-  for i = 1, 128 do wave[i] = 0 end
-  wave_bin = 0
   C.wave_any = span > 0
   -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
@@ -2751,7 +2751,7 @@ local function open_pcm16_mono(path)
   return f, floor(dlen / 2), sr   -- handle, frames, sample rate
 end
 
-function M.interleave_wav(pathL, pathR, out)
+function M.interleave_wav(pathL, pathR, out, yield)
   local fL, nL, sr = open_pcm16_mono(pathL)
   if not fL then return false end
   local fR, nR = open_pcm16_mono(pathR)
@@ -2765,7 +2765,7 @@ function M.interleave_wav(pathL, pathR, out)
     string.pack("<I4", sr), string.pack("<I4", sr * 4), string.pack("<I2", 4), string.pack("<I2", 16))
   of:write("data", string.pack("<I4", datalen))
   local CHUNK = 8192                               -- frames per pass
-  local i = 0
+  local i, since = 0, 0
   while i < frames do
     local n = min(CHUNK, frames - i)
     local lc, rc = fL:read(n * 2), fR:read(n * 2)
@@ -2776,6 +2776,15 @@ function M.interleave_wav(pathL, pathR, out)
     end
     of:write(table.concat(buf))
     i = i + n
+    since = since + 1
+    if yield and since >= 8 then since = 0; yield() end   -- ~64k frames / yield
+  end
+  -- a short read means the declared header over-states the data; backpatch the
+  -- RIFF + data sizes to what we actually wrote so the wav isn't malformed.
+  if i < frames then
+    local dl = i * 4
+    of:seek("set", 4); of:write(string.pack("<I4", 36 + dl))
+    of:seek("set", 40); of:write(string.pack("<I4", dl))
   end
   fL:close(); fR:close(); of:close()
   return true
@@ -3351,8 +3360,8 @@ local function body_TAPE(frame)
 end
 
 -- ============================================================================
--- 4 · FILTER — tone (the REAL biquad magnitude, with labeled measurement
---     rails; drive = grit on the line, not a number)
+-- 4 · FILTER — tone (approx DFM1 response, with labeled measurement rails;
+--     drive = grit on the line, not a number)
 -- ============================================================================
 local function body_FILTER(frame)
   local cut = pget("cutoff", 20000)
@@ -3372,7 +3381,6 @@ local function body_FILTER(frame)
   end
   local rq = max(1 - res * 0.92, 0.05)
   local rq2 = rq * rq
-  local bpg = (1 + res) * (1 + res)
   local px_per_db = (FILT_BOT - FILT_TOP) / FILT_DB_RANGE
   for x = 0, 127 do
     local w = FILT_FREQ[x + 1] / cut
@@ -3382,7 +3390,11 @@ local function body_FILTER(frame)
     local h2
     if ft == 1 then h2 = 1 / d
     elseif ft == 2 then h2 = (w2 * w2) / d
-    else h2 = (w2 * rq2) / d * bpg end
+    else                              -- BP = resonant LP peak, high-passed below cutoff/2
+      local u = w + w                 -- freq / (cutoff*0.5), the engine's HP corner
+      local u4 = u * u * u * u
+      h2 = (1 / d) * u4 / (1 + u4)
+    end
     local y = FILT_TOP + (FILT_DB_TOP - 4.342944819 * log(h2)) * px_per_db
     if y < FILT_TOP then y = FILT_TOP elseif y > FILT_BOT then y = FILT_BOT end
     FILT_Y[x + 1] = y
@@ -4722,17 +4734,27 @@ function ctx.export_take(name)
   local tmp = norns.state.data .. "mexport-tmp"
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
   if export_clock then clock.cancel(export_clock) end
+  -- expected bytes per mono 16-bit wav (2 B/frame + 44 B header). we wait for
+  -- BOTH files to REACH that size and stop growing, not just plateau — a slow
+  -- SD card could stall mid-write and read as "stable" at a partial size, which
+  -- would export a truncated take. the cap scales with the take so a big
+  -- (regen/60s) dump gets time to finish; it's only a backstop.
+  local exp = take_frames() * 2 + 44
+  local cap = math.max(100, math.ceil(exp / 200000) + 80)
   export_clock = clock.run(function()
     local pL, pR, stable = -1, -1, 0
-    for _ = 1, 60 do                  -- wait up to ~3s for the async write
+    for _ = 1, cap do
       clock.sleep(0.05)
       local sL, sR = filesize(tmp .. "_L.wav"), filesize(tmp .. "_R.wav")
-      if sL and sR and sL > 44 and sL == pL and sR == pR then
+      if sL and sR and sL >= exp * 0.98 and sR >= exp * 0.98
+        and sL == pL and sR == pR then
         stable = stable + 1; if stable >= 2 then break end
       else stable = 0 end
       pL, pR = sL, sR
     end
-    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out)
+    -- yield between chunks so a large interleave doesn't freeze the UI thread
+    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
+      function() clock.sleep(0) end)
     os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
     print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
     export_clock = nil
@@ -5388,7 +5410,9 @@ function key(n, z)
     -- can't navigate stations while K1 is held — K1+E1 is the morph — so the
     -- erase can also never retarget onto a different station's material.)
     if z == 0 and ctx.k13_frame and not ctx.k13_fired then
-      ctx.k13_frame = nil
+      -- mark it RESOLVED (not just clear the arc) so the still-held K3's release
+      -- doesn't fall into the dry/erase tap branch and fire DRY after the abort.
+      ctx.k13_frame, ctx.k13_fired = nil, true
     end
     redraw()
     return

@@ -431,7 +431,9 @@ Engine_Mangler : CroneEngine {
             // if sc3-plugins is absent. One DFM1: LP for LP+BP, HP for HP; BP
             // high-passes the resonant LP peak into a band. filt_type 0=LP 1=HP 2=BP.
             cf = cutoff.clip(20, 20000).lag(0.05);
-            res = resonance.clip(0, 0.95);
+            // clip below DFM1's self-oscillation onset (~0.95) so max resonance
+            // is very resonant but STABLE; raise toward 0.95 to let it self-osc.
+            res = resonance.clip(0, 0.9);
             mmFilter = {
                 var rq = (1 - (resonance * 0.92)).max(0.05);
                 (RLPF.ar(wet, cf, rq) * (filt_type < 0.5))
