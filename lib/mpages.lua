@@ -303,6 +303,7 @@ local SHORT = {
   kb_octave = "OCT",
   warp_window = "WIN", warp_rand = "RAND",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
+  cut_source = "SRC",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK",
   rev_size = "SIZE", rev_mix = "VERB",
@@ -311,9 +312,8 @@ local SHORT = {
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
-  motion_lane = "LANE", motion_depth = "DPT",
-  seq_euclid = "HITS", seq_len = "LEN", seq_div = "DIV", seq_slice = "SLICE",
-  pad_pitch = "PTCH",
+  motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
+  seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   clock_tempo = "BPM",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
@@ -341,15 +341,15 @@ local FULL = {
   clouds_lofi = "LOFI",
   warp_window = "WINDOW", warp_rand = "RANDOM",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "START", loop_end = "LOOP",
+  cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
   rev_size = "SIZE", rev_mix = "REVERB",
   rev_decay = "DECAY", rev_damp = "DAMP",
   shimmer = "SHIMMER", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
-  motion_lane = "LANE", motion_depth = "DEPTH",
-  seq_euclid = "HITS", seq_len = "LENGTH", seq_div = "DIV", seq_slice = "SLICE",
-  pad_pitch = "PITCH",
+  motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
+  seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
   clock_tempo = "TEMPO",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
 }
@@ -408,6 +408,16 @@ local function fmt_value(id)
   end
   if id == "clock_tempo" then
     return tostring(floor(params:get(id) + 0.5))
+  end
+  if id == "motion_len" then
+    local v = params:get(id)
+    return v < 0.05 and "AUTO" or string.format("%.1fS", v)
+  end
+  if id == "cut_source" then                    -- tape source: DRY .. WET blend
+    local v = params:get(id)
+    if v < 0.02 then return "DRY" end
+    if v > 0.98 then return "WET" end
+    return floor(v * 100 + 0.5) .. "%"
   end
   if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
       or id == "shimmer_tone" then
@@ -666,21 +676,10 @@ local function body_TAKE(frame)
   screen.rect(hi * 127 - 2, TK_MID - TK_HALF - 2, 2, 1)
   screen.rect(hi * 127 - 2, TK_MID + TK_HALF + 2, 2, 1)
   screen.fill()
-  -- the drone's playhead (only when something can sound)
-  if C.wave_any and pget("mode", 5) ~= 1 then
-    screen.level(15)
-    local phx = clamp(C.play_phase, 0, 1) * 127
-    screen.move(phx, TK_MID - TK_HALF)
-    screen.line(phx, TK_MID + TK_HALF)
-    screen.stroke()
-  end
   if rec then
-    -- armed frame: the ONLY fast blink on the page
-    if (frame % 4) < 2 then
-      screen.level(15)
-      screen.rect(0.5, TK_MID - TK_HALF - 3.5, 127, 2 * TK_HALF + 7)
-      screen.stroke()
-    end
+    -- no blinking window frame (doc/ux-feedback.md §29 — "way too much"): the
+    -- sweeping write head, the big elapsed seconds, the IN meter and the header
+    -- R flag already say REC. the strip stays calm.
     screen.level(15)                -- the write head
     screen.move(wx, TK_MID - TK_HALF - 2)
     screen.line(wx, TK_MID + TK_HALF + 2)
@@ -707,6 +706,18 @@ local function body_TAKE(frame)
     local bx = 2
     if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 12) + 2 end
     if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
+  end
+  -- the READ (playback) head, drawn LAST so it never hides behind the solid
+  -- WRITE head (doc/ux-feedback.md §30). distinct SHAPE, not just tone: a
+  -- DASHED column + a caret above the strip vs the write head's solid line +
+  -- comet-tail glow — so even when they cross you can tell read from write.
+  if C.wave_any and pget("mode", 5) ~= 1 then
+    local phx = clamp(C.play_phase, 0, 1) * 127
+    screen.level(15)
+    for y = TK_MID - TK_HALF, TK_MID + TK_HALF, 2 do screen.rect(phx, y, 1, 1) end
+    screen.rect(phx, TK_MID - TK_HALF - 3, 1, 1)          -- caret stem
+    screen.rect(phx - 1, TK_MID - TK_HALF - 4, 3, 1)      -- caret ▽ above the strip
+    screen.fill()
   end
 end
 
@@ -842,6 +853,13 @@ local function body_TAPE(frame)
   screen.move(tx, 37) screen.line(tx, 43)
   screen.stroke()
   ptext_r(string.format("%.1fS", lspan * 60), 126, 12, 1, 4)
+  -- record SOURCE: flag when the tape is printing PROCESSED audio (never a
+  -- hidden mode — DRY, the default, draws nothing so classic tape is unchanged)
+  local src = pget("cut_source", 0)
+  if src > 0.02 then
+    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
+      2, 46, 1, 9)
+  end
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     if (frame % FPS) < (FPS / 2) then chip("REC", 2, 12) end
   elseif not C.twave_any then
@@ -933,17 +951,18 @@ local function body_FILTER(frame)
 end
 
 -- ============================================================================
--- 5 · SPACE — the time-smear (one impulse scape: onset, echo taps decaying
---     by feedback, the reverb tail as a slope, shimmer as motes; time rails
---     at 1s/2s; the tail running off the edge = the wash warning)
+-- 5 · DELAY / REVERB — the time-smear, split into two stations. DELAY draws
+--     the onset + echo taps decaying by feedback; REVERB draws the tail as a
+--     slope + shimmer motes. shared time axis, rails at 1s/2s, dormant flat
+--     at mix 0. (was one merged SPACE page — see doc/ux-feedback.md §21.)
 -- ============================================================================
 local SPC_BASE, SPC_X0 = 48, 8
 local SPC_PPS = 49                    -- pixels per second on the time axis
 
-local function body_SPACE(frame)
-  local emix = pget("delay_mix", 0)
-  local vmix = pget("rev_mix", 0)
-  local live = emix > 0.005 or vmix > 0.005
+-- shared chrome: the time baseline, the dormant stub, and the 1s/2s rails.
+-- returns true if the page is live (caller draws the effect), false if it
+-- already drew the dormant stub and should bail.
+local function spc_frame(live)
   screen.level(live and 4 or 2)
   screen.move(4, SPC_BASE) screen.line(124, SPC_BASE)
   screen.stroke()
@@ -951,7 +970,7 @@ local function body_SPACE(frame)
     screen.level(4)
     screen.rect(SPC_X0, SPC_BASE - 5, 2, 5)
     screen.fill()
-    return
+    return false
   end
   -- time rails: 1s and 2s, labeled
   screen.level(2)
@@ -962,66 +981,88 @@ local function body_SPACE(frame)
   screen.fill()
   ptext("1S", SPC_X0 + SPC_PPS - 3, SPC_BASE + 2, 1, 3)
   ptext("2S", SPC_X0 + 2 * SPC_PPS - 3, SPC_BASE + 2, 1, 3)
-  -- the reverb tail: a filled slope whose reach IS the decay
-  if vmix > 0.005 then
-    local tau = max(pget("rev_decay", 2), 0.1) * SPC_PPS / 6.9
-    local A = 4 + vmix * 26
-    screen.level(3)
-    for x = SPC_X0 + 1, 124 do
-      local h = A * exp(-(x - SPC_X0) / tau)
-      if h >= 1 then
-        screen.move(x, SPC_BASE - h)
-        screen.line(x, SPC_BASE - 1)
-      end
-    end
-    screen.stroke()
-    screen.level(7)
-    for x = SPC_X0 + 1, 124, 2 do
-      local h = A * exp(-(x - SPC_X0) / tau)
-      if h >= 1 then screen.rect(x, SPC_BASE - h, 1, 1) end
-    end
-    screen.fill()
-    -- "this will not stop soon": the tail runs into the hatched margin
-    if A * exp(-(124 - SPC_X0) / tau) >= 1 then
-      screen.level(9)
-      for y = 14, SPC_BASE do
-        local xx = 125 + ((y + 125) % 3)
-        if xx <= 127 then screen.rect(xx, y, 1, 1) end
-      end
-      screen.fill()
-    end
-    -- shimmer: motes climbing off the tail
-    local shim = pget("shimmer", 0)
-    if shim > 0.01 then
-      local spd = 0.4 + (param_norm("shimmer_pitch") or 0.5) * 1.4
-      local n = 3 + floor(shim * 15)
-      screen.level(7)
-      for i = 1, n do
-        local mx = SPC_X0 + 4 + hash(i, 3, 0) * 100
-        local ph = (frame * spd + hash(i, 5, 0) * 100) % 28
-        screen.rect(mx, SPC_BASE - 4 - ph, 1, 1)
-      end
-      screen.fill()
-    end
-  end
-  -- the onset spike
+  return true
+end
+
+local function spc_onset()             -- the shared onset spike
   screen.level(15)
   screen.rect(SPC_X0, SPC_BASE - 34, 2, 34)
   screen.fill()
-  -- echo taps: spacing = delay_time, height decaying by feedback
-  if emix > 0.005 then
-    local sp = max(pget("delay_time", 0.3) * SPC_PPS, 6)
-    local fb = max(pget("delay_fb", 0.3), 0.05)
-    local h = 30 * (0.4 + emix * 0.6)
-    local x = SPC_X0 + sp
-    while x <= 124 and h >= 1.5 do
-      screen.level(max(4, floor(4 + (h / 30) * 10)))
-      screen.rect(floor(x), SPC_BASE - h, 2, h)
-      screen.fill()
-      h = h * fb
-      x = x + sp
+end
+
+local function body_DELAY(frame)
+  local emix = pget("delay_mix", 0)
+  if not spc_frame(emix > 0.005) then return end
+  spc_onset()
+  -- echo taps: spacing = delay_time, height decaying by the ACTUAL feedback
+  -- coefficient (the knob is curved through ctx.delay_fb_curve, so the taps
+  -- match what you hear — the animation stays honest, doc/ux-feedback.md §23)
+  local sp = max(pget("delay_time", 0.3) * SPC_PPS, 6)
+  local fbk = pget("delay_fb", 0.3)
+  local fb = max(C.delay_fb_curve and C.delay_fb_curve(fbk) or fbk, 0.05)
+  local h = 30 * (0.4 + emix * 0.6)
+  local x = SPC_X0 + sp
+  while x <= 124 and h >= 1.5 do
+    screen.level(max(4, floor(4 + (h / 30) * 10)))
+    screen.rect(floor(x), SPC_BASE - h, 2, h)
+    screen.fill()
+    h = h * fb
+    x = x + sp
+  end
+end
+
+local function body_REVERB(frame)
+  local vmix = pget("rev_mix", 0)
+  if not spc_frame(vmix > 0.005) then return end
+  -- the reverb tail: a filled slope whose reach IS the decay
+  local tau = max(pget("rev_decay", 2), 0.1) * SPC_PPS / 6.9
+  local A = 4 + vmix * 26
+  screen.level(3)
+  for x = SPC_X0 + 1, 124 do
+    local h = A * exp(-(x - SPC_X0) / tau)
+    if h >= 1 then
+      screen.move(x, SPC_BASE - h)
+      screen.line(x, SPC_BASE - 1)
     end
   end
+  screen.stroke()
+  -- discrete reflections riding the slope: rev_size spaces them (a bigger
+  -- room = sparser, later reflections), rev_damp darkens them toward the
+  -- tail-end (high frequencies absorbed) — so both encoders READ on the page.
+  local step = 2 + floor(pget("rev_size", 1))          -- 2 (tight) .. 7 (vast)
+  local damp = pget("rev_damp", 0.3)
+  local span = 124 - SPC_X0
+  for x = SPC_X0 + 1, 124, step do
+    local h = A * exp(-(x - SPC_X0) / tau)
+    if h >= 1 then
+      screen.level(max(2, floor(9 - damp * 7 * (x - SPC_X0) / span)))
+      screen.rect(x, SPC_BASE - h, 1, 1)
+      screen.fill()
+    end
+  end
+  -- "this will not stop soon": the tail runs into the hatched margin
+  if A * exp(-(124 - SPC_X0) / tau) >= 1 then
+    screen.level(9)
+    for y = 14, SPC_BASE do
+      local xx = 125 + ((y + 125) % 3)
+      if xx <= 127 then screen.rect(xx, y, 1, 1) end
+    end
+    screen.fill()
+  end
+  -- shimmer: motes climbing off the tail
+  local shim = pget("shimmer", 0)
+  if shim > 0.01 then
+    local spd = 0.4 + (param_norm("shimmer_pitch") or 0.5) * 1.4
+    local n = 3 + floor(shim * 15)
+    screen.level(7)
+    for i = 1, n do
+      local mx = SPC_X0 + 4 + hash(i, 3, 0) * 100
+      local ph = (frame * spd + hash(i, 5, 0) * 100) % 28
+      screen.rect(mx, SPC_BASE - 4 - ph, 1, 1)
+    end
+    screen.fill()
+  end
+  spc_onset()
 end
 
 -- ============================================================================
@@ -1135,8 +1176,9 @@ local function body_MIX(frame)
 end
 
 -- ============================================================================
--- 7 · PADS — the take chopped and sequenced (cause above, rhythm below; ONE
---     cursor: the slice you audition is the slice the sequencer fires)
+-- 7 · PADS — the take chopped into 8 playable slices: the window zoomed full
+--     width over 8 numbered cells, each with its own voice + pitch sound-lock;
+--     lit while sounding, the cursor squared for editing.
 -- ============================================================================
 local function body_PADS(frame)
   for i = 0, 7 do pad_lit[i] = false end
@@ -1185,15 +1227,10 @@ local function body_PADS(frame)
     end
   end
   -- the 8 slice cells, aligned under their eighths
-  local sq = C.seq
-  local playing = pget("seq_play", 0) == 1
-  local pos = sq.pos
-  local target = clamp(floor(pget("seq_slice", 0) + 0.5), 0, 7)
-  local firing = playing and sq.pattern[pos] == true
   for i = 0, 7 do
     local cx = bx0 + i * sw
     local cur = i == C.pad_cursor
-    local lit = pad_lit[i] or (firing and i == target)
+    local lit = pad_lit[i]
     if cur then
       -- the selected cell is a SQUARE that stands 1px proud on every side, so
       -- it reads as picked instead of as one more small rectangle in the row
@@ -1223,34 +1260,9 @@ local function body_PADS(frame)
       screen.fill()
     end
   end
-  -- the 16-step row: the rhythm that fires the selected slice
-  local len = pget("seq_len", 16)
-  local active = 0
-  for i = 1, len do if sq.pattern[i] then active = active + 1 end end
-  if active == 0 then
-    ptext_c("TURN E3 - OR TAP GRID", 64, 45, 1, 5)
-    return
-  end
-  for i = 1, sq.NUM_STEPS do
-    local x = floor(4 + (i - 1) * 7.5)
-    if i > len then
-      screen.level(1)
-      screen.rect(x, 44, 6, 7)
-      screen.fill()
-    elseif playing and i == pos then
-      screen.level(15)
-      screen.rect(x, 44, 6, 7)
-      screen.fill()
-    elseif sq.pattern[i] then
-      screen.level(9)
-      screen.rect(x, 44, 6, 7)
-      screen.fill()
-    else
-      screen.level(3)
-      screen.rect(x + 0.5, 44.5, 5, 6)
-      screen.stroke()
-    end
-  end
+  -- a quiet cue for the sound-lock surface (the two face encoders), so the
+  -- freed row below the slices isn't blank (82px, well under the 124 limit)
+  ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
 end
 
 -- ============================================================================
@@ -1292,7 +1304,7 @@ local function body_MOTION(frame)
     if focus - 1 < off then off = focus - 1 end --   between the top and bottom row
   end
   -- drawing length: the loop once set, else the furthest event so far
-  local dl = ll
+  local dl = ll                          -- playhead / rails denominator (loop_len)
   if dl == 0 then
     for i = 1, nlane do
       local L = mo.lanes[ids[i]]
@@ -1300,6 +1312,11 @@ local function body_MOTION(frame)
     end
   end
   if dl < 1 then dl = 1 end
+  -- events live in the rec_len timebase; plotting them against rec_len keeps
+  -- the step-curve aligned with the playhead when motion_len retimes the loop.
+  -- IDENTITY when not retimed (rec_len == loop_len == dl) or mid-first-pass.
+  local el = mo.rec_len or 0
+  if el < 1 then el = dl end
   -- quarter rails through the loop
   screen.level(2)
   for k = 0, 4 do
@@ -1330,7 +1347,7 @@ local function body_MOTION(frame)
       local py = yb - value_norm(id, L.v[1]) * 8
       screen.move(gx0, py)
       for e = 1, n do
-        local ex = gx0 + (L.f[e] / dl) * (gx1 - gx0)
+        local ex = gx0 + (L.f[e] / el) * (gx1 - gx0)
         local ey = yb - value_norm(id, L.v[e]) * 8
         screen.line(ex, py)
         screen.line(ex, ey)
@@ -1535,7 +1552,7 @@ end
 -- built ONCE at load, so the redraw stays allocation-free
 local BODY = {
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
-  FILTER = body_FILTER, SPACE = body_SPACE, MIX = body_MIX,
+  FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
 }
 
@@ -1608,12 +1625,6 @@ local function draw_header()
   if pget("rec", 0) == 1 then x = wflag(x, blink, "R", 12) end
   if pget("tape_rec", 0) == 1 then x = wflag(x, blink, "T", 11) end
   if pget("motion_rec", 0) == 1 then x = wflag(x, blink, "M", 13) end
-  if pget("seq_play", 0) == 1 then     -- running: a steady triangle
-    screen.level(10)
-    screen.rect(x, 1, 1, 5) screen.rect(x + 1, 2, 1, 3) screen.rect(x + 2, 3, 1, 1)
-    screen.fill()
-    x = x + 6
-  end
   if pget("pv_freeze", 0) == 1 or pget("freeze", 0) == 1 then
     ptext("FZ", x, 1, 1, 10)
     x = x + 12

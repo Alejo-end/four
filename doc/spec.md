@@ -1331,3 +1331,216 @@ a cleanup to consider only after both phases are gated, never a reason to delay 
 **Phase B gate:** export a take → a real stereo wav appears in `dust/audio`, plays in any editor,
 and reloads via PARAMS > load sample identical to the original (B-eng: dry; B-soft: post-FX, as
 chosen). No xruns during the bounce; live audio recovers cleanly afterward.
+
+---
+
+### S23 — post-redesign play-test fixes (Lua-heavy; ONE engine gate for true STOP)
+
+Driver: **doc/ux-feedback.md §19–30** (2026-07-17 voice memo, transcribed). The user's
+directive is explicit — **NO new features**: "make this thing we have good, it's hard enough."
+Everything here is a fix, a rework, or a removal. Three forks were resolved WITH the user:
+**remove the sequencer**, **STOP truly halts (not mute)**, **motion loop-length now, multiple
+loops deferred**.
+
+**Fingerprint.** Batch A is Lua-only (STAYS **63**, save + reload). Batch B adds a play-voice
+transport gate for true STOP — intended arity-only, so **confirm `count` STAYS 63** after
+RESTART; if it needs a `\addCommand` it becomes 64, so reuse an existing arg/command instead.
+
+**Page-count note.** Splitting SPACE takes `PAGES` 9 → **10**, which re-spaces the header path
+dots on EVERY page (`mpages.lua:1628-1646`, pitch = `min(5, floor(45/(#PAGES-1)))`). So the
+whole `doc/ui` gallery + render suite regenerate; all non-SPACE shots differ only by that dot
+shift (the S19-style "one dot moves everywhere" diff). Removing the sequencer does NOT change
+the page count — SEQ was already merged into PADS in the NU redesign.
+
+**Progress (in-session build):** A1 ✅ split · A2 ✅ delay range · A3 ✅ deeper reverb ·
+A5 ✅ motion length · A7 ✅ blink · A8 ✅ heads · A4 ✅ tape source · A6 ✅ remove seq ·
+docs ✅. **BATCH A COMPLETE** (Lua-only, no restart — save + reload). Batch B — B1 true
+STOP, B2 erase — is ENGINE-gated, deferred to a device session (needs RESTART + count 63).
+
+- docs: full doc/ui gallery regenerated at 4x (every page's header dots went 9→10 on the
+  SPACE split; space.png/space-wash.png retired → delay.png/reverb.png added; take/pads
+  reflect the head + slice reworks). README rewritten to ten stations: DELAY + REVERB
+  sections replace SPACE, PADS is a play/sound-lock surface (no sequencer), TAKE notes the
+  two head shapes, TAPE the source control, MOTION the loop length; features list, page
+  table, status flags, grid spine, engine spec + architecture all de-sequenced. mangler.lua
+  header + mgrid/mscenes/minput comments de-sequenced. doc/redesign.md flagged
+  "superseded in part by S23". dist rebuilt + byte-verified (source==dist, 47 shots).
+
+- A6: sequencer REMOVED. Deleted lib/mseq.lua (amalgamate 9→8); dropped
+  seq_play/seq_div/seq_euclid/seq_len/seq_level (grp_seq deleted) + all wiring
+  (include/ctx.seq/init/cleanup/body step-row/header triangle/grid step rows).
+  KEPT the slice selector: `seq_slice` id UNCHANGED (CLAUDE.md invariant — ids
+  are never renamed, so PMAP/PSET survive; only display name → "slice" and it
+  moved into grp_voice 7→8). Its action is still the sole writer of
+  ctx.pad_cursor. PADS reworked into a pure slice surface: ENC_MAP.PADS =
+  seq_slice/pad_voice/pad_pitch/voice_rel (the freed slots became the per-slice
+  sound-lock encoders); K3 RUN→ROUTE (pad_input); no page erase (PADS has no
+  own material → K1+K3 stays global DRY). Grid PADS workspace: row 3 = 8 slice
+  play pads (finger-drum, ids 2600+), row 5 = slice select, row 6 = voice/route;
+  state-strip x6 seq-run→pad_input. mscenes: seq_euclid/seq_len/seq_div dropped;
+  seq_slice EXCLUDED (a UI cursor, like scene_slot/motion_lane — a scene/morph
+  must not move it). Verified: source==dist (47 shots, EUCLID gone), PADS renders
+  clean, SCENE capture/recall/morph still exercised byte-clean.
+
+- A4: `cut_source` param (grp_tape 8→9, 0=DRY..1=WET, default DRY) on TAPE K1+E3
+  (replacing @loop_move — loop positioning stays on grid + loop_end + PARAMS).
+  `Mtape.set_source(v)` drives `level_adc_cut(1-v)` + `level_eng_cut(v)`; the two
+  sends SUM at the softcut input, so the tape prints dry input, processed engine
+  output, or a blend — the resample/print stage of §25. init_tape reads the
+  param (was hardcoded adc1/eng0); cleanup zeroes eng_cut so a WET route can't
+  leak to the next script. No runaway (engine reads only the ADC bus). A "SRC
+  WET" body flag shows the non-default state so it's never hidden. Verified: DRY
+  default byte-identical (TAPE + MIX_TAPE shots), routing-math harness (DRY/WET/
+  blend/cleanup), +TAPE_WET truth shot; source==dist (48 shots).
+
+- A7: removed the armed-frame full-width blinking box on TAKE (was the only
+  fast blink in the body). REC is still unmistakable — sweeping write head, big
+  elapsed seconds, IN meter, blinking header R (kept). §29 satisfied.
+- A8: the READ (playback) head is now drawn LAST (never hidden behind the solid
+  WRITE head) and is a distinct SHAPE — a dashed column + a caret ▽ above the
+  strip — vs the write head's solid line + comet-tail afterglow. Distinguishable
+  even when they cross. §30 satisfied. Only TAKE shots changed; source==dist.
+
+- A5: `motion_len` param (grp_motion 4→5, seconds, 0=AUTO) on the free MOTION
+  K1+E2 alt slot. Splits motion timing into two timebases: `rec_len` (the
+  natural recorded length = the event timebase, events stored against it) and
+  `loop_len` (the playback length motion_len sets). Playback reads events through
+  `src_of(ph)` = `ph·rec_len/loop_len` — IDENTITY when not retimed, so AUTO is
+  bit-for-bit the pre-A5 behavior (MOTION renders byte-identical to HEAD). >0
+  retimes playback SPEED losslessly (events untouched); overdub captures at
+  src_of too so new events share the timebase; the page plots the step-curve
+  against `rec_len` (aligned with the playhead when retimed). Floored at 0.5s.
+  Pre-set before recording → honored at finalize. Verified: 47 shots source==
+  dist, MOTION 4 shots byte-identical to pre-A5, 17-assertion functional harness
+  (AUTO round-trip lossless, retime up/down, floor, pre-set-at-finalize).
+
+- A3: the SPACE split (A1) doubled each effect's encoder complement — DELAY owns
+  mix/time/fb, REVERB owns mix/size/decay/damp (feedback, size, damp are NEWLY
+  on-encoder; the other 11 JPverb params stay in PARAMS + the WASH/BLOOM throws,
+  per the user's own "separate pages = more keys" resolution). No new params.
+  Made the newly-exposed rev_size/rev_damp READ on the page: the reverb-tail
+  reflection dots now space by rev_size and dim toward the tail-end by rev_damp
+  (body_REVERB, mpages.lua). Stale "edited in banks" comment on grp_reverb fixed
+  (banking was deleted in NU-1). Renders verified, source==dist (47 shots).
+
+#### Batch A — Lua-only (no restart)
+
+**A1. Split SPACE → DELAY + REVERB (§21, §24).** Register two pages where SPACE sat:
+`PAGES` (`mangler.lua:86-89`), `KEYS` (split `KEYS.SPACE` `:331-342` — keep the `INF` delay-pin
+throw on DELAY, the `BLOOM` shimmer throw on REVERB), `ENC_MAP` (`:433-443`), `BODY` dispatch
+(`mpages.lua:1536-1540`). Split `body_SPACE` (`mpages.lua:943-1025`) at its two already-guarded
+blocks: the echo-taps block (`:1011-1024`) → `body_DELAY`, the tail + shimmer-motes block
+(`:966-1006`) → `body_REVERB`; duplicate the shared baseline/rails/onset (`:948-964, :1007-1010`)
+into each. The engine command surface is id-based/page-agnostic — NO `.sc` change. The param
+groups already exist and are already named `"space - delay"` (`grp_delay` `mangler.lua:1078`) and
+`"space - reverb"` (`grp_reverb` `:1093`) — rename their labels to drop `"space -"`. All SHORT/FULL/
+`fmt_value` label entries for delay/reverb ids already exist (`mpages.lua:291-448`) — no label work.
+
+**A2. Fix the delay feedback range (§23).** `delay_fb` is `controlspec.new(0, 0.95, "lin", 0, 0.3)`
+(`mangler.lua:1081-1082`) — LINEAR, capped at 0.95, so audible repeat-count (a `ln`-law of feedback)
+stays tiny across almost all travel and only explodes in the last few %, then the in-loop `.softclip`
+(`Engine_Mangler.sc:466`) sustains → "≈4 quiet repeats, then jumps to infinite." Fix = re-warp the
+controlspec (curved/exp, reach ~0.98) so the knob spans "few → many (10+) → near-infinite" smoothly.
+Pure Lua controlspec edit; leave the engine softclip alone unless a device ear-check wants a distinct
+top-of-range infinite-hold (that half is engine, defer).
+
+**A3. Deeper DELAY / REVERB pages (§22).** DELAY face = `delay_time / delay_fb / delay_mix`
+(feedback gets its own encoder now it's not sharing SPACE). REVERB face = 4 of its 15 existing params
+(`rev_decay / rev_damp / rev_size / rev_mix`); the other 11 (early/mod/EQ/cuts/shimmer, all already
+in `grp_reverb` `mangler.lua:1093-1124`) stay reachable in PARAMS + on the alt encoder layer. No new
+params — the depth already exists, it was just hidden behind the merged page.
+
+**A4. Tape captures the FX output (§25).** `mtape.lua:82` holds `audio.level_eng_cut(0)` ON PURPOSE
+— raising it feeds the engine's post-FX output (`Out.ar(out_b)`, `Engine_Mangler.sc:505`, after
+filter/drive/delay/reverb) into the softcut tape input. This is the codebase's own parked design
+(spec.md "B-soft" above; `CLAUDE.md:503-504`). `level_adc_cut` and `level_eng_cut` SUM at the shared
+softcut input crossfields, so a dry↔processed mix = driving BOTH (a norns-router property, not a
+choice). Add a `tape_source` param (dry↔processed, avoid reserved ids — use the `cut_*`/`sc_*`
+convention) with an action that sets both levels; re-assert in `init_tape` and reset on `cleanup`
+(`mtape.lua:137-139`) so it doesn't leak to the next script. No feedback runaway — the engine reads
+only `context.in_b` (ADC), never softcut. Caveat to note on the page: with `level_eng_cut` up + the
+existing `level_cut(1)`, the tape also catches the engine while you monitor live.
+
+**A5. Motion loop-length control (§26).** Length is implicit today — `loop_len` = frames between arm
+and stop of the first pass (`mmotion.lua:163-174`), and the "24.4 s" is a read-only `loop_len/FPS`
+display (`mpages.lua:1279`). BOTH MOTION alt-encoder slots are genuinely free (`ENC_MAP.MOTION =
+{ "motion_lane", nil, "motion_depth", nil }`, `mangler.lua:441`). Add a `motion_len` param on a free
+alt slot (K1+E2 or K1+E3), consumed in the finalize branch to clamp/override `elapsed` (and/or to set
+a fixed pre-record window that `capture_poll` wraps to). Lua-only, no engine.
+
+**A6. REMOVE the sequencer (§28).** Delete `lib/mseq.lua`. Unwire: `mangler.lua` — include `:198`,
+`ctx.seq` `:206`, `Mseq.init` `:213`, `Mseq.cleanup` `:1383`; `KEYS.PADS` `:360-370` (drop `k3`
+RUN/`seq_play` + `erase`=`Mseq.clear`, repoint `k2` off `seq_slice`); `ENC_MAP.PADS` `:440` (drop
+`seq_len`/`seq_euclid`); `grp_seq` `:1205-1223` (delete `seq_play`/`seq_div`/`seq_euclid`/`seq_len`/
+`seq_level`). **CRITICAL — keep a slice selector.** `seq_slice`'s action (`mangler.lua:1216-1219`) is
+the ONLY writer of `ctx.pad_cursor` and only caller of `ctx.pad_edit_sync()`; delete it blindly and
+the PADS cursor freezes at 0 and the sound-lock editors stop following. Keep that action body under a
+renamed `slice` param (E2 on PADS). `lib/mgrid.lua` — drop `seq_play` strip (`:329, :453`), the step
+rows in `pads_ws_key` (`:352-362`, keep slice-select y5 + voice y6), the step rows in `draw_pads_ws`
+(`:508-534`, keep slice5 + voice6). `lib/mpages.lua` — drop `seq_*` labels (`:315, :351`), the
+`body_PADS` step-row block (`:1226-1253`) + `sq`/`seq_play` firing refs (`:1188-1192, :1196`, keep the
+slice cells), the header running-triangle (`:1611-1616`); keep `slice` fmt (`:394-396`) + `SELECTOR_IDS`
+(`:458`) for the surviving selector. `lib/mscenes.lua` — remove `seq_euclid`/`seq_len`/`seq_slice`
+(`:86`) + `seq_div` (`:99`), keep the renamed selector id. `tools/amalgamate.lua:35` assert **9 → 8**.
+`tools/uisim/render_pages.lua` — remove the seq sets + `_EUCLID` shot (`:588, :596, :599-600`).
+Docs: README / spec / redesign / this file's §28; regenerate `dist/` + `doc/ui/pads.png`. **Must
+stay:** all `ctx.pad_*` state + helpers (`pad_pos :534`, `pad_trigger :542`, `route_note :562`,
+`pads_all_off :571`, `pad_edit_sync :580`), the `pad_voice`/`pad_pitch` sound-lock editors, the
+slice-cell drawing, and grid slice-select + voice.
+
+**A7. Kill the blinking TAKE window (§29).** `mpages.lua:677-683` — the armed-frame full-width box
+gated by `(frame % 4) < 2` (the only fast blink in the body). Drop the blink: draw a steady border
+or remove the box. One-line change. (The header "R" flag blink `:1607-1608` is separate — leave it.)
+
+**A8. Playback head vs record head on TAKE (§30).** `mpages.lua:669-687` — both are `screen.level(15)`,
+the record head is drawn SECOND and 2px taller, so it occludes the playhead wherever `rec_phase ≈
+play_phase`. Give the playhead a distinct tone/shape (dimmer, or a caret/dashed line) and draw it
+LAST so it isn't buried. Sources are already separate: `C.play_phase` (`mangler.lua:162`) vs
+`C.rec_phase` (`:163`).
+
+#### Batch B — engine (ONE restart, confirm count 63)
+
+**B1. STOP truly halts (§20).** Today `stop_all` (`mangler.lua:848-852`) only zeroes `engine.level`
++ `sc.level` in `Mtape.update_mix` (`mtape.lua:20-30`) — a click-free MUTE; the play voice, the
+record head, and the tape transport all keep running (the "24.4s kept advancing" symptom). For a
+true stop: on `stop_all==1` also (a) halt the tape transport — `sc.rate(v,0)` / `sc.rec(v,0)` [Lua],
+(b) gate the record head — `engine.rec(0)` [Lua], and (c) gate the play/drone voice + freeze
+`phaseBus` so the engine actually pauses and the on-screen heads stop sweeping (`play_phase` poll
+`Engine_Mangler.sc:680-682`). The drone gate is the engine piece — add a `run` arg to the play/drone
+SynthDefs (multiply into output / gate the Phasor) driven from the existing set path, or free/suspend
+the play synth. Restore all of it on START (stop_all→0). **Keep the level slew** so it stays
+click-free. Intended arity-only → **confirm `count` STAYS 63**; do NOT add a new command (would be 64).
+
+**B2. Erase reliability + clear kills tails/regen (§19).** The wire is CORRECT: K1+K3 hold ≥
+`ERASE_FRAMES` (15 ≈ 1 s, `mangler.lua:494-500`) → `page_erase` (`:423-425`) → `KEYS.TAKE.erase`
+(`:292`, `pulse("clear_rec")`) → `ctx.clear_recording` (`:596-608`) → `engine.clear` (`Engine_Mangler.sc:617-621`,
+`bufL.zero`/`bufR.zero`) + `clear_wave` + `take_len=0` + window reset. The device symptom ("looks
+cool, doesn't work") is almost certainly the gesture, NOT the wire: a *tap* of K1+K3 is DRY
+(`ALT_DRY`, `mangler.lua:409-410`), you must HOLD ~1 s to erase, and releasing K1 early aborts.
+Secondary suspects: FX/delay/reverb tails ringing after the buffer zeroes, and `regen>0` re-seeding
+the buffer from live output. Fix: (1) diagnose on device which cause; (2) make erase discoverable/
+forgiving (clearer arc feedback, consider a dedicated CLR affordance separate from DRY); (3) have
+`clear_recording` also kill FX tails and force `regen`→0 so nothing rings on after a clear; (4)
+verify a fresh `rec` pass actually overwrites the buffer ("record over doesn't replace"). Steps
+2-4 are Lua-only; batch with B only if a device check shows an engine cause.
+
+#### Verification & gates
+
+- Static: `luac5.3 -p mangler.lua`; engine paren-balance if `.sc` touched.
+- Renders: `tools/uisim/render_pages.lua` — expect NEW `DELAY`/`REVERB` shots, changed `MOTION`/
+  `TAKE`/`PADS`; every other page differs ONLY by the 9→10 header-dot shift. Regenerate `doc/ui`.
+- Build: `tools/amalgamate.lua` (assert 9→8 after A6) → `dist/` byte-verify (source==dist).
+- Batch A ships save + reload. **Batch B**: rsync `--delete` → SYSTEM > RESTART → confirm
+  `Engine.register_commands; count: 63` (wrong count = a stray new command; fix before gating) →
+  run the ear gate: STOP fully halts + START resumes cleanly (no click); erase clears audibly and a
+  re-record replaces; delay knob sweeps few→many→infinite; DELAY/REVERB pages read independently.
+
+#### Deferred (stated, not built — do NOT pre-build)
+
+- **Motion multiple loops (§27).** A real state refactor: nest the singleton fields
+  (`loop_len`/`playhead`/`lane_ids`/`lanes` + `rec_start_frame`/`touched_this_pass`/`last_val`,
+  `mmotion.lua:64-74`) under `loops[k]`, add a `motion_slot` selector, teach `body_MOTION` about
+  selected/other loops, and resolve same-param write ownership across simultaneously-playing loops
+  (the "one writer per param" invariant, `mmotion.lua:264`). Lua-only, follow-up pass.
+- **Sequencer rework** (the drone/pad-sequencing alternative to removal) — not chosen; note kept
+  in §28 if it ever returns.

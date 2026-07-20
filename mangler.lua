@@ -17,8 +17,9 @@
 --   TAKE    K2, play a phrase, K2 — the window snaps to your take and loops
 --           it, dry. the ◇ by the title = "you hear the recording, verbatim"
 --   VOICE   K3 cycles PLAY (clean) · GRAIN · WARP · PV; the texture IS the mode
---   SPACE   echoes + reverb, one picture; both start at zero
---   PADS    the take chopped into 8 slices + a euclidean step row
+--   DELAY   echoes: time · feedback (few → many → near-infinite) · mix
+--   REVERB  the tail: decay · size · damp · mix — starts silent
+--   PADS    the take chopped into 8 playable slices, each sound-locked
 --   SCENE   capture whole sounds; HOLD K2 to peek, tap to keep; ◄ = way back
 --
 -- THE PUNCH LAW (every key, every page):
@@ -26,8 +27,8 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (nine stations: TAKE VOICE TAPE · FILTER SPACE · MIX
---          · PADS MOTION SCENE — the header dots are the signal map)
+--   E1     select page (ten stations: TAKE VOICE TAPE · FILTER DELAY REVERB
+--          · MIX · PADS MOTION SCENE — the header dots are the signal map)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -38,7 +39,7 @@
 --   K1+K3  DRY (tap): playback path thrown clean — delay/reverb/shimmer/
 --          drive/clouds-fb zero, filter open. HELD ~1s = the ERASER: an arc
 --          fills, and at the ring the page's material is wiped (take / tape
---          loop / pattern / lane / slot). GLOBAL, every page.
+--          loop / lane / slot). GLOBAL, every page.
 --   K1+E1  the MORPH, from anywhere: sweep toward the selected scene; back
 --          to zero lands exactly home
 --
@@ -81,10 +82,10 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- nine stations on one signal path —
--- TAKE VOICE TAPE | FILTER SPACE | MIX | PADS MOTION SCENE
+-- ten stations on one signal path —
+-- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE
 local PAGES = {
-  "TAKE", "VOICE", "TAPE", "FILTER", "SPACE", "MIX",
+  "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
   "PADS", "MOTION", "SCENE",
 }
 
@@ -195,7 +196,6 @@ local Mtape = include "lib/mtape"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
-local Mseq = include "lib/mseq"
 local Mscenes = include "lib/mscenes"
 local Mpages = include "lib/mpages"
 
@@ -203,14 +203,12 @@ ctx.font = Mfont
 ctx.particles = Mparticles
 ctx.grid = Mgrid
 ctx.motion = Mmotion
-ctx.seq = Mseq
 
 Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
-Mseq.init(ctx)
 -- sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
 -- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
 Mscenes.init(ctx)
@@ -328,10 +326,25 @@ local KEYS = {
         params:set("filt_type", (pget("filt_type", 1) % 3) + 1)
       end },
   },
-  SPACE = {
+  DELAY = {
+    -- INF pins the feedback near max (a dub hold); KILL cuts the echo send.
+    -- both round-trip: tap latches, tap again restores the prior value.
     k2 = throw("INF", function()   -- dub grab: pin the delay loop
       local mem = { delay_fb = pget("delay_fb", 0) }
-      params:set("delay_fb", 0.95)
+      params:set("delay_fb", 1)   -- knob max -> ~0.98 fb, a self-sustaining hold
+      return mem
+    end),
+    k3 = throw("KILL", function()  -- cut the echo send
+      local mem = { delay_mix = pget("delay_mix", 0) }
+      params:set("delay_mix", 0)
+      return mem
+    end),
+  },
+  REVERB = {
+    -- WASH swells the tail to a near-infinite hall; BLOOM surges shimmer.
+    k2 = throw("WASH", function()  -- freeze the space
+      local mem = { rev_decay = pget("rev_decay", 2) }
+      params:set("rev_decay", 30)
       return mem
     end),
     k3 = throw("BLOOM", function() -- shimmer surge
@@ -365,8 +378,9 @@ local KEYS = {
       lit = function() return ctx.pad_held[8] ~= nil end,
       pon = function() ctx.pad_trigger(8, pget("seq_slice", 0), 1) end,
       poff = function() ctx.pad_trigger(8, 0, 0) end },
-    k3 = pk("RUN", "seq_play"),
-    erase = function() Mseq.clear() end,
+    -- notes -> pads (poly) or the drone. PADS has no material of its own (the
+    -- take is TAKE's), so no page erase — K1+K3 stays the global DRY here.
+    k3 = pk("ROUTE", "pad_input"),
   },
   MOTION = {
     k2 = pk("REC", "motion_rec"),
@@ -433,12 +447,13 @@ end
 local ENC_MAP = {
   TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
-  TAPE   = { "tape_rate", "tape_pre", "loop_end", "@loop_move" },
+  TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
-  SPACE  = { "delay_mix", "delay_time", "rev_mix", "rev_decay" },
+  DELAY  = { "delay_mix", "delay_time", "delay_fb", nil },
+  REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
-  PADS   = { "seq_slice", "seq_len", "seq_euclid", "pad_pitch" },
-  MOTION = { "motion_lane", nil, "motion_depth", nil },
+  PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
+  MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
   SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
 }
 
@@ -523,13 +538,11 @@ ctx.TAP_FRAMES = TAP_FRAMES
 -- ============================================================================
 -- a pad's slice point: the centre of the i-th eighth OF THE TAKE — i.e. of
 -- the current window, not of the 60s buffer. this is the one definition of
--- "slice i" in the instrument: the PADS audition, MIDI/grid note pads, and
--- the sequencer (mseq.fire) all resolve through here, so pad 3 and seq slice
--- 3 are always the same audio.
+-- "slice i" in the instrument: the PADS audition and the MIDI/grid note pads
+-- both resolve through here.
 -- it was buffer-relative ((i+0.5)/8) until now, which meant a normal take —
 -- record a phrase, the rec action snaps the window to it — left 7 of the 8
--- pads pointing at silence out in the empty buffer. mseq hit exactly that on
--- device in S18 and worked around it locally; this is that fix, shared.
+-- pads pointing at silence out in the empty buffer; this is that fix, shared.
 -- rate stays fixed at 1 (per-pad rate is a later knob). type is per-pad.
 local function pad_pos(i)
   local lo, _, span = window_bounds()
@@ -544,7 +557,7 @@ function ctx.pad_trigger(id, i, z)
     if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
-      -- the pad voice level (chord-safe default, unlike the loud sequencer)
+      -- the pad voice level (chord-safe default that won't slam the limiter)
       engine.note_on(id, pad_pos(i), 2 ^ ((ctx.pad_pitch[i] or 0) / 12),
         ctx.pad_type[i] or 0, pget("pad_level", 0.3))
     end
@@ -586,9 +599,9 @@ function ctx.pad_edit_sync()
 end
 
 -- delete the recording, and load a source other than the live input. the
--- engine's 60s buffer is what everything slices (window, drone, pads,
--- sequencer). (the TAPE deck's own CLR is on the TAPE page — that's the
--- softcut loop, a different deck entirely.)
+-- engine's 60s buffer is what everything slices (window, drone, pads). (the
+-- TAPE deck's own CLR is on the TAPE page — that's the softcut loop, a
+-- different deck entirely.)
 
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
 -- the window back up, so every page goes back to inviting a take instead of
@@ -608,7 +621,7 @@ function ctx.clear_recording()
 end
 
 -- load any wav as the sample (PARAMS > rec > load sample). it lands in the SAME
--- buffer a take does, so the window, drone, pads and sequencer all work on it
+-- buffer a take does, so the window, drone and pads all work on it
 -- identically — there is no "loaded sample" mode, it's just the sample.
 -- the window snaps to the file's length, and the display is read from the FILE
 -- (lua can't see the SC buffer — see Mpages.load_wave).
@@ -814,6 +827,16 @@ local function add_eng_control(id, name, spec, map)
 end
 local function square(v) return v * v end
 
+-- delay feedback response (doc/ux-feedback.md §23). the raw knob is 0..1 but
+-- audible repeat-count is a ln-law of the loop gain, so a LINEAR knob crams
+-- every useful value into the top few percent ("~4 quiet repeats then jumps to
+-- infinite"). this concave curve spreads the knob across the musical band —
+-- quarter ~3 repeats, half ~6, three-quarter ~14, top a near-infinite hold —
+-- and is SHARED with the DELAY page (ctx.delay_fb_curve) so the drawn echo
+-- taps decay at the feedback you actually hear, not the raw knob.
+local function fb_curve(v) return 0.98 * v ^ 0.6 end
+ctx.delay_fb_curve = fb_curve
+
 local function add_eng_binary(id, name)
   params:add_binary(id, name, "toggle", 0)
   params:set_action(id, function(v)
@@ -1014,7 +1037,7 @@ local function init_params()
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   add_eng_binary("pv_freeze", "pv freeze")
 
-  params:add_group("grp_tape", "tape", 8)
+  params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
   -- mirror the SC side's workflow: arming with no overdub opens the loop to
   -- the full tape for a fresh take; stopping snaps the loop around the take
@@ -1061,6 +1084,13 @@ local function init_params()
   params:add_control("tape_fade", "tape fade",
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
+  -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET post-FX
+  -- engine output — the tape as a print / resample stage (doc/ux-feedback.md
+  -- §25). default DRY = the classic parallel-ADC tap, so nothing changes until
+  -- you reach for it.
+  params:add_control("cut_source", "tape source",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("cut_source", function(v) Mtape.set_source(v) end)
 
   params:add_group("grp_filter", "filter", 4)
   params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
@@ -1075,11 +1105,13 @@ local function init_params()
   add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_delay", "space - delay", 3)
+  params:add_group("grp_delay", "delay", 3)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
+  -- 0..1 knob curved to the actual 0..0.98 feedback coefficient (fb_curve):
+  -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback",
-    controlspec.new(0, 0.95, "lin", 0, 0.3, ""))
+    controlspec.new(0, 1, "lin", 0, 0.3, ""), fb_curve)
   -- FX SEND response curve: the engine crossfades the wet with an equal-power
   -- .sqrt (Engine_Mangler.sc), so a raw 3% knob already reads ~17% wet ("way too
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
@@ -1089,8 +1121,10 @@ local function init_params()
 
   -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
-  -- hardcoded. edited on the REVERB page in banks (K2 pages through them).
-  params:add_group("grp_reverb", "space - reverb", 15)
+  -- hardcoded. REVERB face reaches mix/size/decay/damp (E2/E3 + K1 alt);
+  -- the other 11 (early/mod/EQ/cuts/shimmer) live in PARAMS + the WASH/BLOOM
+  -- throws. shimmer surges on the BLOOM key.
+  params:add_group("grp_reverb", "reverb", 15)
   add_eng_control("rev_decay", "reverb decay",
     controlspec.new(0.1, 30, "exp", 0, 2.0, "s"))
   add_eng_control("rev_damp", "reverb damp",
@@ -1127,10 +1161,19 @@ local function init_params()
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
   -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
-  params:add_group("grp_voice", "pads - voices", 7)
+  params:add_group("grp_voice", "pads - voices", 8)
   params:add_binary("pad_input", "pad input", "toggle", 0)
   params:set_action("pad_input", function(v)
     if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
+  end)
+  -- the PADS slice SELECTOR (id kept as `seq_slice` — ids are never renamed, so
+  -- PMAP/PSET references survive; the sequencer that shared it is gone). its
+  -- action is the ONLY writer of ctx.pad_cursor, so the sound-lock editors
+  -- (pad_voice/pad_pitch) follow the selected slice.
+  params:add_number("seq_slice", "slice", 0, 7, 0)
+  params:set_action("seq_slice", function(v)
+    ctx.pad_cursor = v
+    ctx.pad_edit_sync()
   end)
   -- SOUND-LOCK EDITORS (Elektron data-knob style): pad_voice + pad_pitch read/
   -- write the pad under pad_cursor, so selecting a pad and turning these edits
@@ -1182,7 +1225,7 @@ local function init_params()
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
-  params:add_group("grp_motion", "motion", 4)
+  params:add_group("grp_motion", "motion", 5)
   params:add_binary("motion_rec", "motion record", "toggle", 0)
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
@@ -1197,30 +1240,11 @@ local function init_params()
     end)
   params:add_control("motion_depth", "motion depth",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
-
-  -- step sequencer: a clock-synced Euclidean sequencer that triggers the
-  -- PADS slice one-shots (see lib/mseq). all Lua-only (drives engine.note_one_
-  -- shot) — no engine command, so the fingerprint is unchanged. seq_play is a
-  -- binary (MIDI-map it to a footswitch); seq_euclid/seq_len regen the pattern.
-  params:add_group("grp_seq", "pads - sequencer", 6)
-  params:add_binary("seq_play", "seq play", "toggle", 0)
-  params:set_action("seq_play", function(v) ctx.seq.set_playing(v == 1) end)
-  params:add_option("seq_div", "seq division", Mseq.DIV_LABELS, 2)
-  params:add_number("seq_euclid", "seq euclid hits", 0, 16, 0)
-  params:set_action("seq_euclid", function() ctx.seq.regen() end)
-  params:add_number("seq_len", "seq length", 1, 16, 16)
-  params:set_action("seq_len", function() ctx.seq.regen() end)
-  params:add_number("seq_slice", "seq slice", 0, 7, 0)
-  -- the sequencer's target and the PADS cursor are ONE selection (browsing
-  -- slices retargets the sequence)
-  params:set_action("seq_slice", function(v)
-    ctx.pad_cursor = v
-    ctx.pad_edit_sync()          -- the sound-lock editors follow the selected pad
-  end)
-  -- sequencer voice LEVEL (per-note amp): LOUD by default so the rhythm cuts
-  -- over the drone (the "makes no sound" report — it's mono, so no chord-clip).
-  params:add_control("seq_level", "seq level",
-    controlspec.new(0, 1, "lin", 0, 0.85, ""))
+  -- settable loop length (K1+E2 on MOTION). 0 = AUTO (the recorded length);
+  -- >0 retimes the loop's playback SPEED without touching the stored gesture.
+  params:add_control("motion_len", "motion length",
+    controlspec.new(0, 60, "lin", 0.5, 0, "s"))
+  params:set_action("motion_len", function(v) ctx.motion.set_len(v) end)
 
   -- scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
@@ -1380,7 +1404,6 @@ function cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
   Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
-  Mseq.cleanup()       -- cancel the sequencer clock (norns clock hygiene)
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 

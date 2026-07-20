@@ -15,14 +15,14 @@
 --          scene, release comes home — the punch law) · with the SCENE
 --          workspace's CAP/CLR modifiers held: capture / clear
 --   row 2  STATE STRIP: [rec][tape rec][tape rev, hold][pv frz][tape frz]
---          [seq run] · [DRY] [STOP]
+--          [notes->pads] · [DRY] [STOP]
 --   rows 3-6  the WORKSPACE (follows the page):
 --     main   row 3 window slices (span gesture; write head glows while
 --            recording) · row 4 tape loop slices (same gesture) · row 5
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
 --            pitch quantize x8 · row 6 dark
---     PADS   rows 3-4 the 16 steps (tap toggles) · row 5 slice select ·
---            row 6 run x1 / clear x8
+--     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
+--            row 6 voice type x1 / notes->pads x8
 --     SCENE  row 3 AIM (point the morph without jumping) · row 5 the morph
 --            bar · row 6 [CAP mod][CLR mod] · [CHAOS, hold] · · [◄ back]
 --   rows 7-8  ONE piano octave (black row above white; same shape as the
@@ -326,7 +326,7 @@ local function state_row_key(x, z)
   elseif x == 2 then ptoggle("tape_rec")
   elseif x == 4 then ptoggle("pv_freeze")
   elseif x == 5 then ptoggle("tape_freeze")
-  elseif x == 6 then ptoggle("seq_play")
+  elseif x == 6 then ptoggle("pad_input")   -- notes -> pads/drone (was seq run)
   elseif x == 7 then C.fx_dry()
   elseif x == 8 then ptoggle("stop_all") end
 end
@@ -350,14 +350,15 @@ local function main_ws_key(x, y, z)
 end
 
 local function pads_ws_key(x, y, z)
+  -- row 3 = the 8 slice pads: finger-drum the chops as HELD voices (press on,
+  -- release off — so it needs both edges, unlike the rest of the workspace).
+  -- ids 2600+ clear the note (2000+) / MIDI (1000+) / screen (0-8) namespaces.
+  if y == 3 then C.pad_trigger(2600 + x, x - 1, z); return end
   if z ~= 1 then return end
-  if y == 3 then C.seq.toggle_step(x)
-  elseif y == 4 then C.seq.toggle_step(x + 8)
-  elseif y == 5 then params:set("seq_slice", x - 1)
+  if y == 5 then params:set("seq_slice", x - 1)         -- select a slice to edit
   elseif y == 6 then
-    if x == 1 then ptoggle("seq_play")
-    elseif x == 4 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
-    elseif x == 8 then C.seq.clear() end
+    if x == 1 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
+    elseif x == 8 then ptoggle("pad_input") end          -- notes -> pads/drone
   end
 end
 
@@ -450,7 +451,7 @@ local function draw_spine()
   strip_led(3, pget("tape_reverse", 0) == 1, "purple")
   strip_led(4, pget("pv_freeze", 0) == 1, "cyan")
   strip_led(5, pget("tape_freeze", 0) == 1, "cyan")
-  strip_led(6, pget("seq_play", 0) == 1, "green")
+  strip_led(6, pget("pad_input", 0) == 1, "yellow")      -- notes routed to pads
   gg:led(7, 2, 7, "blue")                                -- DRY: an action
   local stopped = pget("stop_all", 0) == 1
   gg:led(8, 2, stopped and (5 + floor(9 * tri(C.frame, 22))) or 2,
@@ -505,32 +506,21 @@ local function draw_main_ws()
   gg:led(8, 5, quant and 15 or (en and 3 or 1), quant and "yellow" or nil)
 end
 
--- Grid sequencer LED map, in the colour language: empty step = BLUE, placed
--- note = GREEN, playhead = WHITE, beyond length = off; slice-select = ORANGE
--- (rest dim blue); run = GREEN, clear = PURPLE (destructive). Brightness is
--- also set sensibly so the monome/midigrid path (which ignores the hue) still
--- reads: empty dim, placed/playhead bright.
+-- Grid PADS LED map, in the colour language: row 3 = the 8 slice pads (ORANGE,
+-- bright while sounding); row 5 = the edit cursor (WHITE selection over dim
+-- blue); row 6 = the selected slice's voice type + the note routing. Brightness
+-- reads on the monome/midigrid path too (which ignores the hue).
 local function draw_pads_ws()
-  local sq = C.seq
-  local len = pget("seq_len", 16)
-  local pos = sq.pos
-  local playing = pget("seq_play", 0) == 1
-  for i = 1, 16 do
-    local x = ((i - 1) % 8) + 1
-    local y = i <= 8 and 3 or 4
-    if i > len then gg:led(x, y, 0)                          -- beyond length: off
-    elseif playing and i == pos then gg:led(x, y, 15, "white")   -- playhead
-    elseif sq.pattern[i] then gg:led(x, y, 9, "green")       -- placed note
-    else gg:led(x, y, 3, "blue") end                         -- empty step
-  end
-  local slice = pget("seq_slice", 0)
+  local held = C.pad_held
+  local cur = floor(pget("seq_slice", 0) + 0.5)
   for x = 1, 8 do
-    local selq = (x - 1) == slice
-    gg:led(x, 5, selq and 15 or 6, selq and "orange" or "blue")   -- slice select
+    local sounding = held[2600 + x] ~= nil
+    gg:led(x, 3, sounding and 15 or 4, sounding and "orange" or "blue")   -- play
+    local sel = (x - 1) == cur
+    gg:led(x, 5, sel and 15 or 6, sel and "white" or "blue")             -- select
   end
-  gg:led(1, 6, playing and 15 or 6, playing and "green" or nil)   -- run
-  gg:led(4, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")  -- voice: SLICE/GRAIN
-  gg:led(8, 6, 11, "purple")                                      -- clear (destructive)
+  gg:led(1, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")     -- voice: SLICE/GRAIN
+  gg:led(8, 6, pget("pad_input", 0) == 1 and 15 or 5, "yellow")          -- route
 end
 
 local function draw_scene_ws()

@@ -4,6 +4,13 @@
 renders verified in tools/uisim, dist byte-checked; the on-device gate is
 still pending (grid code and key-feel are untestable in the sim). Written
 2026-07-15, pre-release (no installed base — no compatibility constraints).
+
+> **Superseded in part by S23** (doc/spec.md, 2026-07-17 play-test fixes): the
+> nine-station SPACE page was split back into separate **DELAY** and **REVERB**
+> pages (**ten stations** now), and the **sequencer was removed** — PADS is a
+> pure 8-slice play/sound-lock surface. The `seq_slice` id is KEPT as the slice
+> selector (ids are never renamed), so the "merge into one `slice` param" note
+> below is behavioral only. Read S23 for the current page layout.
 **North star:** "make it feel like the S-4" — sleek, immediate, confident,
 fluid, unified, restrained — while staying strictly norns-native
 (128x64 OLED · 3 keys · 3 encoders · optional grid · no color).

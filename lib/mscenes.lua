@@ -21,12 +21,12 @@
 --
 -- WHAT IS AND ISN'T IN A SCENE — the lists are right below and they are
 -- deliberate. in: everything that shapes the sound of the take (window,
--- grain/clouds, stretch, tape loop, filter, delay, reverb, shimmer, voices,
--- the sequencer's pattern generator). out: the hardware/config layer (midi
--- channel, keys, root note), the SYSTEM levels (in/out/monitor/hp), the
--- capture transports (rec, tape_rec), the master STOP, and the motion/seq
--- transports. a scene changes how it sounds, never how it's plumbed or
--- whether it's running.
+-- grain/clouds, stretch, tape loop, filter, delay, reverb, shimmer, voices).
+-- out: the hardware/config layer (midi channel, keys, root note), the SYSTEM
+-- levels (in/out/monitor/hp), the capture transports (rec, tape_rec), the
+-- master STOP, the motion transport, and the UI selectors (slice cursor).
+-- a scene changes how it sounds, never how it's plumbed or whether it's
+-- running.
 --
 -- THE MORPH IS FRAME-COALESCED. scene_morph_amt's action only marks the sweep
 -- dirty; M.tick() applies it at most once per redraw frame (the existing 15fps
@@ -49,7 +49,7 @@ local NUM_SLOTS = 8
 -- walk it in order, so a scene lands in the order the engine wants it:
 --
 --   1 TIMBRE  the continuous voice: source blend, window, grain/clouds,
---             stretch shape, tape loop, voices, sequencer pattern
+--             stretch shape, tape loop, voices
 --   2 SPACE   the wet path: filter, drive, delay, reverb, shimmer
 --   3 SWITCH  the discrete mode/type switches — LAST, on purpose: `mode`
 --             respawns the SC voice, so switching it after everything else
@@ -80,10 +80,9 @@ local TIMBRE_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade",
   -- polyphonic pad voices
   "voices", "voice_atk", "voice_rel",
-  -- the sequencer's PATTERN (not its transport): euclid regenerates on set,
-  -- so a scene restores the generated rhythm. hand-drawn grid edits live in
-  -- mseq.pattern, which is not a param — they don't survive a recall.
-  "seq_euclid", "seq_len", "seq_slice",
+  -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
+  -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
+  -- move your cursor, and a morph must never lerp it across slices.
 }
 
 local SPACE_IDS = {
@@ -96,7 +95,7 @@ local SPACE_IDS = {
 }
 
 local SWITCH_IDS = {
-  "filt_type", "clouds_mode", "grain_shape", "seq_div",
+  "filt_type", "clouds_mode", "grain_shape",
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "mode",   -- last of the last: this one respawns the voice
@@ -734,7 +733,7 @@ end
 function M.init(ctx)
   C = ctx
   pget, clamp = ctx.pget, ctx.clamp
-  ctx.scene = M          -- the module, like ctx.motion / ctx.seq
+  ctx.scene = M          -- the module, like ctx.motion
   ctx.scenes = M.slots   -- the scene table itself (mutated in place, never
                          -- reassigned, so this ref can't go stale)
   -- the named helpers, on ctx beside fx_dry / pads_all_off — the KEYS table

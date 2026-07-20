@@ -101,8 +101,8 @@ function M.init(ctx)
         -- both edges, like the grid: route_note plays pad (semi mod 8) as a
         -- polyphonic voice in pad mode, or retunes the mono drone (which
         -- ignores the release) otherwise. ids 3000+ keep typing-keyboard
-        -- voices clear of MIDI (1000+), grid (2000+), seq (2500) and the
-        -- screen bank (0..8).
+        -- voices clear of MIDI (1000+), grid (2000+ note / 2600+ slice) and
+        -- the screen bank (0..8).
         kb_held[code] = st
         C.route_note(3000 + st, 2 ^ (semi / 12), semi, 1)
         -- in pad mode `pitch` doesn't move, so don't swell a value that isn't

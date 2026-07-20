@@ -392,7 +392,7 @@ run_ticks(EMPTY and 30 or 200)
 -- walk pages and shoot each one. navigation is BY NAME (goto_page) and the
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
-local PAGES = { "TAKE", "VOICE", "TAPE", "FILTER", "SPACE", "MIX",
+local PAGES = { "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
   "PADS", "MOTION", "SCENE" }
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
@@ -502,32 +502,40 @@ else
   params:set("delay_mix", 0.35)
   params:set("rev_mix", 0.28)
   params:set("mix", 0.5)
-  -- SPACE truth shots: INF pins the loop; both mixes at zero go dormant
-  goto_page("SPACE")
+  -- DELAY truth shots: INF pins the loop; the echo at zero goes dormant
+  goto_page("DELAY")
   params:set("delay_fb", 0.95)
   run_ticks(20)
   redraw()
-  export(pfx("SPACE", "_INF"))
+  export(pfx("DELAY", "_INF"))
   params:set("delay_fb", 0.45)
   params:set("delay_mix", 0)
-  params:set("rev_mix", 0)
   run_ticks(5)
   redraw()
-  export(pfx("SPACE", "_DRY"))
+  export(pfx("DELAY", "_DRY"))
   params:set("delay_mix", 0.35)
+  -- REVERB truth shots: WASH swells the tail; shimmer motes drift over it
+  goto_page("REVERB")
   params:set("rev_mix", 1)
   run_ticks(6)
   redraw()
-  export(pfx("SPACE", "_WASH"))
-  -- S15 shimmer: motes drift over the tail
+  export(pfx("REVERB", "_WASH"))
   params:set("rev_mix", 0.4)
   params:set("shimmer", 0.7)
   params:set("shimmer_pitch", 12)
   run_ticks(6)
   redraw()
-  export(pfx("SPACE", "_SHIMMER"))
+  export(pfx("REVERB", "_SHIMMER"))
   params:set("shimmer", 0)
   params:set("rev_mix", 0.28)
+  -- TAPE record SOURCE thrown WET: the tape prints the processed output
+  -- (doc/ux-feedback.md §25) — the "SRC WET" flag must show
+  goto_page("TAPE")
+  params:set("cut_source", 1)
+  run_ticks(4)
+  redraw()
+  export(pfx("TAPE", "_WET"))
+  params:set("cut_source", 0)
   -- MIX thrown full tape: the ENG lane must lie flat-dim (inaudible)
   goto_page("MIX")
   params:set("mix", 1)
@@ -592,12 +600,6 @@ else
   export(pfx("PADS", "_LIVE"))
   key(2, 0)
   params:set("pad_input", 0)
-  -- a euclid pattern (the step row itself lands with the NU-2 body)
-  params:set("seq_euclid", 5)
-  run_ticks(3)
-  redraw()
-  export(pfx("PADS", "_EUCLID"))
-  params:set("seq_euclid", 0)
   -- master STOP: the title chip inverts, on every page
   goto_page("MIX")
   params:set("stop_all", 1)

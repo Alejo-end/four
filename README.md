@@ -3,7 +3,7 @@
 A live stereo sampler and sound mangler for [norns](https://monome.org/norns/). Record
 line-level input, loop it back verbatim, then process it: time-stretch, granular clouds,
 tape-style varispeed and looping, a filter, delay, reverb and shimmer, plus per-slice
-polyphonic voices with a Euclidean sequencer, a gesture (motion) looper, and scene morphing.
+polyphonic voices, a gesture (motion) looper, and scene morphing.
 
 Played with **three keys and three encoders** — no grid required. An optional grid adds a pad
 surface. Every parameter is a norns param and is MIDI-mappable.
@@ -65,12 +65,12 @@ A footer word that stays inverted after you lift your finger is latched.
 
 | Control | Action |
 |---|---|
-| **E1** | Select the page (nine stations along the signal path). |
+| **E1** | Select the page (ten stations along the signal path). |
 | **E2 / E3** | The page's two shaping knobs. Hold **K1** for the second (alt) pair. Values show in the footer only while you turn. |
 | **K1** (hold) | Shift: swaps to the alt knobs and the two global keys below. |
 | **K2 / K3** | The page's two gestures, named in the footer, under the gesture law. |
 | **K1 + K2** | **STOP / START**, every page. Tap chokes all output (the title inverts); tap again restores the exact mix; hold for a mute stab. Also the USB space bar, the grid, and MIDI (`stop all`). |
-| **K1 + K3** | **DRY** (tap): sets the playback effects — delay, reverb, shimmer, drive, clouds feedback — to zero and opens the filter. **Hold ~1 s** (a ring fills beside the word) to **ERASE** the current page's material: the take, tape loop, pattern, motion lane, or scene slot. Release before the ring closes and nothing happens. |
+| **K1 + K3** | **DRY** (tap): sets the playback effects — delay, reverb, shimmer, drive, clouds feedback — to zero and opens the filter. **Hold ~1 s** (a ring fills beside the word) to **ERASE** the current page's material: the take, tape loop, motion lane, or scene slot. Release before the ring closes and nothing happens. |
 | **K1 + E1** | **Morph** toward the selected scene, from any page. Sweep back to zero to return exactly where you started. |
 
 Every knob is also a parameter in **PARAMS**, grouped by page, where it can be MIDI-mapped.
@@ -83,8 +83,8 @@ The header and footer keep the same layout on every page.
   while the output is the recording, verbatim (it goes out the moment any effect touches the
   sound).
 - **Write flags:** `R` / `T` / `M` blink fast while the take, tape, or motion is *writing*.
-  `▸` (steady) = the sequencer is running. `FZ` / `TF` = the voice / tape freezes.
-- **Top-right:** nine page dots, the current page a filled block.
+  `FZ` / `TF` = the voice / tape freezes.
+- **Top-right:** ten page dots, the current page a filled block.
 - **Footer:** `K2  K3 | E2·  E3·`. Each shows the full word at rest; while you turn a knob the
   word abbreviates and its value appears. Latched keys stay inverted.
 
@@ -98,23 +98,26 @@ Frames below are rendered from `tools/uisim/` over a scripted take.
 | 2 | [VOICE](#voice) | how the take plays: PLAY · GRAIN · WARP · PV |
 | 3 | [TAPE](#tape) | a second, parallel loop deck |
 | 4 | [FILTER](#filter) | tone |
-| 5 | [SPACE](#space) | delay and reverb |
-| 6 | [MIX](#mix) | input → decks → output |
-| 7 | [PADS](#pads) | the take chopped into 8 slices, played and sequenced |
-| 8 | [MOTION](#motion) | record and replay knob moves |
-| 9 | [SCENE](#scene) | store, recall, and morph whole sounds |
+| 5 | [DELAY](#delay) | feedback echoes |
+| 6 | [REVERB](#reverb) | the tail, and shimmer |
+| 7 | [MIX](#mix) | input → decks → output |
+| 8 | [PADS](#pads) | the take chopped into 8 playable slices |
+| 9 | [MOTION](#motion) | record and replay knob moves |
+| 10 | [SCENE](#scene) | store, recall, and morph whole sounds |
 
 ### TAKE
 
 ![TAKE: the recorded material as a strip with window brackets; the unwritten buffer dotted](doc/ui/take.png)
 
 The recording sits inside the **window brackets** (bright in-window, dim outside); the
-unwritten buffer is dotted. **E2 / E3** move the window edges (finer as it tightens);
-**K1+E2** slides the whole window. **K2** records — tap to arm, tap again to commit (the
-window snaps to the take), or hold to punch input straight in. **K3** snaps the window full
-and back. While armed, the frame blinks, the write head sweeps, elapsed seconds count, and the
-input meter shows a target bracket. `RSMP` / `REGN` badges show when resample or regen is
-feeding output back into the buffer (both in PARAMS).
+unwritten buffer is dotted. The **read (playback) head** is a dashed column with a caret above
+the strip; the **write head**, while recording, is a solid line with a comet-tail glow — two
+distinct shapes so they never read as one. **E2 / E3** move the window edges (finer as it
+tightens); **K1+E2** slides the whole window. **K2** records — tap to arm, tap again to commit
+(the window snaps to the take), or hold to punch input straight in. **K3** snaps the window
+full and back. While armed, the write head sweeps, elapsed seconds count, and the input meter
+shows a target bracket. `RSMP` / `REGN` badges show when resample or regen is feeding output
+back into the buffer (both in PARAMS).
 
 ![TAKE while recording: armed frame, write head, elapsed seconds, input meter](doc/ui/take-rec.png)
 
@@ -139,12 +142,16 @@ PARAMS > voice.
 
 ![TAPE: two spinning reels turning in the transport direction, over the loop track and playhead](doc/ui/tape.png)
 
-A second deck: softcut records the raw input on its own 60-second loop, independent of the
-voice. The two **reels** turn in the transport direction (reverse spins them backward, stopped
-stands still) above the loop track and playhead. **K2** records (hold = punch-in overdub).
-**K3** reverses — hold to flip for a moment, tap to latch it backwards. **E2** is the rate
-(bipolar), **E3** the loop length; the alt pair is overdub decay and loop position. K1+K3
-(held) erases the loop.
+A second deck: softcut records on its own 60-second loop, independent of the voice. The two
+**reels** turn in the transport direction (reverse spins them backward, stopped stands still)
+above the loop track and playhead. **K2** records (hold = punch-in overdub). **K3** reverses —
+hold to flip for a moment, tap to latch it backwards. **E2** is the rate (bipolar), **E3** the
+loop length; the alt pair is overdub decay and the tape **source**. K1+K3 (held) erases the
+loop.
+
+The **source** (K1+E3) sets what the tape records: DRY the raw input (default), WET the
+processed voice output (filter/delay/reverb), or a blend — so the tape becomes a print /
+resample stage you can mangle further. When it is not fully dry the page shows `SRC WET`.
 
 ### FILTER
 
@@ -156,20 +163,27 @@ resonance, **K1+E2** the drive (post-filter tanh saturation; grit on the curve, 
 at zero). **K2 OPEN** throws the filter wide — hold for a sweep that returns on release, tap to
 park it open. **K3** cycles LP / HP / BP.
 
-### SPACE
+### DELAY
 
-![SPACE: onset spike, echo taps decaying by feedback, the reverb tail as a slope, rails at 1 s and 2 s](doc/ui/space.png)
+![DELAY: onset spike, echo taps decaying by feedback, rails at 1 s and 2 s](doc/ui/delay.png)
 
-Delay and reverb in one picture. The spike is the dry onset; the taps are the echoes (spacing
-= TIME, decay = feedback); the slope is the reverb tail (reach = DECAY); motes climb off it
-when shimmer is up. **E2 / E3** are the two amounts, ECHO and VERB (a progressive fade — a low
-setting is a small amount, dry stays full); the alt pair is TIME and DECAY. **K2 INF** pins the
-delay feedback (a dub grab; the taps stop decaying). **K3 BLOOM** surges the shimmer. When the
-tail runs into the hatched right margin it will outlast the take:
+A feedback delay. The spike is the dry onset; the taps are the echoes — spacing = TIME, height
+decaying by the real FEEDBACK. **E2** is the mix (a progressive fade — a low setting is a small
+amount, dry stays full), **E3** the feedback, **K1+E2** the time. Feedback spans a smooth few →
+many (10+) → near-infinite (the curve is warped so the useful range is not all crammed into the
+last few percent). **K2 INF** pins the feedback to a self-sustaining hold (a dub grab; the taps
+stop decaying). **K3 KILL** throws the mix to zero.
 
-![SPACE with a long wash: the tail runs off the edge](doc/ui/space-wash.png)
+### REVERB
 
-Reverb depth (damp, size, early, mod, EQ, cuts) and shimmer pitch/tone are in PARAMS > space.
+![REVERB: an onset spike and the decaying tail with reflection dots, rails at 1 s and 2 s](doc/ui/reverb.png)
+
+The reverb tail: a filled slope whose reach is the DECAY, with reflection dots that space by
+SIZE and darken toward the tail by DAMP; shimmer motes climb off it when up. **E2** is the mix,
+**E3** the decay; the alt pair is SIZE and DAMP. **K2 WASH** swells the tail to a near-infinite
+hall; **K3 BLOOM** surges the shimmer. Reverb is JPverb's full attribute set when installed —
+early diffusion, modulation, EQ and crossovers, plus shimmer pitch/tone, are in PARAMS > reverb.
+Both mixes start at zero, so a fresh take is dry.
 
 ### MIX
 
@@ -182,20 +196,19 @@ crossfade hard to the engine or tape deck (hold for a stab, tap to latch).
 
 ### PADS
 
-![PADS: the take chopped into 8 numbered slices over a 16-step Euclidean row](doc/ui/pads.png)
+![PADS: the take chopped into 8 numbered, playable slices](doc/ui/pads.png)
 
-The window chopped into 8 slices, played polyphonically over the voice, with a 16-step
-Euclidean rhythm that re-fires the selected slice. **E2** selects the slice (this is the shared
-cursor), **K2** plays it (hold = gate, tap = fire), **E3** sets the Euclidean hit count; the
-alt pair is length and the selected slice's **pitch**. **K3** runs the sequencer (hold to
-stutter).
+The window chopped into 8 slices, played polyphonically over the voice. The strip is the take
+zoomed full width, divided into eight; the numbered cells below are the pads, the selected one
+squared and lit while sounding. **E2** selects the slice (the shared cursor), **K2** plays it
+(hold = gate, tap = fire), **E3** sets the selected slice's **pitch**; the alt pair is its
+**voice** type and the voice **release**. **K3 ROUTE** sends MIDI/grid/keyboard notes to the
+slices (the header reads `PLAY>PADS`) instead of the drone.
 
 Each slice carries a **sound-lock**: its own voice (GRAIN or SLICE) and pitch, MIDI-mappable
-and saved in the PSET. K1+E3 pitches the selected slice; the grid PADS row-6 pad (or PARAMS >
-pads) toggles its voice; the header shows the selected lock (e.g. `SLC+5`). `pad level` and
-`seq level` (PARAMS) set the pad and sequencer loudness — raise `seq level` if the sequenced
-rhythm is quiet under the drone. Route MIDI/grid notes to the slices with `pad input`
-(PARAMS > pads); the header then reads `PLAY>PADS`.
+and saved in the PSET. The header shows the selected lock (e.g. `SLC+5`); `pad level` (PARAMS)
+sets the pad loudness. On the grid, PADS row 3 finger-drums the eight slices and row 5 selects
+one to edit.
 
 ### MOTION
 
@@ -205,7 +218,9 @@ A gesture looper for the knobs. Tap **K2**, move any knobs (on any page), tap K2
 knob you touched becomes a lane, drawn as a step curve and named with its page's word. One
 playhead crosses all lanes with a dot at the value sounding now. **K3** plays / stops the loop;
 holding K2 during playback punches a replacement into only the lanes you move. **E2** selects a
-lane (the view scrolls to it), **E3** scales the loop's depth. K1+K3 erases the selected lane.
+lane (the view scrolls to it), **E3** scales the loop's depth. **K1+E2** sets the loop
+**length** in seconds — `AUTO` (the default) keeps the length you recorded; a set value retimes
+the whole loop's playback speed without losing the gesture. K1+K3 erases the selected lane.
 
 ### SCENE
 
@@ -257,11 +272,12 @@ so the transport and scenes are always in the same place:
 
 - **Row 1 — scenes**, from any page: tap to recall, hold to peek. On the SCENE page, hold the
   CAP or CLR pad and tap a slot to capture or clear.
-- **Row 2 — state strip:** take rec · tape rec · tape reverse (hold) · voice freeze · tape
-  freeze · seq run · DRY · STOP.
+- **Row 2 — state strip:** rec · tape rec · tape reverse (hold) · voice freeze · tape
+  freeze · notes→pads · DRY · STOP.
 - **Rows 3–6 — the workspace** (follows the page): normally window and tape-loop spans (hold
-  one pad, tap another to stretch a region) plus the mode radio; on PADS the 16 steps, slice
-  select, voice toggle, run/clear; on SCENE aim, the morph bar, and CAP · CLR · CHAOS · ◄.
+  one pad, tap another to stretch a region) plus the mode radio; on PADS the eight slice pads
+  (row 3), slice select (row 5), voice toggle and route (row 6); on SCENE aim, the morph bar,
+  and CAP · CLR · CHAOS · ◄.
 - **Rows 7–8 — one piano octave** (black keys over white), octave −/+ at the row-7 corners.
 
 On the Launchpad Mini MK3, pads are coloured by meaning: red = recording, green = playing,
@@ -287,22 +303,22 @@ character), guarded so a missing sc3-plugins falls back to a stock biquad. DFM1 
 bandpass mode, so BP is built from a resonant low-pass peak high-passed into a band. Separate
 cutoff, resonance, and drive (post-filter tanh saturation, bypassed at 0).
 
-**Delay / reverb.** Feedback delay with time, feedback and mix (feedback low-passed and
-soft-clipped). Reverb is JPverb's full attribute set when installed, else FreeVerb; a
-pitch-shifted, band-limited shimmer recirculates into the reverb input. The reverb runs in its
-own synth that is spawned only while its mix is up and freed at zero, so it costs no CPU when
-off. The delay and reverb mixes fade in progressively (linear in the knob).
+**Delay.** Feedback delay with time, feedback and mix (feedback low-passed and soft-clipped).
+Feedback is warped so its audible repeat-count spans smoothly from a few to near-infinite. The
+tape deck can also record the post-delay/reverb output (its `source` control), a print stage.
+
+**Reverb.** JPverb's full attribute set when installed, else FreeVerb; a pitch-shifted,
+band-limited shimmer recirculates into the reverb input. The reverb runs in its own synth that
+is spawned only while its mix is up and freed at zero, so it costs no CPU when off. The delay
+and reverb mixes fade in progressively (linear in the knob); both default to zero (dry).
 
 **Pads and sound-locks.** The window is chopped into 8 slices played polyphonically over the
 drone. Each slice has an independent voice (grain/slice) and pitch — sound-locks — that are
-real params (MIDI-mappable, PSET-persisted). `pad level` and `seq level` set the note amplitude
-for pads and the sequencer.
-
-**Sequencer.** One track, up to 16 steps, Euclidean fill, clock-synced; each active step fires
-the selected slice's sound-lock as a mono note over the drone.
+real params (MIDI-mappable, PSET-persisted). `pad level` sets the note amplitude.
 
 **Motion.** Records the parameter stream as per-parameter lanes and replays them on the 15 fps
-redraw clock (one loop, punch-in overdub, depth scaling).
+redraw clock (one loop, punch-in overdub, depth scaling, a settable loop length that retimes
+playback losslessly).
 
 **Scenes.** Eight slots of control state plus a safe (◄) state; capture, recall (immediate or
 beat/bar-quantised), morph (interpolated in each parameter's own warped space), and a bounded
@@ -324,7 +340,6 @@ lib/mtape.lua            softcut tape path and the voice/tape mix
 lib/minput.lua           MIDI and typing-keyboard note input
 lib/mgrid.lua            optional grid surface + native Launchpad Mini MK3 colour driver
 lib/mmotion.lua          gesture looper: records and replays the param stream
-lib/mseq.lua             Euclidean step sequencer driving the slice voices
 lib/mscenes.lua          scenes, morph, and the ◄ safe state
 lib/mfont.lua  lib/mparticles.lua   pixel font and pooled grain particles
 tools/uisim/             offscreen UI renderer (every page to a PNG, no hardware)

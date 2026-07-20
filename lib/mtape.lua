@@ -77,9 +77,20 @@ function M.clear_buffer()
   sc.buffer_clear()
 end
 
+-- the tape's RECORD SOURCE (cut_source, doc/ux-feedback.md §25): 0 = DRY (the
+-- raw ADC tap) .. 1 = WET (the engine's post-FX output — filter/drive/delay/
+-- reverb). the two router sends SUM at the shared softcut input, so a blend
+-- prints part raw + part processed and the tape becomes a resample / print
+-- stage. NO runaway: the engine reads only the ADC bus (context.in_b), never
+-- softcut, so eng -> cut is a one-way edge. default 0 = the classic parallel
+-- tap, so the tape behaves exactly as before until you reach for this.
+function M.set_source(v)
+  audio.level_adc_cut(1 - v)   -- dry input tap
+  audio.level_eng_cut(v)       -- processed engine output
+end
+
 function M.init_tape()
-  audio.level_adc_cut(1)   -- parallel ADC tap into softcut
-  audio.level_eng_cut(0)   -- engine does NOT feed softcut (resample is SC-side)
+  M.set_source(pget("cut_source", 0))   -- dry/processed record source (was 1/0)
   audio.level_cut(1)       -- softcut master out: persists across scripts, force up
   sc.buffer_clear()
   for v = 1, 2 do
@@ -136,6 +147,7 @@ end
 
 function M.cleanup()
   sc.poll_stop_phase()
+  audio.level_eng_cut(0)   -- don't leak a processed-source route to the next script
 end
 
 return M

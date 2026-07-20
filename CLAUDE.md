@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1251,6 +1251,60 @@ DEPLOY: ENGINE change (DFM1 filter, reverb spawn/free, res clip, record Limiter,
 amp) → rsync, SYSTEM > RESTART, **confirm count STILL 63** (no new command). Then gate:
 DFM1 LP/HP/BP character; reverb %CPU drops at rev_mix=0; DFM1 res at max is resonant
 but stable; no LOADING hang / SC-tab error.
+
+Forty-ninth change — **S23 Batch A: play-test fixes (Lua-only, fingerprint STAYS 63,
+renders verified, untested on device)** — from a transcribed voice memo (doc/ux-feedback.md
+§19–30; full staging doc/spec.md §S23). User directive: **NO new features** ("make this
+thing we have good, it's hard enough") — every item is a fix/rework/removal. Three forks were
+resolved WITH the user: remove the sequencer · STOP truly halts (Batch B, engine) · motion
+loop-length now. Save + reload (NO restart — the 48th batch's engine RESTART for count 63 is
+still separately pending).
+* **A1 — SPACE split → DELAY + REVERB.** PAGES 9→**10** (re-spaces every page's header dots,
+  so the whole gallery + suite regenerate). body_SPACE split into body_DELAY (echo taps) +
+  body_REVERB (tail); shared spc_frame/spc_onset helpers. grp labels de-"space -".
+* **A2 — delay feedback range.** `delay_fb` 0..0.95-linear → a 0..1 knob curved through
+  `fb_curve(v)=0.98·v^0.6` (shared via ctx.delay_fb_curve so the page taps stay honest): a
+  smooth few→many(10+)→near-infinite sweep, no top-end cliff. INF throw sets the knob to 1.
+* **A3 — deeper DELAY/REVERB.** The split doubled each effect's encoder complement (DELAY =
+  mix/time/fb, REVERB = mix/size/decay/damp — fb/size/damp NEWLY on-encoder; the other 11
+  JPverb params stay in PARAMS + WASH/BLOOM). Made rev_size/rev_damp READ on the page (the
+  reflection dots space by size, darken by damp). No new params — the user's own "separate
+  pages = more keys" resolution.
+* **A4 — tape captures FX output.** `cut_source` (grp_tape 8→9, 0=DRY..1=WET, TAPE K1+E3
+  replacing @loop_move). `Mtape.set_source` drives level_adc_cut(1-v)+level_eng_cut(v) (they
+  SUM at softcut in) so the tape prints dry input / processed output / a blend — the §25
+  resample stage. init_tape reads the param (was hardcoded adc1/eng0); cleanup zeroes eng_cut
+  (no leak). No runaway (engine reads only the ADC bus). "SRC WET" body flag = never a hidden
+  mode. Routing-math harness (DRY/WET/blend/cleanup) + TAPE_WET shot.
+* **A5 — motion loop length.** `motion_len` (grp_motion 4→5, seconds, 0=AUTO, MOTION K1+E2).
+  Splits timing into rec_len (natural = event timebase) + loop_len (playback length); playback
+  reads events through `src_of(ph)=ph·rec_len/loop_len` — IDENTITY when not retimed (AUTO is
+  bit-for-bit pre-A5, MOTION renders byte-identical). >0 retimes SPEED losslessly; overdub +
+  the page step-curve also key off rec_len. Floored 0.5s; pre-set honored at finalize.
+  17-assertion harness (AUTO round-trip lossless, retime up/down, floor).
+* **A7 — killed the blinking TAKE window** (§29): removed the armed full-width blink box; the
+  sweeping write head + big seconds + IN meter + header R still say REC.
+* **A8 — read vs write head** (§30): the READ head is now drawn LAST (never hidden) and a
+  distinct SHAPE — dashed column + caret ▽ above the strip — vs the WRITE head's solid line +
+  comet-tail. Distinguishable even when they cross.
+* **A6 — sequencer REMOVED** (§28). Deleted lib/mseq.lua (amalgamate 9→8); dropped seq_play/
+  seq_div/seq_euclid/seq_len/seq_level (grp_seq gone) + all wiring (include/ctx.seq/init/
+  cleanup/body step-row/header ▸/grid step rows). KEPT the slice selector: **`seq_slice` id
+  UNCHANGED** (ids are never renamed — PMAP/PSET survive; display name→"slice", moved into
+  grp_voice 7→8; still the sole writer of ctx.pad_cursor). PADS is now a pure slice surface:
+  ENC_MAP = seq_slice/pad_voice/pad_pitch/voice_rel (freed slots → per-slice sound-lock
+  encoders); K3 RUN→ROUTE (pad_input); no page erase (K1+K3 stays global DRY). Grid PADS:
+  row 3 = 8 slice play-pads (finger-drum, ids 2600+), row 5 select, row 6 voice/route;
+  state-strip x6 seq-run→pad_input. mscenes: 3 seq params dropped; seq_slice EXCLUDED from
+  scenes (a UI cursor, like scene_slot/motion_lane).
+* **docs:** whole doc/ui gallery regenerated at 4x (delay/reverb replace space*; take/pads/
+  every-page dots); README → ten stations, DELAY+REVERB, PADS play-surface, de-sequenced;
+  redesign.md flagged "superseded in part by S23".
+VERIFIED: luac clean, source==dist (47 shots), A5 + A4 harnesses pass, SCENE capture/recall/
+morph still exercised byte-clean, no mseq refs remain. **BATCH B (deferred, engine-gated):**
+B1 true STOP (gate the play-voice + tape transport + record head, intended arity-only → still
+63), B2 erase reliability + clear kills FX tails/regen. Needs a device session: rsync, SYSTEM
+> RESTART, confirm count 63, then walk the §S23 gate.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
