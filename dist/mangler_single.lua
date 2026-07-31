@@ -4165,12 +4165,15 @@ local function draw_header()
     ptext("TF", x, 1, 1, 10)
     x = x + 12
   end
-  -- path dots, top-right: uniform spacing (first x=81, pitch 5, current page
-  -- a rounded 4x4 block). the wider current dot nudges every dot after it 2px
-  -- right so it gets matching breathing room.
+  -- path dots, top-right: uniform spacing, current page a rounded 4x4 block.
+  -- the wider current dot nudges every dot after it 2px right so it gets
+  -- matching breathing room. the row is RIGHT-ANCHORED to end 2px clear of
+  -- the screen edge whatever the page count (a fixed left origin cropped
+  -- the last dot once the count reached twelve).
   local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
+  local dx0 = 126 - ((#PAGES - 1) * dpitch + 4)
   for i = 1, #PAGES do
-    local dx = 81 + (i - 1) * dpitch + (i > page and 2 or 0)
+    local dx = dx0 + (i - 1) * dpitch + (i > page and 2 or 0)
     if i == page then
       screen.level(15)
       screen.rect(dx, 3, 4, 4)
