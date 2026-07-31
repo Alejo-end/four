@@ -512,34 +512,19 @@ end
 local function label_total(l, val) return text_w(l, 1) + 3 + (val and text_w(val, 1) or 0) end
 local function flabel_r(id, rx, minx)
   local turning = is_turning(id)
-  local val
-  if id and (turning or SELECTOR_IDS[id]) then val = fmt_value(id) end
-  -- the knob being ADJUSTED keeps its FULL word next to the value; the
-  -- pocket below hides whatever that overlaps, and everything returns when
-  -- the swell ends. selectors reading at rest keep the SHORT form because
-  -- they sit beside the key words permanently, with no pocket.
-  local full = turning or not val
+  -- the footer layout is ALWAYS the at-rest layout: a turning knob only
+  -- brightens its word, never widens or moves it, so the neighbor word
+  -- stays exactly where it was. the live value shows in the big readout
+  -- box instead (draw_footer). selectors keep their small value at rest.
+  local val = id and SELECTOR_IDS[id] and fmt_value(id) or nil
+  local full = not val
   local lab = label_for(id, full)
   local lvl = turning and 15 or 6
   local x = rx - label_total(lab, val)
-  if full and not turning and minx and x < minx then
-    -- at rest a full word that would cross the key words drops to SHORT
+  if full and minx and x < minx then
+    -- a full word that would cross the key words drops to SHORT
     lab = label_for(id, false)
     x = rx - label_total(lab, val)
-  elseif turning and x < 2 then
-    -- while turning the pocket handles overlap; abbreviate only if the
-    -- full word plus value would run off the screen itself
-    lab = label_for(id, false)
-    x = rx - label_total(lab, val)
-  end
-  if turning and val then
-    -- the setting being adjusted owns its ground: knock out a pocket first,
-    -- so a long value never collides with the key words (or anything else)
-    -- underneath — they vanish for the swell and come back after. (the old
-    -- top-right readout's pocket rule, applied to the footer row.)
-    screen.level(0)
-    screen.rect(x - 3, 56, rx - x + 5, 8)
-    screen.fill()
   end
   ptext(lab, x, FY, 1, lvl)
   screen.level(lvl)
@@ -547,6 +532,27 @@ local function flabel_r(id, rx, minx)
   screen.fill()
   if val then ptext(val, x + text_w(lab, 1) + 3, FY, 1, lvl) end
   return x
+end
+
+-- the big readout: while a knob turns, its value draws at double size in a
+-- framed black box just above the footer, right-anchored. the footer never
+-- changes shape; this box carries the number and vanishes with the swell.
+local function draw_big_value()
+  local tid
+  local e2, e3 = C.enc_param(2), C.enc_param(3)
+  if is_turning(e2) then tid = e2
+  elseif is_turning(e3) then tid = e3 end
+  if not tid then return end
+  local v = fmt_value(tid)
+  local w = text_w(v, 2) + 9
+  local bx = 126 - w
+  screen.level(0)
+  screen.rect(bx, 41, w + 2, 15)
+  screen.fill()
+  screen.level(12)
+  screen.rect(bx, 41, w + 2, 15)
+  screen.stroke()
+  ptext(v, bx + 5, 44, 2, 15)
 end
 
 -- footer: K2 K3 | E2· E3· — four quiet words that never lie about the keys
@@ -585,6 +591,7 @@ local function draw_footer()
   end
   local e3x = flabel_r(C.enc_param(3), 126, keys_right)
   flabel_r(C.enc_param(2), e3x - 9, keys_right)
+  draw_big_value()
 end
 
 -- ============================================================================
@@ -1570,6 +1577,12 @@ end
 -- ORBIT: the eight slots in a row, the wanderer travelling from where it
 -- last parked toward the current target. filled slots bright, empties dim,
 -- target bracketed. truth rules: the traveller only moves while running.
+-- the trail is a preallocated ring of recent positions that fades with
+-- age; it freezes when the orbit stops, showing the path it took.
+local ORB_TRAIL = 12
+local orb_trail = {}
+for i = 1, ORB_TRAIL do orb_trail[i] = -1 end
+local orb_head = 0
 local function body_ORBIT(frame)
   local on = pget("orbit_on", 0) == 1
   local target = clamp(floor(pget("scene_slot", 1) + 0.5), 0, 8)
@@ -1599,6 +1612,19 @@ local function body_ORBIT(frame)
   local px = 6 + (tx - 6) * amt
   screen.level(3)
   screen.rect(6, 42, 116, 1)
+  screen.fill()
+  if on and (frame % 2) == 0 then
+    orb_head = orb_head % ORB_TRAIL + 1
+    orb_trail[orb_head] = px
+  end
+  for i = 1, ORB_TRAIL do
+    local t = orb_trail[i]
+    if t >= 0 then
+      local age = (orb_head - i) % ORB_TRAIL
+      screen.level(max(1, 6 - floor(age / 2)))
+      screen.rect(clamp(t, 2, 124), 42, 1, 1)
+    end
+  end
   screen.fill()
   screen.level(on and 15 or 6)
   screen.rect(clamp(px, 2, 124), 40, 3, 5)
@@ -1659,6 +1685,13 @@ local function body_EROSION(frame)
   screen.level(15)
   screen.rect(hx, 20, 1, 22)
   screen.fill()
+  -- progress through the CURRENT generation (the erosion head runs at one
+  -- pass per window length; eros_acc tracks it exactly)
+  if e > 0 then
+    screen.level(5)
+    screen.rect(4, 45, floor(clamp(eros_acc, 0, 1) * 120), 1)
+    screen.fill()
+  end
   ptext_r("GEN " .. eros_gen, 126, 12, 1, e > 0 and 13 or 5)
   if e > 0 and (frame % 8) < 5 then chip("ERODING", 2, 12) end
 end
@@ -1774,12 +1807,24 @@ local function draw_header()
   end
 end
 
+-- idle dim: after two minutes without a key or encoder touch every level is
+-- cut to keep the OLED from burning the static chrome in; the first touch
+-- restores full brightness. one closure, made once.
+local orig_level, dim_level
 function M.redraw()
+  if orig_level == nil then
+    orig_level = screen.level
+    dim_level = function(l)
+      orig_level(l and l > 0 and max(1, floor(l * 0.4)) or 0)
+    end
+  end
+  screen.level = C.idle_dim and dim_level or orig_level
   screen.clear()
   draw_header()
   draw_body()
   draw_footer()
   screen.update()
+  screen.level = orig_level
 end
 
 function M.init(ctx)

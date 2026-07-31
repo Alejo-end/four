@@ -155,6 +155,8 @@ local ctx = {
   -- ui state
   page = 1,
   alt = false,               -- K1 held
+  last_input = 0,            -- frame of the last key/encoder touch (idle dim)
+  idle_dim = false,
   held = {},                 -- held[n] = true while key n is down (page-independent)
   frame = 0,                 -- redraw frame counter (drives the REC blink)
   flash_id = nil,            -- transient top-right value readout
@@ -1540,6 +1542,7 @@ function init()
     while true do
       clock.sleep(1 / FPS)
       ctx.frame = ctx.frame + 1
+      ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
       sync_delay_time()    -- tempo-follow the delay (writes only on change)
       Mpages.erosion_tick()  -- count loop passes while the take erodes
       Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
@@ -1584,6 +1587,7 @@ end
 local key_state = { [2] = {}, [3] = {} }
 
 function enc(n, d)
+  ctx.last_input = ctx.frame
   if n == 1 then
     if ctx.alt then
       -- K1+E1 = the everything-knob: morph toward the selected scene from
@@ -1616,6 +1620,7 @@ function enc(n, d)
 end
 
 function key(n, z)
+  ctx.last_input = ctx.frame
   if n == 1 then
     ctx.alt = (z == 1)
     -- releasing K1 ABORTS a pending K1+K3 erase. the arc is gated on K1, so
