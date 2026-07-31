@@ -21,7 +21,7 @@
 --                  stretch / spectral
 --
 -- the drone defaults to CLEAN PLAY — a straight loop of your take, exactly as
--- recorded. GRAIN / WARP / PV are mangling modes you switch on from STRETCH.
+-- recorded. GRAIN / WARP / PV are mangling modes you switch on from VOICE.
 --
 -- PLAY IT (the redesign, doc/redesign.md)
 --   TAKE    K2, play a phrase, K2 — the window snaps to your take and loops
