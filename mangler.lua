@@ -1437,9 +1437,20 @@ local function init_params()
   params:set_action("scene_safe_restore", function(v)
     if v == 1 then Mscenes.safe_restore() end
   end)
+  -- chaos: HOLD it for a bounded random throw, release to land back on the
+  -- safe state (it marks one for you if you never did). a footswitch or grid
+  -- pad you can lean on — the release is what makes it safe to press.
+  params:add_binary("chaos_throw", "chaos throw", "momentary", 0)
+  params:set_action("chaos_throw", function(v)
+    if v == 1 then Mscenes.chaos() else Mscenes.chaos_release() end
+  end)
+
   -- ORBIT: the instrument wanders between your captured scenes by itself,
   -- one partial morph leg at a time, never fully arriving. all Lua, driven
   -- through the same morph engine and params as a hand on the knob.
+  -- (these groups MUST sit after grp_scene's last param, chaos_throw — a
+  -- group's declared count claims the params that FOLLOW it, and an insert
+  -- mid-group silently corrupts the whole PARAMS menu on device.)
   params:add_group("grp_orbit", "orbit", 3)
   params:add_binary("orbit_on", "orbit run", "toggle", 0)
   params:set_action("orbit_on", function(v) Mscenes.orbit_set(v == 1) end)
@@ -1463,14 +1474,6 @@ local function init_params()
   end)
   add_eng_control("wear", "wear",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
-
-  -- chaos: HOLD it for a bounded random throw, release to land back on the
-  -- safe state (it marks one for you if you never did). a footswitch or grid
-  -- pad you can lean on — the release is what makes it safe to press.
-  params:add_binary("chaos_throw", "chaos throw", "momentary", 0)
-  params:set_action("chaos_throw", function(v)
-    if v == 1 then Mscenes.chaos() else Mscenes.chaos_release() end
-  end)
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record

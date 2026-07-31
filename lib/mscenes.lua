@@ -368,6 +368,11 @@ end
 
 function M.capture(slot)
   if is_back(slot) then return M.safe_capture() end
+  -- while the orbit runs it keeps re-aiming the selector, so a no-slot
+  -- capture (SCENE K3, the scene_capture param) would land in whatever
+  -- slot the wander just targeted and overwrite a scene it navigates by.
+  -- redirect to the first empty slot; an EXPLICIT slot stays explicit.
+  if slot == nil and M.orbit_running then return M.capture_free() end
   slot = slot_idx(slot)
   local t, n = snapshot_ids(SCENE_RECALL_IDS)
   M.slots[slot] = t
@@ -646,6 +651,7 @@ end
 
 function M.orbit_set(on)
   orbit.on = on
+  M.orbit_running = on   -- read by capture(); declared here, order-safe
   if on then
     orbit_park()               -- depart from wherever we stand right now
     orbit_new_leg()
