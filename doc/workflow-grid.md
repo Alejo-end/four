@@ -1,5 +1,9 @@
 # Workflow: with a grid (optional 8×8 surface)
 
+> **HISTORICAL** — predates the grid spine redesign (NU-4) and the S23 PADS
+> layout. The current grid reference is the README's Grid section. Kept for
+> the ideas, not the pad maps.
+
 A grid is **never required** — everything below has a keys+encoders route
 (see `doc/workflow-standalone.md`). But if one is attached, mangler grows a
 pad surface for the parts of the instrument that want *instant* hands:

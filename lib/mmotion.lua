@@ -1,12 +1,11 @@
--- mmotion: the gesture looper (S16) — a fourth driver for the params.
+-- mmotion: the gesture looper — a fourth driver for the params.
 --
 -- keys/encoders/MIDI are three drivers of the single source of truth (the
 -- params). this module adds a fourth that RECORDS the param stream and
--- REPLAYS it: a modulation loop pedal for a 3-knob instrument. record a
--- filter sweep and it loops hands-free while you granulate on top; overdub a
--- delay-mix swell onto a second lane; each param you move becomes its own
--- automation lane. no engine change — it just re-issues params:set, so the
--- fingerprint is untouched and it can never brick loading.
+-- REPLAYS it: a modulation loop pedal for a 3-knob instrument. each param you
+-- move becomes its own automation lane, overdubbed independently. no engine
+-- change — it just re-issues params:set, so the fingerprint is untouched and
+-- it can never brick loading.
 --
 -- data model: one loop, per-param lanes.
 --   loop_len   loop length in FRAMES (the 15fps redraw grid is the timeline;
@@ -35,6 +34,8 @@ local min, floor = math.min, math.floor
 local C            -- shared ctx, bound at init
 local pget, clamp, FPS
 local MAX_LEN      -- cap the loop at 60s so a forgotten arm can't run away
+local MIN_LEN      -- floor on a SETTABLE loop (0.5s) so a tiny motion_len can't
+                   -- collapse the loop to a single frame
 
 -- the params whose motion is recordable — the performance / mangle knobs and
 -- toggles, in a stable order (first-touch lane order follows it). NOT here:
@@ -50,16 +51,26 @@ local MOTION_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_freeze",
   "tape_reverse",
   "cutoff", "resonance", "drive", "filt_type",
-  "delay_time", "delay_fb", "delay_mix",
+  "delay_time", "delay_fb", "delay_mix", "delay_sync",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
-  "voice_atk", "voice_rel",
+  "voice_atk", "voice_rel", "pad_level",
+  "cut_source",
+  -- the scene morph knob. recording THIS records a whole-instrument
+  -- sweep in ONE lane — mscenes re-derives every param from it on replay
+  -- (and tells us it did, via M.account, so the sweep never punches forty
+  -- lanes of its own). appended, so existing lane order is unchanged.
+  "scene_morph_amt",
 }
 
 local M = {
-  loop_len = 0,     -- frames; 0 = empty (no take yet)
-  playhead = 0,     -- current loop frame while playing
+  loop_len = 0,     -- frames; 0 = empty (no take yet). the PLAYBACK length —
+                    -- motion_len may retime it away from the recorded length.
+  rec_len = 0,      -- the natural recorded length = the EVENT timebase. events
+                    -- are stored against this; playback reads them through a
+                    -- rec_len/loop_len ratio, so retiming is lossless.
+  playhead = 0,     -- current loop frame while playing (0 .. loop_len)
   lane_ids = {},    -- ordered active param ids (first-touch order)
   lanes = {},       -- lanes[id] = { f, v, n, cur, last_fire }
 }
@@ -86,7 +97,23 @@ local function wipe()
     ids[i] = nil
   end
   M.loop_len = 0
+  M.rec_len = 0
   M.playhead = 0
+end
+
+-- motion_len (seconds) -> a settable playback length in frames, or nil for
+-- AUTO (0 = use the natural recorded length). clamped to [0.5s, 60s].
+local function len_frames(secs)
+  if not secs or secs <= 0 then return nil end
+  return clamp(floor(secs * FPS + 0.5), MIN_LEN, MAX_LEN)
+end
+
+-- map a playback frame (loop_len timebase) to the event timebase (rec_len).
+-- IDENTITY when the loop isn't retimed, so default playback is bit-for-bit
+-- the pre-A5 behavior (loop_len == rec_len -> src == playhead, integer).
+local function src_of(ph)
+  if M.loop_len == M.rec_len then return ph end
+  return floor(ph * M.rec_len / M.loop_len)
 end
 
 -- baseline: remember every recordable param's current value, so the poll only
@@ -130,6 +157,15 @@ local function capture_poll(offset)
   end
 end
 
+-- another driver (a scene recall or a morph sweep) is about to move `id` itself: fold the
+-- resulting value into our baseline so the next poll doesn't read it as a
+-- live hand on a knob. this is the same trick playback uses on its own
+-- writes — a scene recall or a morph sweep is a JUMP, not a gesture, and
+-- must never punch itself into a lane. no-op for ids we don't track.
+function M.account(id)
+  if last_val[id] ~= nil then last_val[id] = params:get(id) end
+end
+
 -- ===========================================================================
 -- transport — driven by the motion_rec / motion_play param actions
 -- ===========================================================================
@@ -148,10 +184,12 @@ function M.set_armed(on)
     end
   else
     if M.loop_len == 0 then
-      -- finalize the first pass: its length becomes the loop length
+      -- finalize the first pass: its natural length is the EVENT timebase;
+      -- motion_len (>0) sets the PLAYBACK length, 0 = AUTO (= natural).
       local elapsed = C.frame - rec_start_frame
       if #M.lane_ids > 0 and elapsed >= 2 then
-        M.loop_len = min(elapsed, MAX_LEN) + 1  -- +1 so the last frame plays
+        M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
+        M.loop_len = len_frames(pget("motion_len", 0)) or M.rec_len
         M.playhead = 0
         reset_cursors()
         if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
@@ -170,6 +208,19 @@ function M.set_playing(on)
     M.playhead = 0
     reset_cursors()
   end
+end
+
+-- motion_len (K1+E2 on the MOTION page) retimes the loop's PLAYBACK length in
+-- seconds; 0 = AUTO (the natural recorded length). retiming changes the loop's
+-- SPEED, not the stored gesture — events live in the rec_len timebase and are
+-- read through src_of(), so you can dial the length up and down losslessly.
+-- resettles from the top so the new length takes hold cleanly. no-op until a
+-- loop exists (before that the finalize branch reads motion_len).
+function M.set_len(secs)
+  if M.rec_len == 0 then return end
+  M.loop_len = len_frames(secs) or M.rec_len
+  M.playhead = 0
+  reset_cursors()
 end
 
 -- ===========================================================================
@@ -215,7 +266,9 @@ function M.tick()
       local offset = C.frame - rec_start_frame
       if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
     else
-      capture_poll(M.playhead)                  -- overdub: at the loop position
+      -- overdub: punch in at the loop position, mapped to the EVENT timebase so
+      -- new events line up with the old ones even when the loop is retimed
+      capture_poll(src_of(M.playhead))
     end
   end
   -- 2) playback: advance the playhead and fire each lane's due events
@@ -227,7 +280,7 @@ function M.tick()
       -- an overdub that ran a full loop auto-disarms (keeps events sorted)
       if armed then params:set("motion_rec", 0) end
     end
-    local ph = M.playhead
+    local src = src_of(M.playhead)       -- read the lanes in their own timebase
     -- motion_depth (0..1) scales continuous lanes toward their first value —
     -- a global "amount" for the whole loop. discrete params pass through.
     local depth = pget("motion_depth", 1)
@@ -238,7 +291,7 @@ function M.tick()
       local L = M.lanes[id]
       local n = L.n
       local cur = L.cur
-      while cur <= n and L.f[cur] <= ph do
+      while cur <= n and L.f[cur] <= src do
         local v = L.v[cur]
         if blend then
           local p = params:lookup_param(id)
@@ -249,7 +302,7 @@ function M.tick()
         end
         params:set(id, v)
         last_val[id] = v      -- account for our own change so the poll skips it
-        L.last_fire = ph
+        L.last_fire = M.playhead
         cur = cur + 1
       end
       L.cur = cur
@@ -265,6 +318,7 @@ function M.init(ctx)
   C = ctx
   pget, clamp, FPS = ctx.pget, ctx.clamp, ctx.FPS
   MAX_LEN = 60 * FPS
+  MIN_LEN = math.max(4, floor(FPS * 0.5))     -- a settable loop is >= 0.5s
 end
 
 function M.cleanup() end   -- nothing to tear down (no wrapped methods anymore)

@@ -167,3 +167,105 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
   question, low priority.
 - Watch whether the LEVEL `IN=0`/`OUT=0` resets feel right on hardware
   (system params are dB tapers there; 0 = unity).
+
+---
+
+# UX feedback — 2026-07-17 (voice memo → whisper transcript)
+
+Second on-device walkthrough, recorded after the NU nine-station redesign and
+the S21/S22 engine changes shipped. Source: a 22-min voice memo transcribed to
+`/Users/alejandrodeleon/Downloads/transcript.txt` (line refs below). Points
+continue the global numbering.
+
+**Overarching directive:** *no new features* — "no more features now… make this
+thing we have good, it's hard enough" (l.122-123). Everything below is a fix, a
+rework, or a removal. All PLANNED (nothing implemented yet).
+
+## Bugs — fix first
+
+19. **Delete/erase doesn't actually clear the take.** The CLR / K1+K3 erase
+    gesture animates ("looks cool") but the recording isn't wiped, and recording
+    over it doesn't replace it either. "The delete looks cool but it doesn't
+    fucking work… deleting is still like an issue" (l.92-100). → PLANNED: trace
+    the erase path on device (K1+K3 hold → arc threshold → `ctx.clear_recording`
+    → engine `clear`); an animation that fires while the buffer stays audible
+    means either the arc-threshold action never reaches `engine.clear`, or
+    `wave[]`/`take_len` aren't reset so it only *looks* uncleared. Confirm a
+    re-record replaces the buffer.
+
+20. **STOP only mutes — it doesn't stop.** `stop_all` chokes the deck levels but
+    mode / tape / heads keep running underneath, so it reads as mute, not stop.
+    "I wanted to stop it not to mute it" (l.78-81). → PLANNED: decide whether
+    STOP should truly halt playback (pause the play voice + tape transport) or
+    stay a click-free level-choke; if it stays a choke, make the page honest that
+    it's muted, not stopped.
+
+## SPACE page — undo the delay+reverb merge
+
+21. **Split delay and reverb back into two separate pages.** Merging them onto
+    one SPACE page was a regression — "just make it a separate thing again, it
+    was better before" (l.4-5, 59-60). There are enough pages/keys now.
+
+22. **Deeper control on delay and reverb.** The settings are too simple — "these
+    settings are too simple for me… my control is not satisfied" → "deeper
+    control for either reverb or both, and separate pages because we have more
+    keys" (l.63-64).
+
+23. **Fix the delay feedback range.** At 100% it's only ~4 barely-audible
+    repeats, then it jumps straight to infinite with nothing usable between; the
+    user wants ~10+ repeats / "tons more repeats" before infinity (l.53-59). The
+    animation is *accurate to the sound* — the fault is the feedback param's
+    range/curve, not the drawing (l.57-58).
+
+24. **Make the delay/reverb controls legible.** Unclear what "echo 100%" means or
+    whether the time knob acts on the delay or the reverb (l.45-52). Splitting the
+    pages (21) + clear labels should resolve most of this.
+
+## Tape — a resample stage, not a second recorder
+
+25. **Tape should capture the OUTPUT of the FX chain, not the raw input.** So you
+    can "print" the mangled sound onto the tape loop and mangle it further, and
+    mix between the dry input and the processed signal — tape as a resample /
+    filter stage in the chain (l.67-76). (The io record path already has a
+    `resample` in↔out control; this is about routing the softcut/tape capture
+    from the post-FX output.)
+
+## Motion page — much more control
+
+26. **Controllable, legible motion loop length.** The "24.4 s" loop time is
+    confusing and unsettable — it's the whole recording, and its meaning shifts
+    with playback speed (l.82-114). Add a loop-time / window control (the alt
+    encoder slot is free — "you can put it on the alt page, there's nothing
+    there," l.115).
+
+27. **Multiple motion loops without overwriting.** Recording a second motion
+    forces deleting the first; the user wants to keep more than two so they can
+    layer without doing everything at once (l.116-119). "We need a lot more
+    control on the motion page to make it usable" (l.119).
+
+## Sequencer — rework or remove
+
+28. **The single-line sequencer is the least-used, least-understood part —
+    rethink it or cut it.** "Maybe take it out completely… it's the part I use the
+    least because I don't know how to use it" (l.29-42). If kept, it should be its
+    *own* thing and sequence *pad / drone* sounds rather than percussive hits —
+    "not a percussive idea but a way to sequence the different kinds of pad
+    sounds / drones" (l.34-37).
+
+## UI polish
+
+29. **Kill the blinking TAKE window** — "the blinking window should be gone… I
+    don't like the fucking blinking, it's way too much" (l.97-98).
+
+30. **Clarify playback head vs record head on TAKE.** They overlap and read as
+    misleading — "the playback head is behind the recording head which you don't
+    see… it's misleading" (l.102-104).
+
+## Praised — do not touch
+
+- Voice **pitch** ("awesome… sounds good", l.65), **recording** ("fine", l.66),
+  the **mix page** ("better… okay", l.77), and the **big elapsed-seconds
+  numbers** ("cool", l.98-99). The low-fi character is accepted as the norns'
+  sound profile (l.1-3). **Scenes** are now understood and liked as manual
+  checkpoint / version-control (l.6-26); no change asked. Open to verify, not a
+  to-do: granular depth ("I need to test it", l.67).

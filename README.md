@@ -1,177 +1,159 @@
 # mangler
 
-**A live stereo sampler and mangler for [norns](https://monome.org/norns/).** (norns is a
-small open sound computer from monome.) It is for anyone who wants to record live gear and
-warp it on the fly: plug in a synth, a drum machine, or anything else that runs at line
-level, record a phrase, and it loops straight back the way you played it. From there you can
-granulate it, time-stretch it, chop it into playable slices, and run it through a filter,
-delay and reverb.
+A live stereo sampler for [norns](https://monome.org/norns/). Record anything line level,
+loop it back exactly as recorded, then process it: time stretch, granular, tape varispeed,
+filter, delay, reverb, playable slices, a gesture looper, scene morphing, and controlled
+decay. Three keys and three encoders run everything. A grid is optional. Every parameter is
+MIDI mappable.
 
-You drive the whole thing with three keys and three encoders, so you never need a grid. If
-you have one you can plug it in for a pad surface.
+Built and tested on a norns shield XL with a Raspberry Pi 4. Older hardware is untested.
 
-![Signal flow: audio comes in, gets recorded, feeds the drone and pads source stage, then passes through filter, delay and reverb on the way out. The effects all start dry.](doc/signal-flow.svg)
+![Signal flow](doc/signal-flow.svg)
 
-> **Status:** staged and still moving. The engine is built and tested in gated stages on real
-> hardware, so features can still change between versions. See [CLAUDE.md](CLAUDE.md) for the
-> current stage and the full build log.
-
-**Contents:** [Requirements](#requirements) · [Play it in 60 seconds](#play-it-in-60-seconds) · [The pages](#the-pages) · [Controls](#controls-3-keys-3-encoders) · [Playing notes](#playing-notes) · [Install](#install) · [Under the hood](#under-the-hood)
+Status: in active development, built in stages that are each verified on hardware.
+[CLAUDE.md](CLAUDE.md) holds the build log, [doc/spec.md](doc/spec.md) the engine spec,
+[doc/engine-map.md](doc/engine-map.md) explains every engine decision in plain words.
+Rendered screens for every page are in `doc/ui/`.
 
 ## Requirements
 
-- A **norns** running current software. Built and tested on a **norns shield XL on a
-  Raspberry Pi 4**. Stock norns and older Pis are untested. They may work, but the CPU budget
-  is tuned for the Pi 4, so treat anything else as unsupported for now.
-- SuperCollider, which ships with norns and runs the engine.
-- **Optional:** a MIDI controller, a grid (a monome grid, or a Launchpad / APC mini through
-  [midigrid](https://github.com/miker2049/midigrid)), and two plugins for the fuller sound,
-  [sc3-plugins](https://github.com/supercollider/sc3-plugins) (JPverb reverb) and
-  [mi-UGens](https://github.com/v7b1/mi-UGens) (MiClouds granular). All optional, and mangler
-  runs fine without any of them.
-
-## Play it in 60 seconds
-
-First time here? [Install](#install) takes about two minutes. Once it is on the norns:
-
-1. Plug in your source. Go to **LEVEL** and set IN so the meters peak just below the top.
-2. Record. On **REC**, tap **K2**, play a phrase, then tap **K2** again. The window snaps to
-   your take and starts looping it. It plays back dry, exactly the sound you just recorded.
-3. Shape it. The drone starts on **PLAY**, a clean loop of your sample. Switch to **GRAIN**,
-   **WARP** or **PV** on **STRETCH** when you want to mangle it. **WINDOW** tightens the
-   slice and **GRAIN** tunes the granular character.
-4. Add effects when you want them. **DELAY** and **REVERB** both start at zero mix, so they
-   are off. Turn E2 up on each page to dial them in.
-5. Play it polyphonically. On **PADS** (press K1+K3 to switch to `NOTES>PADS`), MIDI notes
-   and grid pads trigger 8 slices of your recording on top of the drone. Chop it up, or play
-   chords.
-6. Loop your hands. On **MOTION**, tap **K2** and move any knob — a filter sweep, a delay
-   swell — then tap **K2** again. It records the *movement* and plays it back on a loop, so
-   your hands are free to layer another one on top.
-
-> **Dry by default.** A fresh recording is your sample, untouched. The filter is wide open,
-> drive is a true bypass at zero, and delay and reverb stay silent until you turn them up.
-> You build the sound by adding to it, never by taking away what was already there.
-
-Longer walkthroughs: [standalone](doc/workflow-standalone.md) and [with a grid](doc/workflow-grid.md).
-
-## The pages
-
-You do not need to learn all of these to start. The quickstart above uses a handful of them.
-This is the reference for when you want the rest.
-
-Every frame below is real output, drawn by the offscreen renderer in `tools/uisim/` over a
-scripted take. The layout is the same on every page: a small title that never disappears, the
-armed-status flags next to it, page dots in the top right, and a footer that mirrors the
-panel. The footer shows the two knobs (they fill in solid while you turn them), the live
-E2/E3 values, and the K2/K3 pills.
-
-![WINDOW page showing the recorded buffer as a waveform with slice handles marking the loop start and end](doc/ui/window.png)
-
-| | |
-|---|---|
-| ![REC page showing the recording buffer with the write head sweeping across it as it captures](doc/ui/rec.png)<br>**REC** shows the buffer with the write head laying down material. When it is empty it says `EMPTY - K2 REC`. Turn up **regen** (E3 + K1) and the loop feeds on its own processed output — a slow self-resampling decay, the sampler mangling itself. | ![MIX page showing a crossfader between the engine level and the tape deck level](doc/ui/mix.png)<br>**MIX** crossfades the engine against the tape deck. |
-| ![GRAIN page showing the granular cloud editor, drawn as the currently selected Clouds mode](doc/ui/grain.png)<br>**GRAIN** is the granular editor. The drawing is whatever Clouds mode you pick with K3: GRANULAR cloud, STRETCH windows, LOOP with echoes, or SPECTRAL columns. K2 banks the params. | ![LEVEL page showing stereo input and output meters with peak-hold marks and clip lamps](doc/ui/level.png)<br>**LEVEL** has stereo I/O meters with peak-hold and clip lamps. |
-| ![FILTER page showing the filter frequency response curve with a node dot marking the cutoff](doc/ui/filter.png)<br>**FILTER** draws the engine's real LP/HP/BP response, with a node dot at the cutoff. | ![REVERB page showing the reverb decay tail as an onset spike followed by reflections fading over time](doc/ui/reverb.png)<br>**REVERB** shows the decay tail: an onset, then reflections dying off over time, with the tail length tracking the decay. K2 banks the full JPverb controls, including shimmer, which pitch-shifts the feedback into a rising octave halo. |
-| ![DELAY page showing bouncing arcs, one per repeat, that shrink as feedback rises](doc/ui/delay.png)<br>**DELAY** draws one bounce per repeat, and the arcs shrink as feedback rises. Starts dry. | ![TAPE page showing two tape reels spinning at the current playback rate](doc/ui/tape.png)<br>**TAPE** is a parallel loop deck. The reels spin at the real playback rate. |
-| ![PADS page showing the recording split into 8 slices up top with 8 pad buttons below, one per slice](doc/ui/pads.png)<br>**PADS** shows your recording up top split into 8 slices, with 8 pad buttons below, one per slice (GRN for a cloud, SLC for a slice, lit while sounding, with a cursor). The header reads `PLAY>PADS` or `PLAY>DRONE` (toggle with K1+K3). | ![STRETCH page showing the selected drone engine drawn as its own waveform texture](doc/ui/stretch-play.png)<br>**STRETCH** picks the drone engine: PLAY (a clean loop, the default), GRAIN, WARP or PV. Each one draws its own texture, and goes flat when it is off. |
-| ![MOTION page showing the gesture looper: a loop timeline up top with a sweeping playhead, and one lane per recorded parameter with its knob movement plotted across the loop](doc/ui/motion.png)<br>**MOTION** is the gesture looper. K2 arms it, and then any knob you move is recorded into a loop that plays your hands back — one lane per parameter. K2 again overdubs another move on top; K3 stops and starts playback. It records the moves, not the audio, so it costs nothing extra to run. | **A modulation loop pedal.** Record a slow filter sweep and it loops hands-free while you granulate over it; layer a delay swell on a second lane. E2 browses the lanes, E3 is a global amount, K1+K2 clears the selected lane, K1+K3 wipes all of them. `motion record` and `motion play` are MIDI-mappable, so a footswitch can punch overdubs. |
-
-## Controls: 3 keys, 3 encoders
-
-| | |
-|---|---|
-| **E1** | Select the page. Hold K1 to jump between page families. |
-| **E2 / E3** | The page's two knobs. Value and dial live in the footer. Hold K1 for the alt pair. |
-| **K1** (hold) | Alt / shift. |
-| **K2 / K3** | The page's two actions. The footer pills invert while they are active. |
-| **K1+K2** | STOP / START. Mutes everything (a `STP` flag blinks by the title), press again and the exact mix comes back. Works on every page except GRAIN, TAPE, PADS and MOTION, where alt-K2 has a page job — the footer pill shows which you have while K1 is held. Also on the space bar of a USB keyboard, grid pad (8,2), and MIDI-mappable as `stop all`. |
-| **K1+K3** | DRY. One press throws the playback path clean — delay, reverb, shimmer, drive and clouds feedback to zero, filter open — so you hear the bare sample. Works everywhere except GRAIN, TAPE, REVERB, PADS and MOTION. Also grid pad (7,2). |
-
-The pages are MIX, LEVEL, REC, WINDOW, GRAIN, STRETCH, TAPE, FILTER, DELAY, REVERB, PADS and
-MOTION. The pages with a lot of controls (REVERB, GRAIN) are banked, so K2 pages E2/E3 through
-the parameter pairs. The full page-to-control map is in `doc/spec.md` §10.
-
-## Playing notes
-
-A MIDI keyboard retunes the sample chromatically. Note 60 plays it as recorded, and you get
-±24 semitones with the pitch staying independent of the speed. A USB typing keyboard works
-Ableton-style: the A row plays white keys, the W row plays black keys, and Z/X shift the
-octave. Turn pad input on and the notes trigger the 8 PADS slices polyphonically instead. The
-settings are in **PARAMS > keys**.
-
-**MIDI mapping.** Every continuous and toggle parameter can be mapped. Long-press it in
-**PARAMS** and assign a CC. Your mappings save per script to `data/mangler/mangler.pmap` and
-reload automatically.
-
-**Grid (optional).** You don't need a grid, but you can plug one in. A monome grid works
-as-is, and a Launchpad or APC mini works through the
-[midigrid](https://github.com/miker2049/midigrid) library. Either way you get an 8×8 surface
-with transport and mode toggles, two-finger slice and loop selection, and two piano octaves.
-The pads drive the same params as everything else.
+A norns on current software. Optional: a MIDI controller, a USB typing keyboard, and a grid
+(monome, Launchpad Mini MK3 driven natively in color, or other Launchpad and APC models
+through [midigrid](https://github.com/jaggednz/midigrid)). JPverb (sc3-plugins) and MiClouds
+(mi-UGens) are used automatically when installed and are never required.
 
 ## Install
-
-**First time?** Copy the folder onto your norns and restart. That is the whole install:
 
 ```sh
 rsync -av --delete --exclude='.git' ./ we@norns.local:~/dust/code/mangler/
 ```
 
-Replace `we@norns.local` with your norns. `we` is the default norns user, and `norns.local`
-is the default hostname. If that name does not resolve, use the IP address instead (you can
-read it on the device under SYSTEM > WIFI), for example
-`we@192.168.1.23:~/dust/code/mangler/`.
+Then SYSTEM > RESTART on the norns and pick mangler in SELECT. Two rules:
 
-Then load it. Open **maiden** (the norns web editor, at `http://norns.local/` or
-`http://<your-norns-ip>/` in a browser) and type `;restart` in the REPL at the bottom, or
-just pick **mangler** from the SELECT menu on the device itself.
+1. `--delete` matters. A stale second copy of `Engine_Mangler.sc` anywhere under
+   `dust/code` hangs every norns script on LOADING.
+2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
+   reload. After a restart the maiden log prints the engine command count; the expected
+   number is in CLAUDE.md, and a different number means an old engine is still running.
 
-**Why `--delete` matters:** it clears out any stale copy of the engine. A leftover engine file
-would otherwise hang every script on "LOADING", so it is worth keeping. A private repo is
-fine, since rsync copies over your local network and GitHub is never involved.
+## First session
 
-**Single-file drop-in.** `dist/mangler_single.lua` is the whole control layer amalgamated into
-one file (generated by `lua tools/amalgamate.lua` and byte-checked against the modules, so
-edit the modules, not this file). You still need the engine `lib/Engine_Mangler.sc` present,
-and exactly once anywhere on the device.
+1. Plug in your gear. On TAKE press K2, play a phrase, press K2 again. The window snaps to
+   what you played and loops it back dry. The small diamond next to the title means you are
+   hearing the recording exactly.
+2. Turn E2 and E3 to move the window edges. On VOICE, K3 cycles PLAY, GRAIN, WARP, PV. The
+   screen texture shows the active mode.
+3. FILTER, DELAY and REVERB all start at zero. Dial them in. Reverb adds tail without ever
+   lowering the recording itself.
+4. On PADS, E2 selects one of eight slices and K2 plays it. Each slice can have its own
+   voice type and pitch. Plug in a MIDI or typing keyboard and tap K3 to play slices
+   polyphonically.
+5. On SCENE, K3 captures the whole current sound into a slot. Change everything, then turn
+   E3 to morph from where you are toward the stored scene. Back to zero returns you exactly
+   home. K2 recalls. Holding K2 borrows the scene and releasing comes back.
+6. Two reflexes work on every page. K1 plus K2 stops and restarts all sound. K1 plus K3
+   makes playback dry instantly, and holding it about a second erases the current page's
+   material.
 
-**For the best sound**, install the two optional plugins from
-[Requirements](#requirements): [sc3-plugins](https://github.com/supercollider/sc3-plugins) for
-JPverb, and [mi-UGens](https://github.com/v7b1/mi-UGens) for MiClouds. Both are fully guarded:
-if a plugin is missing, mangler falls back to stock SuperCollider (FreeVerb or GrainBuf) and
-loads normally. Nothing can brick loading.
+## Controls
 
-## Under the hood
+Every key follows one rule: press engages immediately, a quick release latches it, a longer
+hold acts while held and releases when you do, and pressing a latched key turns it off.
 
-**Performance on the Pi 4.** scsynth runs on a single core and starts to xrun past about 60%,
-so softcut (a separate, near-free core) handles the tape: record, loop, varispeed and
-reverse. scsynth only does what softcut can't, which is the granular, the stretch and the
-custom FX. The three drone algorithms are one voice with a mode switch, so you never pay for
-all of them at once.
+| Control | Action |
+|---|---|
+| E1 | Select page |
+| E2, E3 | The page's two knobs. Hold K1 for the second pair. Values show while turning. |
+| K1 | Shift, hold |
+| K2, K3 | The page's two actions, named in the footer |
+| K1 + K2 | Stop and start everything, from any page |
+| K1 + K3 | Tap: dry playback. Hold about a second: erase this page's material. |
+| K1 + E1 | Morph toward the selected scene, from any page |
 
-**Params are the single source of truth.** Keys, encoders, MIDI and the grid all drive the
-same `params:*`, so they stay in lockstep. This is also why every parameter is MIDI-mappable
-for free.
+## Pages
 
-**Staged and gated.** The engine grows in stages, each one tested on the device before the
-next. The current stage and the full build log are at the top of [CLAUDE.md](CLAUDE.md), and
-the durable design lives in [doc/spec.md](doc/spec.md).
+| Page | What it does | Keys |
+|---|---|---|
+| TAKE | Record and frame the material | K2 record, K3 snap window |
+| VOICE | How the take plays: PLAY, GRAIN, WARP, PV | K2 freeze, K3 mode |
+| TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
+| FILTER | Diode ladder filter plus drive | K2 open, K3 type |
+| DELAY | Feedback echoes, optionally clocked | K2 infinite hold, K3 kill |
+| REVERB | Tail and shimmer, added on top of the dry sound | K2 wash, K3 shimmer bloom |
+| MIX | Input, both decks, output | K2 engine throw, K3 tape throw |
+| PADS | The take chopped into eight playable slices | K2 play slice, K3 route notes |
+| MOTION | Record and replay knob movements | K2 record, K3 play |
+| SCENE | Capture, recall and morph whole sounds | K2 recall or peek, K3 capture |
+| ORBIT | The instrument drifts between your scenes by itself | K2 run, K3 capture the moment |
+| EROSION | Each loop pass ages the take a little | K2 heal, K3 scar |
 
-```
-mangler.lua              orchestrator: state, params, keys and encoders
-lib/Engine_Mangler.sc    the one and only SuperCollider engine
-lib/mpages.lua           the screen: page bodies, header and footer
-lib/mtape.lua            softcut tape path and the engine/tape mix
-lib/minput.lua           MIDI and typing-keyboard note input
-lib/mgrid.lua            optional grid surface
-lib/mmotion.lua          gesture looper: records and replays the param stream
-lib/mfont.lua  lib/mparticles.lua   pixel font and pooled grain particles
-tools/uisim/             offscreen UI renderer, every page as a PNG, no hardware
-dist/mangler_single.lua  generated single-file drop-in
-```
+Notes on the less obvious ones.
 
-## License
+ORBIT picks a stored scene, morphs partway toward it, parks there, then picks another. It
+never fully arrives, so it keeps finding sounds between the ones you saved. K3 captures
+whatever it found into the first empty slot. It needs at least one captured scene, and it
+owns the morph knob while running.
 
-No license has been chosen yet, so for now the code is all rights reserved by default. If you
-want to build on it, ask.
+EROSION works in PLAY mode. With erode up, every pass of the loop rewrites the window
+slightly darker and quieter. Wear sets how dark. The GEN counter shows how many passes the
+take has aged. Heal stops the decay where it stands. Recording is never affected.
+
+SCENE slot zero, drawn as a left arrow, is the way back: every recall and chaos throw parks
+the previous sound there automatically. Select it and tap K2 to undo. The `next scene`
+parameter steps through filled slots and can be mapped to a footswitch, as can `chaos throw`.
+
+## Notes and pads
+
+A MIDI keyboard or a USB typing keyboard (letters as keys, Z and X for octave) retunes the
+sample chromatically. With pad routing on they play the eight slices polyphonically instead.
+Settings live in PARAMS under keys. The space bar stops and starts everything.
+
+## Samples
+
+Load: PARAMS > take > load sample reads WAV in 16, 24 or 32 bit. The window snaps to the
+file. A 44.1 kHz file plays about nine percent fast; export at 48 kHz.
+
+Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo WAV.
+
+Print: PARAMS > take > print mix records the master output, everything you hear from both
+decks and all effects, then loads that recording back as the take. Length zero means one
+window length. The bounce also stays on disk, so material is never lost. Map it to a
+footswitch and resampling becomes one stomp.
+
+## Saving
+
+PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape audio,
+the scene bank and the per slice settings. Loading restores the whole session, sound
+included.
+
+## Grid
+
+Optional. Rows one and two are always scenes and transport, rows seven and eight are always
+a piano octave, and the middle rows follow the current page: window and loop spans, slice
+pads, or the morph bar. On a Launchpad Mini MK3 pads are colored by meaning: red records,
+green plays, white is the cursor, purple is destructive. Details in `lib/mgrid.lua`.
+
+## Troubleshooting
+
+1. Every script hangs on LOADING: almost always a duplicate engine class under `dust/code`.
+   Redeploy with `rsync --delete`. Errors appear in maiden's SC tab, not matron.
+2. Engine edits do nothing: you skipped SYSTEM > RESTART, or the printed command count does
+   not match the expected one in CLAUDE.md.
+3. Dry playback has reverb on it: check the system reverb under PARAMS, a raised reverb or
+   delay mix, or clouds feedback. K1 plus K3 zeros all of them.
+4. Reverb knobs beyond decay, damp and mix do nothing: JPverb is not installed and the
+   FreeVerb fallback only honors those three.
+5. A mystery loop that is not the take: the tape deck. The MIX page shows which deck is
+   audible. Clear the tape on TAPE with the erase gesture.
+6. Faint on headphones but fine on the line out: raise headphone gain under PARAMS > LEVELS.
+7. Frozen or black screen after loading: a Lua error inside redraw. Scroll maiden below the
+   ok line for the traceback.
+
+## Architecture
+
+One SuperCollider engine (`lib/Engine_Mangler.sc`, exactly one copy on the device) does
+recording, playback voices and effects. softcut runs the tape deck on its own core. The Lua
+side is `mangler.lua` plus modules in `lib/` sharing one context table, with the params
+system as the single source of truth for every value. `dist/mangler_single.lua` is a
+generated single file build; edit the modules, not that file. `tools/uisim/` renders every
+page offscreen for testing without hardware.

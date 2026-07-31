@@ -15,7 +15,7 @@ function M.init(ctx)
   pget = ctx.pget
 end
 
--- MIX page, now real: `mix` crossfades SC engine <-> tape, out_level masters
+-- MIX page: `mix` crossfades SC engine <-> tape, out_level masters
 -- both, each side keeps its own trim. center keeps both at full trim.
 function M.update_mix()
   local mixv = pget("mix", 0.5)
@@ -77,9 +77,20 @@ function M.clear_buffer()
   sc.buffer_clear()
 end
 
+-- the tape's RECORD SOURCE (cut_source): 0 = DRY (the
+-- raw ADC tap) .. 1 = WET (the engine's post-FX output — filter/drive/delay/
+-- reverb). the two router sends SUM at the shared softcut input, so a blend
+-- prints part raw + part processed and the tape becomes a resample / print
+-- stage. NO runaway: the engine reads only the ADC bus (context.in_b), never
+-- softcut, so eng -> cut is a one-way edge. default 0 = the classic parallel
+-- tap, so the tape behaves exactly as before until you reach for this.
+function M.set_source(v)
+  audio.level_adc_cut(1 - v)   -- dry input tap
+  audio.level_eng_cut(v)       -- processed engine output
+end
+
 function M.init_tape()
-  audio.level_adc_cut(1)   -- parallel ADC tap into softcut
-  audio.level_eng_cut(0)   -- engine does NOT feed softcut (resample is SC-side)
+  M.set_source(pget("cut_source", 0))   -- dry/processed record source (was 1/0)
   audio.level_cut(1)       -- softcut master out: persists across scripts, force up
   sc.buffer_clear()
   for v = 1, 2 do
@@ -117,13 +128,23 @@ end
 -- PSETs persist the tape audio too: SAVE writes the softcut buffers
 -- (L=buf1, R=buf2, matching init_tape's routing) next to the pset; LOAD
 -- reads them back, DELETE cleans up.
+local function path_for(number)
+  return norns.state.data .. "tape-" .. number .. ".wav"
+end
+
 function M.pset_write(number)
-  sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
-    0, TAPE_LEN)
+  -- like the take (take_pset_write): an untouched tape must not dump 60s of
+  -- stereo silence per save, and a cleared one must not resurrect old audio
+  -- on load — an empty save deletes the stale wav instead.
+  if C.twave_any then
+    sc.buffer_write_stereo(path_for(number), 0, TAPE_LEN)
+  else
+    M.pset_delete(number)
+  end
 end
 
 function M.pset_read(number)
-  local path = norns.state.data .. "tape-" .. number .. ".wav"
+  local path = path_for(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
@@ -131,11 +152,13 @@ function M.pset_read(number)
 end
 
 function M.pset_delete(number)
-  os.remove(norns.state.data .. "tape-" .. number .. ".wav")
+  os.remove(path_for(number))
 end
 
 function M.cleanup()
   sc.poll_stop_phase()
+  audio.level_eng_cut(0)   -- don't leak a processed-source route to the next script
+  audio.level_adc_cut(1)   -- ...and give the next script the stock ADC tap back
 end
 
 return M
