@@ -64,10 +64,12 @@ local TIMBRE_IDS = {
   -- source blend. NOT out_level: a scene must never rewrite your stage
   -- volume. (the safe snapshot does take it — see SAFE_EXTRA_IDS.)
   "mix", "sc_level", "cut_level",
-  -- playback path + the two output->buffer writers. resample only bites on
-  -- the next armed take; regen is the one member that quietly rewrites the
-  -- buffer, which is exactly why a scene should be able to pull it back to 0.
-  "dry_wet", "resample", "regen",
+  -- playback path + the output->buffer writers. resample only bites on
+  -- the next armed take; regen and erode quietly rewrite the buffer, which
+  -- is exactly why a scene should be able to pull them back to 0. wear is
+  -- just a tone control and morphs freely. (orbit_* stays OUT of every
+  -- list: it is a transport, like motion_*.)
+  "dry_wet", "resample", "regen", "erode", "wear",
   -- window / scan
   "pos_start", "pos_end", "scan", "pos_jitter",
   -- grain + clouds (the granular character)
@@ -137,7 +139,8 @@ append(SCENE_RECALL_IDS, SWITCH_IDS)
 -- rest. (the SCENE page says so: see M.unlanded + the "RCL B TO LAND" cue.)
 local MORPH_EXCLUDE = {
   freeze = true, pv_freeze = true, tape_freeze = true,
-  pad_input = true, resample = true, regen = true, voices = true,
+  pad_input = true, resample = true, regen = true, erode = true,
+  voices = true,
   -- mode respawns the SC voice: crossing 0.5 mid-sweep is a click + a voice
   -- born with half-morphed params, not a texture. tape_reverse flips playback
   -- direction: also a hard event, not something to cross gradually. recall
@@ -598,10 +601,64 @@ function M.touch()
   dirty = true
 end
 
+-- ===========================================================================
+-- orbit: the instrument wanders the scene bank by itself
+-- ===========================================================================
+-- one leg at a time: pick a filled slot, ramp the morph partway toward it
+-- (orbit_reach) over orbit_drift seconds, park there, pick another. parking
+-- means dropping the sweep origin without applying anything, so the next leg
+-- departs from the in-between sound the last one found. everything goes
+-- through the same scene_slot and scene_morph_amt params a hand would use:
+-- the SCENE page shows the wander live, and CAP bottles any moment of it.
+-- with one filled slot each leg halves the remaining distance toward it;
+-- with none the orbit idles. math.random stays out of the draw path.
+
+local orbit = { on = false, leg_start = 0, leg_len = 1 }
+
+local function orbit_park()
+  M.invalidate()
+  pset("scene_morph_amt", 0)   -- silent: with no sweep origin this writes nothing
+end
+
+local function orbit_new_leg()
+  local filled, cur = {}, slot_idx()
+  for s = 1, NUM_SLOTS do
+    if M.slots[s] and s ~= cur then filled[#filled + 1] = s end
+  end
+  if #filled == 0 and not M.slots[cur] then return false end
+  local target = #filled > 0 and filled[math.random(#filled)] or cur
+  pset("scene_slot", target)
+  orbit.leg_start = C.frame
+  orbit.leg_len = math.max(2, math.floor(pget("orbit_rate", 12) * 15))
+  return true
+end
+
+function M.orbit_set(on)
+  orbit.on = on
+  if on then
+    orbit_park()               -- depart from wherever we stand right now
+    orbit_new_leg()
+  else
+    orbit_park()               -- stop and keep the sound the orbit found
+  end
+end
+
+local function orbit_tick()
+  if not orbit.on then return end
+  local t = (C.frame - orbit.leg_start) / orbit.leg_len
+  if t >= 1 then
+    orbit_park()
+    if not orbit_new_leg() then return end
+    t = 0
+  end
+  pset("scene_morph_amt", pget("orbit_reach", 0.5) * t)
+end
+
 -- one per redraw frame, from the existing 15fps clock in mangler.lua.
 -- the target is simply the SELECTED slot — the same one K2 recalls and K3
 -- captures into. one selector, three jobs.
 function M.tick()
+  orbit_tick()                 -- may set the morph params, marking dirty
   if not dirty then return end
   dirty = false
   M.morph(pget("scene_slot", 1), pget("scene_morph_amt", 0))

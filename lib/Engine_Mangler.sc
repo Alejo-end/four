@@ -169,7 +169,9 @@ Engine_Mangler : CroneEngine {
             // MiClouds granular controls (also passed to the fallback defs,
             // which simply ignore them)
             \clouds_pos -> 0.5, \clouds_tex -> 0.5, \clouds_fb -> 0.0,
-            \clouds_mode -> 0, \clouds_lofi -> 0.0
+            \clouds_mode -> 0, \clouds_lofi -> 0.0,
+            // erosion (PLAY mode only; the other defs take and ignore them)
+            \erode -> 0.0, \wear -> 0.5
         ];
         // reverb params live in revParams (routed to \mangler_reverb); io keeps
         // only rev_mix. (ioKeys U revParams) is the old ioKeys -> same commands.
@@ -216,7 +218,8 @@ Engine_Mangler : CroneEngine {
                 grain_env1 = -1, grain_env2 = -1,
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
-                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
+                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
+                erode = 0, wear = 0.5;
             var winPos, phase, span, look;
             var trigL, trigR, posL, posR, panL, panR, sig, comp;
             var durL, durR, pchL, pchR, envSel;
@@ -259,7 +262,8 @@ Engine_Mangler : CroneEngine {
                 grain_env1 = -1, grain_env2 = -1,
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
-                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
+                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
+                erode = 0, wear = 0.5;
             var winPos, phase, span, ptr, l, r, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             ptr = A2K.kr(winPos);
@@ -277,7 +281,8 @@ Engine_Mangler : CroneEngine {
                 grain_env1 = -1, grain_env2 = -1,
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
-                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
+                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
+                erode = 0, wear = 0.5;
             var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             // cubic interp like every other read path — PV magnifies linear-
@@ -307,12 +312,30 @@ Engine_Mangler : CroneEngine {
                 grain_env1 = -1, grain_env2 = -1,
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
-                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
+                warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
+                erode = 0, wear = 0.5;
             var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
+            var idx, eff, rawL, rawR, wearF;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch);
             bufDur = BufDur.kr(buf_l);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
+            // EROSION: window-synced self-rewrite. a separate NON-interpolating
+            // read fetches the exact stored sample at the head, and a slightly
+            // darkened, slightly quieter copy is written back in its place —
+            // so every loop pass ages the take a little more. at erode 0 the
+            // exact sample is written back unchanged (bit-identical content);
+            // manual rec and freeze suspend it so the two write heads never
+            // fight. `wear` sets how dark the aging filter sits.
+            idx = winPos * BufFrames.kr(buf_l);
+            eff = erode.clip(0, 1).lag(0.05) * (1 - rec) * (1 - freeze);
+            wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
+            rawL = BufRd.ar(1, buf_l, idx, 1, 1);
+            rawR = BufRd.ar(1, buf_r, idx, 1, 1);
+            BufWr.ar((rawL * (1 - eff)) + (LPF.ar(rawL, wearF) * 0.996 * eff),
+                buf_l, idx);
+            BufWr.ar((rawR * (1 - eff)) + (LPF.ar(rawR, wearF) * 0.996 * eff),
+                buf_r, idx);
             // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
             // with rate): the rec-stop window almost never lands on a zero
             // crossing, so the bare loop CLICKED every pass — the one blemish
@@ -339,7 +362,7 @@ Engine_Mangler : CroneEngine {
                         clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
-                        pv_freeze = 0;
+                        pv_freeze = 0, erode = 0, wear = 0.5;
                     var winPos, phase, span, srcL, srcR, sig;
                     #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
                     srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);

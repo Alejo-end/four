@@ -318,6 +318,7 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
+  orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -353,6 +354,7 @@ local FULL = {
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
+  orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE", wear = "WEAR",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -1557,7 +1559,94 @@ end
 
 -- each page draws its body through this dispatch table, selected by name;
 -- built ONCE at load, so the redraw stays allocation-free
+-- ORBIT: the eight slots in a row, the wanderer travelling from where it
+-- last parked toward the current target. filled slots bright, empties dim,
+-- target bracketed. truth rules: the traveller only moves while running.
+local function body_ORBIT(frame)
+  local on = pget("orbit_on", 0) == 1
+  local target = clamp(floor(pget("scene_slot", 1) + 0.5), 0, 8)
+  local amt = clamp(pget("scene_morph_amt", 0), 0, 1)
+  local filled = 0
+  for s = 1, 8 do if C.scenes[s] then filled = filled + 1 end end
+  if filled == 0 then
+    ptext_c("NO SCENES TO ORBIT", 64, 24, 1, 4)
+    ptext_c("CAPTURE SOME ON SCENE", 64, 32, 1, 3)
+    return
+  end
+  for s = 1, 8 do
+    local x = 6 + (s - 1) * 15
+    local has = C.scenes[s] ~= nil
+    screen.level(has and (s == target and 12 or 7) or 2)
+    screen.rect(x, 22, 11, 11)
+    if has then screen.fill() else screen.stroke() end
+    if s == target and on then
+      screen.level(15)
+      screen.rect(x - 1, 20, 13, 1)
+      screen.fill()
+    end
+  end
+  -- the traveller: a dot on a rail under the slots, position = morph amount
+  -- toward the target slot's x. resting position is the left edge (LIVE).
+  local tx = 6 + (target - 1) * 15 + 5
+  local px = 6 + (tx - 6) * amt
+  screen.level(3)
+  screen.rect(6, 42, 116, 1)
+  screen.fill()
+  screen.level(on and 15 or 6)
+  screen.rect(clamp(px, 2, 124), 40, 3, 5)
+  screen.fill()
+  if on then
+    if (frame % 16) < 10 then chip("RUN", 2, 12) end
+  else
+    ptext("HELD", 2, 12, 1, 5)
+  end
+  ptext_r(filled .. " SCENES", 126, 12, 1, 4)
+end
+
+-- EROSION: how aged the take is. generation counter counts completed loop
+-- passes while eroding; the strip fuzzes and dims with erosion depth.
+local eros_gen, eros_prev = 0, 0
+function M.erosion_tick()
+  local e = pget("erode", 0)
+  if e > 0 and pget("mode", 5) == 5 then
+    local ph = C.play_phase
+    if eros_prev > 0.9 and ph < 0.1 then eros_gen = eros_gen + 1 end
+    eros_prev = ph
+  end
+end
+function M.erosion_reset() eros_gen, eros_prev = 0, 0 end
+
+local function body_EROSION(frame)
+  local e = clamp(pget("erode", 0), 0, 1)
+  local w = clamp(pget("wear", 0), 0, 1)
+  if pget("mode", 5) ~= 5 then
+    ptext_c("EROSION WORKS IN PLAY MODE", 64, 26, 1, 4)
+    ptext_c("VOICE K3 TO SWITCH", 64, 34, 1, 3)
+    return
+  end
+  if not C.wave_any then
+    ptext_c("EMPTY - K2 REC ON TAKE", 64, 28, 1, 4)
+    return
+  end
+  -- the material line: fuzz density and dimming follow the erosion depth
+  local lvl = 10 - floor(e * 6)
+  for x = 4, 124 do
+    local h = 4 + floor(hash(x, 0, 7) * 8 * (1 - w * 0.5))
+    screen.level(hash(x, frame % 8, 3) < e * 0.7 and 2 or lvl)
+    screen.rect(x, 31 - floor(h / 2), 1, h)
+  end
+  screen.fill()
+  -- playhead
+  local hx = 4 + floor(clamp(C.play_phase, 0, 1) * 120)
+  screen.level(15)
+  screen.rect(hx, 20, 1, 22)
+  screen.fill()
+  ptext_r("GEN " .. eros_gen, 126, 12, 1, e > 0 and 13 or 5)
+  if e > 0 and (frame % 8) < 5 then chip("ERODING", 2, 12) end
+end
+
 local BODY = {
+  ORBIT = body_ORBIT, EROSION = body_EROSION,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,

@@ -392,8 +392,9 @@ run_ticks(EMPTY and 30 or 200)
 -- walk pages and shoot each one. navigation is BY NAME (goto_page) and the
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
+-- MUST mirror the script's PAGES order: goto_page navigates by these indices
 local PAGES = { "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE" }
+  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION" }
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
 local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end

@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63, committed 0b4f045) the **51st change** (texture pass, ENGINE-only, count STILL 63), the **52nd change** (codebase cleanup — dead mparticles module REMOVED (7 libs now), dead scene state/bindings, list-drift fix, engine winRead consolidation), and the **53rd–58th changes** (footer pocket · send-style reverb · DFM1 headroom · quality-recheck batch incl. the 12x-too-weak grain_pitch_spread fix · PRINT + delay_sync + scene_next · doc staleness sweep + **doc/engine-map.md**, the plain-words map of every engine decision) ALL ride the same deploy: ONE rsync + RESTART covers every pending engine change (count STILL 63 throughout), the reload covers the Lua.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63, committed 0b4f045) the **51st change** (texture pass, ENGINE-only, count STILL 63), the **52nd change** (codebase cleanup — dead mparticles module REMOVED (7 libs now), dead scene state/bindings, list-drift fix, engine winRead consolidation), and the **53rd–58th changes** (footer pocket · send-style reverb · DFM1 headroom · quality-recheck batch incl. the 12x-too-weak grain_pitch_spread fix · PRINT + delay_sync + scene_next · doc staleness sweep + **doc/engine-map.md**, the plain-words map of every engine decision) ALL ride the same deploy: ONE rsync + RESTART covers every pending engine change, the reload covers the Lua. The **59th change** (ORBIT page, Lua + EROSION page, ENGINE +2 commands) moves the expected count to **65**.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1507,12 +1507,47 @@ GATE (device): print a 2-bar mix and hear it come back as the take; delay
 locks to tempo and glides on tempo change; a footswitch stomps through
 filled scenes in order.
 
+Fifty-ninth change — **ORBIT + EROSION pages (PAGES 10 → 12; ORBIT Lua-only,
+EROSION is ENGINE: +2 commands erode/wear, fingerprint 63 → **65**, UNTESTED)**.
+* **ORBIT** (page 11): the instrument wanders the scene bank by itself — one
+  partial morph leg at a time (pick a filled slot ≠ current, ramp
+  scene_morph_amt to orbit_reach over orbit_rate seconds, PARK by
+  invalidate+silent amt reset so the next leg departs from the in-between,
+  repeat). Lives in mscenes (orbit_tick at the top of M.tick); drives the
+  REAL scene_slot/scene_morph_amt params through pset() so the SCENE page
+  shows it, motion doesn't record it, and CAP bottles any moment. One filled
+  slot = asymptotic drift toward it; zero = idle. K2 RUN (punch law: hold =
+  temporary wander), K3 CAP. grp_orbit 3 params (orbit_on/rate/reach),
+  excluded from scene/motion lists (a transport). math.random only in the
+  tick, never in draw.
+* **EROSION** (page 12): window-synced decay in PLAY mode. Engine: in
+  \mangler_play only, a NON-interpolating BufRd fetches the exact sample at
+  the head and BufWr writes back `raw*(1-eff) + LPF(raw,wearF)*0.996*eff` —
+  each loop pass ages the take (darker by `wear` 9k→1.2k linexp, 0.996
+  amplitude/pass). eff = erode*(1-rec)*(1-freeze) lag 0.05: at erode 0 the
+  EXACT read sample is written back (bit-identical content — the non-interp
+  read is what makes that true; an interpolated read would smear even at
+  zero). erode/wear in ALL FIVE def arg lists (uniform-args convention;
+  only play uses them) + playParams → auto-union → count 65. Lua: grp_erode
+  (add_eng_control ×2); K2 HEAL / K3 SCAR (throws to 0/1, round-trip);
+  GEN counter = play_phase wrap count while eroding (Mpages.erosion_tick on
+  the redraw clock, reset by clear); erode+wear in SCENE TIMBRE list with
+  erode MORPH-EXCLUDED (a buffer writer, like regen).
+* Suite: render_pages PAGES list now MIRRORS the script's (a prepend
+  mis-navigated every shot — the suite indexes drive goto_page; comment
+  added); ORBIT/EROSION shot at 11/12; 63 shots total, eyeballed both.
+* GATE: RESTART, confirm **count: 65** (NOT 63 any more), then: erode=0
+  overnight leaves a take bit-identical; erode~0.3 audibly darkens over
+  passes without runaway; HEAL freezes the age; rec suspends erosion;
+  ORBIT wanders audibly between 2+ scenes and CAP catches an in-between.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
 3. load script → check `Engine.register_commands; count:` in maiden matches the
    expected fingerprint (S2 = 22, S4 = 30, S5/S6 = 31, S7 = 34, S8/S9 = 40,
-   S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = 61, S22 Phase A = **63**).
+   S10 = 50, S11 = 55, S15 = 58, S17 = 59, S21 = 61, S22 Phase A = 63,
+   EROSION/59th change (+erode +wear) = **65**).
    Wrong count = old engine still live. (The #14 `write_take` numFrames arg is an
    ARITY change, not a new command — `count` STAYS **63**; if it moved, something
    else changed. The 48th batch — DFM1 filter, reverb spawn/free split, `res` clip,

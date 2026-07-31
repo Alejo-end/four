@@ -86,7 +86,7 @@ local min, max = math.min, math.max
 -- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE
 local PAGES = {
   "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE",
+  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION",
 }
 
 local FPS = 15
@@ -393,6 +393,27 @@ local KEYS = {
     k3 = pk("PLAY", "motion_play"),
     erase = function() ctx.motion.clear_lane() end,
   },
+  ORBIT = {
+    -- RUN under the punch law: hold = a temporary wander, tap = latch it.
+    -- CAP bottles whatever in-between sound the orbit found into the
+    -- selected slot; the machine discovers, you decide what to keep.
+    k2 = pk("RUN", "orbit_on"),
+    k3 = { label = "CAP", act = function() pulse("scene_capture") end },
+  },
+  EROSION = {
+    -- HEAL parks the decay (round-trips like every throw); SCAR is a full
+    -- strength pass while held, latched with a tap.
+    k2 = throw("HEAL", function()
+      local mem = { erode = pget("erode", 0) }
+      params:set("erode", 0)
+      return mem
+    end),
+    k3 = throw("SCAR", function()
+      local mem = { erode = pget("erode", 0) }
+      params:set("erode", 1)
+      return mem
+    end),
+  },
   SCENE = {
     -- RCL under the punch law — hold = PEEK (borrow the scene via the
     -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
@@ -468,6 +489,8 @@ local ENC_MAP = {
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
   SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
+  ORBIT  = { "orbit_rate", nil, "orbit_reach", nil },
+  EROSION = { "erode", nil, "wear", nil },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
@@ -633,6 +656,7 @@ function ctx.clear_recording()
     return
   end
   Mpages.clear_wave()
+  Mpages.erosion_reset()   -- a fresh take starts at generation zero
   ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
   params:set("pos_start", 0)
   params:set("pos_end", 1)
@@ -1406,6 +1430,25 @@ local function init_params()
   params:set_action("scene_safe_restore", function(v)
     if v == 1 then Mscenes.safe_restore() end
   end)
+  -- ORBIT: the instrument wanders between your captured scenes by itself,
+  -- one partial morph leg at a time, never fully arriving. all Lua, driven
+  -- through the same morph engine and params as a hand on the knob.
+  params:add_group("grp_orbit", "orbit", 3)
+  params:add_binary("orbit_on", "orbit run", "toggle", 0)
+  params:set_action("orbit_on", function(v) Mscenes.orbit_set(v == 1) end)
+  params:add_control("orbit_rate", "orbit drift",
+    controlspec.new(2, 60, "lin", 1, 12, "s"))
+  params:add_control("orbit_reach", "orbit reach",
+    controlspec.new(0.05, 1, "lin", 0, 0.5, ""))
+
+  -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
+  -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
+  params:add_group("grp_erode", "erosion", 2)
+  add_eng_control("erode", "erode",
+    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("wear", "wear",
+    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+
   -- chaos: HOLD it for a bounded random throw, release to land back on the
   -- safe state (it marks one for you if you never did). a footswitch or grid
   -- pad you can lean on — the release is what makes it safe to press.
@@ -1487,6 +1530,7 @@ function init()
       clock.sleep(1 / FPS)
       ctx.frame = ctx.frame + 1
       sync_delay_time()    -- tempo-follow the delay (writes only on change)
+      Mpages.erosion_tick()  -- count loop passes while the take erodes
       Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
