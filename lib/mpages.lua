@@ -514,13 +514,21 @@ local function flabel_r(id, rx, minx)
   local turning = is_turning(id)
   local val
   if id and (turning or SELECTOR_IDS[id]) then val = fmt_value(id) end
-  -- full word by default; abbreviate whenever a value is shown (turning /
-  -- selector), where the digits need the room
-  local full = not val
+  -- the knob being ADJUSTED keeps its FULL word next to the value; the
+  -- pocket below hides whatever that overlaps, and everything returns when
+  -- the swell ends. selectors reading at rest keep the SHORT form because
+  -- they sit beside the key words permanently, with no pocket.
+  local full = turning or not val
   local lab = label_for(id, full)
   local lvl = turning and 15 or 6
   local x = rx - label_total(lab, val)
-  if full and minx and x < minx then    -- full word won't fit: drop to SHORT
+  if full and not turning and minx and x < minx then
+    -- at rest a full word that would cross the key words drops to SHORT
+    lab = label_for(id, false)
+    x = rx - label_total(lab, val)
+  elseif turning and x < 2 then
+    -- while turning the pocket handles overlap; abbreviate only if the
+    -- full word plus value would run off the screen itself
     lab = label_for(id, false)
     x = rx - label_total(lab, val)
   end
