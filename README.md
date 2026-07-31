@@ -20,7 +20,9 @@ untested; the CPU budget is tuned for the Pi 4.
 
 > **Status:** in active development, built in gated stages on hardware. See
 > [CLAUDE.md](CLAUDE.md) for the current stage and build log, [doc/redesign.md](doc/redesign.md)
-> for the UI spec, and [doc/spec.md](doc/spec.md) for the engine spec.
+> for the UI spec, [doc/spec.md](doc/spec.md) for the engine spec, and
+> [doc/engine-map.md](doc/engine-map.md) for a plain-words map of every engine
+> decision and why it was made.
 
 ## Requirements
 
@@ -399,7 +401,7 @@ lib/minput.lua           MIDI and typing-keyboard note input
 lib/mgrid.lua            optional grid surface + native Launchpad Mini MK3 colour driver
 lib/mmotion.lua          gesture looper: records and replays the param stream
 lib/mscenes.lua          scenes, morph, and the ◄ safe state
-lib/mfont.lua  lib/mparticles.lua   pixel font and pooled grain particles
+lib/mfont.lua            pixel font
 tools/uisim/             offscreen UI renderer (every page to a PNG, no hardware)
 dist/mangler_single.lua  generated single-file build
 ```
