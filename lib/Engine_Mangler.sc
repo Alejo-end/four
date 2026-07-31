@@ -498,6 +498,7 @@ Engine_Mangler : CroneEngine {
             // the mix laws are equal-power .sqrt (steep near the ends), so a
             // CC step lands as an audible zipper without these lags
             delay_mix = delay_mix.lag(0.03);
+            delay_fb = delay_fb.lag(0.03);   // the last unlagged performance knob
             fbIn = LocalIn.ar(2);
             dIn = wet + (fbIn * delay_fb);
             dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));

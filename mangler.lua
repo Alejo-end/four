@@ -798,6 +798,12 @@ function ctx.print_take()
   if not (audio.tape_record_open and audio.tape_record_start) then
     print("mangler: no system tape API — cannot print"); return
   end
+  -- printing a CHOKED output would record silence and then load it AS the
+  -- take — a mis-stomp while stopped must not wipe the material with nothing
+  if pget("stop_all", 0) == 1 then
+    print("mangler: PRINT refused — output is stopped (K1+K2 to start)")
+    return
+  end
   local secs = pget("print_len", 0)
   if secs < 0.05 then
     local _, _, span = window_bounds()
@@ -871,6 +877,9 @@ local function sync_delay_time(force)
   if not force and t == last_sync_tempo then return end
   last_sync_tempo = t
   params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 1))
+  -- tell the gesture looper this wasn't a hand on the knob (its polling
+  -- capture would otherwise punch a delay_time lane on every tempo move)
+  if ctx.motion and ctx.motion.account then ctx.motion.account("delay_time") end
 end
 
 -- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
