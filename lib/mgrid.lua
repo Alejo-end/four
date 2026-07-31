@@ -288,8 +288,7 @@ local function scene_row_key(x, z)
       srow_frame[x] = C.frame
     else
       -- empty slot: recall it anyway so the page says SLOT EMPTY
-      params:set("scene_recall", 1)
-      params:set("scene_recall", 0)
+      C.pulse("scene_recall")
       srow_frame[x] = nil
     end
   else
@@ -305,8 +304,7 @@ local function scene_row_key(x, z)
         -- a tap: COMMIT the recall; the scene is the new LIVE. leave the amt
         -- alone when the recall only QUEUED (BEAT/BAR) — zeroing it then
         -- force-applies the old A and bounces the sound around the sync point
-        params:set("scene_recall", 1)
-        params:set("scene_recall", 0)
+        C.pulse("scene_recall")
         if not C.scene.pending then params:set("scene_morph_amt", 0) end
       else
         C.peek_back = true                   -- borrowed: sweep home
@@ -370,8 +368,7 @@ local function scene_ws_key(x, y, z)
     elseif x == 2 then scene_mod.clr = (z == 1)
     elseif x == 4 then params:set("chaos_throw", z)
     elseif x == 8 and z == 1 then            -- ◄ the way back
-      params:set("scene_safe_restore", 1)
-      params:set("scene_safe_restore", 0)
+      C.pulse("scene_safe_restore")
     end
     return
   end

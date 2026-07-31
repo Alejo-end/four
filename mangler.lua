@@ -64,7 +64,7 @@
 -- -----------------------------------------------------------------------------
 -- this file is the orchestrator: state + params + key/encoder handlers. the
 -- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
--- font), mparticles (grain cloud), mtape (softcut tape), minput (midi/keyboard
+-- font), mtape (softcut tape), minput (midi/keyboard
 -- notes), mgrid (grid surface), mpages (the screen). they share one `ctx` table
 -- and params are the single source of truth. full design: doc/spec.md.
 
@@ -167,7 +167,7 @@ local ctx = {
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
-  -- display-model flags (mpages paints them, mparticles gates on them)
+  -- display-model flags (mpages paints them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
   -- normalized 0..1 high-water mark of buffer content worth saving (from frame
@@ -191,7 +191,6 @@ local ctx = {
 }
 
 local Mfont = include "lib/mfont"
-local Mparticles = include "lib/mparticles"
 local Mtape = include "lib/mtape"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
@@ -200,17 +199,15 @@ local Mscenes = include "lib/mscenes"
 local Mpages = include "lib/mpages"
 
 ctx.font = Mfont
-ctx.particles = Mparticles
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 
-Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 -- sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
--- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
+-- ctx.scene_capture/_clear helpers the grid's CAP/CLR modifiers call
 Mscenes.init(ctx)
 Mpages.init(ctx)
 
@@ -262,6 +259,15 @@ end
 local function pulse(id)
   params:set(id, 1)
   params:set(id, 0)
+end
+-- the grid drives the same momentary params (read lazily at press time, so
+-- defining it after the ctx wiring above is safe)
+ctx.pulse = pulse
+
+-- "open" cutoff for the current filter type — the ONE definition of what an
+-- open filter means, shared by FILTER's OPEN throw and ctx.fx_dry
+local function filter_open_cutoff(ft)
+  return ft == 2 and 20 or (ft == 3 and 1000 or 20000)
 end
 
 -- TAKE K3: window full <-> back where you had it (a round trip, so a
@@ -317,7 +323,7 @@ local KEYS = {
       local mem = { cutoff = pget("cutoff", 20000),
         resonance = pget("resonance", 0) }
       local ft = pget("filt_type", 1)
-      params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+      params:set("cutoff", filter_open_cutoff(ft))
       params:set("resonance", 0)
       return mem
     end),
@@ -569,9 +575,10 @@ function ctx.pad_trigger(id, i, z)
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
       -- the pad voice level (chord-safe default that won't slam the limiter)
-      engine.note_on(id, pad_pos(i, (ctx.pad_type[i] or 0) > 0),
+      local pt = ctx.pad_type[i] or 0
+      engine.note_on(id, pad_pos(i, pt > 0),
         2 ^ ((ctx.pad_pitch[i] or 0) / 12),
-        ctx.pad_type[i] or 0, pget("pad_level", 0.3))
+        pt, pget("pad_level", 0.3))
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
   elseif ctx.pad_held[id] then
@@ -820,7 +827,7 @@ function ctx.fx_dry()
   params:set("drive", 0)
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
-  params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+  params:set("cutoff", filter_open_cutoff(ft))
   params:set("resonance", 0)
 end
 
@@ -1393,7 +1400,6 @@ function init()
       Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
-      Mparticles.update()
       Mmotion.tick()   -- advance + replay the gesture loop
       -- apply a pending morph sweep. AFTER motion, which may have just
       -- replayed a recorded scene_morph_amt move for us to act on.

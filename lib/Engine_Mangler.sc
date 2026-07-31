@@ -130,6 +130,7 @@ Engine_Mangler : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
+        var winRead;
 
         bufL = Buffer.alloc(s, s.sampleRate * 60, 1);
         bufR = Buffer.alloc(s, s.sampleRate * 60, 1);
@@ -187,6 +188,25 @@ Engine_Mangler : CroneEngine {
 
         // ---- drone playback defs: ONE runs at a time. all share the full
         // arg set (unused args ignored) so spawn/set stays uniform.
+        // winRead = the window-position law, defined ONCE for all five defs
+        // (a plain build-time function — each call emits the same UGens
+        // inline, so the compiled graphs are unchanged; before this the same
+        // 7 lines were copy-pasted five times and had already drifted once).
+        // window edges + scan are Lag'd ~20ms: pos_start/pos_end are
+        // PERFORMANCE encoders (TAKE E2/E3) and an unsmoothed edge move
+        // jumped the read head with a click per detent. pitchMul folds
+        // varispeed into the phase rate (only \mangler_play passes it).
+        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1;
+            var lo, hi, span, incr, phase, winPos;
+            lo = Lag.kr(pos_start.min(pos_end), 0.02);
+            hi = Lag.kr(pos_start.max(pos_end), 0.02);
+            span = (hi - lo).max(0.001);
+            incr = Lag.kr(scan, 0.02) * pitchMul * SampleDur.ir / (BufDur.kr(buf) * span);
+            phase = Phasor.ar(0, incr, 0, 1);
+            winPos = lo + (phase * span);
+            Out.kr(phase_out, A2K.kr(winPos));
+            [winPos, phase, span];
+        };
 
         SynthDef(\mangler_grain, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
@@ -197,30 +217,32 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
-            var lo, hi, span, incr, phase, winPos, look;
+            var winPos, phase, span, look;
             var trigL, trigR, posL, posR, panL, panR, sig, comp;
             var durL, durR, pchL, pchR, envSel;
-            lo = pos_start.min(pos_end);
-            hi = pos_start.max(pos_end);
-            span = (hi - lo).max(0.001);
-            incr = scan * SampleDur.ir / (BufDur.kr(buf_l) * span);
-            phase = Phasor.ar(0, incr, 0, 1);
-            winPos = lo + (phase * span);
-            Out.kr(phase_out, A2K.kr(winPos));
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             look = (0.25 / BufDur.kr(buf_l)) * rec * (1 - freeze);
-            // S7: Dust (Poisson) instead of Impulse (periodic).
-            trigL = Dust.kr(density);
-            trigR = Dust.kr(density);
-            posL = winPos - look + TRand.kr((pos_jitter * span).neg, pos_jitter * span, trigL);
-            posR = winPos - look + TRand.kr((pos_jitter * span).neg, pos_jitter * span, trigR);
-            panL = (pan + TRand.kr(spread.neg, spread, trigL)).clip(-1, 1);
-            panR = (pan + TRand.kr(spread.neg, spread, trigR)).clip(-1, 1);
-            durL = (size * (1 + TRand.kr(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
-            durR = (size * (1 + TRand.kr(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            pchL = pitch * (TRand.kr(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
-            pchR = pitch * (TRand.kr(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
+            // S7: Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
+            // kr quantized grain onsets to the ~1.3ms control block, which
+            // correlates them audibly at high density. the TRands must be ar
+            // with it — a kr TRand samples an ar trigger once per block and
+            // misses most impulses (stale per-grain randoms).
+            trigL = Dust.ar(density);
+            trigR = Dust.ar(density);
+            posL = winPos - look + TRand.ar((pos_jitter * span).neg, pos_jitter * span, trigL);
+            posR = winPos - look + TRand.ar((pos_jitter * span).neg, pos_jitter * span, trigR);
+            panL = (pan + TRand.ar(spread.neg, spread, trigL)).clip(-1, 1);
+            panR = (pan + TRand.ar(spread.neg, spread, trigR)).clip(-1, 1);
+            durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
+            durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
+            pchL = pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
+            pchR = pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
-            comp = (density * size).clip(0.25, 1).sqrt.reciprocal;
+            // equal-loudness across the whole density x size plane: below unity
+            // overlap this BOOSTS (<=2x, the S5 "too faint" fix, unchanged);
+            // above it it now ATTENUATES (to -12dB at ~100 stacked grains)
+            // instead of riding the master limiter into pumping.
+            comp = (density * size).clip(0.25, 16).sqrt.reciprocal;
             sig = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, posL.wrap(0, 1), 4, panL, envSel)
                 + GrainBuf.ar(2, trigR, durR, buf_r, pchR, posR.wrap(0, 1), 4, panR, envSel)) * comp;
             Out.ar(play_bus, sig);
@@ -235,14 +257,8 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
-            var lo, hi, span, incr, phase, winPos, ptr, l, r, sig;
-            lo = pos_start.min(pos_end);
-            hi = pos_start.max(pos_end);
-            span = (hi - lo).max(0.001);
-            incr = scan * SampleDur.ir / (BufDur.kr(buf_l) * span);
-            phase = Phasor.ar(0, incr, 0, 1);
-            winPos = lo + (phase * span);
-            Out.kr(phase_out, A2K.kr(winPos));
+            var winPos, phase, span, ptr, l, r, sig;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             ptr = A2K.kr(winPos);
             l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
             r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
@@ -259,14 +275,8 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
-            var lo, hi, span, incr, phase, winPos, sigL, sigR, chainL, chainR, l, r, sig;
-            lo = pos_start.min(pos_end);
-            hi = pos_start.max(pos_end);
-            span = (hi - lo).max(0.001);
-            incr = scan * SampleDur.ir / (BufDur.kr(buf_l) * span);
-            phase = Phasor.ar(0, incr, 0, 1);
-            winPos = lo + (phase * span);
-            Out.kr(phase_out, A2K.kr(winPos));
+            var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
@@ -295,21 +305,16 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
-            var lo, hi, span, incr, phase, winPos, sigL, sigR, edge, sig;
-            lo = pos_start.min(pos_end);
-            hi = pos_start.max(pos_end);
-            span = (hi - lo).max(0.001);
-            incr = scan * pitch * SampleDur.ir / (BufDur.kr(buf_l) * span);
-            phase = Phasor.ar(0, incr, 0, 1);
-            winPos = lo + (phase * span);
-            Out.kr(phase_out, A2K.kr(winPos));
+            var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch);
+            bufDur = BufDur.kr(buf_l);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
             // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
             // with rate): the rec-stop window almost never lands on a zero
             // crossing, so the bare loop CLICKED every pass — the one blemish
             // on "the exact recorded sample". the body of the take is untouched.
-            edge = (phase.min(1 - phase) * span * BufDur.kr(buf_l) / 0.005).clip(0, 1);
+            edge = (phase.min(1 - phase) * span * bufDur / 0.005).clip(0, 1);
             sig = Balance2.ar(sigL, sigR, pan) * edge;
             Out.ar(play_bus, sig);
         }).add;
@@ -332,14 +337,8 @@ Engine_Mangler : CroneEngine {
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                         pv_freeze = 0;
-                    var lo, hi, span, incr, phase, winPos, srcL, srcR, sig;
-                    lo = pos_start.min(pos_end);
-                    hi = pos_start.max(pos_end);
-                    span = (hi - lo).max(0.001);
-                    incr = scan * SampleDur.ir / (BufDur.kr(buf_l) * span);
-                    phase = Phasor.ar(0, incr, 0, 1);
-                    winPos = lo + (phase * span);
-                    Out.kr(phase_out, A2K.kr(winPos));
+                    var winPos, phase, span, srcL, srcR, sig;
+                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
                     srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
                     srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
                     // POSITIONAL args (keyword args don't survive perform on a
@@ -380,17 +379,18 @@ Engine_Mangler : CroneEngine {
                 grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
                 grain_env1 = -1, grain_env2 = -1;
             var trigL, trigR, durL, durR, pchL, pchR, envSel, cloud, eGate, env, sig;
-            trigL = Dust.kr(density);
-            trigR = Dust.kr(density);
-            durL = (size * (1 + TRand.kr(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
-            durR = (size * (1 + TRand.kr(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            pchL = note_pitch * (TRand.kr(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
-            pchR = note_pitch * (TRand.kr(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
+            // ar like the drone: sample-accurate onsets + per-grain randoms
+            trigL = Dust.ar(density);
+            trigR = Dust.ar(density);
+            durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
+            durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
+            pchL = note_pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
+            pchR = note_pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             cloud = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, note_pos.wrap(0, 1), 4,
-                    TRand.kr(spread.neg, spread, trigL), envSel)
+                    TRand.ar(spread.neg, spread, trigL), envSel)
                 + GrainBuf.ar(2, trigR, durR, buf_r, pchR, note_pos.wrap(0, 1), 4,
-                    TRand.kr(spread.neg, spread, trigR), envSel)) * 0.5;
+                    TRand.ar(spread.neg, spread, trigR), envSel)) * 0.5;
             eGate = Select.kr(one_shot, [gate, Trig.kr(Impulse.kr(0), sustain)]);
             env = EnvGen.ar(Env.asr(atk, 1, rel), eGate, doneAction: 2);
             sig = Balance2.ar(cloud[0], cloud[1], pan) * env * amp;
@@ -453,9 +453,16 @@ Engine_Mangler : CroneEngine {
             dfmClass = "DFM1".asSymbol.asClass;
             wet = dfmClass.notNil.if({
                 try {
-                    // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel
-                    var d = dfmClass.ar(wet, cf, res, 1,
-                        (filt_type > 0.5) * (filt_type < 1.5), 0);
+                    // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel.
+                    // inputgain 0.5 + x2 makeup: DFM1 is a NONLINEAR diode
+                    // model, and the wet path arrives with a fixed 1.5x
+                    // loudness makeup — at unity input gain it saturated
+                    // constantly ("the engine sounds noisy"), which the old
+                    // LINEAR biquads never did. half in / double out keeps
+                    // the loudness and stays clean until `drive` asks for
+                    // dirt. the 0.5/2 pair is the device-tunable knob here.
+                    var d = dfmClass.ar(wet, cf, res, 0.5,
+                        (filt_type > 0.5) * (filt_type < 1.5), 0) * 2;
                     Select.ar(filt_type > 1.5, [d, HPF.ar(d, (cf * 0.5).clip(20, 20000))])
                 } { |e| mmFilter.value }
             }, { mmFilter.value });
@@ -487,7 +494,14 @@ Engine_Mangler : CroneEngine {
             // rev_mix=0 the synth is gone, the return reads 0, output unchanged.
             Out.ar(rev_send, wet);
             rvRet = InFeedback.ar(rev_ret, 2);
-            wet = (wet * (1 - rev_mix).sqrt) + (rvRet * rev_mix.sqrt);
+            // SEND-style (user decision, OT-like): the direct sound stays at
+            // FULL level across the whole knob and rev_mix only scales how
+            // much tail is ADDED — "with reverb I can't hear the recording"
+            // was the old equal-power crossfade doing its job too well. Lua
+            // squares the knob, so .sqrt makes the tail gain linear in it.
+            // full-wet wash is no longer on this knob: crank rev_decay (WASH)
+            // or choke the source instead. headroom: the master Limiter.
+            wet = wet + (rvRet * rev_mix.sqrt);
 
             dry = [inL, inR];
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
@@ -508,16 +522,23 @@ Engine_Mangler : CroneEngine {
             // take's window snapped to stale positions.
             recPhase = Phasor.ar(0, runW * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
             Out.kr(rec_phase_out, A2K.kr(recPhase));
-            recL = (inL * (1 - resample)) + (sig[0] * resample);
-            recR = (inR * (1 - resample)) + (sig[1] * resample);
+            // LeakDC on the take's dry arm: a line input with DC offset would
+            // print it into the buffer and eat limiter headroom. (the regen
+            // arm below already has its own; the monitor path stays untouched.)
+            recL = (LeakDC.ar(inL) * (1 - resample)) + (sig[0] * resample);
+            recR = (LeakDC.ar(inR) * (1 - resample)) + (sig[1] * resample);
             srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
             srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
             // record-safety limiter: transparent below 0.99, stops a hot take
             // hard-clipping into the buffer.
             srcL = Limiter.ar(srcL, 0.99, 0.002);
             srcR = Limiter.ar(srcR, 0.99, 0.002);
-            recLvl = (rec_level * (1 - regenRun)) + (regen * regenRun);
-            preLvl = (pre_level * (1 - regenRun)) + ((1 - regen) * regenRun);
+            // ~10ms lag on the write levels: punch-IN fades instead of stepping,
+            // and mid-take rec_level/pre_level/regen moves stop printing steps
+            // into the buffer. (run stays binary — punch position is sample-
+            // exact, and punch-OUT just pauses the head as before.)
+            recLvl = Lag.kr((rec_level * (1 - regenRun)) + (regen * regenRun), 0.01);
+            preLvl = Lag.kr((pre_level * (1 - regenRun)) + ((1 - regen) * regenRun), 0.01);
             RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
             RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
             Out.kr(rec_amp_out,

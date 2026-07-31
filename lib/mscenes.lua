@@ -76,10 +76,12 @@ local TIMBRE_IDS = {
   "clouds_pos", "clouds_tex", "clouds_fb", "clouds_lofi",
   -- stretch shape (mode itself is a SWITCH, below)
   "warp_window", "warp_overlaps", "warp_rand",
-  -- tape deck (loop bounds ride along, so a scene = a loop region too)
-  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade",
+  -- tape deck (loop bounds ride along, so a scene = a loop region too).
+  -- cut_source is the record-SOURCE blend (dry..wet print) — continuous and
+  -- slew-safe, so it morphs; it selects what WOULD be written, never writes.
+  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade", "cut_source",
   -- polyphonic pad voices
-  "voices", "voice_atk", "voice_rel",
+  "voices", "voice_atk", "voice_rel", "pad_level",
   -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
   -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
   -- move your cursor, and a morph must never lerp it across slices.
@@ -177,11 +179,7 @@ local M = {
   slots = {},         -- slots[1..8] = { id = value } (nil = empty). ctx.scenes
   safe = nil,         -- the safe snapshot, same shape
   pending = nil,      -- slot waiting on a quantized recall (nil = none)
-  morph_at = 0,       -- last morph amount applied (display)
   chaos_live = false, -- a chaos throw is currently held
-  safe_at = -999,     -- frames, for the page's confirmation flashes
-  restored_at = -999,
-  captured_at = -999,
   NUM_SLOTS = NUM_SLOTS,
   -- exposed for docs/tests/inspection: the three lists, as built above
   SCENE_RECALL_IDS = SCENE_RECALL_IDS,
@@ -369,7 +367,6 @@ function M.capture(slot)
   slot = slot_idx(slot)
   local t, n = snapshot_ids(SCENE_RECALL_IDS)
   M.slots[slot] = t
-  M.captured_at = C.frame
   M.invalidate()   -- an endpoint's contents may have just changed under us
   say("SAVED " .. slot,
     "scene " .. slot .. " captured — " .. n .. " params (the whole mangle:"
@@ -499,15 +496,17 @@ function M.morph(slot, amt, opts)
     -- stranded: neither able to move nor to land home.
     if not (amt <= 0 and morph_from) then return false end
     morphing = true
-    for id in pairs(last_sent) do
-      local va = morph_from[id]
-      if va ~= nil and params.lookup[id] then pset(id, va) end
+    -- walk the morph list IN ORDER (like every other writer here), restoring
+    -- only the ids this sweep displaced (the last_sent filter)
+    for i = 1, #SCENE_MORPH_IDS do
+      local id = SCENE_MORPH_IDS[i]
+      if last_sent[id] ~= nil and morph_from[id] ~= nil
+          and params.lookup[id] then
+        pset(id, morph_from[id])
+      end
     end
     morphing = false
-    morph_from = nil
-    for k in pairs(last_sent) do last_sent[k] = nil end
-    M.morph_at = 0
-    M.engaged = false
+    M.invalidate()   -- forget the sweep: we are home
     return true
   end
   opts = opts or {}
@@ -545,7 +544,6 @@ function M.morph(slot, amt, opts)
     end
   end
   morphing = false
-  M.morph_at = amt
   M.engaged = amt > 0   -- the morph is what's driving the sound... unless home
   if amt <= 0 then
     -- home again, exactly where you started. forget the "from" so the NEXT
@@ -598,7 +596,6 @@ end
 function M.safe_capture()
   local t, n = snapshot_ids(SAFE_SNAPSHOT_IDS)
   M.safe = t
-  M.safe_at = C.frame
   say("MARKED <",
     "way-back state marked — " .. n .. " params. select the ◄ cell and K2"
     .. " brings this exact sound back.")
@@ -609,7 +606,6 @@ end
 -- in ◄ without stealing the headline from the action itself
 function M.auto_safe()
   M.safe = snapshot_ids(SAFE_SNAPSHOT_IDS)
-  M.safe_at = C.frame
 end
 
 -- back to the last known good state, now. control state only: it does not
@@ -624,7 +620,6 @@ function M.safe_restore()
   cancel_pending()   -- a queued recall must not undo the rescue a beat later
   local n, moved = apply(M.safe, SAFE_SNAPSHOT_IDS)
   M.chaos_live = false
-  M.restored_at = C.frame
   say(moved == 0 and "UNDO - SAME" or "UNDO",
     "safe state restored — " .. moved .. " of " .. n .. " params moved")
   return true
@@ -728,7 +723,8 @@ function M.pset_read(number)
   cancel_pending()
   -- the load is authoritative even when NO scene file follows: a morph_from /
   -- last_sent left engaged would re-derive the morph from the PRE-load sound
-  -- on the next knob move. (idempotent with the invalidate at the end.)
+  -- on the next knob move. (covers every path below, including the early
+  -- returns — nothing after this touches the morph state again.)
   M.invalidate()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
@@ -746,7 +742,6 @@ function M.pset_read(number)
   -- previous session's ◄/safe-state bleeds into this one and its recall jumps
   -- the instrument to a sound this session never captured.
   M.safe = type(t.safe) == "table" and t.safe or nil
-  M.invalidate()
 end
 
 function M.pset_delete(number)
@@ -763,14 +758,10 @@ function M.init(ctx)
   ctx.scene = M          -- the module, like ctx.motion
   ctx.scenes = M.slots   -- the scene table itself (mutated in place, never
                          -- reassigned, so this ref can't go stale)
-  -- the named helpers, on ctx beside fx_dry / pads_all_off — the KEYS table
-  -- and the grid reach them the same way they reach everything else
+  -- the named helpers the grid's CAP/CLR modifiers call (everything else
+  -- drives the scene_* params directly, so those are the only two exposed)
   ctx.scene_capture = M.capture
-  ctx.scene_recall = M.recall
   ctx.scene_clear = M.clear
-  ctx.scene_morph = M.morph
-  ctx.safe_snapshot_capture = M.safe_capture
-  ctx.safe_snapshot_restore = M.safe_restore
 end
 
 function M.cleanup()

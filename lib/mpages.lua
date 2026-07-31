@@ -17,8 +17,6 @@ local log, exp = math.log, math.exp
 local C     -- shared ctx, bound at init
 local pget, clamp, window_bounds, FPS, PAGES
 local ptext, ptext_c, ptext_r, chip, text_w
-local particles_draw
-local GRAIN_CY, GRAIN_CH
 local amp_in, amp_out
 
 local BAND_T, BAND_B = 15, 40  -- visualization band (strip pages)
@@ -296,7 +294,6 @@ end
 local SHORT = {
   mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
   input_level = "IN", monitor_level = "MON",
-  output_level = "OUT", headphone_gain = "HP",
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   regen = "REGN",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
@@ -319,7 +316,6 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
-  clock_tempo = "BPM",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
@@ -335,7 +331,6 @@ local SHORT = {
 local FULL = {
   mix = "MIX", out_level = "OUT", sc_level = "ENGINE", cut_level = "TAPE",
   input_level = "INPUT", monitor_level = "MONITOR",
-  output_level = "OUT", headphone_gain = "HP",
   rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
   regen = "REGEN",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
@@ -355,7 +350,6 @@ local FULL = {
   voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
-  clock_tempo = "TEMPO",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
 }
 
@@ -410,9 +404,6 @@ local function fmt_value(id)
     local sel = clamp(floor(params:get(id) + 0.5), 0, n)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
-  end
-  if id == "clock_tempo" then
-    return tostring(floor(params:get(id) + 0.5))
   end
   if id == "motion_len" then
     local v = params:get(id)
@@ -528,6 +519,15 @@ local function flabel_r(id, rx, minx)
   if full and minx and x < minx then    -- full word won't fit: drop to SHORT
     lab = label_for(id, false)
     x = rx - label_total(lab, val)
+  end
+  if turning and val then
+    -- the setting being adjusted owns its ground: knock out a pocket first,
+    -- so a long value never collides with the key words (or anything else)
+    -- underneath — they vanish for the swell and come back after. (the old
+    -- top-right readout's pocket rule, applied to the footer row.)
+    screen.level(0)
+    screen.rect(x - 3, 56, rx - x + 5, 8)
+    screen.fill()
   end
   ptext(lab, x, FY, 1, lvl)
   screen.level(lvl)
@@ -1678,8 +1678,6 @@ function M.init(ctx)
   local F = ctx.font
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
-  particles_draw = ctx.particles.draw
-  GRAIN_CY, GRAIN_CH = ctx.particles.CY, ctx.particles.CH
 end
 
 return M

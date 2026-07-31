@@ -32,7 +32,7 @@ local body = main:gsub("(%s*)local%s+(%w+)%s*=%s*include%s*\"lib/([%w_]+)\"",
       lead, var, mod, src)
   end)
 
-assert(inlined == 8, "expected 8 lib includes, matched " .. inlined ..
+assert(inlined == 7, "expected 7 lib includes, matched " .. inlined ..
   " — update tools/amalgamate.lua if modules changed")
 
 local header = [[

@@ -74,7 +74,7 @@
 -- -----------------------------------------------------------------------------
 -- this file is the orchestrator: state + params + key/encoder handlers. the
 -- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
--- font), mparticles (grain cloud), mtape (softcut tape), minput (midi/keyboard
+-- font), mtape (softcut tape), minput (midi/keyboard
 -- notes), mgrid (grid surface), mpages (the screen). they share one `ctx` table
 -- and params are the single source of truth. full design: doc/spec.md.
 
@@ -177,7 +177,7 @@ local ctx = {
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
-  -- display-model flags (mpages paints them, mparticles gates on them)
+  -- display-model flags (mpages paints them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
   -- normalized 0..1 high-water mark of buffer content worth saving (from frame
@@ -324,108 +324,6 @@ return {
 }
 
 end)()
-local Mparticles = (function()  -- inlined lib/mparticles.lua
--- mparticles: the pooled grain-cloud particle system (visual only).
---
--- particles are spawned at the playhead at ~density rate. x is buffer
--- position (playhead + jitter scatter), y is the grain's stereo seat
--- (pan + spread scatter, the engine's own per-grain pan law: L up,
--- R down), dot side and lifetime both step with grain size. slots are
--- pooled and kept in spawn order, so steady-state spawning never allocates.
-
-local floor, log, random, max = math.floor, math.log, math.random, math.max
-
-local PARTICLE_MAX = 32
-local GRAIN_CY, GRAIN_CH = 31, 8  -- stereo axis: mono rail row + half-height
-local SIZE_LOG_SPAN = log(50)     -- size spec is exp 0.01..0.5s: a 50x range
-local particles = {}
-local particles_n = 0
-for i = 1, PARTICLE_MAX do
-  particles[i] = { x = 0, y = 0, lvl = 0, decay = 0, sz = 1 }
-end
-local spawn_acc = 0
-
-local C            -- shared ctx, bound at init
-local pget, clamp, window_bounds, FPS
-
-local M = { CY = GRAIN_CY, CH = GRAIN_CH }
-
-function M.init(ctx)
-  C = ctx
-  pget, clamp, window_bounds, FPS = ctx.pget, ctx.clamp, ctx.window_bounds, ctx.FPS
-end
-
-function M.update()
-  if not params.lookup["density"] then return end
-  -- nothing moves that can't be heard: mode OFF frees the SC voice, and an
-  -- empty buffer granulates silence — either way the cloud stops spawning
-  -- (live particles still decay out)
-  if pget("mode", 2) == 1 or not C.wave_any then
-    spawn_acc = 0
-  else
-    spawn_acc = spawn_acc + pget("density", 20) / FPS
-  end
-  local lo, hi, span = window_bounds()
-  local jit = pget("pos_jitter", 0)
-  local size = pget("size", 0.1)
-  local decay = 13 / max(size * FPS * 4, 2)
-  -- grain size reads twice: lifetime (decay above) and dot side — 1..3 px
-  -- stepped along the size spec's exp scale, fixed at spawn like the
-  -- sounding grain (thresholds land near 27ms and 190ms)
-  local sz = 1 + floor(clamp(log(size * 100) / SIZE_LOG_SPAN, 0, 1) * 2 + 0.5)
-  local pan = pget("pan", 0)
-  local spr = pget("spread", 0.5)
-  local play_phase = C.play_phase
-  while spawn_acc >= 1 do
-    spawn_acc = spawn_acc - 1
-    if particles_n < PARTICLE_MAX then
-      local px = clamp(play_phase + (random() * 2 - 1) * jit * span, 0, 1)
-      particles_n = particles_n + 1
-      local p = particles[particles_n]
-      p.x = px * 127
-      -- y is the grain's stereo seat: pan + spread scatter, clipped the
-      -- same way the engine clips per-grain pan — so cloud height IS
-      -- stereo width, and hard pans pile up on the band edge
-      p.y = clamp(GRAIN_CY + (pan + (random() * 2 - 1) * spr) * GRAIN_CH,
-        GRAIN_CY - GRAIN_CH, GRAIN_CY + GRAIN_CH)
-      p.lvl = 13
-      p.decay = decay
-      p.sz = sz
-    else
-      spawn_acc = 0
-    end
-  end
-  -- decay + compact in place: live slots keep their order (draw order is
-  -- part of the picture), dead slots swap to the tail for reuse
-  local w = 0
-  for i = 1, particles_n do
-    local p = particles[i]
-    p.lvl = p.lvl - p.decay
-    if p.lvl >= 1 then
-      w = w + 1
-      if w ~= i then
-        particles[w], particles[i] = p, particles[w]
-      end
-    end
-  end
-  particles_n = w
-end
-
-function M.draw()
-  -- level varies per particle and overlaps must layer in spawn order, so
-  -- the fill stays per-particle (32 max); dots center on their stereo seat
-  for i = 1, particles_n do
-    local p = particles[i]
-    local off = (p.sz - 1) * 0.5
-    screen.level(floor(p.lvl))
-    screen.rect(p.x - off, p.y - off, p.sz, p.sz)
-    screen.fill()
-  end
-end
-
-return M
-
-end)()
 local Mtape = (function()  -- inlined lib/mtape.lua
 -- mtape: every softcut touch — the TAPE path's plumbing, the eng<>tape mix,
 -- and the tape audio halves of PSET save/load/delete.
@@ -557,20 +455,23 @@ end
 -- PSETs persist the tape audio too: SAVE writes the softcut buffers
 -- (L=buf1, R=buf2, matching init_tape's routing) next to the pset; LOAD
 -- reads them back, DELETE cleans up.
+local function path_for(number)
+  return norns.state.data .. "tape-" .. number .. ".wav"
+end
+
 function M.pset_write(number)
   -- like the take (take_pset_write): an untouched tape must not dump 60s of
   -- stereo silence per save, and a cleared one must not resurrect old audio
   -- on load — an empty save deletes the stale wav instead.
   if C.twave_any then
-    sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
-      0, TAPE_LEN)
+    sc.buffer_write_stereo(path_for(number), 0, TAPE_LEN)
   else
     M.pset_delete(number)
   end
 end
 
 function M.pset_read(number)
-  local path = norns.state.data .. "tape-" .. number .. ".wav"
+  local path = path_for(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
@@ -578,7 +479,7 @@ function M.pset_read(number)
 end
 
 function M.pset_delete(number)
-  os.remove(norns.state.data .. "tape-" .. number .. ".wav")
+  os.remove(path_for(number))
 end
 
 function M.cleanup()
@@ -1023,8 +924,7 @@ local function scene_row_key(x, z)
       srow_frame[x] = C.frame
     else
       -- empty slot: recall it anyway so the page says SLOT EMPTY
-      params:set("scene_recall", 1)
-      params:set("scene_recall", 0)
+      C.pulse("scene_recall")
       srow_frame[x] = nil
     end
   else
@@ -1040,8 +940,7 @@ local function scene_row_key(x, z)
         -- a tap: COMMIT the recall; the scene is the new LIVE. leave the amt
         -- alone when the recall only QUEUED (BEAT/BAR) — zeroing it then
         -- force-applies the old A and bounces the sound around the sync point
-        params:set("scene_recall", 1)
-        params:set("scene_recall", 0)
+        C.pulse("scene_recall")
         if not C.scene.pending then params:set("scene_morph_amt", 0) end
       else
         C.peek_back = true                   -- borrowed: sweep home
@@ -1105,8 +1004,7 @@ local function scene_ws_key(x, y, z)
     elseif x == 2 then scene_mod.clr = (z == 1)
     elseif x == 4 then params:set("chaos_throw", z)
     elseif x == 8 and z == 1 then            -- ◄ the way back
-      params:set("scene_safe_restore", 1)
-      params:set("scene_safe_restore", 0)
+      C.pulse("scene_safe_restore")
     end
     return
   end
@@ -1394,7 +1292,8 @@ local MOTION_IDS = {
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
-  "voice_atk", "voice_rel",
+  "voice_atk", "voice_rel", "pad_level",
+  "cut_source",
   -- the scene morph knob. recording THIS records a whole-instrument
   -- sweep in ONE lane — mscenes re-derives every param from it on replay
   -- (and tells us it did, via M.account, so the sweep never punches forty
@@ -1743,10 +1642,12 @@ local TIMBRE_IDS = {
   "clouds_pos", "clouds_tex", "clouds_fb", "clouds_lofi",
   -- stretch shape (mode itself is a SWITCH, below)
   "warp_window", "warp_overlaps", "warp_rand",
-  -- tape deck (loop bounds ride along, so a scene = a loop region too)
-  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade",
+  -- tape deck (loop bounds ride along, so a scene = a loop region too).
+  -- cut_source is the record-SOURCE blend (dry..wet print) — continuous and
+  -- slew-safe, so it morphs; it selects what WOULD be written, never writes.
+  "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade", "cut_source",
   -- polyphonic pad voices
-  "voices", "voice_atk", "voice_rel",
+  "voices", "voice_atk", "voice_rel", "pad_level",
   -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
   -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
   -- move your cursor, and a morph must never lerp it across slices.
@@ -1844,11 +1745,7 @@ local M = {
   slots = {},         -- slots[1..8] = { id = value } (nil = empty). ctx.scenes
   safe = nil,         -- the safe snapshot, same shape
   pending = nil,      -- slot waiting on a quantized recall (nil = none)
-  morph_at = 0,       -- last morph amount applied (display)
   chaos_live = false, -- a chaos throw is currently held
-  safe_at = -999,     -- frames, for the page's confirmation flashes
-  restored_at = -999,
-  captured_at = -999,
   NUM_SLOTS = NUM_SLOTS,
   -- exposed for docs/tests/inspection: the three lists, as built above
   SCENE_RECALL_IDS = SCENE_RECALL_IDS,
@@ -2036,7 +1933,6 @@ function M.capture(slot)
   slot = slot_idx(slot)
   local t, n = snapshot_ids(SCENE_RECALL_IDS)
   M.slots[slot] = t
-  M.captured_at = C.frame
   M.invalidate()   -- an endpoint's contents may have just changed under us
   say("SAVED " .. slot,
     "scene " .. slot .. " captured — " .. n .. " params (the whole mangle:"
@@ -2166,15 +2062,17 @@ function M.morph(slot, amt, opts)
     -- stranded: neither able to move nor to land home.
     if not (amt <= 0 and morph_from) then return false end
     morphing = true
-    for id in pairs(last_sent) do
-      local va = morph_from[id]
-      if va ~= nil and params.lookup[id] then pset(id, va) end
+    -- walk the morph list IN ORDER (like every other writer here), restoring
+    -- only the ids this sweep displaced (the last_sent filter)
+    for i = 1, #SCENE_MORPH_IDS do
+      local id = SCENE_MORPH_IDS[i]
+      if last_sent[id] ~= nil and morph_from[id] ~= nil
+          and params.lookup[id] then
+        pset(id, morph_from[id])
+      end
     end
     morphing = false
-    morph_from = nil
-    for k in pairs(last_sent) do last_sent[k] = nil end
-    M.morph_at = 0
-    M.engaged = false
+    M.invalidate()   -- forget the sweep: we are home
     return true
   end
   opts = opts or {}
@@ -2212,7 +2110,6 @@ function M.morph(slot, amt, opts)
     end
   end
   morphing = false
-  M.morph_at = amt
   M.engaged = amt > 0   -- the morph is what's driving the sound... unless home
   if amt <= 0 then
     -- home again, exactly where you started. forget the "from" so the NEXT
@@ -2265,7 +2162,6 @@ end
 function M.safe_capture()
   local t, n = snapshot_ids(SAFE_SNAPSHOT_IDS)
   M.safe = t
-  M.safe_at = C.frame
   say("MARKED <",
     "way-back state marked — " .. n .. " params. select the ◄ cell and K2"
     .. " brings this exact sound back.")
@@ -2276,7 +2172,6 @@ end
 -- in ◄ without stealing the headline from the action itself
 function M.auto_safe()
   M.safe = snapshot_ids(SAFE_SNAPSHOT_IDS)
-  M.safe_at = C.frame
 end
 
 -- back to the last known good state, now. control state only: it does not
@@ -2291,7 +2186,6 @@ function M.safe_restore()
   cancel_pending()   -- a queued recall must not undo the rescue a beat later
   local n, moved = apply(M.safe, SAFE_SNAPSHOT_IDS)
   M.chaos_live = false
-  M.restored_at = C.frame
   say(moved == 0 and "UNDO - SAME" or "UNDO",
     "safe state restored — " .. moved .. " of " .. n .. " params moved")
   return true
@@ -2395,7 +2289,8 @@ function M.pset_read(number)
   cancel_pending()
   -- the load is authoritative even when NO scene file follows: a morph_from /
   -- last_sent left engaged would re-derive the morph from the PRE-load sound
-  -- on the next knob move. (idempotent with the invalidate at the end.)
+  -- on the next knob move. (covers every path below, including the early
+  -- returns — nothing after this touches the morph state again.)
   M.invalidate()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
@@ -2413,7 +2308,6 @@ function M.pset_read(number)
   -- previous session's ◄/safe-state bleeds into this one and its recall jumps
   -- the instrument to a sound this session never captured.
   M.safe = type(t.safe) == "table" and t.safe or nil
-  M.invalidate()
 end
 
 function M.pset_delete(number)
@@ -2430,14 +2324,10 @@ function M.init(ctx)
   ctx.scene = M          -- the module, like ctx.motion
   ctx.scenes = M.slots   -- the scene table itself (mutated in place, never
                          -- reassigned, so this ref can't go stale)
-  -- the named helpers, on ctx beside fx_dry / pads_all_off — the KEYS table
-  -- and the grid reach them the same way they reach everything else
+  -- the named helpers the grid's CAP/CLR modifiers call (everything else
+  -- drives the scene_* params directly, so those are the only two exposed)
   ctx.scene_capture = M.capture
-  ctx.scene_recall = M.recall
   ctx.scene_clear = M.clear
-  ctx.scene_morph = M.morph
-  ctx.safe_snapshot_capture = M.safe_capture
-  ctx.safe_snapshot_restore = M.safe_restore
 end
 
 function M.cleanup()
@@ -2467,8 +2357,6 @@ local log, exp = math.log, math.exp
 local C     -- shared ctx, bound at init
 local pget, clamp, window_bounds, FPS, PAGES
 local ptext, ptext_c, ptext_r, chip, text_w
-local particles_draw
-local GRAIN_CY, GRAIN_CH
 local amp_in, amp_out
 
 local BAND_T, BAND_B = 15, 40  -- visualization band (strip pages)
@@ -2746,7 +2634,6 @@ end
 local SHORT = {
   mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
   input_level = "IN", monitor_level = "MON",
-  output_level = "OUT", headphone_gain = "HP",
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   regen = "REGN",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
@@ -2769,7 +2656,6 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
-  clock_tempo = "BPM",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
@@ -2785,7 +2671,6 @@ local SHORT = {
 local FULL = {
   mix = "MIX", out_level = "OUT", sc_level = "ENGINE", cut_level = "TAPE",
   input_level = "INPUT", monitor_level = "MONITOR",
-  output_level = "OUT", headphone_gain = "HP",
   rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
   regen = "REGEN",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
@@ -2805,7 +2690,6 @@ local FULL = {
   voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
-  clock_tempo = "TEMPO",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
 }
 
@@ -2860,9 +2744,6 @@ local function fmt_value(id)
     local sel = clamp(floor(params:get(id) + 0.5), 0, n)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
-  end
-  if id == "clock_tempo" then
-    return tostring(floor(params:get(id) + 0.5))
   end
   if id == "motion_len" then
     local v = params:get(id)
@@ -2978,6 +2859,15 @@ local function flabel_r(id, rx, minx)
   if full and minx and x < minx then    -- full word won't fit: drop to SHORT
     lab = label_for(id, false)
     x = rx - label_total(lab, val)
+  end
+  if turning and val then
+    -- the setting being adjusted owns its ground: knock out a pocket first,
+    -- so a long value never collides with the key words (or anything else)
+    -- underneath — they vanish for the swell and come back after. (the old
+    -- top-right readout's pocket rule, applied to the footer row.)
+    screen.level(0)
+    screen.rect(x - 3, 56, rx - x + 5, 8)
+    screen.fill()
   end
   ptext(lab, x, FY, 1, lvl)
   screen.level(lvl)
@@ -4128,8 +4018,6 @@ function M.init(ctx)
   local F = ctx.font
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
-  particles_draw = ctx.particles.draw
-  GRAIN_CY, GRAIN_CH = ctx.particles.CY, ctx.particles.CH
 end
 
 return M
@@ -4137,17 +4025,15 @@ return M
 end)()
 
 ctx.font = Mfont
-ctx.particles = Mparticles
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 
-Mparticles.init(ctx)
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 -- sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
--- ctx.scene_* / ctx.safe_snapshot_* helpers the KEYS table + grid call
+-- ctx.scene_capture/_clear helpers the grid's CAP/CLR modifiers call
 Mscenes.init(ctx)
 Mpages.init(ctx)
 
@@ -4199,6 +4085,15 @@ end
 local function pulse(id)
   params:set(id, 1)
   params:set(id, 0)
+end
+-- the grid drives the same momentary params (read lazily at press time, so
+-- defining it after the ctx wiring above is safe)
+ctx.pulse = pulse
+
+-- "open" cutoff for the current filter type — the ONE definition of what an
+-- open filter means, shared by FILTER's OPEN throw and ctx.fx_dry
+local function filter_open_cutoff(ft)
+  return ft == 2 and 20 or (ft == 3 and 1000 or 20000)
 end
 
 -- TAKE K3: window full <-> back where you had it (a round trip, so a
@@ -4254,7 +4149,7 @@ local KEYS = {
       local mem = { cutoff = pget("cutoff", 20000),
         resonance = pget("resonance", 0) }
       local ft = pget("filt_type", 1)
-      params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+      params:set("cutoff", filter_open_cutoff(ft))
       params:set("resonance", 0)
       return mem
     end),
@@ -4506,9 +4401,10 @@ function ctx.pad_trigger(id, i, z)
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
       -- the pad voice level (chord-safe default that won't slam the limiter)
-      engine.note_on(id, pad_pos(i, (ctx.pad_type[i] or 0) > 0),
+      local pt = ctx.pad_type[i] or 0
+      engine.note_on(id, pad_pos(i, pt > 0),
         2 ^ ((ctx.pad_pitch[i] or 0) / 12),
-        ctx.pad_type[i] or 0, pget("pad_level", 0.3))
+        pt, pget("pad_level", 0.3))
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
   elseif ctx.pad_held[id] then
@@ -4757,7 +4653,7 @@ function ctx.fx_dry()
   params:set("drive", 0)
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
-  params:set("cutoff", ft == 2 and 20 or (ft == 3 and 1000 or 20000))
+  params:set("cutoff", filter_open_cutoff(ft))
   params:set("resonance", 0)
 end
 
@@ -5330,7 +5226,6 @@ function init()
       Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
-      Mparticles.update()
       Mmotion.tick()   -- advance + replay the gesture loop
       -- apply a pending morph sweep. AFTER motion, which may have just
       -- replayed a recorded scene_morph_amt move for us to act on.

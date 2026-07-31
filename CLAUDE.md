@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63) rides the same deploy: the RESTART covers the 48th+50th engine, the reload covers the 49th+50th Lua.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63, committed 0b4f045) the **51st change** (texture pass, ENGINE-only, count STILL 63) and the **52nd change** (codebase cleanup — dead mparticles module REMOVED (7 libs now), dead scene state/bindings, list-drift fix, engine winRead consolidation; count STILL 63) ride the same deploy: ONE RESTART covers the 48th+50th+51st+52nd engine, the reload covers the Lua.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1345,6 +1345,110 @@ audio), PV's dead `pitch` face knob. README: added "First session, five minutes"
 + a Troubleshooting section. Gate: reload + RESTART, count 63, then ear-check the
 8 engine fixes (seam fade, drive law, stereo verb, PV interp, regen pause under
 STOP, voice re-cap, voice pan, regen-head window snap).
+
+Fifty-first change — **texture pass (ENGINE-only, fingerprint STAYS 63, all core
+UGens, UNTESTED — rides the same pending RESTART)**: the safe subset of the
+"sound even better" list. (a) **grain equal-loudness** — overlap comp clip
+`(0.25, 1)` → `(0.25, 16)`: above unity overlap it now ATTENUATES (to −12dB)
+instead of riding the master limiter into pumping; the ≤2× low-overlap boost (S5)
+is unchanged. NB this retunes dense-cloud loudness — ear-check on the gate. (b)
+**lagged performance controls** — `pos_start`/`pos_end` (as lo/hi) + `scan` get
+`Lag.kr(…, 0.02)` in ALL FIVE play defs (grain/warp/pv/play/clouds): window-edge
+rides no longer click the read head. (c) **sample-accurate grains** — Dust.kr →
+**Dust.ar** and EVERY per-grain TRand.kr → **TRand.ar** in \mangler_grain and
+\mangler_voice_grain (kr quantized onsets to the control block; and a kr TRand
+would MISS ar impulses — the two must move together, never swap one without the
+other). (d) **punch-in declick** — `recLvl`/`preLvl` wrapped in Lag.kr(0.01):
+arming fades in, mid-take level moves stop printing steps; run stays binary so
+punch position is sample-exact (punch-OUT still just pauses the head). (e)
+**LeakDC on the take's dry arm** (`recL/recR` input side) — DC from a line input
+no longer prints into the buffer. NO Lua touched → renders trivially identical;
+paren-balanced; TRand.kr/Dust.kr count now 0. STILL DEFERRED (device/measurement):
+44.1k SRC, resample-comb DelayN, int24 takes, dual-head seam crossfade,
+window-synced regen, full-mix resample, partial scenes. Gate: RESTART, count 63,
+then ear the density sweep (equal-loudness), a TAKE E2 ride mid-play (no clicks),
+a dense cloud A/B for smoothness, and a rec punch-in on hot material.
+
+Fifty-second change — **codebase cleanup pass (4-agent /simplify sweep; Lua +
+ENGINE source-refactor, fingerprint STAYS 63, ALL 61 renders byte-identical,
+dist verified — 7 modules now)**: quality only, no behavior change.
+* **lib/mparticles.lua DELETED** — the particle system was fully dead (M.draw
+  bound but never called since the NU-2 rewrite) yet `Mparticles.update()`
+  still burned ~9 param reads + a 32-slot scan EVERY frame. Include/init/tick
+  call/bindings removed; amalgamate assert 8→7. Render-proven inert (0 shots
+  changed — the sim never drove it either).
+* **mscenes dead state removed** — morph_at/safe_at/restored_at/captured_at
+  (write-only since the 36th change's say() superseded them) + the 4 unused
+  ctx bindings (scene_recall/scene_morph/safe_snapshot_*); ctx keeps only
+  scene_capture/scene_clear (the grid's CAP/CLR).
+* **LIST DRIFT FIXED** — `cut_source` (S23) and `pad_level` (48th) had missed
+  BOTH curated lists: now in SCENE_RECALL_IDS (TIMBRE, morph-safe) and
+  MOTION_IDS (appended). The three-hand-lists-over-one-registry pattern
+  remains the structural risk (a tagged param registry is the deeper fix —
+  deferred).
+* **Reuse**: `filter_open_cutoff(ft)` shared by FILTER OPEN + fx_dry (the
+  comment claimed parity, now the code enforces it); `ctx.pulse` exported and
+  used by mgrid's 3 hand-rolled momentary pairs; mtape got the `path_for`
+  helper its three pset siblings already had; dead SHORT/FULL/fmt_value
+  entries (clock_tempo/output_level/headphone_gain, SEQ leftovers) removed.
+* **ENGINE `winRead`** — the five play defs' identical 7-line window preamble
+  (which had already drifted once: play's pitch term) is now ONE build-time
+  function `winRead.(pos_start, pos_end, scan, buf, phase_out, pitchMul)`
+  emitting the same UGens inline; graphs unchanged, `#winPos, phase, span =`
+  destructure per def. SOURCE refactor only — but it IS engine text: rides
+  the pending RESTART, confirm count 63 + all modes still play.
+* SKIPPED (noted, deliberate): delay→spawn/free synth like the reverb (real
+  CPU win, needs a device session); purity()/FILT_Y per-frame micro-costs
+  (within the measured 0.076ms budget); footer tostring churn (Lua 5.3
+  interns short strings); LP refresh header table (device-only code, micro);
+  FILTER-curve Lua/SC duplication (cross-language, needs codegen); pset
+  choreography + press-token unification (working, recently hardened);
+  param_norm/value_norm + draw-law/VU/dotted-box helper merges in mpages
+  (cosmetic maintenance, cut for another pass); `note_one_shot` is dead but
+  removing it moves the fingerprint — leave until a deliberate engine gate.
+
+Fifty-third change — **footer pocket while turning (Lua-only, lib/mpages.lua,
+renders byte-identical — no suite shot captures mid-swell)**: user report — a
+long value swelling in the footer (e.g. a kHz cutoff) collided with the key
+words. `flabel_r`'s full-word→SHORT fallback only guarded the AT-REST case;
+with a value up there was NO collision guard. Fix: while a param is TURNING,
+its label+value knock out a black pocket (x−3..rx+2, rows 56–63) BEFORE
+drawing — anything underneath (key words, chips) vanishes for the ~1.2s swell
+and returns after (the old top-right readout's pocket rule, applied to the
+footer). Selector values at rest (SLICE·n etc.) are unchanged — they were
+laid out to fit and must not permanently hide the key words. Save + reload.
+
+Fifty-fourth change — **reverb mix is now SEND-style (ENGINE one-liner,
+fingerprint STAYS 63, UNTESTED — rides the next RESTART; user-decided)**:
+device report "with reverb I can't listen to the sound recorded" — the old
+equal-power crossfade traded the direct sound away as mix rose (gone entirely
+at knob max, by design). Now `wet = wet + (rvRet * rev_mix.sqrt)` — the
+recorded sound stays at FULL level across the whole knob, rev_mix only adds
+tail (linear in the knob thanks to the Lua square map). TRADE (stated): no
+100%-wet wash on this knob any more — that's rev_decay/WASH or choking the
+source. delay_mix deliberately KEPT as a crossfade (a dub delay throw wants
+the direct to duck). The reverb spawn/free gate (rev_mix>0) is unchanged.
+SAME SESSION, device diagnosis notes: "very faint on headphones, fine on the
+mixer" = the SYSTEM headphone gain (PARAMS > LEVELS), not the engine — the
+DFM1-attenuation theory is likely RETRACTED; engine-side noise still being
+localized (ladder: STOP kills it? → path vs monitor/HP-amp; only while the
+take plays? → noise printed at record time + the wet path's fixed 1.5x
+makeup; swells with reverb/shimmer? → FreeVerb x2 fallback / shimmer loop /
+DFM1 res near the 0.9 clip).
+
+Fifty-fifth change — **DFM1 headroom (ENGINE one-liner, fingerprint STAYS 63,
+UNTESTED — rides the next RESTART)**: device report "why is the sound so
+noisy?" — leading theory: the wet path's fixed 1.5x makeup (S5) used to feed
+LINEAR biquads; since the 48th batch it drives the NONLINEAR DFM1 diode
+ladder at ~1.35 full scale = constant saturation grit, new to the player's
+ears with this deploy. Fix: DFM1 inputgain 1 → **0.5 with a x2 post-makeup**
+(same loudness, clean until `drive` asks; the 0.5/2 pair is the device
+tunable). CONFIRM on device with the 10-second test: grain_level down →
+noise cleans = confirmed. Other open noise candidates from the same session:
+REGN badge lit (regen re-recording mush), noise PRINTED into the take
+(record 2s of silence and play it — hissy = input-chain gain staging, then
+boosted by the same 1.5x), FreeVerb x2 fallback with rev_mix up, DFM1 res
+near the 0.9 clip. Headphone faintness resolved as SYSTEM headphone gain.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

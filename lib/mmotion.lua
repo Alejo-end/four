@@ -55,7 +55,8 @@ local MOTION_IDS = {
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
-  "voice_atk", "voice_rel",
+  "voice_atk", "voice_rel", "pad_level",
+  "cut_source",
   -- the scene morph knob. recording THIS records a whole-instrument
   -- sweep in ONE lane — mscenes re-derives every param from it on replay
   -- (and tells us it did, via M.account, so the sweep never punches forty

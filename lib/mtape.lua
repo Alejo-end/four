@@ -128,20 +128,23 @@ end
 -- PSETs persist the tape audio too: SAVE writes the softcut buffers
 -- (L=buf1, R=buf2, matching init_tape's routing) next to the pset; LOAD
 -- reads them back, DELETE cleans up.
+local function path_for(number)
+  return norns.state.data .. "tape-" .. number .. ".wav"
+end
+
 function M.pset_write(number)
   -- like the take (take_pset_write): an untouched tape must not dump 60s of
   -- stereo silence per save, and a cleared one must not resurrect old audio
   -- on load — an empty save deletes the stale wav instead.
   if C.twave_any then
-    sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
-      0, TAPE_LEN)
+    sc.buffer_write_stereo(path_for(number), 0, TAPE_LEN)
   else
     M.pset_delete(number)
   end
 end
 
 function M.pset_read(number)
-  local path = norns.state.data .. "tape-" .. number .. ".wav"
+  local path = path_for(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
@@ -149,7 +152,7 @@ function M.pset_read(number)
 end
 
 function M.pset_delete(number)
-  os.remove(norns.state.data .. "tape-" .. number .. ".wav")
+  os.remove(path_for(number))
 end
 
 function M.cleanup()
