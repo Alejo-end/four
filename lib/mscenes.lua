@@ -1,4 +1,4 @@
--- mscenes: scenes, scene morphing, and the safe-state snapshot (S19) — the
+-- mscenes: scenes, scene morphing, and the safe-state snapshot — the
 -- "remember this / go back to that" layer.
 --
 -- three features, one data model:
@@ -540,7 +540,7 @@ function M.morph(slot, amt, opts)
     local id = ids[i]
     local va, vb = A[id], B[id]
     -- skip anything either side doesn't have (older capture, missing param).
-    -- the OT rule: a param IDENTICAL at both ends is not the morph's to move —
+    -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
     -- a hand riding such a knob mid-sweep stays live even through the forced
     -- ends, instead of being stomped back (a scene only claims what differs).
     -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)

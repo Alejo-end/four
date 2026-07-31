@@ -157,7 +157,7 @@ local function capture_poll(offset)
   end
 end
 
--- another driver (scenes, S19) is about to move `id` itself: fold the
+-- another driver (a scene recall or a morph sweep) is about to move `id` itself: fold the
 -- resulting value into our baseline so the next poll doesn't read it as a
 -- live hand on a knob. this is the same trick playback uses on its own
 -- writes — a scene recall or a morph sweep is a JUMP, not a gesture, and

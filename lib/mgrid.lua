@@ -387,7 +387,7 @@ end
 -- a pad's RELEASE belongs to the surface that took its PRESS.
 -- rows 1-2 and 7-8 are page-independent, but the workspace is not — without
 -- this, changing page mid-hold hands the release to a layout that doesn't
--- know the pad, and whatever it was holding LATCHES (the S18/S19 lesson).
+-- know the pad, and whatever it was holding LATCHES (learned the hard way on device).
 local key_surface = {}
 
 local function grid_key(x, y, z)

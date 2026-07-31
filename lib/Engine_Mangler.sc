@@ -28,9 +28,9 @@ Engine_Mangler : CroneEngine {
     // reverb+shimmer spawn/free synth: freed at rev_mix==0. send/return busses
     // + last-known reverb params (handed over when the synth is spawned).
     var <revSynth, <revSendBus, <revRetBus, <revParams;
-    // S8 polyphonic voice layer
+    // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
-    // S11: true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
+    // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
     // then uses the Clouds granular voice instead of the GrainBuf fallback
     var <hasClouds;
 
@@ -75,7 +75,7 @@ Engine_Mangler : CroneEngine {
         });
     }
 
-    // ---- S8 voice allocation ------------------------------------------------
+    // ---- voice allocation ---------------------------------------------------
     // shared spawn args: buffers, bus, envelope, and the CURRENT drone grain
     // params so a grain-cloud voice tracks the drone's character.
     voiceArgs { arg pos, pitch, oneShot, amp;
@@ -135,7 +135,7 @@ Engine_Mangler : CroneEngine {
         bufL = Buffer.alloc(s, s.sampleRate * 60, 1);
         bufR = Buffer.alloc(s, s.sampleRate * 60, 1);
 
-        // grain envelope buffers (S7). shape 0 uses built-in Hann (envbufnum
+        // grain envelope buffers. shape 0 uses built-in Hann (envbufnum
         // -1) and never touches these. filled BEFORE the s.sync below so
         // they're ready when the first GRAIN synth spawns.
         grainEnv1 = Buffer.alloc(s, 2048, 1);
@@ -151,12 +151,12 @@ Engine_Mangler : CroneEngine {
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
 
-        // S8 voice state
+        // voice state
         maxVoices = 8;
         activeVoices = Dictionary.new;
         voiceOrder = List.new;
-        // S9 headroom: per-voice amp 0.5 -> 0.3 so a chord of poly voices
-        // summing on play_bus doesn't slam the master limiter (the S8 clip).
+        // headroom: per-voice amp 0.3 so a chord of poly voices summing
+        // on play_bus doesn't slam the master limiter.
         voiceParams = Dictionary[\amp -> 0.3, \voice_atk -> 0.005, \voice_rel -> 0.6];
 
         // last-known drone values, handed to a freshly spawned mode synth
@@ -166,7 +166,7 @@ Engine_Mangler : CroneEngine {
             \size -> 0.1, \density -> 20, \pitch -> 1.0, \spread -> 0.5, \pan -> 0.0,
             \grain_jitter -> 0.0, \grain_pitch_spread -> 0.0, \grain_shape -> 0,
             \warp_window -> 0.25, \warp_overlaps -> 4, \warp_rand -> 0.0, \pv_freeze -> 0,
-            // S11 MiClouds granular controls (also passed to the fallback defs,
+            // MiClouds granular controls (also passed to the fallback defs,
             // which simply ignore them)
             \clouds_pos -> 0.5, \clouds_tex -> 0.5, \clouds_fb -> 0.0,
             \clouds_mode -> 0, \clouds_lofi -> 0.0
@@ -222,7 +222,7 @@ Engine_Mangler : CroneEngine {
             var durL, durR, pchL, pchR, envSel;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             look = (0.25 / BufDur.kr(buf_l)) * rec * (1 - freeze);
-            // S7: Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
+            // Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
             // kr quantized grain onsets to the ~1.3ms control block, which
             // correlates them audibly at high density. the TRands must be ar
             // with it — a kr TRand samples an ar trigger once per block and
@@ -237,12 +237,12 @@ Engine_Mangler : CroneEngine {
             durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
             // NO /12 before .midiratio — midiratio IS 2^(st/12); the old
             // double-divide made a 12-semitone spread deliver ~1 semitone
-            // (the param ran at 1/12 strength since S7)
+            // (the param had run at 1/12 strength since it was built)
             pchL = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
             pchR = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // equal-loudness across the whole density x size plane: below unity
-            // overlap this BOOSTS (<=2x, the S5 "too faint" fix, unchanged);
+            // overlap this BOOSTS (<=2x, the original "too faint" fix, unchanged);
             // above it it now ATTENUATES (to -12dB at ~100 stacked grains)
             // instead of riding the master limiter into pumping.
             comp = (density * size).clip(0.25, 16).sqrt.reciprocal;
@@ -294,7 +294,7 @@ Engine_Mangler : CroneEngine {
             Out.ar(play_bus, sig);
         }).add;
 
-        // ---- S14: CLEAN PLAY drone — a straight loop of the window, the EXACT
+        // ---- CLEAN PLAY drone — a straight loop of the window, the EXACT
         // recorded sample (no granulation/stretch/spectral). this is the
         // default mode so a fresh take plays back untouched; GRAIN/WARP/PV are
         // switched on when you want them. scan sets loop speed, pitch resamples
@@ -365,7 +365,7 @@ Engine_Mangler : CroneEngine {
             };
         });
 
-        // ---- S8 polyphonic voices: ONE note each, spawned per press. both
+        // ---- polyphonic voices: ONE note each, spawned per press. both
         // defs share the arg set; each frees itself. THE PER-PAD SWITCH is
         // which def the allocator spawns (grain cloud vs clean slice).
 
@@ -441,7 +441,7 @@ Engine_Mangler : CroneEngine {
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
             // 2.sqrt (not 1.5): the exact inverse of Balance2's -3dB centre
             // gain in the play defs — PLAY at pan 0 with no FX now lands at
-            // EXACT unity vs the raw take (the S14 "exact recorded sample"
+            // EXACT unity vs the raw take (the "exact recorded sample"
             // claim, previously +0.5dB into the limiter).
             wet = In.ar(play_bus, 2) * grain_level * 2.sqrt;
 
@@ -480,7 +480,7 @@ Engine_Mangler : CroneEngine {
                 } { |e| mmFilter.value }
             }, { mmFilter.value });
 
-            // S13: drive is a clean->saturated crossfade so drive=0 is a TRUE
+            // drive is a clean->saturated crossfade so drive=0 is a TRUE
             // bypass. it was an always-on tanh that soft-clipped even at 0,
             // colouring a fresh dry recording; now the base sound is exactly
             // the sample, and drive dials the saturation in on top.
@@ -527,7 +527,7 @@ Engine_Mangler : CroneEngine {
             dry_wet = dry_wet.lag(0.03);
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
             sig = sig * Lag.kr(level, 0.05);
-            sig = Limiter.ar(sig, 0.92, 0.01);  // S9: 0.98 -> 0.92 DAC headroom
+            sig = Limiter.ar(sig, 0.92, 0.01);  // DAC headroom
             recRun = rec * (1 - freeze);
             // regen: run the record head continuously and crossfade the OUTPUT
             // back into the buffer (self-mangle). BOUNDED (convex crossfade +
@@ -660,7 +660,7 @@ Engine_Mangler : CroneEngine {
             this.setMode(msg[1]);
         });
 
-        // ---- S8 polyphony commands. note_on/one_shot gained a trailing AMP
+        // ---- polyphony commands. note_on/one_shot gained a trailing AMP
         // (per-note level) — an ARITY change, NOT a new command, so the
         // fingerprint COUNT is unchanged. amp nil (an old 4-arg caller) -> the
         // voiceParams default, so it degrades cleanly both ways.
@@ -758,7 +758,7 @@ Engine_Mangler : CroneEngine {
             recAmpBus.getSynchronous;
         });
 
-        // start in GRAIN so the instrument behaves like S1 out of the box
+        // start in GRAIN; the Lua defaults switch it to clean PLAY at load
         this.setMode(1);
     }
 

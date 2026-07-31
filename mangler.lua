@@ -907,7 +907,7 @@ local function add_eng_control(id, name, spec, map)
 end
 local function square(v) return v * v end
 
--- delay feedback response (doc/ux-feedback.md §23). the raw knob is 0..1 but
+-- delay feedback response. the raw knob is 0..1 but
 -- audible repeat-count is a ln-law of the loop gain, so a LINEAR knob crams
 -- every useful value into the top few percent ("~4 quiet repeats then jumps to
 -- infinite"). this concave curve spreads the knob across the musical band —
@@ -1177,8 +1177,7 @@ local function init_params()
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
   -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET post-FX
-  -- engine output — the tape as a print / resample stage (doc/ux-feedback.md
-  -- §25). default DRY = the classic parallel-ADC tap, so nothing changes until
+  -- engine output — the tape as a print / resample stage. default DRY = the classic parallel-ADC tap, so nothing changes until
   -- you reach for it.
   params:add_control("cut_source", "tape source",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
@@ -1415,7 +1414,7 @@ local function init_params()
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
     Mscenes.pset_write(number)
-    ctx.take_pset_write(number)   -- S22: the engine take, as an L/R pair
+    ctx.take_pset_write(number)   -- the engine take, as an L/R pair
     ctx.padlock_pset_write(number)  -- per-pad sound-locks
   end
   params.action_read = function(filename, silent, number)

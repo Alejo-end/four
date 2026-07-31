@@ -404,7 +404,7 @@ function M.clear_buffer()
   sc.buffer_clear()
 end
 
--- the tape's RECORD SOURCE (cut_source, doc/ux-feedback.md §25): 0 = DRY (the
+-- the tape's RECORD SOURCE (cut_source): 0 = DRY (the
 -- raw ADC tap) .. 1 = WET (the engine's post-FX output — filter/drive/delay/
 -- reverb). the two router sends SUM at the shared softcut input, so a blend
 -- prints part raw + part processed and the tape becomes a resample / print
@@ -1023,7 +1023,7 @@ end
 -- a pad's RELEASE belongs to the surface that took its PRESS.
 -- rows 1-2 and 7-8 are page-independent, but the workspace is not — without
 -- this, changing page mid-hold hands the release to a layout that doesn't
--- know the pad, and whatever it was holding LATCHES (the S18/S19 lesson).
+-- know the pad, and whatever it was holding LATCHES (learned the hard way on device).
 local key_surface = {}
 
 local function grid_key(x, y, z)
@@ -1394,7 +1394,7 @@ local function capture_poll(offset)
   end
 end
 
--- another driver (scenes, S19) is about to move `id` itself: fold the
+-- another driver (a scene recall or a morph sweep) is about to move `id` itself: fold the
 -- resulting value into our baseline so the next poll doesn't read it as a
 -- live hand on a knob. this is the same trick playback uses on its own
 -- writes — a scene recall or a morph sweep is a JUMP, not a gesture, and
@@ -1564,7 +1564,7 @@ return M
 
 end)()
 local Mscenes = (function()  -- inlined lib/mscenes.lua
--- mscenes: scenes, scene morphing, and the safe-state snapshot (S19) — the
+-- mscenes: scenes, scene morphing, and the safe-state snapshot — the
 -- "remember this / go back to that" layer.
 --
 -- three features, one data model:
@@ -2106,7 +2106,7 @@ function M.morph(slot, amt, opts)
     local id = ids[i]
     local va, vb = A[id], B[id]
     -- skip anything either side doesn't have (older capture, missing param).
-    -- the OT rule: a param IDENTICAL at both ends is not the morph's to move —
+    -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
     -- a hand riding such a knob mid-sweep stays live even through the forced
     -- ends, instead of being stomped back (a scene only claims what differs).
     -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
@@ -2445,7 +2445,7 @@ function M.clear_twave()
   C.twave_any = false
 end
 
--- wipe the engine's picture (S21 `clear`): the buffer is gone, so the strip
+-- wipe the engine's picture (the engine `clear` command): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
   if M.cancel_load then M.cancel_load() end  -- stop an in-flight fill first
@@ -2454,7 +2454,7 @@ function M.clear_wave()
   C.wave_any = false
 end
 
--- paint the wave display straight out of a FILE (S21 `read_file`).
+-- paint the wave display straight out of a FILE (the engine `read_file`).
 -- lua cannot read the engine's SC buffer, so a loaded sample would otherwise be
 -- INVISIBLE on every page that draws the take — REC/WINDOW/PADS would sit there
 -- saying "EMPTY - K2 REC" over audio you can hear. so we read the file's peaks
@@ -2520,8 +2520,8 @@ function M.load_wave(path, buf_secs)
   if afmt == 0xFFFE then afmt = 1 end
   -- one sample → a normalized 0..1 magnitude, per format. 16/24/32-bit PCM and
   -- 32-bit float are what the engine's SoundFile loads, so a 24-bit drop-in now
-  -- draws + windows correctly instead of "loads audibly but shows EMPTY" (S21's
-  -- bug, previously only fixed for 16-bit).
+  -- draws + windows correctly instead of "loads audibly but shows EMPTY" (a
+  -- bug this once had for everything but 16-bit).
   local readpeak
   if afmt == 1 and bits == 16 then
     readpeak = function(s, p) local v = string.unpack("<i2", s, p); return (v < 0 and -v or v) / 32768 end
@@ -2943,7 +2943,7 @@ end
 
 -- FILTER: log-frequency axis 20Hz..20kHz over 128 columns, rail columns at
 -- 100Hz/1k/10k (labeled), the 0dB row, and a reusable response buffer (the
--- curve is the engine's REAL biquad magnitude — S5 constants, keep in sync
+-- curve is the engine's REAL biquad magnitude — constants mirror the engine, keep in sync
 -- with Engine_Mangler.sc)
 local FILT_FREQ, FILT_Y = {}, {}
 for x = 0, 127 do
@@ -3042,7 +3042,7 @@ local function body_TAKE(frame)
   screen.rect(hi * 127 - 2, TK_MID + TK_HALF + 2, 2, 1)
   screen.fill()
   if rec then
-    -- no blinking window frame (doc/ux-feedback.md §29 — "way too much"): the
+    -- no blinking window frame (play-tested as "way too much"): the
     -- sweeping write head, the big elapsed seconds, the IN meter and the header
     -- R flag already say REC. the strip stays calm.
     screen.level(15)                -- the write head
@@ -3073,7 +3073,7 @@ local function body_TAKE(frame)
     if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
   end
   -- the READ (playback) head, drawn LAST so it never hides behind the solid
-  -- WRITE head (doc/ux-feedback.md §30). distinct SHAPE, not just tone: a
+  -- WRITE head. distinct SHAPE, not just tone: a
   -- DASHED column + a caret above the strip vs the write head's solid line +
   -- comet-tail glow — so even when they cross you can tell read from write.
   if C.wave_any and pget("mode", 5) ~= 1 then
@@ -3319,7 +3319,7 @@ end
 -- 5 · DELAY / REVERB — the time-smear, split into two stations. DELAY draws
 --     the onset + echo taps decaying by feedback; REVERB draws the tail as a
 --     slope + shimmer motes. shared time axis, rails at 1s/2s, dormant flat
---     at mix 0. (was one merged SPACE page — see doc/ux-feedback.md §21.)
+--     at mix 0. (was one merged SPACE page, split after play-testing.)
 -- ============================================================================
 local SPC_BASE, SPC_X0 = 48, 8
 local SPC_PPS = 49                    -- pixels per second on the time axis
@@ -3361,7 +3361,7 @@ local function body_DELAY(frame)
   spc_onset()
   -- echo taps: spacing = delay_time, height decaying by the ACTUAL feedback
   -- coefficient (the knob is curved through ctx.delay_fb_curve, so the taps
-  -- match what you hear — the animation stays honest, doc/ux-feedback.md §23)
+  -- match what you hear — the animation stays honest)
   local sp = max(pget("delay_time", 0.3) * SPC_PPS, 6)
   local fbk = pget("delay_fb", 0.3)
   local fb = max(C.delay_fb_curve and C.delay_fb_curve(fbk) or fbk, 0.05)
@@ -4753,7 +4753,7 @@ local function add_eng_control(id, name, spec, map)
 end
 local function square(v) return v * v end
 
--- delay feedback response (doc/ux-feedback.md §23). the raw knob is 0..1 but
+-- delay feedback response. the raw knob is 0..1 but
 -- audible repeat-count is a ln-law of the loop gain, so a LINEAR knob crams
 -- every useful value into the top few percent ("~4 quiet repeats then jumps to
 -- infinite"). this concave curve spreads the knob across the musical band —
@@ -5023,8 +5023,7 @@ local function init_params()
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
   -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET post-FX
-  -- engine output — the tape as a print / resample stage (doc/ux-feedback.md
-  -- §25). default DRY = the classic parallel-ADC tap, so nothing changes until
+  -- engine output — the tape as a print / resample stage. default DRY = the classic parallel-ADC tap, so nothing changes until
   -- you reach for it.
   params:add_control("cut_source", "tape source",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
@@ -5261,7 +5260,7 @@ local function init_params()
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
     Mscenes.pset_write(number)
-    ctx.take_pset_write(number)   -- S22: the engine take, as an L/R pair
+    ctx.take_pset_write(number)   -- the engine take, as an L/R pair
     ctx.padlock_pset_write(number)  -- per-pad sound-locks
   end
   params.action_read = function(filename, silent, number)

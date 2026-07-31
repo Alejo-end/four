@@ -77,7 +77,7 @@ function M.clear_buffer()
   sc.buffer_clear()
 end
 
--- the tape's RECORD SOURCE (cut_source, doc/ux-feedback.md §25): 0 = DRY (the
+-- the tape's RECORD SOURCE (cut_source): 0 = DRY (the
 -- raw ADC tap) .. 1 = WET (the engine's post-FX output — filter/drive/delay/
 -- reverb). the two router sends SUM at the shared softcut input, so a blend
 -- prints part raw + part processed and the tape becomes a resample / print
