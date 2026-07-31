@@ -4031,21 +4031,23 @@ end
 
 -- EROSION: how aged the take is. generation counter counts completed loop
 -- passes while eroding; the strip fuzzes and dims with erosion depth.
-local eros_gen, eros_prev = 0, 0
+local eros_gen, eros_acc = 0, 0
 function M.erosion_tick()
-  local e = pget("erode", 0)
-  if e > 0 and pget("mode", 5) == 5 then
-    -- play_phase is the head's BUFFER position (it spans the window, not
-    -- 0..1), so a wrap is a jump larger than half the window, in either
-    -- direction (reverse scan wraps upward)
+  -- the erosion head runs at exactly one pass per window length, so a
+  -- generation is span times sixty seconds of eroding time. paused under
+  -- the same conditions the engine pauses (rec, freeze, not in PLAY).
+  if pget("erode", 0) > 0 and pget("mode", 5) == 5
+      and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
     local a, b = pget("pos_start", 0), pget("pos_end", 1)
     local span = max(max(a, b) - min(a, b), 0.001)
-    local ph = C.play_phase
-    if math.abs(eros_prev - ph) > span * 0.5 then eros_gen = eros_gen + 1 end
-    eros_prev = ph
+    eros_acc = eros_acc + (1 / FPS) / (span * 60)
+    if eros_acc >= 1 then
+      eros_gen = eros_gen + 1
+      eros_acc = eros_acc - 1
+    end
   end
 end
-function M.erosion_reset() eros_gen, eros_prev = 0, 0 end
+function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 
 local function body_EROSION(frame)
   local e = clamp(pget("erode", 0), 0, 1)
@@ -5041,6 +5043,8 @@ local function init_params()
   add_eng_control("regen", "regen (self-resample)",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   params:set_action("regen", function(v)
+    -- the other half of the erode interlock (see grp_erode below)
+    if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
     if engine.regen then engine.regen(v) end
     -- regen's record head traverses the WHOLE buffer, so once it runs the take
     -- can be anywhere: force a full-buffer PSET save (sticky until the next
@@ -5456,8 +5460,16 @@ local function init_params()
   -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
   -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
   params:add_group("grp_erode", "erosion", 2)
-  add_eng_control("erode", "erode",
+  params:add_control("erode", "erode",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:set_action("erode", function(v)
+    -- interlock: erode and regen are both free-running write heads on the
+    -- same buffer. engaging one disengages the other, so the conflict is
+    -- impossible rather than documented. no recursion: each interlock only
+    -- acts when its own value is rising.
+    if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
+    if engine.erode then engine.erode(v) end
+  end)
   add_eng_control("wear", "wear",
     controlspec.new(0, 1, "lin", 0, 0.5, ""))
 

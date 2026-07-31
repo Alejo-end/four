@@ -1541,6 +1541,24 @@ EROSION is ENGINE: +2 commands erode/wear, fingerprint 63 → **65**, UNTESTED)*
   passes without runaway; HEAL freezes the age; rec suspends erosion;
   ORBIT wanders audibly between 2+ scenes and CAP catches an in-between.
 
+Sixtieth change — **erosion hardened to product grade (ENGINE + Lua,
+fingerprint STAYS 65, UNTESTED)**: (a) **regen/erode INTERLOCK** — the two
+free-running write heads can no longer coexist: each param's action zeroes
+the other on its own rising edge (no recursion — interlocks act only on
+v>0). The "don't run both" gate note is obsolete; the conflict is now
+impossible at the param layer, so every driver (keys, MIDI, scenes, chaos)
+inherits it. Scene recall order (regen before erode in TIMBRE) makes a
+both-hot legacy capture resolve deterministically to erode. (b) **erosion
+runs on its OWN constant-rate head** (`eroPhase` Phasor, one pass per
+window length; `eroPos = winPos - phase*span + eroPhase*span` derives lo
+at audio rate): aging is uniform and predictable, independent of playback
+speed AND direction, no skipped samples at rates >1, no wear-character
+shift with varispeed — the two documented quirks are deleted, not
+documented. (c) GEN counter is now TIME-based (span*60 s per generation,
+matching the head exactly), paused under the same conditions the engine
+pauses (rec/freeze/not-PLAY). Gate additions: erode at speed 2 and speed
+−1 ages at the same rate; raising regen drops erode to 0 and vice versa.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

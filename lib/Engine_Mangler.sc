@@ -315,19 +315,25 @@ Engine_Mangler : CroneEngine {
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5;
             var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
-            var idx, eff, rawL, rawR, wearF;
+            var eroPhase, eroPos, idx, eff, rawL, rawR, wearF;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch);
             bufDur = BufDur.kr(buf_l);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
-            // EROSION: window-synced self-rewrite. a separate NON-interpolating
-            // read fetches the exact stored sample at the head, and a slightly
-            // darkened, slightly quieter copy is written back in its place —
-            // so every loop pass ages the take a little more. at erode 0 the
-            // exact sample is written back unchanged (bit-identical content);
-            // manual rec and freeze suspend it so the two write heads never
-            // fight. `wear` sets how dark the aging filter sits.
-            idx = winPos * BufFrames.kr(buf_l);
+            // EROSION: window-synced self-rewrite on its OWN head, running at
+            // a constant one pass per window length regardless of playback
+            // speed or direction — aging is uniform and predictable, no
+            // samples are skipped at high rates, and varispeed does not
+            // change the wear character. a NON-interpolating read fetches
+            // the exact stored sample and a slightly darkened, slightly
+            // quieter copy is written back in its place. at erode 0 the
+            // exact sample is written back unchanged (bit-identical
+            // content); manual rec and freeze suspend it. the Lua layer
+            // interlocks erode against regen so two free-running write
+            // heads can never fight over the buffer.
+            eroPhase = Phasor.ar(0, SampleDur.ir / (bufDur * span), 0, 1);
+            eroPos = (winPos - (phase * span)) + (eroPhase * span);
+            idx = eroPos * BufFrames.kr(buf_l);
             eff = erode.clip(0, 1).lag(0.05) * (1 - rec) * (1 - freeze);
             wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
             rawL = BufRd.ar(1, buf_l, idx, 1, 1);
