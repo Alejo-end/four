@@ -1450,6 +1450,35 @@ REGN badge lit (regen re-recording mush), noise PRINTED into the take
 boosted by the same 1.5x), FreeVerb x2 fallback with rev_mix up, DFM1 res
 near the 0.9 clip. Headphone faintness resolved as SYSTEM headphone gain.
 
+Fifty-sixth change — **audio-quality recheck: 2-agent audit of the CURRENT
+engine (ENGINE-only, fingerprint STAYS 63 — re-verified programmatically —
+UNTESTED, rides the next RESTART)**. Adversarial verifier: ALL TEN stacked
+50th/51st/54th/55th items SAFE — JPverb's array-in confirmed against the real
+sc3-plugins source (*ar unpacks [L,R] into ONE true-stereo JPverbRaw, no MCE
+double-instantiation), DFM1 arg order confirmed against TJUGens source,
+LinXFade2 confirmed core, winRead/destructure legal, regen=0 bit-identical,
+while-steal safe. ONE WATCH ITEM for the gate: ar-rate Dust/TRand costs real
+CPU across drone + up to 8 poly voices — watch %CPU/xruns with a held PADS
+chord in GRAIN mode. APPLIED from the quality lens (docs-verified):
+* **grain_pitch_spread was 12x too weak SINCE S7** — `(x/12).midiratio`
+  double-divides (midiratio IS 2^(st/12)); a 12 st spread delivered ~1 st.
+  `/12` removed in \mangler_grain + \mangler_voice_grain. The knob finally
+  does what it says — expect it to feel MUCH stronger.
+* **five zipper lags**: resonance (.05 — the likeliest pop source: stepped CC
+  on a near-self-osc filter; arg-reassign so the fallback rq law shares it),
+  drive/dry_wet/delay_mix/rev_mix (.03 — equal-power .sqrt laws step audibly);
+  **resample .02** (a step in that blend PRINTS into the take permanently).
+* **wet makeup 1.5 → 2.sqrt** — the exact inverse of Balance2's −3dB centre:
+  PLAY/pan-0/no-FX now lands at EXACT unity vs the raw take (was +0.5dB into
+  the limiter — the S14 "exact recorded sample" claim, now numerically true).
+* **shimmer PitchShift pitchDispersion 0 → 0.02** (SC docs: uniform grain
+  placement combs at a fixed ratio — softens the robotic octave-up edge).
+RULED OUT by real-source verification (do not re-attempt): PlayBuf is cubic
+(no BufRd swap needed in voice_slice); \mangler_pv's FFT 2048/sine/hop-0.5 is
+the documented-correct PV config; Warp1 and the 2048-sample grain envelopes
+are fine as-is. Footnote (accepted): recLvl/preLvl lag independently, so
+their sum wobbles bounded for ~10ms across a rec/regen transition.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

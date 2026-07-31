@@ -235,8 +235,11 @@ Engine_Mangler : CroneEngine {
             panR = (pan + TRand.ar(spread.neg, spread, trigR)).clip(-1, 1);
             durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
             durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            pchL = pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
-            pchR = pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
+            // NO /12 before .midiratio — midiratio IS 2^(st/12); the old
+            // double-divide made a 12-semitone spread deliver ~1 semitone
+            // (the param ran at 1/12 strength since S7)
+            pchL = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
+            pchR = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // equal-loudness across the whole density x size plane: below unity
             // overlap this BOOSTS (<=2x, the S5 "too faint" fix, unchanged);
@@ -384,8 +387,9 @@ Engine_Mangler : CroneEngine {
             trigR = Dust.ar(density);
             durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
             durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            pchL = note_pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL) / 12).midiratio;
-            pchR = note_pitch * (TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR) / 12).midiratio;
+            // no /12 — same double-divide fix as the drone def
+            pchL = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
+            pchR = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             cloud = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, note_pos.wrap(0, 1), 4,
                     TRand.ar(spread.neg, spread, trigL), envSel)
@@ -435,12 +439,21 @@ Engine_Mangler : CroneEngine {
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
-            wet = In.ar(play_bus, 2) * grain_level * 1.5;
+            // 2.sqrt (not 1.5): the exact inverse of Balance2's -3dB centre
+            // gain in the play defs — PLAY at pan 0 with no FX now lands at
+            // EXACT unity vs the raw take (the S14 "exact recorded sample"
+            // claim, previously +0.5dB into the limiter).
+            wet = In.ar(play_bus, 2) * grain_level * 2.sqrt;
 
             // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
             // if sc3-plugins is absent. One DFM1: LP for LP+BP, HP for HP; BP
             // high-passes the resonant LP peak into a band. filt_type 0=LP 1=HP 2=BP.
             cf = cutoff.clip(20, 20000).lag(0.05);
+            // lag the resonance like cutoff: a stepped CC/encoder jump on a
+            // near-self-oscillating filter is the file's likeliest pop source.
+            // (reassigning the arg means the fallback's rq law below gets the
+            // same smoothing for free.)
+            resonance = resonance.lag(0.05);
             // clip below DFM1's self-oscillation onset (~0.95) so max resonance
             // is very resonant but STABLE; raise toward 0.95 to let it self-osc.
             res = resonance.clip(0, 0.9);
@@ -471,6 +484,7 @@ Engine_Mangler : CroneEngine {
             // bypass. it was an always-on tanh that soft-clipped even at 0,
             // colouring a fresh dry recording; now the base sound is exactly
             // the sample, and drive dials the saturation in on top.
+            drive = drive.lag(0.03);      // zipper-free drive rides
             pre = 1 + (drive * 6);
             // LINEAR crossfade (LinXFade2), not equal-power: the two arms are
             // the SAME signal (one saturated), so XFade2's sin/cos law summed
@@ -481,6 +495,9 @@ Engine_Mangler : CroneEngine {
 
             // delay feedback loop (own LocalIn/LocalOut(2); the shimmer loop
             // moved into the reverb synth).
+            // the mix laws are equal-power .sqrt (steep near the ends), so a
+            // CC step lands as an audible zipper without these lags
+            delay_mix = delay_mix.lag(0.03);
             fbIn = LocalIn.ar(2);
             dIn = wet + (fbIn * delay_fb);
             dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));
@@ -501,9 +518,13 @@ Engine_Mangler : CroneEngine {
             // squares the knob, so .sqrt makes the tail gain linear in it.
             // full-wet wash is no longer on this knob: crank rev_decay (WASH)
             // or choke the source instead. headroom: the master Limiter.
+            // (lagging the synth-side arg does NOT touch the sclang spawn/free
+            // gate — updateReverb reads the raw command value.)
+            rev_mix = rev_mix.lag(0.03);
             wet = wet + (rvRet * rev_mix.sqrt);
 
             dry = [inL, inR];
+            dry_wet = dry_wet.lag(0.03);
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
             sig = sig * Lag.kr(level, 0.05);
             sig = Limiter.ar(sig, 0.92, 0.01);  // S9: 0.98 -> 0.92 DAC headroom
@@ -525,6 +546,9 @@ Engine_Mangler : CroneEngine {
             // LeakDC on the take's dry arm: a line input with DC offset would
             // print it into the buffer and eat limiter headroom. (the regen
             // arm below already has its own; the monitor path stays untouched.)
+            // resample is lagged because a step in THIS blend gets printed
+            // permanently into the take, not just heard once.
+            resample = resample.lag(0.02);
             recL = (LeakDC.ar(inL) * (1 - resample)) + (sig[0] * resample);
             recR = (LeakDC.ar(inR) * (1 - resample)) + (sig[1] * resample);
             srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
@@ -584,7 +608,10 @@ Engine_Mangler : CroneEngine {
             // PitchShift per channel — for a wide halo.
             ratio = (shimmer_pitch.round(1) / 12.0);
             ratio = (2 ** ratio).clip(0.25, 4);
-            pitched = PitchShift.ar(rv, 0.2, ratio, 0, 0.01);
+            // pitchDispersion 0.02 (was 0): SC's own docs — uniform grain
+            // placement at a fixed ratio combs; a whisper of dispersion
+            // softens the robotic edge at the octave-up default.
+            pitched = PitchShift.ar(rv, 0.2, ratio, 0.02, 0.01);
             pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
             shimOut = (pitched * (shimmer > 0)).softclip;
             LocalOut.ar(shimOut);
