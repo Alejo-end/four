@@ -558,8 +558,15 @@ end
 -- (L=buf1, R=buf2, matching init_tape's routing) next to the pset; LOAD
 -- reads them back, DELETE cleans up.
 function M.pset_write(number)
-  sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
-    0, TAPE_LEN)
+  -- like the take (take_pset_write): an untouched tape must not dump 60s of
+  -- stereo silence per save, and a cleared one must not resurrect old audio
+  -- on load — an empty save deletes the stale wav instead.
+  if C.twave_any then
+    sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
+      0, TAPE_LEN)
+  else
+    M.pset_delete(number)
+  end
 end
 
 function M.pset_read(number)
@@ -577,6 +584,7 @@ end
 function M.cleanup()
   sc.poll_stop_phase()
   audio.level_eng_cut(0)   -- don't leak a processed-source route to the next script
+  audio.level_adc_cut(1)   -- ...and give the next script the stock ADC tap back
 end
 
 return M
@@ -615,9 +623,6 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
-  if pget("keys_enable", 1) == 0 then return end
-  local ch = pget("midi_channel", 0)
-  if ch > 0 and msg.ch ~= ch then return end
   -- both edges: note-on gates a voice / retunes the drone, note-off releases
   -- a voice (the drone is last-note, so it ignores the release)
   local z, note
@@ -627,6 +632,16 @@ local function midi_event(data, vport)
     z, note = 0, msg.note
   else
     return
+  end
+  -- the gates apply to PRESSES only: a release belongs to the press that
+  -- opened it, so keys_enable going off (or the channel changing) mid-hold
+  -- must never swallow a note-off and strand a pad voice — the same trap the
+  -- typing keyboard guards below. a release for a note we never opened is a
+  -- no-op inside route_note/pad_trigger.
+  if z == 1 then
+    if pget("keys_enable", 1) == 0 then return end
+    local ch = pget("midi_channel", 0)
+    if ch > 0 and msg.ch ~= ch then return end
   end
   -- route_note decides drone vs pad from `pad_input`; id offset by 1000 so
   -- MIDI voice ids never collide with grid/screen pad ids
@@ -1022,10 +1037,12 @@ local function scene_row_key(x, z)
       peek_pad = nil
       params:set("scene_slot", x)            -- recall THIS pad's slot
       if C.frame - f < (C.TAP_FRAMES or 5) then
-        -- a tap: COMMIT the recall; the scene is the new LIVE
+        -- a tap: COMMIT the recall; the scene is the new LIVE. leave the amt
+        -- alone when the recall only QUEUED (BEAT/BAR) — zeroing it then
+        -- force-applies the old A and bounces the sound around the sync point
         params:set("scene_recall", 1)
         params:set("scene_recall", 0)
-        params:set("scene_morph_amt", 0)
+        if not C.scene.pending then params:set("scene_morph_amt", 0) end
       else
         C.peek_back = true                   -- borrowed: sweep home
       end
@@ -2139,11 +2156,28 @@ local MORPH_EPS = 1 / 400
 -- at 0 with no sweep in progress — at rest the sound is just the sound).
 function M.morph(slot, amt, opts)
   if morphing then return false end    -- a param action can never recurse in
-  if is_back(slot) then return false end   -- ◄ is a recall, not a target
-  local B = M.slots[slot_idx(slot)]
-  if not B then return false end
-  opts = opts or {}
   amt = clamp(amt or 0, 0, 1)
+  local B = (not is_back(slot)) and M.slots[slot_idx(slot)] or nil
+  if not B then
+    -- ◄ / an empty slot can't be swept TOWARD — but a sweep already engaged
+    -- must still come HOME: re-aim the selector at a dead target mid-sweep
+    -- and turning the knob to 0 restores the origin of everything this sweep
+    -- displaced (exactly the ids in last_sent). without this the sweep was
+    -- stranded: neither able to move nor to land home.
+    if not (amt <= 0 and morph_from) then return false end
+    morphing = true
+    for id in pairs(last_sent) do
+      local va = morph_from[id]
+      if va ~= nil and params.lookup[id] then pset(id, va) end
+    end
+    morphing = false
+    morph_from = nil
+    for k in pairs(last_sent) do last_sent[k] = nil end
+    M.morph_at = 0
+    M.engaged = false
+    return true
+  end
+  opts = opts or {}
   if amt <= 0 and not morph_from then return false end
   -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
   local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
@@ -2155,8 +2189,14 @@ function M.morph(slot, amt, opts)
   for i = 1, #ids do
     local id = ids[i]
     local va, vb = A[id], B[id]
-    -- skip anything either side doesn't have (older capture, missing param)
-    if va ~= nil and vb ~= nil and params.lookup[id] then
+    -- skip anything either side doesn't have (older capture, missing param).
+    -- the OT rule: a param IDENTICAL at both ends is not the morph's to move —
+    -- a hand riding such a knob mid-sweep stays live even through the forced
+    -- ends, instead of being stomped back (a scene only claims what differs).
+    -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
+    -- still lands exactly at both ends.
+    if va ~= nil and vb ~= nil and params.lookup[id]
+        and (va ~= vb or (force and last_sent[id] ~= nil)) then
       local v, tn = morph_value(id, va, vb, amt, opts.linear)
       if v ~= nil then
         local key = tn or v        -- continuous: compare norms; discrete: values
@@ -2353,6 +2393,10 @@ function M.pset_read(number)
   -- any early return — otherwise a coroutine armed just before the load survives
   -- and fires an old slot over the freshly loaded session a beat later.
   cancel_pending()
+  -- the load is authoritative even when NO scene file follows: a morph_from /
+  -- last_sent left engaged would re-derive the morph from the PRE-load sound
+  -- on the next knob move. (idempotent with the invalidate at the end.)
+  M.invalidate()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
   -- exactly like mtape leaves the tape audio alone when there's no wav
@@ -2477,7 +2521,12 @@ end
 function M.update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
-    local a = max(amp_in[1], amp_in[2])
+    -- meter what softcut actually records: the ADC tap, the engine output
+    -- (cut_source WET), or the blend — a WET print otherwise painted nothing
+    -- and left twave_any false over audible tape
+    local cs = pget("cut_source", 0)
+    local a = max(amp_in[1], amp_in[2]) * (1 - cs)
+      + max(amp_out[1], amp_out[2]) * cs
     if a > 0.01 then C.twave_any = true end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end
@@ -4292,15 +4341,22 @@ local KEYS = {
         local sel = math.floor(pget("scene_slot", 1) + 0.5)
         ctx.peek_on = false
         pulse("scene_recall")
-        if sel >= 1 then
-          -- the scene landed: it IS the new LIVE, so the rail goes home
-          -- without sweeping (recall invalidated the morph's "from")
+        -- the scene landed: it IS the new LIVE, so the rail goes home without
+        -- sweeping (recall invalidated the morph's "from"). NOT when the
+        -- recall only QUEUED (BEAT/BAR): zeroing amt then would force-apply
+        -- the old A and audibly bounce scene->LIVE->scene around the sync.
+        if sel >= 1 and not ctx.scene.pending then
           params:set("scene_morph_amt", 0)
         end
       end,
       poff = function()   -- punch release: it was borrowed — sweep home
-        ctx.peek_on = false
-        ctx.peek_back = true
+        -- only when the peek actually engaged: pon declines on an empty slot
+        -- and on ◄, and ramping "home" then would drag a morph someone parked
+        -- (a latched sweep, a MIDI fader) down to zero for nothing
+        if ctx.peek_on then
+          ctx.peek_on = false
+          ctx.peek_back = true
+        end
       end },
     k3 = { label = "CAP", act = function() pulse("scene_capture") end },
     erase = function() pulse("scene_clear") end,
@@ -4432,9 +4488,13 @@ ctx.TAP_FRAMES = TAP_FRAMES
 -- record a phrase, the rec action snaps the window to it — left 7 of the 8
 -- pads pointing at silence out in the empty buffer; this is that fix, shared.
 -- rate stays fixed at 1 (per-pad rate is a later knob). type is per-pad.
-local function pad_pos(i)
+-- SLICE voices are a PlayBuf reading FORWARD from the point, so they anchor
+-- at the slice's START — the chop's attack (firing from the centre skipped
+-- the transient the pad was chopped for). GRAIN clouds spread around the
+-- point, so they keep the centre. one law, two anchors.
+local function pad_pos(i, at_start)
   local lo, _, span = window_bounds()
-  return lo + (i + 0.5) / ctx.pad_n * span
+  return lo + (i + (at_start and 0 or 0.5)) / ctx.pad_n * span
 end
 ctx.pad_pos = pad_pos
 
@@ -4446,7 +4506,8 @@ function ctx.pad_trigger(id, i, z)
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
       -- the pad voice level (chord-safe default that won't slam the limiter)
-      engine.note_on(id, pad_pos(i), 2 ^ ((ctx.pad_pitch[i] or 0) / 12),
+      engine.note_on(id, pad_pos(i, (ctx.pad_type[i] or 0) > 0),
+        2 ^ ((ctx.pad_pitch[i] or 0) / 12),
         ctx.pad_type[i] or 0, pget("pad_level", 0.3))
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
@@ -4581,8 +4642,11 @@ function ctx.take_pset_read(number)
   local stem = take_stem(number)
   -- no take file (a pset from before S22, or one saved with an empty buffer):
   -- leave the buffer alone, exactly like mtape when there's no wav — the
-  -- pset's own params (window included) still load.
-  if not util.file_exists(stem .. "_L.wav") then return end
+  -- pset's own params (window included) still load. BOTH halves must exist:
+  -- /b_write is async, so an interrupted save can leave _L without _R, and
+  -- reading that would zero both buffers then restore a left-only take.
+  if not (util.file_exists(stem .. "_L.wav")
+      and util.file_exists(stem .. "_R.wav")) then return end
   engine.read_take(stem)
   -- repaint from the file or the restored take is INVISIBLE (audio you can hear
   -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already

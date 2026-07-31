@@ -404,15 +404,22 @@ local KEYS = {
         local sel = math.floor(pget("scene_slot", 1) + 0.5)
         ctx.peek_on = false
         pulse("scene_recall")
-        if sel >= 1 then
-          -- the scene landed: it IS the new LIVE, so the rail goes home
-          -- without sweeping (recall invalidated the morph's "from")
+        -- the scene landed: it IS the new LIVE, so the rail goes home without
+        -- sweeping (recall invalidated the morph's "from"). NOT when the
+        -- recall only QUEUED (BEAT/BAR): zeroing amt then would force-apply
+        -- the old A and audibly bounce scene->LIVE->scene around the sync.
+        if sel >= 1 and not ctx.scene.pending then
           params:set("scene_morph_amt", 0)
         end
       end,
       poff = function()   -- punch release: it was borrowed — sweep home
-        ctx.peek_on = false
-        ctx.peek_back = true
+        -- only when the peek actually engaged: pon declines on an empty slot
+        -- and on ◄, and ramping "home" then would drag a morph someone parked
+        -- (a latched sweep, a MIDI fader) down to zero for nothing
+        if ctx.peek_on then
+          ctx.peek_on = false
+          ctx.peek_back = true
+        end
       end },
     k3 = { label = "CAP", act = function() pulse("scene_capture") end },
     erase = function() pulse("scene_clear") end,
@@ -544,9 +551,13 @@ ctx.TAP_FRAMES = TAP_FRAMES
 -- record a phrase, the rec action snaps the window to it — left 7 of the 8
 -- pads pointing at silence out in the empty buffer; this is that fix, shared.
 -- rate stays fixed at 1 (per-pad rate is a later knob). type is per-pad.
-local function pad_pos(i)
+-- SLICE voices are a PlayBuf reading FORWARD from the point, so they anchor
+-- at the slice's START — the chop's attack (firing from the centre skipped
+-- the transient the pad was chopped for). GRAIN clouds spread around the
+-- point, so they keep the centre. one law, two anchors.
+local function pad_pos(i, at_start)
   local lo, _, span = window_bounds()
-  return lo + (i + 0.5) / ctx.pad_n * span
+  return lo + (i + (at_start and 0 or 0.5)) / ctx.pad_n * span
 end
 ctx.pad_pos = pad_pos
 
@@ -558,7 +569,8 @@ function ctx.pad_trigger(id, i, z)
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
       -- the pad voice level (chord-safe default that won't slam the limiter)
-      engine.note_on(id, pad_pos(i), 2 ^ ((ctx.pad_pitch[i] or 0) / 12),
+      engine.note_on(id, pad_pos(i, (ctx.pad_type[i] or 0) > 0),
+        2 ^ ((ctx.pad_pitch[i] or 0) / 12),
         ctx.pad_type[i] or 0, pget("pad_level", 0.3))
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
@@ -693,8 +705,11 @@ function ctx.take_pset_read(number)
   local stem = take_stem(number)
   -- no take file (a pset from before S22, or one saved with an empty buffer):
   -- leave the buffer alone, exactly like mtape when there's no wav — the
-  -- pset's own params (window included) still load.
-  if not util.file_exists(stem .. "_L.wav") then return end
+  -- pset's own params (window included) still load. BOTH halves must exist:
+  -- /b_write is async, so an interrupted save can leave _L without _R, and
+  -- reading that would zero both buffers then restore a left-only take.
+  if not (util.file_exists(stem .. "_L.wav")
+      and util.file_exists(stem .. "_R.wav")) then return end
   engine.read_take(stem)
   -- repaint from the file or the restored take is INVISIBLE (audio you can hear
   -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already

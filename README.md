@@ -53,6 +53,31 @@ the IP from SYSTEM > WIFI if the name does not resolve). Then type `;restart` in
   engine `lib/Engine_Mangler.sc` must still be present, exactly once on the device. Edit the
   modules, not the generated file (`lua tools/amalgamate.lua` regenerates it).
 
+## First session, five minutes
+
+Plug something line-level into the input, load mangler, and:
+
+1. **Record.** On **TAKE** (page 1), press **K2**, play a phrase, press **K2** again. The
+   window snaps to what you played and it loops back **dry** — exactly what you recorded.
+   The ◇ next to the title says so.
+2. **Mangle it.** Turn **E2/E3** on TAKE to move the window edges. Go to **VOICE** and tap
+   **K3** to cycle PLAY → GRAIN → WARP → PV — the screen texture *is* the mode. In GRAIN,
+   E2/E3 are size and density.
+3. **Add colour.** **FILTER** E2 sweeps the cutoff (K1+E2 = drive). **DELAY** E2 brings the
+   echo in, E3 feeds it back. **REVERB** E2 opens the tail. Everything starts at zero — you
+   only hear what you dialled in.
+4. **Play it like a drum.** On **PADS**, **E2** selects one of the 8 slices of your take and
+   **K2** plays it (hold = gate, tap = a short hit). Give the slice its own voice (GRAIN or
+   clean SLICE) with **K1+E2** and its own pitch with **E3**. Plug in any MIDI or USB typing
+   keyboard and tap **K3 (ROUTE)** to play the slices polyphonically.
+5. **Keep the sound.** On **SCENE**, tap **K3 (CAP)** to capture everything into the selected
+   slot. Change the sound completely, then turn **E3**: you morph from where you are toward
+   the stored scene — and back to zero lands you exactly home. Tap **K2 (RCL)** to commit;
+   hold K2 to *peek* (borrow it, release to come home).
+6. **The two reflexes.** **K1+K2** = STOP/START, anywhere. **K1+K3** = DRY, anywhere — the
+   playback path snaps clean. If a knob adventure goes wrong: select **◄** on SCENE and tap
+   K2 — the way back.
+
 ## Controls
 
 **Gesture law** (applies to K2 and K3 on every page):
@@ -283,6 +308,29 @@ so the transport and scenes are always in the same place:
 On the Launchpad Mini MK3, pads are coloured by meaning: red = recording, green = playing,
 white = playhead/selection, blue = available/empty, orange = selected slice, cyan = frozen,
 purple = destructive. STOP pulses red. Colours are defined in `LP_HUE` (lib/mgrid.lua).
+
+## Troubleshooting
+
+- **Every script hangs on "LOADING".** Almost always a duplicate SuperCollider class: a second
+  `Engine_Mangler` copy under `~/dust/code/` (redeploy with `rsync --delete`), or plugin
+  `.sc` class files installed under `dust/code` (keep mi-UGens/sc3-plugins only in the
+  SuperCollider Extensions folder). Errors, if any, are in maiden's **SC tab**, not matron.
+- **Changed the engine but nothing changed.** `.sc` edits need **SYSTEM > RESTART**. After
+  restart, the maiden load log prints `Engine.register_commands; count: 63` — a different
+  count means an old engine is still live.
+- **"Dry" playback has reverb on it.** Check the norns **SYSTEM reverb** (PARAMS > REVERB —
+  mangler prints a note at load when it's on), a left-up `rev_mix`/`delay_mix`, or clouds
+  feedback (K1+K3 DRY zeroes all of them), or you recorded with `resample` up (which bakes
+  the effects into the take, by design).
+- **The reverb knobs beyond decay/damp/mix do nothing.** JPverb (sc3-plugins) isn't
+  installed — the guarded fallback is FreeVerb, which only honours those three.
+- **A loaded sample plays ~9% fast / sharp.** It's a 44.1 kHz file; the buffer loads without
+  sample-rate conversion at norns' 48 kHz. Re-export the file at 48 kHz.
+- **A mystery loop plays that isn't the take.** It's the tape deck — the MIX page shows both
+  decks honestly (a lane only lights if its deck holds audio and is audible). Throw MIX fully
+  to ENG, or clear the tape on TAPE with the erase gesture.
+- **Screen frozen or black but the script loaded.** A Lua error inside redraw — scroll
+  maiden below `<ok>` for the traceback.
 
 ## Spec
 

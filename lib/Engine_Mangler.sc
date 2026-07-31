@@ -84,6 +84,7 @@ Engine_Mangler : CroneEngine {
             \note_pos, pos, \note_pitch, pitch,
             \gate, 1, \one_shot, oneShot,
             \amp, amp ? voiceParams[\amp],   // per-note level (nil -> the default)
+            \pan, playParams[\pan],          // voices track the drone's pan too
             \atk, voiceParams[\voice_atk], \rel, voiceParams[\voice_rel],
             \grain_env1, grainEnv1, \grain_env2, grainEnv2,
             \size, playParams[\size], \density, playParams[\density],
@@ -96,8 +97,10 @@ Engine_Mangler : CroneEngine {
 
     noteOn { arg id, pos, pitch, type, amp;
         var def, syn;
-        // enforce polyphony cap: release-steal the oldest held voice
-        (voiceOrder.size >= maxVoices).if({
+        // enforce polyphony cap: release-steal oldest voices until under it.
+        // a while (not one steal per press): `voices` can be LOWERED below the
+        // held count mid-performance, and a single steal never converges.
+        while({ voiceOrder.size >= maxVoices }, {
             var oldId = voiceOrder.removeAt(0);
             var old = activeVoices[oldId];
             old.notNil.if({ old.set(\gate, 0) });
@@ -264,8 +267,10 @@ Engine_Mangler : CroneEngine {
             phase = Phasor.ar(0, incr, 0, 1);
             winPos = lo + (phase * span);
             Out.kr(phase_out, A2K.kr(winPos));
-            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 2);
-            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 2);
+            // cubic interp like every other read path — PV magnifies linear-
+            // interp images: MagFreeze sustains whatever aliasing lands in the FFT
+            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
+            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
             chainL = FFT(LocalBuf(2048), sigL);
             chainR = FFT(LocalBuf(2048), sigR);
             chainL = PV_MagFreeze(chainL, pv_freeze);
@@ -290,7 +295,7 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0;
-            var lo, hi, span, incr, phase, winPos, sigL, sigR, sig;
+            var lo, hi, span, incr, phase, winPos, sigL, sigR, edge, sig;
             lo = pos_start.min(pos_end);
             hi = pos_start.max(pos_end);
             span = (hi - lo).max(0.001);
@@ -300,7 +305,12 @@ Engine_Mangler : CroneEngine {
             Out.kr(phase_out, A2K.kr(winPos));
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
-            sig = Balance2.ar(sigL, sigR, pan);
+            // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
+            // with rate): the rec-stop window almost never lands on a zero
+            // crossing, so the bare loop CLICKED every pass — the one blemish
+            // on "the exact recorded sample". the body of the take is untouched.
+            edge = (phase.min(1 - phase) * span * BufDur.kr(buf_l) / 0.005).clip(0, 1);
+            sig = Balance2.ar(sigL, sigR, pan) * edge;
             Out.ar(play_bus, sig);
         }).add;
 
@@ -455,7 +465,11 @@ Engine_Mangler : CroneEngine {
             // colouring a fresh dry recording; now the base sound is exactly
             // the sample, and drive dials the saturation in on top.
             pre = 1 + (drive * 6);
-            wet = XFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
+            // LINEAR crossfade (LinXFade2), not equal-power: the two arms are
+            // the SAME signal (one saturated), so XFade2's sin/cos law summed
+            // correlated copies to a ~+3dB loudness hump at mid-knob. end
+            // gains are exactly 1/0 — drive=0 stays a bit-true bypass.
+            wet = LinXFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
 
             // delay feedback loop (own LocalIn/LocalOut(2); the shimmer loop
@@ -480,16 +494,22 @@ Engine_Mangler : CroneEngine {
             sig = sig * Lag.kr(level, 0.05);
             sig = Limiter.ar(sig, 0.92, 0.01);  // S9: 0.98 -> 0.92 DAC headroom
             recRun = rec * (1 - freeze);
-            recPhase = Phasor.ar(0, recRun * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
-            Out.kr(rec_phase_out, A2K.kr(recPhase));
-            recL = (inL * (1 - resample)) + (sig[0] * resample);
-            recR = (inR * (1 - resample)) + (sig[1] * resample);
             // regen: run the record head continuously and crossfade the OUTPUT
             // back into the buffer (self-mangle). BOUNDED (convex crossfade +
             // LeakDC + master Limiter); bit-identical to no-regen at regen=0.
-            // manual rec and freeze both suspend it.
-            regenRun = (regen > 0) * (1 - rec) * (1 - freeze);
+            // manual rec and freeze both suspend it. a CHOKED engine deck
+            // (STOP / mix thrown fully to tape -> level ~0) PAUSES it — else a
+            // stopped minute of regen crossfades SILENCE over the whole take.
+            regenRun = (regen > 0) * (1 - rec) * (1 - freeze) * (level > 0.001);
             runW = recRun.max(regenRun);
+            // the polled write-head phase advances with the SAME run signal
+            // RecordBuf gets (rec OR regen): driven by rec alone, a regen pass
+            // walked the real head while rec_phase stayed parked, so the next
+            // take's window snapped to stale positions.
+            recPhase = Phasor.ar(0, runW * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
+            Out.kr(rec_phase_out, A2K.kr(recPhase));
+            recL = (inL * (1 - resample)) + (sig[0] * resample);
+            recR = (inR * (1 - resample)) + (sig[1] * resample);
             srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
             srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
             // record-safety limiter: transparent below 0.99, stops a hot take
@@ -524,9 +544,12 @@ Engine_Mangler : CroneEngine {
             revIn = wet + (shimFb * shimmer.clip(0, 0.95));
             jpClass = "JPverb".asSymbol.asClass;
             rv = jpClass.notNil.if({
-                // in, t60, damp, size, earlyDiff, modDepth, modFreq,
+                // in (STEREO pair — the mono .sum collapsed the grain field's
+                // pan/spread and the stereo shimmer out of the tail; array-in
+                // via perform works, the MiClouds call is the precedent),
+                // t60, damp, size, earlyDiff, modDepth, modFreq,
                 // low, mid, high, lowcut, highcut
-                jpClass.ar(revIn.sum * 0.5, rev_decay, rev_damp, rev_size,
+                jpClass.ar(revIn * 0.5, rev_decay, rev_damp, rev_size,
                     rev_early, rev_moddepth, rev_modfreq,
                     rev_low, rev_mid, rev_high, rev_lowcut, rev_highcut)
             }, {

@@ -129,8 +129,15 @@ end
 -- (L=buf1, R=buf2, matching init_tape's routing) next to the pset; LOAD
 -- reads them back, DELETE cleans up.
 function M.pset_write(number)
-  sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
-    0, TAPE_LEN)
+  -- like the take (take_pset_write): an untouched tape must not dump 60s of
+  -- stereo silence per save, and a cleared one must not resurrect old audio
+  -- on load — an empty save deletes the stale wav instead.
+  if C.twave_any then
+    sc.buffer_write_stereo(norns.state.data .. "tape-" .. number .. ".wav",
+      0, TAPE_LEN)
+  else
+    M.pset_delete(number)
+  end
 end
 
 function M.pset_read(number)
@@ -148,6 +155,7 @@ end
 function M.cleanup()
   sc.poll_stop_phase()
   audio.level_eng_cut(0)   -- don't leak a processed-source route to the next script
+  audio.level_adc_cut(1)   -- ...and give the next script the stock ADC tap back
 end
 
 return M

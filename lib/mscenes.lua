@@ -489,11 +489,28 @@ local MORPH_EPS = 1 / 400
 -- at 0 with no sweep in progress — at rest the sound is just the sound).
 function M.morph(slot, amt, opts)
   if morphing then return false end    -- a param action can never recurse in
-  if is_back(slot) then return false end   -- ◄ is a recall, not a target
-  local B = M.slots[slot_idx(slot)]
-  if not B then return false end
-  opts = opts or {}
   amt = clamp(amt or 0, 0, 1)
+  local B = (not is_back(slot)) and M.slots[slot_idx(slot)] or nil
+  if not B then
+    -- ◄ / an empty slot can't be swept TOWARD — but a sweep already engaged
+    -- must still come HOME: re-aim the selector at a dead target mid-sweep
+    -- and turning the knob to 0 restores the origin of everything this sweep
+    -- displaced (exactly the ids in last_sent). without this the sweep was
+    -- stranded: neither able to move nor to land home.
+    if not (amt <= 0 and morph_from) then return false end
+    morphing = true
+    for id in pairs(last_sent) do
+      local va = morph_from[id]
+      if va ~= nil and params.lookup[id] then pset(id, va) end
+    end
+    morphing = false
+    morph_from = nil
+    for k in pairs(last_sent) do last_sent[k] = nil end
+    M.morph_at = 0
+    M.engaged = false
+    return true
+  end
+  opts = opts or {}
   if amt <= 0 and not morph_from then return false end
   -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
   local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
@@ -505,8 +522,14 @@ function M.morph(slot, amt, opts)
   for i = 1, #ids do
     local id = ids[i]
     local va, vb = A[id], B[id]
-    -- skip anything either side doesn't have (older capture, missing param)
-    if va ~= nil and vb ~= nil and params.lookup[id] then
+    -- skip anything either side doesn't have (older capture, missing param).
+    -- the OT rule: a param IDENTICAL at both ends is not the morph's to move —
+    -- a hand riding such a knob mid-sweep stays live even through the forced
+    -- ends, instead of being stomped back (a scene only claims what differs).
+    -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
+    -- still lands exactly at both ends.
+    if va ~= nil and vb ~= nil and params.lookup[id]
+        and (va ~= vb or (force and last_sent[id] ~= nil)) then
       local v, tn = morph_value(id, va, vb, amt, opts.linear)
       if v ~= nil then
         local key = tn or v        -- continuous: compare norms; discrete: values
@@ -703,6 +726,10 @@ function M.pset_read(number)
   -- any early return — otherwise a coroutine armed just before the load survives
   -- and fires an old slot over the freshly loaded session a beat later.
   cancel_pending()
+  -- the load is authoritative even when NO scene file follows: a morph_from /
+  -- last_sent left engaged would re-derive the morph from the PRE-load sound
+  -- on the next knob move. (idempotent with the invalidate at the end.)
+  M.invalidate()
   local path = path_for(number)
   -- no scene file (a pset from before scenes existed): leave the bank alone,
   -- exactly like mtape leaves the tape audio alone when there's no wav

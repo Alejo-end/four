@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63) rides the same deploy: the RESTART covers the 48th+50th engine, the reload covers the 49th+50th Lua.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -1305,6 +1305,46 @@ morph still exercised byte-clean, no mseq refs remain. **BATCH B (deferred, engi
 B1 true STOP (gate the play-voice + tape transport + record head, intended arity-only → still
 63), B2 erase reliability + clear kills FX tails/regen. Needs a device session: rsync, SYSTEM
 > RESTART, confirm count 63, then walk the §S23 gate.
+
+Fiftieth change — **review batch: 11 Lua + 8 engine fixes (fingerprint STAYS 63,
+renders byte-identical, dist verified; engine half UNTESTED — rides the pending
+RESTART gate)**: a workflow-backed line-by-line review (4 of 9 finders completed
+before an early stop; findings judged + verified by hand against every core file).
+LUA (save + reload): MIDI note-OFFS now bypass the keys_enable/channel gates
+(presses still gated) — toggling note input or channel mid-hold stranded a pad
+voice, the same trap the 43rd change fixed for typing keys; **SLICE pads fire from
+the slice START** (the attack — centre-anchor skipped the transient; GRAIN keeps
+the centre; `pad_pos(i, at_start)`); mscenes morph — a sweep re-aimed at ◄/an
+empty slot can now come HOME (restores last_sent ids from morph_from; it was
+stranded), **the OT no-stomp rule** (a param IDENTICAL in A and B is never fired,
+even at the forced ends — a hand riding it stays live; displaced ids still land
+exactly), pset_read invalidates even on the no-scene-file early return; SCENE K2
+tap-commit under BEAT/BAR no longer zeroes the amt while the recall is only
+QUEUED (screen + grid — it bounced scene→LIVE→scene), peek punch-release only
+ramps home if the peek actually engaged; tape pset_write gates on twave_any +
+deletes stale (mirrors the take), cleanup restores level_adc_cut(1); take
+pset_read requires BOTH _L and _R (async /b_write can orphan one); tape meter
+blends amp_in/amp_out by cut_source (a WET print painted nothing). ENGINE (all
+core-UGen, no arity/command change): regen gated on `level > 0.001` (STOP with
+regen>0 crossfaded SILENCE over the take); rec_phase Phasor driven by runW (regen
+walked the real head while the poll stayed parked → stale window snaps);
+voice-steal is a `while` (lowering `voices` below the held count never re-capped);
+voiceArgs passes `\pan`; \mangler_pv BufRd interp 2→4; JPverb gets the STEREO
+send (`revIn * 0.5`, was mono .sum); drive XFade2→**LinXFade2** (equal-power
+summed correlated arms to a +3dB mid-knob hump; ends still exact bypass);
+\mangler_play gets a ~5ms **loop-seam edge fade** (the default mode clicked every
+pass — takes never end on a zero crossing). DOCUMENTED, NOT BUILT (candidates for
+a device session, from the review): resample-blend comb (limiter lookahead delay
+vs undelayed dry — needs on-device delay measurement), grain overlap comp
+attenuation above unity (loudness rebalance — ear call), 44.1k SRC on read_file
+(temp-buffer varispeed copy), write_take int16→int24 (touches the whole export
+chain), one-gesture FULL-mix resample via the system TAPE, OT-style partial-scene
+capture (capture only SPACE_IDS → an FX-only scene — the data model already
+supports it), tape-wav repaint after pset restore (twave stays blank over audible
+audio), PV's dead `pitch` face knob. README: added "First session, five minutes"
++ a Troubleshooting section. Gate: reload + RESTART, count 63, then ear-check the
+8 engine fixes (seam fade, drive law, stereo verb, PV interp, regen pause under
+STOP, voice re-cap, voice pan, regen-head window snap).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep

@@ -71,7 +71,12 @@ end
 function M.update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
-    local a = max(amp_in[1], amp_in[2])
+    -- meter what softcut actually records: the ADC tap, the engine output
+    -- (cut_source WET), or the blend — a WET print otherwise painted nothing
+    -- and left twave_any false over audible tape
+    local cs = pget("cut_source", 0)
+    local a = max(amp_in[1], amp_in[2]) * (1 - cs)
+      + max(amp_out[1], amp_out[2]) * cs
     if a > 0.01 then C.twave_any = true end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end

@@ -30,9 +30,6 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
-  if pget("keys_enable", 1) == 0 then return end
-  local ch = pget("midi_channel", 0)
-  if ch > 0 and msg.ch ~= ch then return end
   -- both edges: note-on gates a voice / retunes the drone, note-off releases
   -- a voice (the drone is last-note, so it ignores the release)
   local z, note
@@ -42,6 +39,16 @@ local function midi_event(data, vport)
     z, note = 0, msg.note
   else
     return
+  end
+  -- the gates apply to PRESSES only: a release belongs to the press that
+  -- opened it, so keys_enable going off (or the channel changing) mid-hold
+  -- must never swallow a note-off and strand a pad voice — the same trap the
+  -- typing keyboard guards below. a release for a note we never opened is a
+  -- no-op inside route_note/pad_trigger.
+  if z == 1 then
+    if pget("keys_enable", 1) == 0 then return end
+    local ch = pget("midi_channel", 0)
+    if ch > 0 and msg.ch ~= ch then return end
   end
   -- route_note decides drone vs pad from `pad_input`; id offset by 1000 so
   -- MIDI voice ids never collide with grid/screen pad ids

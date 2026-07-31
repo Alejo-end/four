@@ -302,10 +302,12 @@ local function scene_row_key(x, z)
       peek_pad = nil
       params:set("scene_slot", x)            -- recall THIS pad's slot
       if C.frame - f < (C.TAP_FRAMES or 5) then
-        -- a tap: COMMIT the recall; the scene is the new LIVE
+        -- a tap: COMMIT the recall; the scene is the new LIVE. leave the amt
+        -- alone when the recall only QUEUED (BEAT/BAR) — zeroing it then
+        -- force-applies the old A and bounces the sound around the sync point
         params:set("scene_recall", 1)
         params:set("scene_recall", 0)
-        params:set("scene_morph_amt", 0)
+        if not C.scene.pending then params:set("scene_morph_amt", 0) end
       else
         C.peek_back = true                   -- borrowed: sweep home
       end
