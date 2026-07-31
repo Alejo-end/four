@@ -98,6 +98,7 @@ local SPACE_IDS = {
 
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape",
+  "delay_sync",   -- a scene remembers whether the delay follows the clock
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "mode",   -- last of the last: this one respawns the voice
@@ -412,6 +413,23 @@ function M.recall(slot, opts)
   M.auto_safe()
   say_recall(slot, apply(scene, SCENE_RECALL_IDS))
   return true
+end
+
+-- advance to the NEXT FILLED slot (cycling, skipping empties) and recall it —
+-- the stomp-through-a-set gesture (scene_next, MIDI-map a footswitch). moves
+-- the ONE selector so the page/grid/morph all follow, then recalls through
+-- the normal path (BEAT/BAR quantize and auto-safe both apply).
+function M.next()
+  local start = slot_idx()
+  for i = 1, NUM_SLOTS do
+    local s = ((start - 1 + i) % NUM_SLOTS) + 1
+    if M.slots[s] then
+      params:set("scene_slot", s)
+      return M.recall(s)
+    end
+  end
+  say("NO SCENES", "no filled slots to advance to — CAP stores one first")
+  return false
 end
 
 function M.clear(slot)

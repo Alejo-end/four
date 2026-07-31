@@ -1288,7 +1288,7 @@ local MOTION_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_freeze",
   "tape_reverse",
   "cutoff", "resonance", "drive", "filt_type",
-  "delay_time", "delay_fb", "delay_mix",
+  "delay_time", "delay_fb", "delay_mix", "delay_sync",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
@@ -1664,6 +1664,7 @@ local SPACE_IDS = {
 
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape",
+  "delay_sync",   -- a scene remembers whether the delay follows the clock
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "mode",   -- last of the last: this one respawns the voice
@@ -1978,6 +1979,23 @@ function M.recall(slot, opts)
   M.auto_safe()
   say_recall(slot, apply(scene, SCENE_RECALL_IDS))
   return true
+end
+
+-- advance to the NEXT FILLED slot (cycling, skipping empties) and recall it —
+-- the stomp-through-a-set gesture (scene_next, MIDI-map a footswitch). moves
+-- the ONE selector so the page/grid/morph all follow, then recalls through
+-- the normal path (BEAT/BAR quantize and auto-safe both apply).
+function M.next()
+  local start = slot_idx()
+  for i = 1, NUM_SLOTS do
+    local s = ((start - 1 + i) % NUM_SLOTS) + 1
+    if M.slots[s] then
+      params:set("scene_slot", s)
+      return M.recall(s)
+    end
+  end
+  say("NO SCENES", "no filled slots to advance to — CAP stores one first")
+  return false
 end
 
 function M.clear(slot)
@@ -2648,6 +2666,7 @@ local SHORT = {
   cut_source = "SRC",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK",
+  delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "VERB",
   rev_decay = "DECAY", rev_damp = "DMP", rev_early = "DIFF",
   rev_moddepth = "MOD", rev_modfreq = "MRAT", rev_low = "LOW",
@@ -2684,6 +2703,7 @@ local FULL = {
   cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
+  delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "REVERB",
   rev_decay = "DECAY", rev_damp = "DAMP",
   shimmer = "SHIMMER", shimmer_pitch = "OCT", shimmer_tone = "AIR",
@@ -4288,7 +4308,7 @@ local ENC_MAP = {
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
-  DELAY  = { "delay_mix", "delay_time", "delay_fb", nil },
+  DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
@@ -4603,6 +4623,46 @@ local function next_export_name()
   end
   return "mangler-000.wav"
 end
+local function next_print_name()
+  for n = 1, 999 do
+    local name = "mangler-print-" .. string.format("%03d", n) .. ".wav"
+    if not util.file_exists(_path.audio .. name) then return name end
+  end
+  return "mangler-print-000.wav"
+end
+
+-- PRINT: the one-gesture full-mix resample (the Octatrack move). the norns
+-- system TAPE records the MASTER out — engine + tape deck + FX, everything
+-- you hear — for print_len seconds (0 = AUTO, the current window length),
+-- then the bounce loads back as THE take (engine.read_file via load_sample:
+-- window snaps, waveform draws). the print wav stays in dust/audio, so the
+-- material is never lost even though the buffer is replaced; older takes
+-- live in their PSETs. mangle -> print -> mangle the print.
+local print_clock
+function ctx.print_take()
+  if print_clock then print("mangler: PRINT already running"); return end
+  if not (audio.tape_record_open and audio.tape_record_start) then
+    print("mangler: no system tape API — cannot print"); return
+  end
+  local secs = pget("print_len", 0)
+  if secs < 0.05 then
+    local _, _, span = window_bounds()
+    secs = clamp(span * 60, 0.5, 60)
+  end
+  local name = next_print_name()
+  local path = _path.audio .. name
+  audio.tape_record_open(path)
+  audio.tape_record_start()
+  print(string.format("mangler: PRINT — recording the master mix, %.1fs", secs))
+  print_clock = clock.run(function()
+    clock.sleep(secs)
+    audio.tape_record_stop()
+    clock.sleep(0.25)          -- let the tape writer flush + close the wav
+    print_clock = nil
+    ctx.load_sample(path)
+    print("mangler: PRINT done — " .. name .. " is the new take")
+  end)
+end
 
 function ctx.export_take(name)
   if not engine.write_take then
@@ -4639,6 +4699,24 @@ function ctx.export_take(name)
     print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
     export_clock = nil
   end)
+end
+
+-- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
+-- clock at the chosen division. computed here (Lua) so the ENGINE command
+-- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
+-- tape-style glide, and times beyond the 1s delay line clamp there. the
+-- redraw tick calls this each frame — it only WRITES when the tempo actually
+-- changed (or the division did), so idle frames set nothing.
+local SYNC_BEATS = { 0, 0.25, 0.5, 0.75, 1, 1.5, 2 }  -- FREE 1/16 1/8 1/8. 1/4 1/4. 1/2
+local last_sync_tempo = 0
+local function sync_delay_time(force)
+  local s = pget("delay_sync", 1)
+  if s <= 1 or not clock.get_tempo then return end   -- FREE (or the sim's stub)
+  local t = clock.get_tempo()
+  if not (t and t > 0) then return end
+  if not force and t == last_sync_tempo then return end
+  last_sync_tempo = t
+  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 1))
 end
 
 -- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
@@ -4722,7 +4800,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "take - record", 10)
+  params:add_group("grp_rec", "take - record", 12)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -4787,6 +4865,18 @@ local function init_params()
   params:set_action("export_take", function(v)
     if v == 1 then ctx.export_take() end
   end)
+  -- PRINT the master mix back into the buffer (see ctx.print_take). momentary
+  -- so a footswitch fires the whole bounce; press edge only.
+  params:add_binary("print_take", "print mix -> take", "momentary", 0)
+  params:set_action("print_take", function(v)
+    if v == 1 then ctx.print_take() end
+  end)
+  params:add_control("print_len", "print length",
+    controlspec.new(0, 16, "lin", 0.5, 0, "s"),
+    function(p)
+      local v = p:get()
+      return v < 0.05 and "AUTO (window)" or string.format("%.1f s", v)
+    end)
 
   params:add_group("grp_window", "take - window", 4)
   -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s
@@ -4953,9 +5043,14 @@ local function init_params()
   add_eng_control("drive", "drive",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
 
-  params:add_group("grp_delay", "delay", 3)
+  params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
+  -- tempo sync (DELAY K1+E3): FREE = the time knob; a division = delay_time
+  -- follows the clock (re-asserted on tempo changes from the redraw tick)
+  params:add_option("delay_sync", "delay sync",
+    { "FREE", "1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2" }, 1)
+  params:set_action("delay_sync", function() sync_delay_time(true) end)
   -- 0..1 knob curved to the actual 0..0.98 feedback coefficient (fb_curve):
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback",
@@ -5100,7 +5195,7 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 9)
+  params:add_group("grp_scene", "scenes", 10)
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
@@ -5128,6 +5223,12 @@ local function init_params()
   params:add_binary("scene_recall", "recall slot", "momentary", 0)
   params:set_action("scene_recall", function(v)
     if v == 1 then Mscenes.recall() end
+  end)
+  -- stomp through a set: advance to the next FILLED slot and recall it
+  -- (cycling; honors BEAT/BAR quantize). MIDI-map a footswitch.
+  params:add_binary("scene_next", "next scene", "momentary", 0)
+  params:set_action("scene_next", function(v)
+    if v == 1 then Mscenes.next() end
   end)
   params:add_binary("scene_clear", "clear slot", "momentary", 0)
   params:set_action("scene_clear", function(v)
@@ -5223,6 +5324,7 @@ function init()
     while true do
       clock.sleep(1 / FPS)
       ctx.frame = ctx.frame + 1
+      sync_delay_time()    -- tempo-follow the delay (writes only on change)
       Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
@@ -5245,6 +5347,11 @@ function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
   if export_clock then clock.cancel(export_clock) end  -- stop a pending export
+  if print_clock then                    -- a PRINT mid-flight: stop the tape
+    clock.cancel(print_clock)
+    pcall(audio.tape_record_stop)
+    print_clock = nil
+  end
   Mpages.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()

@@ -1479,6 +1479,34 @@ the documented-correct PV config; Warp1 and the 2048-sample grain envelopes
 are fine as-is. Footnote (accepted): recLvl/preLvl lag independently, so
 their sum wobbles bounded for ~10ms across a rec/regen transition.
 
+Fifty-seventh change — **PRINT + tempo-synced delay + next-scene (Lua-only,
+fingerprint STAYS 63, renders byte-identical, dist verified; save + reload)**:
+the three user-picked workflow features, no engine change.
+* **PRINT** (`print_take` momentary + `print_len` 0=AUTO(window)..16s, grp_rec
+  10→12): `ctx.print_take` records the MASTER out via the system TAPE
+  (audio.tape_record_open/start/stop) for the length, then `ctx.load_sample`s
+  the bounce back AS the take (window snap + progressive waveform; the
+  32-bit-float/24-bit load_wave support from the 47th change is what makes the
+  system-tape wav drawable). Bounces accumulate as mangler-print-NNN.wav in
+  dust/audio — the buffer is replaced but material is never lost. cleanup
+  cancels a mid-flight print + pcall-stops the tape. GATE: confirm the system
+  tape wav format loads+draws; confirm no conflict if the user's own TAPE
+  record is running (no query API — documented, not guarded).
+* **delay_sync** (grp_delay 3→4, DELAY K1+E3 — the empty alt slot): FREE or
+  1/16..1/2 (+dotted); `sync_delay_time` computes delay_time from
+  clock.get_tempo (guarded for the sim), called each redraw frame but WRITES
+  only when tempo/division changed; times past the 1s delay line clamp; the
+  engine's 0.2s lag glides tempo changes. Added to SWITCH_IDS + MOTION_IDS
+  (the list-drift lesson applied at birth). SHORT/FULL "SYNC".
+* **scene_next** (grp_scene 9→10, momentary — footswitch): Mscenes.next()
+  advances the ONE selector to the next FILLED slot (cycling, skips empties,
+  says NO SCENES when bank empty) and recalls through the normal path
+  (BEAT/BAR quantize + auto-safe apply). print_take/print_len/scene_next
+  correctly OUT of the curated lists (transports/config).
+GATE (device): print a 2-bar mix and hear it come back as the take; delay
+locks to tempo and glides on tempo change; a footswitch stomps through
+filled scenes in order.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

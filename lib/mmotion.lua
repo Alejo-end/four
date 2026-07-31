@@ -51,7 +51,7 @@ local MOTION_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_freeze",
   "tape_reverse",
   "cutoff", "resonance", "drive", "filt_type",
-  "delay_time", "delay_fb", "delay_mix",
+  "delay_time", "delay_fb", "delay_mix", "delay_sync",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",

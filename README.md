@@ -197,7 +197,9 @@ decaying by the real FEEDBACK. **E2** is the mix (a progressive fade — a low s
 amount, dry stays full), **E3** the feedback, **K1+E2** the time. Feedback spans a smooth few →
 many (10+) → near-infinite (the curve is warped so the useful range is not all crammed into the
 last few percent). **K2 INF** pins the feedback to a self-sustaining hold (a dub grab; the taps
-stop decaying). **K3 KILL** throws the mix to zero.
+stop decaying). **K3 KILL** throws the mix to zero. **K1+E3** sets the tempo **sync**: FREE
+uses the time knob; a division (1/16 … 1/2, with dotted values) locks the delay to the clock
+and follows tempo changes with a tape-style glide.
 
 ### REVERB
 
@@ -263,6 +265,8 @@ automatically. Select it (E2, left of slot 1) and tap K2 to return. Recalls can 
 the next beat/bar (E2 alt = recall mode); a queued slot blinks. Holds, note routing and buffer
 writers do not ride a morph, so the page shows `K2 TO LAND THE REST` when a tap is needed to
 finish. `chaos throw` (PARAMS, momentary) throws a bounded random state; release returns to ◄.
+`next scene` (PARAMS, momentary — map a footswitch) advances to the next **filled** slot and
+recalls it, cycling and honoring the BEAT/BAR quantize: a live set becomes stomp, stomp, stomp.
 Scenes save and load with the PSET.
 
 ## Playing notes
@@ -282,6 +286,12 @@ CC; mappings save to `data/mangler/mangler.pmap`.
 - **Export:** PARAMS > take > record > **export take** writes a stereo WAV to `dust/audio`
   (`mangler-NNN.wav`), reloadable through load sample or any editor. It is a momentary
   parameter — map it to a footswitch or grid pad.
+- **Print (resample the mix):** PARAMS > take > record > **print mix → take** records the
+  **master output** — engine, tape deck, and effects, everything you hear — for **print
+  length** seconds (0 = AUTO, the current window length), then loads the bounce back **as the
+  take**: window snapped, waveform drawn, ready to mangle again. The bounce also stays on disk
+  (`mangler-print-NNN.wav`), so nothing is ever lost. Momentary — a footswitch turns
+  mangle → print → mangle-the-print into one stomp.
 
 ## Saving a session (PSET)
 
