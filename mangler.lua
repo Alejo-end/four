@@ -395,10 +395,11 @@ local KEYS = {
   },
   ORBIT = {
     -- RUN under the punch law: hold = a temporary wander, tap = latch it.
-    -- CAP bottles whatever in-between sound the orbit found into the
-    -- selected slot; the machine discovers, you decide what to keep.
+    -- CAP bottles the in-between sound into the first EMPTY slot — never
+    -- the selected one, because the orbit keeps re-selecting its target
+    -- and would overwrite a scene it navigates by.
     k2 = pk("RUN", "orbit_on"),
-    k3 = { label = "CAP", act = function() pulse("scene_capture") end },
+    k3 = { label = "CAP", act = function() ctx.scene.capture_free() end },
   },
   EROSION = {
     -- HEAL parks the decay (round-trips like every throw); SCAR is a full

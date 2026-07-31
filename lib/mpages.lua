@@ -1609,8 +1609,13 @@ local eros_gen, eros_prev = 0, 0
 function M.erosion_tick()
   local e = pget("erode", 0)
   if e > 0 and pget("mode", 5) == 5 then
+    -- play_phase is the head's BUFFER position (it spans the window, not
+    -- 0..1), so a wrap is a jump larger than half the window, in either
+    -- direction (reverse scan wraps upward)
+    local a, b = pget("pos_start", 0), pget("pos_end", 1)
+    local span = max(max(a, b) - min(a, b), 0.001)
     local ph = C.play_phase
-    if eros_prev > 0.9 and ph < 0.1 then eros_gen = eros_gen + 1 end
+    if math.abs(eros_prev - ph) > span * 0.5 then eros_gen = eros_gen + 1 end
     eros_prev = ph
   end
 end
@@ -1636,8 +1641,11 @@ local function body_EROSION(frame)
     screen.rect(x, 31 - floor(h / 2), 1, h)
   end
   screen.fill()
-  -- playhead
-  local hx = 4 + floor(clamp(C.play_phase, 0, 1) * 120)
+  -- playhead, window relative (play_phase is a buffer position)
+  local a, b = pget("pos_start", 0), pget("pos_end", 1)
+  local wlo = min(a, b)
+  local wspan = max(max(a, b) - wlo, 0.001)
+  local hx = 4 + floor(clamp((C.play_phase - wlo) / wspan, 0, 1) * 120)
   screen.level(15)
   screen.rect(hx, 20, 1, 22)
   screen.fill()

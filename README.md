@@ -91,7 +91,8 @@ Notes on the less obvious ones.
 
 ORBIT picks a stored scene, morphs partway toward it, parks there, then picks another. It
 never fully arrives, so it keeps finding sounds between the ones you saved. K3 captures
-whatever it found into the selected slot. It needs at least one captured scene.
+whatever it found into the first empty slot. It needs at least one captured scene, and it
+owns the morph knob while running.
 
 EROSION works in PLAY mode. With erode up, every pass of the loop rewrites the window
 slightly darker and quieter. Wear sets how dark. The GEN counter shows how many passes the

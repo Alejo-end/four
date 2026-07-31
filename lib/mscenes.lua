@@ -435,6 +435,17 @@ function M.next()
   return false
 end
 
+-- capture into the first EMPTY slot (the orbit's CAP: bottling a found
+-- sound must never overwrite a scene the wander is navigating by)
+function M.capture_free()
+  for s = 1, NUM_SLOTS do
+    if not M.slots[s] then return M.capture(s) end
+  end
+  say("BANK FULL",
+    "all 8 slots hold scenes — clear one to keep the orbit's find")
+  return false
+end
+
 function M.clear(slot)
   if is_back(slot) then
     local had = M.safe ~= nil
