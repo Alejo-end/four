@@ -596,6 +596,7 @@ ctx.pad_pos = pad_pos
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
 -- the note_on that started it). z=1 press, z=0 release.
 function ctx.pad_trigger(id, i, z)
+  ctx.last_input = ctx.frame   -- playing pads counts as presence (idle dim)
   if z == 1 then
     if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
     if engine.note_on then
@@ -618,6 +619,7 @@ end
 -- drone `pitch` exactly as before. `pitch` is the chromatic rate the caller
 -- already computed for the drone path.
 function ctx.route_note(id, pitch, pad_idx, z)
+  ctx.last_input = ctx.frame   -- MIDI/grid/typing notes count as presence
   if pget("pad_input", 0) == 1 then
     ctx.pad_trigger(id, pad_idx % ctx.pad_n, z)
   elseif z == 1 then
