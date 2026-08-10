@@ -50,7 +50,8 @@ local MOTION_IDS = {
   "mode", "warp_window", "warp_rand", "pv_freeze", "freeze",
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_freeze",
   "tape_reverse",
-  "cutoff", "resonance", "drive", "filt_type",
+  "cutoff", "resonance", "drive", "filt_type", "dry_wet",
+  "erode", "wear",
   "delay_time", "delay_fb", "delay_mix", "delay_sync",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
@@ -301,7 +302,14 @@ function M.tick()
           end
         end
         params:set(id, v)
-        last_val[id] = v      -- account for our own change so the poll skips it
+        -- account for our own change so the poll skips it. read the value BACK
+        -- rather than storing what we asked for: a Control stores
+        -- map(unmap(v)), which differs from v in the last bit for a large share
+        -- of values on an exponential spec. storing v left the next poll seeing
+        -- a mismatch, reading it as a live hand on the knob, and punch-in
+        -- REPLACING the very lane an overdub was meant to extend. M.account
+        -- re-reads for the same reason.
+        last_val[id] = params:get(id)
         L.last_fire = M.playhead
         cur = cur + 1
       end

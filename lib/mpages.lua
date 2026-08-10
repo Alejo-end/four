@@ -147,6 +147,31 @@ local function riff_parse(f)
   return afmt, ch, bits, sr, dpos, dlen
 end
 
+-- one SIGNED sample decoder per (format, bit depth). 16/24/32-bit PCM and
+-- 32-bit float are what norns itself can produce — the engine's take dump, the
+-- system tape's print, and whatever a performer drops in — so this covers all
+-- of it. ONE table: the waveform preview and the sample-rate converter below
+-- read the same files, and a second copy would mean a format could draw
+-- correctly and convert to noise, or the reverse.
+local DECODE = {
+  [1] = {
+    [16] = function(s, p) return string.unpack("<i2", s, p) / 32768 end,
+    [24] = function(s, p) return string.unpack("<i3", s, p) / 8388608 end,
+    [32] = function(s, p) return string.unpack("<i4", s, p) / 2147483648 end,
+  },
+  [3] = {
+    [32] = function(s, p) return string.unpack("<f", s, p) end,
+  },
+}
+
+-- WAVE_FORMAT_EXTENSIBLE is PCM of the stated depth (the common 24-bit case;
+-- the rare float-extensible falls through to "unsupported", which callers read
+-- as "no preview" / "refuse to convert" rather than drawing or writing a lie).
+function M.wav_decoder(afmt, bits)
+  if afmt == 0xFFFE then afmt = 1 end
+  return DECODE[afmt] and DECODE[afmt][bits]
+end
+
 function M.load_wave(path, buf_secs)
   cancel_load()
   -- clear the strip FIRST, so an unsupported-format / unreadable early return
@@ -157,23 +182,10 @@ function M.load_wave(path, buf_secs)
   if not f then return nil end
   local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
   if not afmt then f:close(); return nil end
-  -- WAVE_FORMAT_EXTENSIBLE → treat as PCM int of the stated depth (the common
-  -- 24-bit case; the rare float-extensible falls through to "no preview").
-  if afmt == 0xFFFE then afmt = 1 end
-  -- one sample → a normalized 0..1 magnitude, per format. 16/24/32-bit PCM and
-  -- 32-bit float are what the engine's SoundFile loads, so a 24-bit drop-in now
-  -- draws + windows correctly instead of "loads audibly but shows EMPTY" (a
-  -- bug this once had for everything but 16-bit).
-  local readpeak
-  if afmt == 1 and bits == 16 then
-    readpeak = function(s, p) local v = string.unpack("<i2", s, p); return (v < 0 and -v or v) / 32768 end
-  elseif afmt == 1 and bits == 24 then
-    readpeak = function(s, p) local v = string.unpack("<i3", s, p); return (v < 0 and -v or v) / 8388608 end
-  elseif afmt == 1 and bits == 32 then
-    readpeak = function(s, p) local v = string.unpack("<i4", s, p); return (v < 0 and -v or v) / 2147483648 end
-  elseif afmt == 3 and bits == 32 then
-    readpeak = function(s, p) local v = string.unpack("<f", s, p); return v < 0 and -v or v end
-  end
+  -- the shared decoder (above): a 24-bit drop-in draws + windows correctly
+  -- instead of "loads audibly but shows EMPTY", the bug this once had for
+  -- everything except 16-bit.
+  local readpeak = M.wav_decoder(afmt, bits)
   if not dpos or ch < 1 or not readpeak then
     f:close()
     return nil
@@ -184,7 +196,7 @@ function M.load_wave(path, buf_secs)
   -- the server's 48k and CLAMPS to it (readChannel numFrames), so the picture
   -- must clamp too — a file longer than the buffer only occupies buf_secs of it;
   -- drawing all of it would stretch the wave and misalign every playhead/slice.
-  local SR = 48000
+  local SR = C.SERVER_SR
   local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
   local span = clamp(frames / (SR * buf_secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
@@ -218,7 +230,9 @@ function M.load_tick()
       local chunk = p.f:read(n * p.fbytes)
       if chunk then
         for pp = 1, #chunk - (p.bps - 1), p.step do
+          -- magnitude: the decoder is signed, the strip wants height
           local v = p.readpeak(chunk, pp)
+          if v < 0 then v = -v end
           if v > peak then peak = v end
         end
       end
@@ -231,6 +245,126 @@ end
 
 -- cancel any in-flight fill (cleanup, or a superseding load)
 function M.cancel_load() cancel_load() end
+
+-- ============================================================================
+-- sample-rate conversion
+-- ============================================================================
+-- scsynth's Buffer:readChannel does NO sample-rate conversion and norns runs
+-- its server at 48k, so a 44.1k wav — which is most of dust/audio and nearly
+-- everything off a card — lands in the take buffer playing 8.8% fast, a
+-- semitone and change sharp, with every pad, slice and window inheriting the
+-- error. This converts a file to the server rate first.
+--
+-- It is deliberately here in lua and not in the engine: no new SC command, no
+-- fingerprint change, no restart, and it yields so the screen stays live.
+-- Catmull-Rom cubic, the same kernel a good sampler uses for varispeed.
+local function cubic(y0, y1, y2, y3, x)
+  local a = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3
+  local b = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
+  local c = -0.5 * y0 + 0.5 * y2
+  return ((a * x + b) * x + c) * x + y1
+end
+
+local SRC_BLOCK = 4096
+local SRC_PACK = "<" .. string.rep("i2", SRC_BLOCK * 2)
+
+-- returns true, seconds  — converted and written to out_path
+--         false, seconds — already at `sr`, nothing written
+--         nil, err       — could not decode (the caller falls back to loading
+--                          the file as-is: audible-but-sharp beats silence)
+-- the declared sample rate of a wav, without decoding a byte of it. nil for
+-- anything that is not a readable RIFF/WAVE.
+function M.wav_rate(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local afmt, _, _, sr = riff_parse(f)
+  f:close()
+  if not afmt or not sr or sr <= 0 then return nil end
+  return sr
+end
+
+function M.convert_sr(path, out_path, sr, yield)
+  local f = io.open(path, "rb")
+  if not f then return nil, "cannot open " .. tostring(path) end
+  local afmt, ch, bits, in_sr, dpos, dlen = riff_parse(f)
+  local dec = afmt and M.wav_decoder(afmt, bits)
+  if not (dec and dpos and ch and ch >= 1 and in_sr and in_sr > 0) then
+    f:close()
+    return nil, "unsupported format"
+  end
+  local bps = bits // 8
+  local fbytes = ch * bps
+  local frames = floor(dlen / fbytes)
+  if frames < 2 then f:close(); return nil, "no audio" end
+  if in_sr == sr then f:close(); return false, frames / sr end
+
+  local of = io.open(out_path, "wb")
+  if not of then f:close(); return nil, "cannot write " .. tostring(out_path) end
+  -- header with placeholder sizes, backpatched at the end
+  of:write("RIFF", string.pack("<I4", 36), "WAVE")
+  of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
+    string.pack("<I2", 2), string.pack("<I4", sr), string.pack("<I4", sr * 4),
+    string.pack("<I2", 4), string.pack("<I2", 16))
+  of:write("data", string.pack("<I4", 0))
+
+  local ratio = in_sr / sr
+  local out_n = floor(frames / ratio)
+  -- read a window of source frames, zero-padded outside the file so the
+  -- interpolator may always ask for a neighbour it cannot have
+  local L, R = {}, {}
+  local function read_window(from, n)
+    local a2, b2 = max(from, 0), min(from + n, frames)
+    for i = 1, a2 - from do L[i], R[i] = 0, 0 end
+    for i = max(1, b2 - from + 1), n do L[i], R[i] = 0, 0 end
+    if b2 <= a2 then return end
+    f:seek("set", dpos + a2 * fbytes)
+    local chunk = f:read((b2 - a2) * fbytes)
+    if not chunk then return end
+    local o = a2 - from
+    for i = 0, (#chunk // fbytes) - 1 do
+      local pp = i * fbytes + 1
+      local l = dec(chunk, pp)
+      L[o + i + 1] = l
+      R[o + i + 1] = ch > 1 and dec(chunk, pp + bps) or l
+    end
+  end
+
+  local out_v = {}
+  local written, since = 0, 0
+  while written < out_n do
+    local bn = min(SRC_BLOCK, out_n - written)
+    local p0 = written * ratio
+    local p1 = (written + bn - 1) * ratio
+    local lo = floor(p0) - 1
+    local hi = floor(p1) + 3
+    read_window(lo, hi - lo + 1)
+    for k = 0, bn - 1 do
+      local pos = (written + k) * ratio
+      local ip = floor(pos)
+      local fr = pos - ip
+      local j = ip - lo + 1
+      local vl = cubic(L[j - 1] or 0, L[j] or 0, L[j + 1] or 0, L[j + 2] or 0, fr)
+      local vr = cubic(R[j - 1] or 0, R[j] or 0, R[j + 1] or 0, R[j + 2] or 0, fr)
+      vl = vl * 32767
+      if vl > 32767 then vl = 32767 elseif vl < -32768 then vl = -32768 end
+      vr = vr * 32767
+      if vr > 32767 then vr = 32767 elseif vr < -32768 then vr = -32768 end
+      out_v[k * 2 + 1] = floor(vl + 0.5)
+      out_v[k * 2 + 2] = floor(vr + 0.5)
+    end
+    local fmt = bn == SRC_BLOCK and SRC_PACK or ("<" .. string.rep("i2", bn * 2))
+    of:write(string.pack(fmt, table.unpack(out_v, 1, bn * 2)))
+    written = written + bn
+    since = since + 1
+    if yield and since >= 4 then since = 0; yield() end
+  end
+
+  local datalen = written * 4
+  of:seek("set", 4);  of:write(string.pack("<I4", 36 + datalen))
+  of:seek("set", 40); of:write(string.pack("<I4", datalen))
+  f:close(); of:close()
+  return true, written / sr
+end
 
 -- interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
 -- into one stereo 16-bit wav — a browsable export that reloads via load sample,
@@ -709,7 +843,7 @@ local function body_TAKE(frame)
     screen.line(wx, TK_MID + TK_HALF + 2)
     screen.stroke()
     -- elapsed seconds: the one number a performer needs
-    local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * 60
+    local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
     ptext(string.format("%.1fS", el), 88, 46, 2, 15)
     -- input meter with the record-ready bracket (peak inside = clean take)
     ptext("IN", 2, 47, 1, 5)
@@ -876,7 +1010,7 @@ local function body_TAPE(frame)
   local tx = clamp(C.tape_phase, 0, 1) * 127
   screen.move(tx, 37) screen.line(tx, 43)
   screen.stroke()
-  ptext_r(string.format("%.1fS", lspan * 60), 126, 12, 1, 4)
+  ptext_r(string.format("%.1fS", lspan * C.BUF_SECS), 126, 12, 1, 4)
   -- record SOURCE: flag when the tape is printing PROCESSED audio (never a
   -- hidden mode — DRY, the default, draws nothing so classic tape is unchanged)
   local src = pget("cut_source", 0)
@@ -1648,7 +1782,7 @@ function M.erosion_tick()
       and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
     local a, b = pget("pos_start", 0), pget("pos_end", 1)
     local span = max(max(a, b) - min(a, b), 0.001)
-    eros_acc = eros_acc + (1 / FPS) / (span * 60)
+    eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then
       eros_gen = eros_gen + 1
       eros_acc = eros_acc - 1

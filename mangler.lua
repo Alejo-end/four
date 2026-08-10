@@ -204,6 +204,29 @@ ctx.font = Mfont
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 
+-- THE TIMEBASE. These two numbers place everything in the instrument: every
+-- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
+-- Both are set by the ENGINE (lib/Engine_Mangler.sc allocates
+-- `s.sampleRate * bufSecs`, and norns runs its server at 48k) and lua cannot
+-- read either off the server — so they are mirrored ONCE here and shared
+-- through ctx. They used to be bare literals in several modules plus the .sc:
+-- miss one when the buffer length changes and PSET saves silently truncate the
+-- take, or every waveform, window bracket and pad slice draws against the
+-- wrong clock with no error anywhere.
+ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler.sc
+ctx.SERVER_SR = 48000    -- norns' scsynth sample rate
+local BUF_SECS, SERVER_SR = ctx.BUF_SECS, ctx.SERVER_SR
+
+-- THE tempo read. Guarded (the offscreen sim has no clock) and defaulted once,
+-- so every caller agrees about what "the tempo" is.
+function ctx.tempo()
+  if clock and clock.get_tempo then
+    local ok, t = pcall(clock.get_tempo)
+    if ok and t and t > 0 then return t end
+  end
+  return 120
+end
+
 Mtape.init(ctx)
 Minput.init(ctx)
 Mgrid.init(ctx)
@@ -243,6 +266,17 @@ end
 -- throw: engage() applies a gesture and returns {id=prior} to restore on
 -- disengage. hold = ride it and come back, tap = latch, tap again = back.
 local throw_mem = {}
+
+-- a throw's snapshot is only good until something ELSE moves the instrument.
+-- A scene recall, a morph, a chaos throw or DRY installs values wholesale;
+-- un-latching afterwards would write a snapshot taken BEFORE all that straight
+-- over the top of it — silently undoing the recall. Drop the snapshots
+-- instead. The pill goes dark, which is the honest signal: there is no longer
+-- a "back" to come back to.
+function ctx.throws_forget()
+  for k in pairs(throw_mem) do throw_mem[k] = nil end
+end
+
 local function throw(label, engage)
   return {
     label = label,
@@ -406,13 +440,16 @@ local KEYS = {
   EROSION = {
     -- HEAL parks the decay (round-trips like every throw); SCAR is a full
     -- strength pass while held, latched with a tap.
+    -- both snapshot regen as well as erode: raising erode ZEROES regen through
+    -- the interlock, so a throw that remembered only erode handed back an
+    -- instrument with the performer's regen setting silently gone.
     k2 = throw("HEAL", function()
-      local mem = { erode = pget("erode", 0) }
+      local mem = { erode = pget("erode", 0), regen = pget("regen", 0) }
       params:set("erode", 0)
       return mem
     end),
     k3 = throw("SCAR", function()
-      local mem = { erode = pget("erode", 0) }
+      local mem = { erode = pget("erode", 0), regen = pget("regen", 0) }
       params:set("erode", 1)
       return mem
     end),
@@ -663,6 +700,12 @@ function ctx.clear_recording()
   Mpages.clear_wave()
   Mpages.erosion_reset()   -- a fresh take starts at generation zero
   ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
+  -- forget the loaded sample too. The take half already refuses to resurrect
+  -- audio you cleared (take_pset_write deletes the pair), but a take that came
+  -- from `load sample` lives in this path, and a PSET saved after a CLR would
+  -- restore it on load — putting back the very sample you erased. "" is a
+  -- no-op through load_sample's own guard.
+  if params:get("sample_file") ~= "" then params:set("sample_file", "") end
   params:set("pos_start", 0)
   params:set("pos_end", 1)
   print("mangler: recording cleared")
@@ -673,6 +716,42 @@ end
 -- identically — there is no "loaded sample" mode, it's just the sample.
 -- the window snaps to the file's length, and the display is read from the FILE
 -- (lua can't see the SC buffer — see Mpages.load_wave).
+-- scsynth's buffer read does no sample-rate conversion, so a file at any rate
+-- other than SERVER_SR plays varispeeded: a 44.1k wav is 8.8% fast, over a
+-- semitone sharp. Anything not at rate goes through the resampler first.
+local srconv_path
+
+-- put a file in the take buffer and make every page agree about it. The tail
+-- half of load_sample, split out so the sample-rate conversion can reach it
+-- with a different path than the one the performer picked.
+local function read_into_buffer(path, shown, secs)
+  engine.read_file(path)
+  ctx.wave_any = true    -- audio is in the buffer now, drawable or not — never
+                         -- lie "EMPTY" over an audible sample, even for formats
+                         -- the preview can't draw
+  Mpages.erosion_reset()   -- different audio, generation zero: the age counter
+                           -- belongs to the material, not to the session
+  local dur = Mpages.load_wave(path, BUF_SECS) or secs
+  -- the loaded length bounds a PSET save; unknown length (no preview) -> full
+  ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
+  if dur then
+    params:set("pos_start", 0)
+    params:set("pos_end", clamp(dur / BUF_SECS, 0.002, 1))
+    print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
+      shown or path, dur))
+  else
+    -- audible, but no picture for this format (8-bit / aiff / float-extensible):
+    -- leave the window for the performer to set rather than draw a lie
+    print("mangler: loaded " .. (shown or path)
+      .. " (playing; no waveform preview for this format)")
+  end
+end
+
+-- load any wav as the sample (PARAMS > rec > load sample). A file that is not
+-- at the server rate is RESAMPLED first (in the background, screen live) —
+-- otherwise it plays sharp and every slice, pad and window inherits the error.
+-- If the conversion cannot run or cannot decode the file, we load it straight
+-- anyway: audible-but-sharp beats silence, and the log says which happened.
 function ctx.load_sample(path)
   if path == nil or path == "" or path == "-" or path == _path.audio then return end
   if not util.file_exists(path) then
@@ -683,23 +762,30 @@ function ctx.load_sample(path)
     print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
     return
   end
-  engine.read_file(path)
-  ctx.wave_any = true    -- audio is in the buffer now, drawable or not — never
-                         -- lie "EMPTY" over an audible sample, even for formats
-                         -- the preview can't draw
-  local dur = Mpages.load_wave(path, 60)
-  -- the loaded length bounds a PSET save; unknown length (no preview) -> full
-  ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1
-  if dur then
-    params:set("pos_start", 0)
-    params:set("pos_end", clamp(dur / 60, 0.002, 1))
-    print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
-      path, dur))
-  else
-    -- audible, but no picture for this format (8-bit / aiff / float-extensible):
-    -- leave the window for the performer to set rather than draw a lie
-    print("mangler: loaded " .. path
-      .. " (playing; no waveform preview for this format)")
+  local okp, in_sr = pcall(Mpages.wav_rate, path)
+  if not (okp and in_sr and in_sr ~= SERVER_SR) then
+    read_into_buffer(path)         -- already at rate, or a format we can't probe
+    return
+  end
+  srconv_path = srconv_path or (norns.state.data .. "mangler-srconv.wav")
+  print(string.format("mangler: %d Hz sample — resampling to %d before load"
+    .. " (it would play %+.1f%% otherwise)",
+    in_sr, SERVER_SR, (in_sr / SERVER_SR - 1) * 100))
+  local started = ctx.run_task(function(yield)
+    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield)
+    if not ok then error(err or "conversion failed", 0) end
+  end, function(ok, err)
+    if ok then
+      read_into_buffer(srconv_path, path)
+    else
+      print("mangler: resample failed (" .. tostring(err)
+        .. ") — loading at the original rate, it will play sharp")
+      read_into_buffer(path)
+    end
+  end)
+  if not started then
+    print("mangler: busy — loading at the original rate, it will play sharp")
+    read_into_buffer(path)
   end
 end
 
@@ -718,7 +804,7 @@ end
 -- mark (from frame 0), +50ms margin so rounding at the take boundary never clips
 -- the tail, capped at the 60s buffer; take_len 0 (empty) -> the full buffer.
 local function take_frames()
-  local total = 48000 * 60
+  local total = SERVER_SR * BUF_SECS
   local tl = ctx.take_len or 1
   return (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
 end
@@ -750,9 +836,11 @@ function ctx.take_pset_read(number)
   -- repaint from the file or the restored take is INVISIBLE (audio you can hear
   -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already
   -- restored the saved pos_start/pos_end.
-  local dur = Mpages.load_wave(stem .. "_L.wav", 60)
+  local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
+  Mpages.erosion_reset()  -- the restored take carries its own age in the audio;
+                          -- the counter is per-material, not per-session
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
-  ctx.take_len = dur and clamp(dur / 60, 0.002, 1) or 1  -- bounds a re-save
+  ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1  -- bounds a re-save
 end
 
 function ctx.take_pset_delete(number)
@@ -794,24 +882,57 @@ end
 -- L/R pair; we wait for the async /b_write to finish (sizes stop growing), then
 -- interleave into a named stereo wav in dust/audio that reloads via `load
 -- sample` (zero new load code).
+-- hand back to the scheduler for one tick. Every long scan inside a clock
+-- coroutine takes this, so the 15fps redraw (and motion, and scenes) keeps
+-- running through a multi-second job instead of freezing.
+function ctx.task_yield() clock.sleep(0) end
+
+-- run a long job as a coroutine that yields.
+-- The body runs under pcall and `on_done(ok, err)` ALWAYS runs: without that a
+-- throw halfway through (a full card, a bad read) kills the coroutine with the
+-- caller's state half-set and its file handles still open. A second job is
+-- REFUSED, not substituted — the job already running owns its cleanup and only
+-- it can run it.
+local task_clock
+function ctx.run_task(fn, on_done)
+  if task_clock then
+    print("mangler: a background job is already running")
+    if on_done then on_done(false, "busy") end
+    return false
+  end
+  task_clock = clock.run(function()
+    local ok, err = pcall(fn, ctx.task_yield)
+    task_clock = nil
+    if not ok then print("mangler: background job failed — " .. tostring(err)) end
+    if on_done then on_done(ok, err) end
+  end)
+  return true
+end
+
 local export_clock
 local function filesize(p)
   local f = io.open(p, "rb"); if not f then return nil end
   local s = f:seek("end"); f:close(); return s
 end
-local function next_export_name()
+-- the first free `<prefix>-NNN` stem in `dir`, NNN from 001, tested with `ext`.
+-- Returns nil when all 999 are taken, and the caller then REFUSES and says so.
+-- This was two copies of one loop, each handing back a "-000" name at
+-- exhaustion — which quietly overwrote the performer's oldest recording.
+function ctx.next_free(dir, prefix, ext)
   for n = 1, 999 do
-    local name = "mangler-" .. string.format("%03d", n) .. ".wav"
-    if not util.file_exists(_path.audio .. name) then return name end
+    local stem = string.format("%s-%03d", prefix, n)
+    if not util.file_exists(dir .. stem .. (ext or "")) then return stem end
   end
-  return "mangler-000.wav"
+  return nil
+end
+
+local function next_export_name()
+  local stem = ctx.next_free(_path.audio, "mangler", ".wav")
+  return stem and (stem .. ".wav")
 end
 local function next_print_name()
-  for n = 1, 999 do
-    local name = "mangler-print-" .. string.format("%03d", n) .. ".wav"
-    if not util.file_exists(_path.audio .. name) then return name end
-  end
-  return "mangler-print-000.wav"
+  local stem = ctx.next_free(_path.audio, "mangler-print", ".wav")
+  return stem and (stem .. ".wav")
 end
 
 -- PRINT: the one-gesture full-mix resample (the Octatrack move). the norns
@@ -836,9 +957,13 @@ function ctx.print_take()
   local secs = pget("print_len", 0)
   if secs < 0.05 then
     local _, _, span = window_bounds()
-    secs = clamp(span * 60, 0.5, 60)
+    secs = clamp(span * BUF_SECS, 0.5, BUF_SECS)
   end
   local name = next_print_name()
+  if not name then
+    print("mangler: 999 prints in dust/audio — clear some out first")
+    return
+  end
   local path = _path.audio .. name
   audio.tape_record_open(path)
   audio.tape_record_start()
@@ -859,6 +984,10 @@ function ctx.export_take(name)
   end
   if not ctx.wave_any then print("mangler: nothing to export"); return end
   name = name or next_export_name()
+  if not name then
+    print("mangler: 999 exports in dust/audio — clear some out first")
+    return
+  end
   local out = _path.audio .. name
   local tmp = norns.state.data .. "mexport-tmp"
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
@@ -900,8 +1029,8 @@ local SYNC_BEATS = { 0, 0.25, 0.5, 0.75, 1, 1.5, 2 }  -- FREE 1/16 1/8 1/8. 1/4 
 local last_sync_tempo = 0
 local function sync_delay_time(force)
   local s = pget("delay_sync", 1)
-  if s <= 1 or not clock.get_tempo then return end   -- FREE (or the sim's stub)
-  local t = clock.get_tempo()
+  if s <= 1 then return end                          -- FREE
+  local t = ctx.tempo()
   if not (t and t > 0) then return end
   if not force and t == last_sync_tempo then return end
   last_sync_tempo = t
@@ -917,6 +1046,8 @@ end
 -- filter thrown open (type-aware, same law as FILTER's OPEN key). the
 -- take itself is always recorded clean; this clears the playback path.
 function ctx.fx_dry()
+  ctx.throws_forget()   -- DRY moves the wet path wholesale: no throw's "back"
+                        -- survives it (a latched WASH would restore reverb)
   params:set("delay_mix", 0)
   params:set("rev_mix", 0)
   params:set("shimmer", 0)
@@ -1644,13 +1775,17 @@ function key(n, z)
   ctx.held[n] = (z == 1)
   if z == 1 then
     local def = key_def(n)
-    st.def, st.frame, st.engaged = def, ctx.frame, false
+    st.def, st.frame, st.engaged, st.unlatched = def, ctx.frame, false, false
     if def then
       if def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
         ctx.k13_frame, ctx.k13_fired = ctx.frame, false
       elseif def.pon then           -- punchable
         if def.lit and def.lit() then
           def.poff()                -- already latched: press = off
+          -- and REMEMBER that this press cancelled. It leaves engaged false,
+          -- same as a pon that declined — but the release must not then run
+          -- def.tap() and undo the cancel.
+          st.unlatched = true
         else
           def.pon()
           st.engaged = true
@@ -1676,7 +1811,8 @@ function key(n, z)
           def.poff()
         end
         -- else: a tap — it latches, still engaged with the finger off
-      elseif def.tap and ctx.frame - st.frame < TAP_FRAMES then
+      elseif def.tap and not st.unlatched
+             and ctx.frame - st.frame < TAP_FRAMES then
         def.tap()                 -- tap on a def whose pon declined to engage
       end
     end

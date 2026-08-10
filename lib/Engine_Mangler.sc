@@ -131,9 +131,14 @@ Engine_Mangler : CroneEngine {
         var s = context.server;
         var allKeys;
         var winRead;
+        // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
+        // (it cannot read it off the server) and derives every window edge,
+        // pad slice and waveform position from it — change it here and there
+        // together, or positions drift with no error anywhere.
+        var bufSecs = 60;
 
-        bufL = Buffer.alloc(s, s.sampleRate * 60, 1);
-        bufR = Buffer.alloc(s, s.sampleRate * 60, 1);
+        bufL = Buffer.alloc(s, s.sampleRate * bufSecs, 1);
+        bufR = Buffer.alloc(s, s.sampleRate * bufSecs, 1);
 
         // grain envelope buffers. shape 0 uses built-in Hann (envbufnum
         // -1) and never touches these. filled BEFORE the s.sync below so
@@ -161,7 +166,11 @@ Engine_Mangler : CroneEngine {
 
         // last-known drone values, handed to a freshly spawned mode synth
         playParams = Dictionary[
-            \rec -> 0, \freeze -> 0,
+            // level/rec/freeze sit in ioKeys too, so ONE command fans out to
+            // both synths (no new command, the fingerprint is unchanged). the
+            // drone doesn't apply level to its output — io does — it only needs
+            // to know whether the deck is audible, to pause the erosion head.
+            \level -> 1.0, \rec -> 0, \freeze -> 0,
             \pos_start -> 0.0, \pos_end -> 1.0, \scan -> 1.0, \pos_jitter -> 0.0,
             \size -> 0.1, \density -> 20, \pitch -> 1.0, \spread -> 0.5, \pan -> 0.0,
             \grain_jitter -> 0.0, \grain_pitch_spread -> 0.0, \grain_shape -> 0,
@@ -219,7 +228,7 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5;
+                erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, look;
             var trigL, trigR, posL, posR, panL, panR, sig, comp;
             var durL, durR, pchL, pchR, envSel;
@@ -263,7 +272,7 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5;
+                erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, ptr, l, r, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             ptr = A2K.kr(winPos);
@@ -282,7 +291,7 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5;
+                erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
             // cubic interp like every other read path — PV magnifies linear-
@@ -313,7 +322,7 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5;
+                erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
             var eroPhase, eroPos, idx, eff, rawL, rawR, wearF;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch);
@@ -328,13 +337,17 @@ Engine_Mangler : CroneEngine {
             // the exact stored sample and a slightly darkened, slightly
             // quieter copy is written back in its place. at erode 0 the
             // exact sample is written back unchanged (bit-identical
-            // content); manual rec and freeze suspend it. the Lua layer
-            // interlocks erode against regen so two free-running write
-            // heads can never fight over the buffer.
+            // content); manual rec and freeze suspend it, and so does a
+            // silenced engine deck (STOP / mix thrown fully to tape ->
+            // level ~0) — a stopped instrument left with erode up would
+            // otherwise grind the take away with nobody listening, the
+            // same trap the regen head already guards against. the Lua
+            // layer interlocks erode against regen so two free-running
+            // write heads can never fight over the buffer.
             eroPhase = Phasor.ar(0, SampleDur.ir / (bufDur * span), 0, 1);
             eroPos = (winPos - (phase * span)) + (eroPhase * span);
             idx = eroPos * BufFrames.kr(buf_l);
-            eff = erode.clip(0, 1).lag(0.05) * (1 - rec) * (1 - freeze);
+            eff = erode.clip(0, 1).lag(0.05) * (1 - rec) * (1 - freeze) * (level > 0.001);
             wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
             rawL = BufRd.ar(1, buf_l, idx, 1, 1);
             rawR = BufRd.ar(1, buf_r, idx, 1, 1);
@@ -368,7 +381,7 @@ Engine_Mangler : CroneEngine {
                         clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
-                        pv_freeze = 0, erode = 0, wear = 0.5;
+                        pv_freeze = 0, erode = 0, wear = 0.5, level = 1;
                     var winPos, phase, span, srcL, srcR, sig;
                     #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
                     srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
@@ -728,7 +741,7 @@ Engine_Mangler : CroneEngine {
             var sf = SoundFile.new;
             sf.openRead(path).if({
                 var nch = sf.numChannels;
-                var frames = sf.numFrames.min(s.sampleRate * 60);
+                var frames = sf.numFrames.min(s.sampleRate * bufSecs);
                 sf.close;
                 bufL.zero;
                 bufR.zero;
@@ -765,7 +778,7 @@ Engine_Mangler : CroneEngine {
             var pathR = stem ++ "_R.wav";
             var sf = SoundFile.new;
             sf.openRead(pathL).if({
-                var frames = sf.numFrames.min(s.sampleRate * 60);
+                var frames = sf.numFrames.min(s.sampleRate * bufSecs);
                 sf.close;
                 bufL.zero;
                 bufR.zero;

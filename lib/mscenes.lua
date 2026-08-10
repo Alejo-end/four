@@ -244,6 +244,11 @@ function M.invalidate()
   -- with it — we are somewhere new, so the next sweep starts from HERE.
   M.engaged = false
   morph_from = nil
+  -- the key throws (OPEN / WASH / INF / HEAL / ...) each cache the values they
+  -- displaced, to put back on un-latch. Whatever just moved the instrument
+  -- moved those params too, so those caches are now stale: un-latching would
+  -- write pre-recall values over the recall. Same reasoning as last_sent above.
+  if C and C.throws_forget then C.throws_forget() end
 end
 
 -- ===========================================================================
