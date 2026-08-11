@@ -1822,6 +1822,41 @@ The key is labelled MUTE and lit means muted.
 Suite gained LAYERS_TURN (the footer mid-swell — the shot that proves fix 1); 50 shots,
 source == dist.
 
+Sixty-fifth change — **tools/test_control.lua: the control surface, offscreen (tooling
+only, no script change)**. The S25 review found four defects and noted that THREE of
+them could not have been caught by the render suite, because it proves the instrument
+DRAWS correctly and never turns an encoder or presses a key. That is a gap in the
+tooling, not just in that change, so it is now closed.
+* **123 assertions**, driving the REAL script through `enc()`, `key()` and `params`
+  with a no-op screen. Five things it asserts: every ENC_MAP target is a real param or
+  a compound one that `ctx.enc_target` resolves AND `SHORT` names (the "reads --"
+  bug); every page's E2 and E3 move something, tried in BOTH directions because a knob
+  already at its maximum is not a broken target; `out_level` reaches all six softcut
+  voices (the master-doesn't-master bug); STOP silences every deck and START brings
+  them back; and every page survives its own keys.
+* MUTATION-PROVEN against the actual defects: removing the layers from `out_level`
+  fails 3 assertions, deleting one line of `ctx.enc_target` fails 2, and dropping the
+  `st.unlatched` guard fails 1.
+* **That last one is asserted at the SOURCE level, deliberately.** The guard protects
+  defs that have both `lit` and `tap`, and on this branch neither reachable def
+  qualifies — SCENE's RCL only lights BETWEEN press and release, PADS' pad is a gate.
+  The only def that can hit it is CHAIN's PRINT, which lives on `foundry`. Rather than
+  fake a runtime test, the harness asserts the guard exists where it lives, so it
+  outlives the branch that needed it. Worth knowing: that guard is currently
+  unexercised at runtime on main/layers.
+* **A shared-stub extraction was tried and BACKED OUT.** Pulling render_pages.lua's
+  offscreen norns into a `tools/uisim/env.lua` that both harnesses could use is the
+  obvious way to avoid two fake nornses. It changed 31 of 50 rendered shots. The
+  extracted code was verified byte-identical to the original, no global was lost (a
+  nil-global trap found nothing), and the random state at script load matched exactly —
+  and I could not account for the difference. Shipping tooling whose behaviour I cannot
+  explain is worse than a second stub, so it was reverted and the renderer is untouched.
+  The control harness stubs the screen as no-ops instead: it never draws, so it does
+  not want the pixel model, which is the only subtle part of the renderer's environment.
+  **If anyone picks this up again: the difference is real, deterministic and
+  reproducible — it is worth understanding before trusting the render suite's
+  byte-identity as strongly as this project does.**
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
