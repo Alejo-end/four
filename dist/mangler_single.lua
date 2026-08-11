@@ -37,8 +37,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (ten stations: TAKE VOICE TAPE · FILTER DELAY REVERB
---          · MIX · PADS MOTION SCENE — the header dots are the signal map)
+--   E1     select page (twelve stations: TAKE VOICE TAPE · FILTER DELAY
+--          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION — the header dots
+--          are the signal map)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -198,8 +199,8 @@ local ctx = {
   pad_sync = false,          -- guard: syncing the editor params FROM the arrays
   pad_cursor = 0,
   pad_n = 8,
-  pad_held = {},             -- voice id -> true while sounding (matches note_off)
-  shimmer_mem = 0.6,         -- last shimmer amount, for the SHMR bloom key
+  pad_held = {},             -- voice id -> pad index while sounding
+  pad_order = {},            -- the same ids in press order, for the steal below
 }
 
 local Mfont = (function()  -- inlined lib/mfont.lua
@@ -477,6 +478,15 @@ function M.pset_read(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
+  else
+    -- NO wav means the pset was saved with an EMPTY tape (pset_write deletes
+    -- the file in that case, precisely so old audio cannot resurrect). Leaving
+    -- the softcut buffer alone let it resurrect anyway — from the live buffer
+    -- instead of from disk, which is the same failure by another route. An
+    -- empty tape in the pset means an empty tape after loading it.
+    M.clear_buffer()
+    C.twave_any = false
+    if C.clear_twave then C.clear_twave() end
   end
 end
 
@@ -796,8 +806,18 @@ local function lp_make_backend(dev)
         local note = lp_note(xx, yy); lvlbuf[note] = lvl; huebuf[note] = 0
       end end
     end
+    -- the SysEx message buffer, reused every frame. This is the 15fps grid
+    -- path, and it allocated a fresh table (and a fresh pcall closure below)
+    -- on every refresh — in a codebase that hoisted closures out of the redraw
+    -- loop for exactly this reason on the Pi.
+    local msg = {}
+    local function send_msg() dev:send(msg) end
+
     function gg:refresh()                -- one SysEx carries every changed pad
-      local m = { table.unpack(LP_RGB_HDR) }
+      local m = msg
+      local n = #LP_RGB_HDR
+      for i = 1, n do m[i] = LP_RGB_HDR[i] end
+      for i = #m, n + 1, -1 do m[i] = nil end   -- drop last frame's tail
       local changed = false
       for yy = 1, 8 do for xx = 1, 8 do
         local note = lp_note(xx, yy)
@@ -823,7 +843,7 @@ local function lp_make_backend(dev)
       end end
       if not changed then return end
       m[#m + 1] = 0xF7
-      pcall(function() dev:send(m) end)
+      pcall(send_msg)
     end
     function gg:shutdown() pcall(function() dev:send(LP_LIVE) end) end
     dev.event = function(data)           -- pad presses -> the grid_key handler
@@ -874,7 +894,12 @@ end
 
 -- one piano octave, rows 7 (black) / 8 (white); gap pads = octave -/+
 local function grid_note_key(x, y, z)
-  if pget("keys_enable", 1) == 0 then return end
+  -- the gate applies to PRESSES only. A release belongs to the press that
+  -- opened it, so keys_enable going off mid-hold must never swallow a note-off
+  -- and strand a polyphonic voice sounding forever — the same trap already
+  -- guarded for MIDI and for the typing keyboard in lib/minput.lua. A release
+  -- for a note we never opened is a no-op inside route_note/pad_trigger.
+  if z == 1 and pget("keys_enable", 1) == 0 then return end
   local st
   if y == 8 then
     st = GRID_WHITE[x]
@@ -1350,10 +1375,17 @@ end
 
 -- map a playback frame (loop_len timebase) to the event timebase (rec_len).
 -- IDENTITY when the loop isn't retimed, so default playback is bit-for-bit
--- the pre-A5 behavior (loop_len == rec_len -> src == playhead, integer).
+-- the pre-retime behaviour (loop_len == rec_len -> src == playhead, integer).
+--
+-- The ENDPOINTS are what matter when it IS retimed: this maps the last
+-- playback frame onto the last event frame, so the tail of every gesture is
+-- reached. Scaling by rec_len/loop_len and flooring instead left the final
+-- rec_len/loop_len event frames past the end of the sweep — shortening a loop
+-- with motion_len silently dropped the end of every recorded gesture.
 local function src_of(ph)
   if M.loop_len == M.rec_len then return ph end
-  return floor(ph * M.rec_len / M.loop_len)
+  if M.loop_len <= 1 then return M.rec_len - 1 end
+  return floor(ph * (M.rec_len - 1) / (M.loop_len - 1) + 0.5)
 end
 
 -- baseline: remember every recordable param's current value, so the poll only
@@ -1505,10 +1537,19 @@ function M.tick()
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
       if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
-    else
+    elseif pget("motion_play", 0) == 1 then
       -- overdub: punch in at the loop position, mapped to the EVENT timebase so
       -- new events line up with the old ones even when the loop is retimed
       capture_poll(src_of(M.playhead))
+    else
+      -- armed over an existing loop with the transport STOPPED. The playhead
+      -- is frozen, so every move would punch-in-clear the lane and then stack
+      -- at one identical offset — an automation curve replaced by a single
+      -- step. There is no timebase to record against, so disarm and say so
+      -- (arming an overdub starts playback; getting here means it was stopped
+      -- afterwards, by hand).
+      params:set("motion_rec", 0)
+      print("mangler: MOTION overdub needs the loop running — disarmed")
     end
   end
   -- 2) playback: advance the playhead and fire each lane's due events
@@ -2136,28 +2177,54 @@ function M.morph(slot, amt, opts)
   local force = opts.force or amt <= 0 or amt >= 1
   morphing = true
   local ids = SCENE_MORPH_IDS
+
+  -- one param's step of the sweep.
+  -- skip anything either side doesn't have (older capture, missing param).
+  -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
+  -- a hand riding such a knob mid-sweep stays live even through the forced
+  -- ends, instead of being stomped back (a scene only claims what differs).
+  -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
+  -- still lands exactly at both ends.
+  local function emit(id, va, vb)
+    if va == nil or vb == nil or not params.lookup[id] then return end
+    if not (va ~= vb or (force and last_sent[id] ~= nil)) then return end
+    local v, tn = morph_value(id, va, vb, amt, opts.linear)
+    if v == nil then return end
+    local key = tn or v          -- continuous: compare norms; discrete: values
+    local last = last_sent[id]
+    local fire = force or last == nil
+      or (tn and abs(tn - last) >= MORPH_EPS)
+      or (not tn and v ~= last)
+    if fire then
+      pset(id, v)
+      last_sent[id] = key
+    end
+  end
+
+  local done                     -- edge partners already written this pass
   for i = 1, #ids do
     local id = ids[i]
-    local va, vb = A[id], B[id]
-    -- skip anything either side doesn't have (older capture, missing param).
-    -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
-    -- a hand riding such a knob mid-sweep stays live even through the forced
-    -- ends, instead of being stomped back (a scene only claims what differs).
-    -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
-    -- still lands exactly at both ends.
-    if va ~= nil and vb ~= nil and params.lookup[id]
-        and (va ~= vb or (force and last_sent[id] ~= nil)) then
-      local v, tn = morph_value(id, va, vb, amt, opts.linear)
-      if v ~= nil then
-        local key = tn or v        -- continuous: compare norms; discrete: values
-        local last = last_sent[id]
-        local fire = force or last == nil
-          or (tn and abs(tn - last) >= MORPH_EPS)
-          or (not tn and v ~= last)
-        if fire then
-          pset(id, v)
-          last_sent[id] = key
+    if not (done and done[id]) then
+      local partner = EDGE_PAIRS[id]
+      if partner and params.lookup[partner]
+          and A[id] ~= nil and B[id] ~= nil
+          and A[partner] ~= nil and B[partner] ~= nil then
+        -- a REGION's two edges move together, and the WIDENING one goes first —
+        -- the same rule apply() follows, and for the same reason: written in
+        -- list order a sweep can momentarily cross the pair, and a crossed pair
+        -- hits the 100ms minimum-length floor, which jumps the softcut head.
+        -- The morph runs this 15 times a second, so it meets the hazard far
+        -- more often than a recall does.
+        local nv = morph_value(id, A[id], B[id], amt, opts.linear)
+        if nv ~= nil and nv < params:get(id) then
+          emit(id, A[id], B[id]); emit(partner, A[partner], B[partner])
+        else
+          emit(partner, A[partner], B[partner]); emit(id, A[id], B[id])
         end
+        done = done or {}
+        done[partner] = true
+      else
+        emit(id, A[id], B[id])
       end
     end
   end
@@ -2226,7 +2293,7 @@ local function orbit_new_leg()
   local target = #filled > 0 and filled[math.random(#filled)] or cur
   pset("scene_slot", target)
   orbit.leg_start = C.frame
-  orbit.leg_len = math.max(2, math.floor(pget("orbit_rate", 12) * 15))
+  orbit.leg_len = math.max(2, math.floor(pget("orbit_rate", 12) * (C.FPS or 15)))
   return true
 end
 
@@ -2898,6 +2965,7 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
+  pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
@@ -4301,13 +4369,22 @@ local function purity()
   if pget("drive", 0) > 0.001 or pget("delay_mix", 0) > 0.001
       or pget("rev_mix", 0) > 0.001 or pget("shimmer", 0) > 0.001
       or pget("clouds_fb", 0) > 0.001 or pget("resample", 0) > 0.001
-      or pget("regen", 0) > 0.001 then return false end
+      or pget("regen", 0) > 0.001
+      -- erode belongs with the other buffer writers: the mark would otherwise
+      -- claim "verbatim" at exactly the moment the erosion head is grinding
+      -- the take away underneath it
+      or pget("erode", 0) > 0.001 then return false end
   if pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1 then return false end
-  local dw = pget("dry_wet", 0)
-  if dw > 0.001 then                    -- the filter must be out of the way
-    if pget("filt_type", 1) ~= 1 or pget("cutoff", 20000) < 19000
-        or pget("resonance", 0) > 0.02 then return false end
-  end
+  -- the take must be ALL of what you hear. dry_wet blends the live INPUT
+  -- against the playback path, so anything short of full wet means the monitor
+  -- is mixed in on top of the recording — and at 0 the take is not audible at
+  -- all. This tested `dw > 0.001` and so lit at the 0.5 default (half and half)
+  -- and at 0 (nothing but the input). The mark says "the recording, verbatim";
+  -- it has to mean it, and it is supposed to be the conservative one.
+  if pget("dry_wet", 0.5) < 0.999 then return false end
+  -- ...and the filter must be out of the way
+  if pget("filt_type", 1) ~= 1 or pget("cutoff", 20000) < 19000
+      or pget("resonance", 0) > 0.02 then return false end
   -- the tape deck must not be adding its own material
   if C.twave_any and pget("mix", 0.5) > 0.02 then return false end
   return true
@@ -4425,6 +4502,9 @@ end)()
 ctx.font = Mfont
 ctx.grid = Mgrid
 ctx.motion = Mmotion
+-- the tape display model lives in mpages; mtape clears it when a pset restores
+-- an empty tape, so it needs a way to reach it
+ctx.clear_twave = Mpages.clear_twave
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -4499,16 +4579,43 @@ function ctx.throws_forget()
   for k in pairs(throw_mem) do throw_mem[k] = nil end
 end
 
-local function throw(label, engage)
+local function throw_restore(label)
+  local mem = throw_mem[label]
+  if not mem then return end
+  throw_mem[label] = nil
+  for id, v in pairs(mem) do params:set(id, v) end
+end
+
+-- a throw: `ids` are the params it owns, `apply` sets the new values, and the
+-- snapshot to restore on release is built FROM ids — so what gets put back can
+-- never drift from what gets set. Hold = ride it and come back, tap = latch,
+-- tap again = back.
+--
+-- Engaging first un-latches any OTHER throw holding one of the same params,
+-- restoring it. Two throws over one param used to STACK: the second cached
+-- what the first had already displaced, so releasing them out of order left
+-- the param at a value nobody chose under a lit pill. MIX's ENG/TAPE carried a
+-- hand-written pair for exactly this and EROSION's HEAL/SCAR did not; keying
+-- the conflict on the PARAMS makes it automatic for every throw, present and
+-- future.
+local function throw(label, ids, apply)
   return {
     label = label,
     lit = function() return throw_mem[label] ~= nil end,
-    pon = function() throw_mem[label] = engage() end,
-    poff = function()
-      local m = throw_mem[label]
-      if m then for id, v in pairs(m) do params:set(id, v) end end
-      throw_mem[label] = nil
+    pon = function()
+      for other, mem in pairs(throw_mem) do
+        if other ~= label then
+          for k = 1, #ids do
+            if mem[ids[k]] ~= nil then throw_restore(other); break end
+          end
+        end
+      end
+      local mem = {}
+      for k = 1, #ids do mem[ids[k]] = params:get(ids[k]) end
+      throw_mem[label] = mem
+      apply()
     end,
+    poff = function() throw_restore(label) end,
   }
 end
 
@@ -4531,6 +4638,13 @@ end
 -- TAKE K3: window full <-> back where you had it (a round trip, so a
 -- fat-fingered snap is always recoverable)
 local snap_mem
+
+-- the window bounds SNAP remembers are only meaningful for the material they
+-- were taken from. New audio in the buffer makes them a pointer into something
+-- that no longer exists — a SNAP after CLR used to restore the erased take's
+-- bounds — so whoever replaces the buffer forgets them.
+function ctx.snap_forget() snap_mem = nil end
+
 local function snap_window()
   local lo, hi = pget("pos_start", 0), pget("pos_end", 1)
   if hi < lo then lo, hi = hi, lo end
@@ -4538,6 +4652,19 @@ local function snap_window()
     if snap_mem then
       params:set("pos_start", snap_mem[1])
       params:set("pos_end", snap_mem[2])
+    else
+      -- full window, nothing remembered — the state on every fresh load, where
+      -- this key used to do nothing at all and say nothing about it. Snap to
+      -- the TAKE instead: the same "window = what you recorded" law the
+      -- rec-stop applies, which is the only useful meaning left here.
+      local tl = ctx.take_len or 0
+      if ctx.wave_any and tl > 0.001 and tl < 0.98 then
+        snap_mem = { lo, hi }
+        params:set("pos_start", 0)
+        params:set("pos_end", tl)
+      else
+        print("mangler: SNAP — the window is already the whole buffer")
+      end
     end
   else
     snap_mem = { lo, hi }
@@ -4568,7 +4695,7 @@ local KEYS = {
     k3 = pk("REV", "tape_reverse"),
     erase = function()
       Mtape.clear_buffer()
-      Mpages.clear_twave()
+      ctx.clear_twave()
       params:set("tape_freeze", 0)
       params:set("loop_start", 0)
       params:set("loop_end", 1)
@@ -4577,13 +4704,9 @@ local KEYS = {
   FILTER = {
     -- OPEN as a throw: hold = a sweep that returns by itself, tap = park
     -- it open, tap again = back to the carved tone
-    k2 = throw("OPEN", function()
-      local mem = { cutoff = pget("cutoff", 20000),
-        resonance = pget("resonance", 0) }
-      local ft = pget("filt_type", 1)
-      params:set("cutoff", filter_open_cutoff(ft))
+    k2 = throw("OPEN", { "cutoff", "resonance" }, function()
+      params:set("cutoff", filter_open_cutoff(pget("filt_type", 1)))
       params:set("resonance", 0)
-      return mem
     end),
     k3 = { label = "TYPE",
       act = function()
@@ -4593,45 +4716,37 @@ local KEYS = {
   DELAY = {
     -- INF pins the feedback near max (a dub hold); KILL cuts the echo send.
     -- both round-trip: tap latches, tap again restores the prior value.
-    k2 = throw("INF", function()   -- dub grab: pin the delay loop
-      local mem = { delay_fb = pget("delay_fb", 0) }
+    k2 = throw("INF", { "delay_fb" }, function()   -- dub grab: pin the loop
       params:set("delay_fb", 1)   -- knob max -> ~0.98 fb, a self-sustaining hold
-      return mem
     end),
-    k3 = throw("KILL", function()  -- cut the echo send
-      local mem = { delay_mix = pget("delay_mix", 0) }
+    k3 = throw("KILL", { "delay_mix" }, function()  -- cut the echo send
       params:set("delay_mix", 0)
-      return mem
     end),
   },
   REVERB = {
     -- WASH swells the tail to a near-infinite hall; BLOOM surges shimmer.
-    k2 = throw("WASH", function()  -- freeze the space
-      local mem = { rev_decay = pget("rev_decay", 2) }
+    k2 = throw("WASH", { "rev_decay" }, function()  -- freeze the space
       params:set("rev_decay", 30)
-      return mem
     end),
-    k3 = throw("BLOOM", function() -- shimmer surge
-      local mem = { shimmer = pget("shimmer", 0) }
-      params:set("shimmer", ctx.shimmer_mem or 0.6)
-      return mem
+    -- BLOOM always INCREASES: it read a `ctx.shimmer_mem` that nothing in the
+    -- codebase ever wrote, so it was permanently the 0.6 fallback — and pulling
+    -- shimmer DOWN whenever it already sat above that, which is the opposite of
+    -- a surge. Double it, floor at 0.6, ceiling at full.
+    k3 = throw("BLOOM", { "shimmer" }, function() -- shimmer surge
+      local now = pget("shimmer", 0)
+      params:set("shimmer", math.min(1, math.max(0.6, now * 2)))
     end),
   },
   MIX = {
-    -- ENG and TAPE are MUTUALLY EXCLUSIVE throws of the same `mix`: engaging one
-    -- restores + un-latches the other FIRST, so the value cached is the true home
-    -- (not one the sibling already displaced) and both pills can't light at once.
-    k2 = throw("ENG", function()   -- crossfade stab to the engine deck
-      if throw_mem["TAPE"] then params:set("mix", throw_mem["TAPE"].mix); throw_mem["TAPE"] = nil end
-      local mem = { mix = pget("mix", 0.5) }
+    -- ENG and TAPE are two throws of the same `mix`, so engaging one restores
+    -- and un-latches the other first — both pills can never light at once and
+    -- the crossfader always returns to its true home. That used to be written
+    -- out here by hand; the throw engine now does it for any shared param.
+    k2 = throw("ENG", { "mix" }, function()   -- crossfade stab to the engine
       params:set("mix", 0)
-      return mem
     end),
-    k3 = throw("TAPE", function()
-      if throw_mem["ENG"] then params:set("mix", throw_mem["ENG"].mix); throw_mem["ENG"] = nil end
-      local mem = { mix = pget("mix", 0.5) }
+    k3 = throw("TAPE", { "mix" }, function()
       params:set("mix", 1)
-      return mem
     end),
   },
   PADS = {
@@ -4665,15 +4780,11 @@ local KEYS = {
     -- both snapshot regen as well as erode: raising erode ZEROES regen through
     -- the interlock, so a throw that remembered only erode handed back an
     -- instrument with the performer's regen setting silently gone.
-    k2 = throw("HEAL", function()
-      local mem = { erode = pget("erode", 0), regen = pget("regen", 0) }
+    k2 = throw("HEAL", { "erode", "regen" }, function()
       params:set("erode", 0)
-      return mem
     end),
-    k3 = throw("SCAR", function()
-      local mem = { erode = pget("erode", 0), regen = pget("regen", 0) }
+    k3 = throw("SCAR", { "erode", "regen" }, function()
       params:set("erode", 1)
-      return mem
     end),
   },
   SCENE = {
@@ -4788,15 +4899,25 @@ local function enc_param(n)
 end
 
 -- compound encoder gesture: slide a lo/hi pair together, width preserved,
--- with the same span-scaled fine step the edges get
+-- with the same span-scaled fine step the edges get.
+-- The two writes go in the OUTWARD-EDGE-FIRST order the scenes use for the
+-- same pairs: sliding right by more than the current width would otherwise
+-- put the low edge past the high one for a single param write, and a crossed
+-- pair is a region that is neither the old one nor the new one.
 local function move_pair(lo_id, hi_id, d)
   local lo, hi = pget(lo_id, 0), pget(hi_id, 1)
   if hi < lo then lo, hi = hi, lo end
   local p = params:lookup_param(lo_id)
   local q = (p and p.controlspec and p.controlspec.quantum) or 0.01
-  local nlo = clamp(lo + fine_delta(lo_id, d) * q, 0, 1 - (hi - lo))
-  params:set(lo_id, nlo)
-  params:set(hi_id, nlo + (hi - lo))
+  local width = hi - lo
+  local nlo = clamp(lo + fine_delta(lo_id, d) * q, 0, 1 - width)
+  if nlo < lo then                     -- moving LEFT: the low edge widens first
+    params:set(lo_id, nlo)
+    params:set(hi_id, nlo + width)
+  else                                 -- moving RIGHT: the high edge widens
+    params:set(hi_id, nlo + width)
+    params:set(lo_id, nlo)
+  end
 end
 
 -- K1+K3 held to the arc: the erase fires AT the threshold (not on the
@@ -4852,6 +4973,16 @@ local function pad_pos(i, at_start)
 end
 ctx.pad_pos = pad_pos
 
+-- how LONG a slice is, in the same buffer-fraction units as pad_pos. The
+-- engine's slice voice needs this or its PlayBuf runs from the slice start
+-- clean through the rest of the 60s buffer — a pad playing its chop and then
+-- everything after it, while the PADS page draws eight bounded cells.
+local function pad_len()
+  local _, _, span = window_bounds()
+  return span / ctx.pad_n
+end
+ctx.pad_len = pad_len
+
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
 -- the note_on that started it). z=1 press, z=0 release.
 function ctx.pad_trigger(id, i, z)
@@ -4864,12 +4995,27 @@ function ctx.pad_trigger(id, i, z)
       local pt = ctx.pad_type[i] or 0
       engine.note_on(id, pad_pos(i, pt > 0),
         2 ^ ((ctx.pad_pitch[i] or 0) / 12),
-        pt, pget("pad_level", 0.3))
+        pt, pget("pad_level", 0.3), pad_len())
+    end
+    if ctx.pad_held[id] == nil then
+      ctx.pad_order[#ctx.pad_order + 1] = id
     end
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
+    -- MIRROR the engine's voice steal. Over the cap it release-steals the
+    -- OLDEST voice and tells lua nothing, so the PADS page went on drawing
+    -- cells that had already stopped and the used/cap readout over-counted.
+    -- Same cap, same order, so the picture matches what is sounding.
+    local cap = math.floor(pget("voices", 8) + 0.5)
+    while #ctx.pad_order > cap do
+      local old = table.remove(ctx.pad_order, 1)
+      ctx.pad_held[old] = nil
+    end
   elseif ctx.pad_held[id] then
     if engine.note_off then engine.note_off(id) end
     ctx.pad_held[id] = nil
+    for k = 1, #ctx.pad_order do
+      if ctx.pad_order[k] == id then table.remove(ctx.pad_order, k); break end
+    end
   end
 end
 
@@ -4892,6 +5038,7 @@ function ctx.pads_all_off()
     if engine.note_off then engine.note_off(id) end
     ctx.pad_held[id] = nil
   end
+  for k = #ctx.pad_order, 1, -1 do ctx.pad_order[k] = nil end
 end
 
 -- SOUND-LOCK editor sync: point the pad_voice/pad_pitch editor params at the pad
@@ -4921,6 +5068,7 @@ function ctx.clear_recording()
   end
   Mpages.clear_wave()
   Mpages.erosion_reset()   -- a fresh take starts at generation zero
+  ctx.snap_forget()        -- the old window bounds point at audio that is gone
   ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
@@ -4953,6 +5101,7 @@ local function read_into_buffer(path, shown, secs)
                          -- the preview can't draw
   Mpages.erosion_reset()   -- different audio, generation zero: the age counter
                            -- belongs to the material, not to the session
+  ctx.snap_forget()        -- ...and the remembered window belonged to the old
   local dur = Mpages.load_wave(path, BUF_SECS) or secs
   -- the loaded length bounds a PSET save; unknown length (no preview) -> full
   ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
@@ -5081,7 +5230,10 @@ end
 function ctx.padlock_pset_write(number)
   local t = { v = 1, type = {}, pitch = {} }
   for i = 0, 7 do t.type[i] = ctx.pad_type[i] or 0; t.pitch[i] = ctx.pad_pitch[i] or 0 end
-  tab.save(t, padlock_path(number))
+  -- guarded like every other pset writer here: a write failure must PRINT, not
+  -- throw out of params.action_write and abort the rest of the save
+  local ok, err = pcall(tab.save, t, padlock_path(number))
+  if not ok then print("mangler: pad-lock save failed — " .. tostring(err)) end
 end
 
 function ctx.padlock_pset_read(number)
@@ -5191,10 +5343,28 @@ function ctx.print_take()
   audio.tape_record_start()
   print(string.format("mangler: PRINT — recording the master mix, %.1fs", secs))
   print_clock = clock.run(function()
-    clock.sleep(secs)
+    -- WATCH for the STOP, don't just sleep through it. Refusing to START while
+    -- stopped is only half the guard: a STOP pressed mid-bounce silences the
+    -- master, so the rest of the pass records digital silence — and loading
+    -- THAT as the take destroys the buffer with exactly the "nothing" the entry
+    -- check exists to prevent. The one key that always means silence has to
+    -- mean "stop making this" too.
+    local aborted = false
+    local left = secs
+    while left > 0 do
+      local step = left < 0.1 and left or 0.1
+      clock.sleep(step)
+      left = left - step
+      if pget("stop_all", 0) == 1 then aborted = true; break end
+    end
     audio.tape_record_stop()
     clock.sleep(0.25)          -- let the tape writer flush + close the wav
     print_clock = nil
+    if aborted then
+      os.remove(path)          -- a part-silent bounce is not worth keeping
+      print("mangler: PRINT aborted by STOP — the take is untouched")
+      return
+    end
     ctx.load_sample(path)
     print("mangler: PRINT done — " .. name .. " is the new take")
   end)
@@ -5210,10 +5380,21 @@ function ctx.export_take(name)
     print("mangler: 999 exports in dust/audio — clear some out first")
     return
   end
+  -- REFUSE a second export rather than cancelling the first. Cancelling killed
+  -- the coroutine mid-interleave, leaving a TRUNCATED wav in dust/audio that
+  -- next_export_name then skips over — a broken file that looks finished in the
+  -- browser and is never overwritten.
+  if export_clock then
+    print("mangler: an export is already running")
+    return
+  end
   local out = _path.audio .. name
   local tmp = norns.state.data .. "mexport-tmp"
+  -- clear any leftover temp pair first: the names are fixed, so a stale half of
+  -- an interrupted export can satisfy the size-stability wait below and get
+  -- interleaved into the new file.
+  os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
-  if export_clock then clock.cancel(export_clock) end
   -- expected bytes per mono 16-bit wav (2 B/frame + 44 B header). we wait for
   -- BOTH files to REACH that size and stop growing, not just plateau — a slow
   -- SD card could stall mid-write and read as "stable" at a partial size, which
@@ -5366,9 +5547,16 @@ local function init_params()
       params:set("pos_end", 1)
     end
     if v == 0 then
-      -- the take now bounds what a PSET save writes (write head runs 0..pos_end).
-      -- regen fills the whole buffer, so it forces a full save.
-      ctx.take_len = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
+      -- the take bounds what a PSET save writes (the write head runs
+      -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
+      -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
+      -- the region it recorded — everything else is still in the buffer. A
+      -- short punch-in over a narrowed window used to REPLACE the mark with
+      -- that narrow pos_end, so the next PSET save wrote a few seconds and the
+      -- rest of the take was gone on reload, with no error anywhere. Fresh
+      -- material resets the mark on purpose (clear/load/print), never a punch.
+      local bound = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
+      if bound > (ctx.take_len or 0) then ctx.take_len = bound end
     end
   end)
   add_eng_control("rec_level", "rec level",
@@ -5962,8 +6150,6 @@ function enc(n, d)
     local id = enc_param(n)
     if id == "@win_move" then
       move_pair("pos_start", "pos_end", d)
-    elseif id == "@loop_move" then
-      move_pair("loop_start", "loop_end", d)
     elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
     else

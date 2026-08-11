@@ -451,6 +451,7 @@ local SHORT = {
   voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
+  pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
@@ -1854,13 +1855,22 @@ local function purity()
   if pget("drive", 0) > 0.001 or pget("delay_mix", 0) > 0.001
       or pget("rev_mix", 0) > 0.001 or pget("shimmer", 0) > 0.001
       or pget("clouds_fb", 0) > 0.001 or pget("resample", 0) > 0.001
-      or pget("regen", 0) > 0.001 then return false end
+      or pget("regen", 0) > 0.001
+      -- erode belongs with the other buffer writers: the mark would otherwise
+      -- claim "verbatim" at exactly the moment the erosion head is grinding
+      -- the take away underneath it
+      or pget("erode", 0) > 0.001 then return false end
   if pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1 then return false end
-  local dw = pget("dry_wet", 0)
-  if dw > 0.001 then                    -- the filter must be out of the way
-    if pget("filt_type", 1) ~= 1 or pget("cutoff", 20000) < 19000
-        or pget("resonance", 0) > 0.02 then return false end
-  end
+  -- the take must be ALL of what you hear. dry_wet blends the live INPUT
+  -- against the playback path, so anything short of full wet means the monitor
+  -- is mixed in on top of the recording — and at 0 the take is not audible at
+  -- all. This tested `dw > 0.001` and so lit at the 0.5 default (half and half)
+  -- and at 0 (nothing but the input). The mark says "the recording, verbatim";
+  -- it has to mean it, and it is supposed to be the conservative one.
+  if pget("dry_wet", 0.5) < 0.999 then return false end
+  -- ...and the filter must be out of the way
+  if pget("filt_type", 1) ~= 1 or pget("cutoff", 20000) < 19000
+      or pget("resonance", 0) > 0.02 then return false end
   -- the tape deck must not be adding its own material
   if C.twave_any and pget("mix", 0.5) > 0.02 then return false end
   return true

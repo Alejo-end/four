@@ -560,28 +560,54 @@ function M.morph(slot, amt, opts)
   local force = opts.force or amt <= 0 or amt >= 1
   morphing = true
   local ids = SCENE_MORPH_IDS
+
+  -- one param's step of the sweep.
+  -- skip anything either side doesn't have (older capture, missing param).
+  -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
+  -- a hand riding such a knob mid-sweep stays live even through the forced
+  -- ends, instead of being stomped back (a scene only claims what differs).
+  -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
+  -- still lands exactly at both ends.
+  local function emit(id, va, vb)
+    if va == nil or vb == nil or not params.lookup[id] then return end
+    if not (va ~= vb or (force and last_sent[id] ~= nil)) then return end
+    local v, tn = morph_value(id, va, vb, amt, opts.linear)
+    if v == nil then return end
+    local key = tn or v          -- continuous: compare norms; discrete: values
+    local last = last_sent[id]
+    local fire = force or last == nil
+      or (tn and abs(tn - last) >= MORPH_EPS)
+      or (not tn and v ~= last)
+    if fire then
+      pset(id, v)
+      last_sent[id] = key
+    end
+  end
+
+  local done                     -- edge partners already written this pass
   for i = 1, #ids do
     local id = ids[i]
-    local va, vb = A[id], B[id]
-    -- skip anything either side doesn't have (older capture, missing param).
-    -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
-    -- a hand riding such a knob mid-sweep stays live even through the forced
-    -- ends, instead of being stomped back (a scene only claims what differs).
-    -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
-    -- still lands exactly at both ends.
-    if va ~= nil and vb ~= nil and params.lookup[id]
-        and (va ~= vb or (force and last_sent[id] ~= nil)) then
-      local v, tn = morph_value(id, va, vb, amt, opts.linear)
-      if v ~= nil then
-        local key = tn or v        -- continuous: compare norms; discrete: values
-        local last = last_sent[id]
-        local fire = force or last == nil
-          or (tn and abs(tn - last) >= MORPH_EPS)
-          or (not tn and v ~= last)
-        if fire then
-          pset(id, v)
-          last_sent[id] = key
+    if not (done and done[id]) then
+      local partner = EDGE_PAIRS[id]
+      if partner and params.lookup[partner]
+          and A[id] ~= nil and B[id] ~= nil
+          and A[partner] ~= nil and B[partner] ~= nil then
+        -- a REGION's two edges move together, and the WIDENING one goes first —
+        -- the same rule apply() follows, and for the same reason: written in
+        -- list order a sweep can momentarily cross the pair, and a crossed pair
+        -- hits the 100ms minimum-length floor, which jumps the softcut head.
+        -- The morph runs this 15 times a second, so it meets the hazard far
+        -- more often than a recall does.
+        local nv = morph_value(id, A[id], B[id], amt, opts.linear)
+        if nv ~= nil and nv < params:get(id) then
+          emit(id, A[id], B[id]); emit(partner, A[partner], B[partner])
+        else
+          emit(partner, A[partner], B[partner]); emit(id, A[id], B[id])
         end
+        done = done or {}
+        done[partner] = true
+      else
+        emit(id, A[id], B[id])
       end
     end
   end
@@ -650,7 +676,7 @@ local function orbit_new_leg()
   local target = #filled > 0 and filled[math.random(#filled)] or cur
   pset("scene_slot", target)
   orbit.leg_start = C.frame
-  orbit.leg_len = math.max(2, math.floor(pget("orbit_rate", 12) * 15))
+  orbit.leg_len = math.max(2, math.floor(pget("orbit_rate", 12) * (C.FPS or 15)))
   return true
 end
 

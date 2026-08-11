@@ -259,11 +259,21 @@ function params:set(id, v)
     if p.action then p.action(v) end
   end
 end
+-- norns' Control:delta moves the RAW (unmapped, 0..1 warped) value and maps
+-- back, so on an exponential spec a detent is a constant RATIO, not a constant
+-- amount. Moving linearly in value space here made the harness disagree with
+-- the device for every exp param — an encoder gesture that reads fine offscreen
+-- and behaves differently in the hand. Same law as the real paramset.
 function params:delta(id, d)
   local p = self:lookup_param(id)
-  if p.controlspec then
-    local range = p.controlspec.maxval - p.controlspec.minval
-    self:set(id, p.value + d * (p.controlspec.quantum or 0.01) * range)
+  local cs = p.controlspec
+  if cs and cs.unmap and cs.map then
+    local raw = cs:unmap(p.value) + d * (cs.quantum or 0.01)
+    if raw < 0 then raw = 0 elseif raw > 1 then raw = 1 end
+    self:set(id, cs:map(raw))
+  elseif cs then
+    local range = cs.maxval - cs.minval
+    self:set(id, p.value + d * (cs.quantum or 0.01) * range)
   else
     self:set(id, p.value + d)
   end
@@ -392,9 +402,18 @@ run_ticks(EMPTY and 30 or 200)
 -- walk pages and shoot each one. navigation is BY NAME (goto_page) and the
 -- export filenames derive their NN index from the page's position, so adding
 -- or reordering pages never desyncs the shots.
--- MUST mirror the script's PAGES order: goto_page navigates by these indices
-local PAGES = { "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION" }
+-- READ from the script rather than mirrored by hand. A hand-copied list that
+-- drifts is worse than no list: goto_page navigates by INDEX, so every shot
+-- would silently render the wrong page while the byte-diff check kept passing.
+local PAGES = (function()
+  local src = assert(io.open(MANGLER, "r")):read("a")
+  local block = src:match("\nlocal PAGES = %{(.-)%}")
+  assert(block, "could not read PAGES out of " .. MANGLER)
+  local out = {}
+  for name in block:gmatch('"([A-Z_]+)"') do out[#out + 1] = name end
+  assert(#out > 0, "PAGES parsed empty")
+  return out
+end)()
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
 local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
@@ -494,9 +513,11 @@ else
   params:set("delay_mix", 0)
   params:set("rev_mix", 0)
   params:set("mix", 0)          -- tape deck thrown away (it holds audio)
+  params:set("dry_wet", 1)      -- the take alone: no live input blended in
   run_ticks(20)                 -- let the swell expire
   redraw()
   export(pfx("TAKE", "_PURE"))
+  params:set("dry_wet", 0.5)    -- back to the default for the rest of the walk
   params:set("pitch", 2 ^ (5 / 12))
   params:set("cutoff", 1400)
   params:set("resonance", 0.35)

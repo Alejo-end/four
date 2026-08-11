@@ -158,8 +158,18 @@ local function lp_make_backend(dev)
         local note = lp_note(xx, yy); lvlbuf[note] = lvl; huebuf[note] = 0
       end end
     end
+    -- the SysEx message buffer, reused every frame. This is the 15fps grid
+    -- path, and it allocated a fresh table (and a fresh pcall closure below)
+    -- on every refresh — in a codebase that hoisted closures out of the redraw
+    -- loop for exactly this reason on the Pi.
+    local msg = {}
+    local function send_msg() dev:send(msg) end
+
     function gg:refresh()                -- one SysEx carries every changed pad
-      local m = { table.unpack(LP_RGB_HDR) }
+      local m = msg
+      local n = #LP_RGB_HDR
+      for i = 1, n do m[i] = LP_RGB_HDR[i] end
+      for i = #m, n + 1, -1 do m[i] = nil end   -- drop last frame's tail
       local changed = false
       for yy = 1, 8 do for xx = 1, 8 do
         local note = lp_note(xx, yy)
@@ -185,7 +195,7 @@ local function lp_make_backend(dev)
       end end
       if not changed then return end
       m[#m + 1] = 0xF7
-      pcall(function() dev:send(m) end)
+      pcall(send_msg)
     end
     function gg:shutdown() pcall(function() dev:send(LP_LIVE) end) end
     dev.event = function(data)           -- pad presses -> the grid_key handler
@@ -236,7 +246,12 @@ end
 
 -- one piano octave, rows 7 (black) / 8 (white); gap pads = octave -/+
 local function grid_note_key(x, y, z)
-  if pget("keys_enable", 1) == 0 then return end
+  -- the gate applies to PRESSES only. A release belongs to the press that
+  -- opened it, so keys_enable going off mid-hold must never swallow a note-off
+  -- and strand a polyphonic voice sounding forever — the same trap already
+  -- guarded for MIDI and for the typing keyboard in lib/minput.lua. A release
+  -- for a note we never opened is a no-op inside route_note/pad_trigger.
+  if z == 1 and pget("keys_enable", 1) == 0 then return end
   local st
   if y == 8 then
     st = GRID_WHITE[x]

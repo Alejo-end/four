@@ -1559,6 +1559,103 @@ matching the head exactly), paused under the same conditions the engine
 pauses (rec/freeze/not-PLAY). Gate additions: erode at speed 2 and speed
 −1 ages at the same rate; raising regen drops erode to 0 and vice versa.
 
+Sixty-first change — **two code-review fix batches (ENGINE + Lua, fingerprint STAYS
+65, all 47 renders byte-identical, UNTESTED on device — rides the SAME pending
+RESTART as the 59th/60th)**. Two workflow-backed reviews: one over branch `foundry`
+whose shared-core findings apply here, and one over this branch, which found 38 more.
+Every fix below is applied; the ones with a named test are mutation-proven.
+FROM THE FOUNDRY REVIEW (the shared core — the forge-only findings do not apply here):
+* **The erosion head ignored STOP.** `eff` was gated on rec+freeze but not level, so a
+  stopped instrument with `erode` up kept aging the take (~600 generations in five
+  minutes at a 0.5s window, no undo). The regen head two lines below had carried
+  `(level > 0.001)` for exactly this reason; erosion, added later as the SECOND
+  free-running writer on the same buffer, never picked it up. `level` is now a key in
+  BOTH `ioKeys` and `playParams` — the fan-out `rec`/`freeze` already use — so one
+  command reaches both synths and the count is unmoved. LESSON: a guard added to one
+  of two siblings makes the other a bug with a witness.
+* **Motion overdub wiped the lane it was extending.** Playback stored the value it
+  ASKED for; `params:set` on a Control stores `map(unmap(v))`, which differs in the
+  last bit for a large share of values on an exp spec. The poll then read the loop's
+  own output as a live hand and punch-in-replaced. It now reads the value BACK, the
+  way `mscenes.account` already did.
+* `throw_mem` invalidated by scene recall/morph/chaos/DRY; `regen` in the HEAL/SCAR
+  snapshots (raising `erode` zeroes it through the interlock); the tap fallback no
+  longer fires after a press that CANCELLED a latched def; `dry_wet`/`erode`/`wear`
+  into MOTION_IDS; `sample_file` cleared on CLR; `erosion_reset` on all three
+  buffer-replacing paths; one `ctx.next_free` replacing two scanners that silently
+  overwrote the oldest recording at 999; one `ctx.tempo`; `ctx.BUF_SECS`/`SERVER_SR`
+  replacing bare `60`/`48000` across the modules and the engine (`var bufSecs`).
+* **44.1k samples were playing a semitone sharp.** scsynth's buffer read does no SRC.
+  `Mpages.convert_sr` (cubic, yields, beside the RIFF walker and the shared decoder it
+  uses) converts to the server rate before the engine reads it; falls back to a raw
+  load and SAYS so if it cannot decode. No new SC command.
+FROM THIS BRANCH'S REVIEW — three that destroy audio:
+* **PRINT was not aborted by STOP.** Refusing to START while stopped was only half the
+  guard: a STOP mid-bounce silences the master, and the rest of the pass recorded
+  digital silence which was then loaded AS the take. The pass now watches for STOP,
+  removes the part-silent file, and leaves the take alone.
+* **`take_len` shrank on a short punch-in.** It is documented as a HIGH-WATER mark, but
+  the rec-off edge overwrote it with the current `pos_end` — so a 200ms overdub over a
+  narrowed window set the PSET write bound to a few seconds and the save silently
+  truncated a 30s take. A rec pass overwrites only the region it recorded, so the mark
+  is now GROW-ONLY; fresh material still resets it.
+* **SLICE pads had no end.** `\mangler_voice_slice`'s PlayBuf got a start and no length,
+  so a pad played its slice and then everything after it, while the PADS page drew
+  eight bounded cells. `note_len` (an ARITY change on note_on/note_one_shot — NOT a new
+  command, count stays 65) carries the slice length; a ~3ms fade closes the boundary.
+STRANDED STATE AND SIBLING GAPS (the pattern that produced most of both reviews):
+* the GRID gated note RELEASES on `keys_enable`, stranding a voice forever — the exact
+  trap already fixed for MIDI and the typing keyboard. Presses only, now.
+* **the throw engine now owns its params.** `throw(label, ids, apply)` builds the
+  restore snapshot FROM `ids` (so what is put back cannot drift from what is set) and
+  un-latches any other throw holding one of the same params first. MIX's ENG/TAPE had a
+  hand-written pair for this and EROSION's HEAL/SCAR did not; keying the conflict on
+  the PARAM makes it automatic. The MIX special case is deleted.
+* Lua mirrors the engine's voice STEAL (`pad_order`), so the PADS page stops drawing
+  voices that already stopped; the morph honours EDGE_PAIRS like `apply()` does (it
+  meets the crossed-pair hazard 15x a second, far more often than a recall);
+  `move_pair` writes the widening edge first; motion capture disarms instead of
+  stacking every event at a frozen playhead; `src_of` maps the LAST playback frame onto
+  the LAST event frame, so a retimed loop stops dropping the tail of every gesture;
+  an empty tape in a pset now CLEARS the softcut buffer (it resurrected from the live
+  buffer instead of the file); export refuses a second run rather than cancelling into
+  a truncated wav, and clears stale temps first.
+* **◇ was lying.** `purity()` never tested `dry_wet`, so the "you hear the recording,
+  verbatim" mark lit at the 0.5 default (half live input) and even at 0, where the take
+  is inaudible; `erode` was missing from the writers test too. It is the conservative
+  mark, so it now requires full wet. Expect it to light far less often — that is the
+  point.
+* `\mangler_voice_grain` gained the drone's equal-loudness overlap compensation (a held
+  chord with density up had nothing holding it back); BLOOM surges instead of reading a
+  `ctx.shimmer_mem` nothing ever wrote (it REDUCED shimmer above 0.6); SNAP does
+  something on a fresh load instead of nothing silently, and its memory is dropped when
+  the material it points at is destroyed; dead `@loop_move` removed (`loop_start` is
+  reachable by PARAMS/MIDI/grid, just not an encoder — an honest limit beats dead code
+  claiming a feature); `pad_level` got its missing SHORT label; orbit uses `ctx.FPS`;
+  the padlock pset write is pcall-guarded like its siblings; the header's control map
+  says twelve stations again.
+TOOLING: **norns is Lua 5.3 and a dev box may have a newer `luac`** (5.5 here) which
+ACCEPTS syntax 5.3 rejects — a clean local parse is necessary, not sufficient. Every
+file was scanned for 5.4+-only constructs (none), the stale `luac5.3` invocations were
+fixed, and the hazard is written into the Workflow section. The render harness now READS
+`PAGES` out of the script instead of mirroring it by hand (a drifted copy would render
+the wrong page while the byte-diff kept passing), and its `params:delta` moves in the
+controlspec's WARPED space like the real one — a cutoff detent at 200 Hz was moving
+200 Hz offscreen and 14 Hz in the hand. The dead 876-line `proto_redesign.lua` is gone,
+and the Launchpad refresh no longer allocates a table and a closure every frame.
+TESTS: NEW `tools/test_wav.lua` (19 assertions) — main had no harness at all. It lifts
+the real functions out of mpages rather than copying them, and asserts the 44.1k→48k
+conversion by VALUE at a wall-clock position, because a rate error is a pitch error.
+Mutation-proven: disabling the conversion fails 8 assertions. It also asserts every
+MOTION_IDS entry has a SHORT label — the hand-maintained-list drift, made checkable.
+VERIFIED: `luac -p` clean, engine paren-balanced, **command count still 65**, all 47
+renders byte-identical, source == dist. DEPLOY: the engine changed (erosion level gate,
+`level` in playParams, `note_len`, voice overlap comp, `bufSecs`) → rsync, SYSTEM >
+RESTART, **confirm `count: 65`**, then: STOP with erode up leaves the take intact
+overnight · a 44.1k sample loads in tune · a SLICE pad plays ONLY its slice · overdub a
+second MOTION lane and the first survives · STOP during a PRINT leaves the take alone ·
+a short punch-in then PSET save/load keeps the whole take.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

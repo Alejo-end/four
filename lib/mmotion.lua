@@ -111,10 +111,17 @@ end
 
 -- map a playback frame (loop_len timebase) to the event timebase (rec_len).
 -- IDENTITY when the loop isn't retimed, so default playback is bit-for-bit
--- the pre-A5 behavior (loop_len == rec_len -> src == playhead, integer).
+-- the pre-retime behaviour (loop_len == rec_len -> src == playhead, integer).
+--
+-- The ENDPOINTS are what matter when it IS retimed: this maps the last
+-- playback frame onto the last event frame, so the tail of every gesture is
+-- reached. Scaling by rec_len/loop_len and flooring instead left the final
+-- rec_len/loop_len event frames past the end of the sweep — shortening a loop
+-- with motion_len silently dropped the end of every recorded gesture.
 local function src_of(ph)
   if M.loop_len == M.rec_len then return ph end
-  return floor(ph * M.rec_len / M.loop_len)
+  if M.loop_len <= 1 then return M.rec_len - 1 end
+  return floor(ph * (M.rec_len - 1) / (M.loop_len - 1) + 0.5)
 end
 
 -- baseline: remember every recordable param's current value, so the poll only
@@ -266,10 +273,19 @@ function M.tick()
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
       if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
-    else
+    elseif pget("motion_play", 0) == 1 then
       -- overdub: punch in at the loop position, mapped to the EVENT timebase so
       -- new events line up with the old ones even when the loop is retimed
       capture_poll(src_of(M.playhead))
+    else
+      -- armed over an existing loop with the transport STOPPED. The playhead
+      -- is frozen, so every move would punch-in-clear the lane and then stack
+      -- at one identical offset — an automation curve replaced by a single
+      -- step. There is no timebase to record against, so disarm and say so
+      -- (arming an overdub starts playback; getting here means it was stopped
+      -- afterwards, by hand).
+      params:set("motion_rec", 0)
+      print("mangler: MOTION overdub needs the loop running — disarmed")
     end
   end
   -- 2) playback: advance the playhead and fire each lane's due events

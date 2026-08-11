@@ -148,6 +148,15 @@ function M.pset_read(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
+  else
+    -- NO wav means the pset was saved with an EMPTY tape (pset_write deletes
+    -- the file in that case, precisely so old audio cannot resurrect). Leaving
+    -- the softcut buffer alone let it resurrect anyway — from the live buffer
+    -- instead of from disk, which is the same failure by another route. An
+    -- empty tape in the pset means an empty tape after loading it.
+    M.clear_buffer()
+    C.twave_any = false
+    if C.clear_twave then C.clear_twave() end
   end
 end
 

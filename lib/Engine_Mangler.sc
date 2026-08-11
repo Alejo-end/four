@@ -78,10 +78,13 @@ Engine_Mangler : CroneEngine {
     // ---- voice allocation ---------------------------------------------------
     // shared spawn args: buffers, bus, envelope, and the CURRENT drone grain
     // params so a grain-cloud voice tracks the drone's character.
-    voiceArgs { arg pos, pitch, oneShot, amp;
+    voiceArgs { arg pos, pitch, oneShot, amp, len;
         ^[
             \buf_l, bufL, \buf_r, bufR, \play_bus, playBus,
             \note_pos, pos, \note_pitch, pitch,
+            // how long the slice IS, as a fraction of the buffer. nil (an old
+            // caller) -> 0 -> unbounded, the previous behaviour.
+            \note_len, len ? 0,
             \gate, 1, \one_shot, oneShot,
             \amp, amp ? voiceParams[\amp],   // per-note level (nil -> the default)
             \pan, playParams[\pan],          // voices track the drone's pan too
@@ -95,7 +98,7 @@ Engine_Mangler : CroneEngine {
         ];
     }
 
-    noteOn { arg id, pos, pitch, type, amp;
+    noteOn { arg id, pos, pitch, type, amp, len;
         var def, syn;
         // enforce polyphony cap: release-steal oldest voices until under it.
         // a while (not one steal per press): `voices` can be LOWERED below the
@@ -107,7 +110,7 @@ Engine_Mangler : CroneEngine {
             activeVoices.removeAt(oldId);
         });
         def = (type > 0.5).if({ \mangler_voice_slice }, { \mangler_voice_grain });
-        syn = Synth.new(def, this.voiceArgs(pos, pitch, 0, amp), playGroup);
+        syn = Synth.new(def, this.voiceArgs(pos, pitch, 0, amp, len), playGroup);
         activeVoices[id] = syn;
         voiceOrder = voiceOrder.add(id);
     }
@@ -121,10 +124,10 @@ Engine_Mangler : CroneEngine {
         });
     }
 
-    noteOneShot { arg pos, pitch, type, amp;
+    noteOneShot { arg pos, pitch, type, amp, len;
         var def = (type > 0.5).if({ \mangler_voice_slice }, { \mangler_voice_grain });
         // fire-and-forget: internal gate self-terminates, synth self-frees
-        Synth.new(def, this.voiceArgs(pos, pitch, 1, amp), playGroup);
+        Synth.new(def, this.voiceArgs(pos, pitch, 1, amp, len), playGroup);
     }
 
     alloc {
@@ -422,8 +425,9 @@ Engine_Mangler : CroneEngine {
                 atk = 0.005, rel = 0.6,
                 size = 0.1, density = 20, spread = 0.5,
                 grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
-                grain_env1 = -1, grain_env2 = -1;
+                grain_env1 = -1, grain_env2 = -1, note_len = 0;
             var trigL, trigR, durL, durR, pchL, pchR, envSel, cloud, eGate, env, sig;
+            var comp;
             // ar like the drone: sample-accurate onsets + per-grain randoms
             trigL = Dust.ar(density);
             trigR = Dust.ar(density);
@@ -433,10 +437,16 @@ Engine_Mangler : CroneEngine {
             pchL = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
             pchR = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
+            // the SAME equal-loudness law the drone uses. Without it, raising
+            // density with a chord of pads held multiplied every voice's level
+            // with nothing holding it back — eight voices each getting louder
+            // together is what slams the master limiter into pumping. (0.5 was
+            // the old fixed halving; the comp law subsumes it.)
+            comp = (density * size).clip(0.25, 16).sqrt.reciprocal * 0.5;
             cloud = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, note_pos.wrap(0, 1), 4,
                     TRand.ar(spread.neg, spread, trigL), envSel)
                 + GrainBuf.ar(2, trigR, durR, buf_r, pchR, note_pos.wrap(0, 1), 4,
-                    TRand.ar(spread.neg, spread, trigR), envSel)) * 0.5;
+                    TRand.ar(spread.neg, spread, trigR), envSel)) * comp;
             eGate = Select.kr(one_shot, [gate, Trig.kr(Impulse.kr(0), sustain)]);
             env = EnvGen.ar(Env.asr(atk, 1, rel), eGate, doneAction: 2);
             sig = Balance2.ar(cloud[0], cloud[1], pan) * env * amp;
@@ -450,17 +460,28 @@ Engine_Mangler : CroneEngine {
                 atk = 0.005, rel = 0.6,
                 size = 0.1, density = 20, spread = 0.5,
                 grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
-                grain_env1 = -1, grain_env2 = -1;
-            var l, r, eGate, env, sig;
+                grain_env1 = -1, grain_env2 = -1, note_len = 0;
+            var l, r, eGate, env, sig, slLen, slDur, slEnv;
             // clean, tight read from the slice point; no loop, no doneAction
             // here (env owns the lifetime)
             l = PlayBuf.ar(1, buf_l, note_pitch * BufRateScale.kr(buf_l), 1,
                 note_pos * BufFrames.kr(buf_l), 0, 0);
             r = PlayBuf.ar(1, buf_r, note_pitch * BufRateScale.kr(buf_r), 1,
                 note_pos * BufFrames.kr(buf_r), 0, 0);
+            // THE SLICE HAS AN END. Given only a start, PlayBuf ran on through
+            // the whole 60s buffer — so a pad played its slice and then
+            // everything after it, while the PADS page drew eight bounded
+            // cells. The picture and the sound disagreed on every held pad.
+            // note_len is the slice length as a buffer fraction; 0 (an old
+            // caller, or a deliberate "to the end") keeps the previous
+            // behaviour. Pitch scales how long the slice takes to play.
+            slLen = Select.kr(note_len > 0, [1.0, note_len]);
+            slDur = (slLen * BufDur.kr(buf_l) / note_pitch.abs.max(0.01)).clip(0.002, 60);
+            // ~3ms out so the boundary closes without a click
+            slEnv = EnvGen.kr(Env([1, 1, 0], [(slDur - 0.003).max(0.001), 0.003]));
             eGate = Select.kr(one_shot, [gate, Trig.kr(Impulse.kr(0), sustain)]);
             env = EnvGen.ar(Env.asr(atk, 1, rel), eGate, doneAction: 2);
-            sig = Balance2.ar(l, r, pan) * env * amp;
+            sig = Balance2.ar(l, r, pan) * env * amp * slEnv;
             Out.ar(play_bus, sig);
         }).add;
 
@@ -707,14 +728,14 @@ Engine_Mangler : CroneEngine {
         // (per-note level) — an ARITY change, NOT a new command, so the
         // fingerprint COUNT is unchanged. amp nil (an old 4-arg caller) -> the
         // voiceParams default, so it degrades cleanly both ways.
-        this.addCommand(\note_on, "iffff", { arg msg;
-            this.noteOn(msg[1], msg[2], msg[3], msg[4], msg[5]);
+        this.addCommand(\note_on, "ifffff", { arg msg;
+            this.noteOn(msg[1], msg[2], msg[3], msg[4], msg[5], msg[6]);
         });
         this.addCommand(\note_off, "i", { arg msg;
             this.noteOff(msg[1]);
         });
-        this.addCommand(\note_one_shot, "ffff", { arg msg;
-            this.noteOneShot(msg[1], msg[2], msg[3], msg[4]);
+        this.addCommand(\note_one_shot, "fffff", { arg msg;
+            this.noteOneShot(msg[1], msg[2], msg[3], msg[4], msg[5]);
         });
         this.addCommand(\voices, "i", { arg msg;
             maxVoices = msg[1].max(1);

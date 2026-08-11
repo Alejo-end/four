@@ -85,6 +85,28 @@ local b=io.open(TMP.."bad.wav","wb"); b:write("nope"); b:close()
 ok(M.convert_sr(TMP.."bad.wav", TMP.."x.wav", 48000, nil) == nil,
   "an unreadable file refuses (the caller falls back to a raw load)")
 
+-- ---- param-list drift ------------------------------------------------------
+-- The three hand-maintained lists (MOTION_IDS here, SCENE_RECALL_IDS and
+-- SWITCH_IDS in mscenes) have drifted from the param declarations more than
+-- once; a lane whose id has no SHORT label draws the raw id and overruns the
+-- gutter into the automation curve. Cheap to check, so check it.
+do
+  local mm = io.open("lib/mmotion.lua"):read("a")
+  local mp = io.open("lib/mpages.lua"):read("a")
+  local list = mm:match("local MOTION_IDS = %{(.-)\n%}")
+  local short = mp:match("local SHORT = %{(.-)\n%}")
+  ok(list ~= nil and short ~= nil, "MOTION_IDS and SHORT are both readable")
+  local have = {}
+  for k in (short or ""):gmatch("([%w_]+)%s*=%s*\"") do have[k] = true end
+  local missing = {}
+  for id in (list or ""):gmatch("\"([%w_]+)\"") do
+    if not have[id] then missing[#missing + 1] = id end
+  end
+  ok(#missing == 0,
+    "every MOTION_IDS entry has a SHORT label (missing: "
+      .. table.concat(missing, ", ") .. ")")
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then print(#fail.." FAILED:"); for _,f in ipairs(fail) do print("  x "..f) end; os.exit(1) end
 print("main resampler OK")
