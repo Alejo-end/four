@@ -22,33 +22,21 @@ local function near(a, b, t, w)
     string.format("%s (got %s, want %s +-%s)", w, tostring(a), tostring(b), tostring(t)))
 end
 
--- ---- a norns with no screen ------------------------------------------------
-local nop = function() end
-screen = setmetatable({}, { __index = function() return nop end })
-engine = setmetatable({}, { __index = function() return nop end })
-audio  = setmetatable({}, { __index = function() return nop end })
-keyboard, midi = {}, { vports = {}, devices = {} }
-poll = { set = function(name)
-  return setmetatable({}, { __index = function() return nop end })
-end }
-grid = { connect = function() return setmetatable({}, { __index = function() return nop end }) end }
-arc = { connect = function() return setmetatable({}, { __index = function() return nop end }) end }
-_path = { code = "/nonexistent/", audio = "/nonexistent/audio/" }
-util = { round = function(x) return math.floor(x + 0.5) end,
-         file_exists = function() return false end, make_dir = nop }
-norns = { state = { data = "/tmp/" }, menu = { status = function() return false end } }
-tab = { save = nop, load = function() return nil end }
+-- ---- the offscreen norns, shared with the render suite --------------------
+-- The SAME environment the renderer uses, so the two harnesses can never
+-- disagree about what norns does. Its screen is real and simply never read
+-- here: this harness asserts on params, not pixels.
+local env = dofile("tools/uisim/env.lua")
+local _h = env.install{ dir = "/tmp" }
 
--- softcut: record every call so a level or a loop bound can be asserted
-local SC = {}
+-- the one thing the renderer does not need: a record of softcut calls, so an
+-- assertion can ask whether a level or a loop bound reached the right voice.
 local sc_calls = {}
-package.preload.softcut = function()
-  return setmetatable({}, { __index = function(_, k)
+do
+  local sc = require "softcut"
+  setmetatable(sc, { __index = function(_, k)
     return function(...) sc_calls[#sc_calls + 1] = { k, ... } end
   end })
-end
-package.preload.musicutil = function()
-  return { note_num_to_name = function(n) return "C" .. n end }
 end
 local function sc_last(name, voice)
   for i = #sc_calls, 1, -1 do
@@ -56,103 +44,10 @@ local function sc_last(name, voice)
     if c[1] == name and (voice == nil or c[2] == voice) then return c end
   end
 end
-
--- clock: run coroutines to completion on demand, never in the background
-local CLOCK_CO
-clock = {
-  run = function(f, ...) local co = coroutine.create(f); coroutine.resume(co, ...)
-        CLOCK_CO = co; return co end,
-  sleep = function() coroutine.yield() end,
-  sync = function() coroutine.yield() end,
-  cancel = nop, get_tempo = function() return 120 end,
-  get_beats = function() return 0 end,
-}
-
--- ---- the real paramset, near enough --------------------------------------
--- controlspec with the warp maths the encoder law depends on
-controlspec = {}
-local CS = {}
-CS.__index = CS
-function controlspec.new(minval, maxval, warp, step, default, units)
-  return setmetatable({ minval = minval, maxval = maxval, warp = warp,
-    step = step, default = default or minval, units = units, quantum = 0.01 }, CS)
-end
-function CS:unmap(v)
-  if self.warp == "exp" then
-    return math.log(v / self.minval) / math.log(self.maxval / self.minval)
-  end
-  return (v - self.minval) / (self.maxval - self.minval)
-end
-function CS:map(r)
-  if self.warp == "exp" then
-    return self.minval * (self.maxval / self.minval) ^ r
-  end
-  return self.minval + r * (self.maxval - self.minval)
-end
-
-local plist, lookup = {}, {}
-params = { lookup = lookup, count = 0 }
-local function padd(p)
-  -- the real Param has a :bang() of its own; the script uses it to re-send a
-  -- value to the engine without changing it
-  function p:bang() if self.action then self.action(self.value) end end
-  plist[#plist + 1] = p; lookup[p.id] = p; params.count = #plist
-end
-function params:add_group(id, name, n) padd({ id = id, name = name, group = true }) end
-function params:add_separator() end
-function params:add_control(id, name, spec, fmt)
-  padd({ id = id, name = name, controlspec = spec, value = spec.default })
-end
-params.add_taper = params.add_control
-function params:add_number(id, name, lo, hi, dflt)
-  padd({ id = id, name = name, min = lo, max = hi, value = dflt or lo })
-end
-function params:add_option(id, name, opts, dflt)
-  padd({ id = id, name = name, options = opts, count = #opts, value = dflt or 1 })
-end
-function params:add_binary(id, name, behavior, dflt)
-  padd({ id = id, name = name, binary = true, value = dflt or 0 })
-end
-function params:add_file(id, name, dflt) padd({ id = id, name = name, value = dflt or "" }) end
-function params:add_trigger(id, name) padd({ id = id, name = name, value = 0 }) end
-function params:lookup_param(id) return lookup[id] end
-function params:get(id) local p = lookup[id]; return p and p.value end
-function params:set(id, v, silent)
-  local p = lookup[id]; if not p then return end
-  if p.controlspec then
-    local cs = p.controlspec
-    v = math.max(cs.minval, math.min(cs.maxval, v))
-    v = cs:map(cs:unmap(v))                 -- the round trip the device does
-  elseif p.min then
-    v = math.max(p.min, math.min(p.max, math.floor(v + 0.5)))
-  elseif p.count then
-    v = math.max(1, math.min(p.count, math.floor(v + 0.5)))
-  elseif p.binary then
-    v = v ~= 0 and 1 or 0
-  end
-  p.value = v
-  if p.action and not silent then p.action(v) end
-end
-function params:delta(id, d)
-  local p = lookup[id]; if not p then return end
-  local cs = p.controlspec
-  if cs then
-    local raw = cs:unmap(p.value) + d * (cs.quantum or 0.01)
-    self:set(id, cs:map(math.max(0, math.min(1, raw))))
-  else
-    self:set(id, (p.value or 0) + d)
-  end
-end
-function params:set_action(id, fn) local p = lookup[id]; if p then p.action = fn end end
-function params:string(id) return tostring(params:get(id)) end
-function params:bang() for _, p in ipairs(plist) do p:bang() end end
-function params:write() end
-function params:read() end
-function params:add(a) padd(a) end
-params.action_write, params.action_read, params.action_delete = nil, nil, nil
-
 -- norns' include(), so lib/*.lua resolve from the repo
-include = function(p) return dofile(p .. ".lua") end
+include = function(m) return dofile(m .. ".lua") end
+
+local plist, lookup = params.list, params.lookup
 
 -- ---- load the instrument --------------------------------------------------
 dofile("mangler.lua")
@@ -279,7 +174,7 @@ do
   end
   params:set("stop_all", 0)
   sc_calls = {}
-  params:set("out_level", 1)
+  params:set("out_level", 0.9)   -- a REAL change, so the action definitely fires
   local back = sc_last("level", 3)
   ok(back and back[3] > 0, "START brings the layers back")
 end

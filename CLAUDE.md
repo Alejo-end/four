@@ -1844,7 +1844,28 @@ tooling, not just in that change, so it is now closed.
   fake a runtime test, the harness asserts the guard exists where it lives, so it
   outlives the branch that needed it. Worth knowing: that guard is currently
   unexercised at runtime on main/layers.
-* **A shared-stub extraction was tried and BACKED OUT.** Pulling render_pages.lua's
+* **The shared-stub extraction: CAUSE FOUND, and it now works.** (This paragraph
+  replaces the "backed out, unexplained" note that stood here first.) Pulling
+  render_pages.lua's offscreen norns into `tools/uisim/env.lua` changed 31 of 50 shots.
+  The reason: the per-frame hook was a file-level **`local SCENARIO`** declared INSIDE
+  the stub block, which the caller assigned to directly. Moving that code into a module
+  made it a local of `install()`, so the caller's `SCENARIO = function(t) ... end`
+  created a **global that nothing ever read** — the scenario silently never ran, every
+  poll (amp_in, rec_amp, play_phase, the softcut phase) froze at its initial value, and
+  the shots that depend on animated data changed while SCENE/MOTION/ORBIT did not.
+  No error anywhere. A nil-global TRAP missed it because nothing READ an undefined
+  global; the caller WROTE one.
+  Found by bisection: wrapping the stub in a function changed nothing (0/50), moving it
+  to a separate file changed everything — which pointed straight at a name that stopped
+  being shared. THE GENERAL LESSON, worth more than the fix: **moving code into a module
+  silently converts an assignment to a former upvalue into an assignment to a global**,
+  and Lua does not warn. Any `local` in extracted code that the CALLER writes to is this
+  bug waiting to happen.
+  The scenario now arrives as a getter (`opts.scenario`) so the caller's own local stays
+  the single source of truth. Renders byte-identical across all four variants;
+  test_control.lua now shares that one environment instead of stubbing a second norns
+  (355 -> 250 lines).
+* (superseded) The original note read: Pulling render_pages.lua's
   offscreen norns into a `tools/uisim/env.lua` that both harnesses could use is the
   obvious way to avoid two fake nornses. It changed 31 of 50 rendered shots. The
   extracted code was verified byte-identical to the original, no global was lost (a
