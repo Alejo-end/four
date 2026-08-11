@@ -1899,6 +1899,60 @@ Sixty-sixth change — **the grid is testable now, and LAYERS has a grid workspa
   address deck 1 fails 3, dropping the workspace dispatch fails 5.
 * Renders byte-identical across all four variants; source == dist.
 
+Sixty-seventh change — **the sample library, five demo presets, and a dead MIDI
+mapping (NO script change at all — `presets/` is new data, fingerprint STAYS 65,
+device-applied 2026-08-11)**. Nothing here touches mangler.lua, lib/, or the .sc.
+* **THE LIBRARY WAS PLAYING A SEMITONE SHARP AND NOBODY SAW IT.** 4724 wavs (the
+  Octatrack MKII factory set — Elektron · Loopmasters · Origin Sound · Sample Magic ·
+  Samples From Mars) were 44.1k/24-bit, and **scsynth's buffer read does no SRC**, so
+  every one of them played ~8.8% fast and sharp on a 48k norns; a 120 BPM loop read as
+  130.6. Converted to 48k/16-bit on the Mac (ffmpeg swresample — no soxr in that build)
+  and pushed to `dust/audio/` as five top-level folders. VERIFY A RATE CONVERSION BY
+  DURATION, not by the header: a botched one that only relabels comes out 8.8% short,
+  and loops landing on exact bar lengths (1.92s @125, 4.0s @120) is the signal it
+  worked. Side effect worth knowing: `ctx.load_sample` now takes its fast path, because
+  `convert_sr` no-ops when the rates already agree — the 61st change's resampler is
+  dead code for this library.
+* Two Mac-sourced-library traps, both live here: **AppleDouble `._*.wav`** doubled the
+  apparent file count (5116 of them; Finder-over-SMB filters them, `rsync` does not),
+  and these are REAPER renders carrying a **`bext` chunk before `fmt `** — any header
+  parser assuming `fmt ` at offset 12 reads 0 Hz. `Mpages.load_wave` walks chunks
+  properly and is fine; the naive audit script I wrote was not, which is how it
+  surfaced.
+* **PRESETS ARE GENERATED AGAINST THE DEPLOYED PARAMSET, NEVER THE REPO.** The device
+  was running a build without `grp_layers`/`layer_sel`; authoring from the working tree
+  would have written ids the device does not have. The method is reusable and cheap:
+  take the first ~343 lines of `tools/uisim/render_pages.lua` (the stub env, up to
+  `dofile(MANGLER)` + `init()`), point it at the DEPLOYED single-file build, and
+  enumerate `params.list` — you get every id, type, default and range exactly as the
+  device builds them.
+* **SIMULATE THE LOAD, not just the write.** A pset load fires every param's ACTION,
+  and an action that throws there is a black screen, not an error (the redraw gotcha
+  above). Replaying norns' own reader loop over each generated file — match
+  `"id": value`, tonumber, set, then call `params.action_read` — proved 108/108 apply,
+  no unknown ids, nothing thrown. Three values every preset must set deliberately:
+  **`dry_wet` = 1** (the engine is `dry*(1-dw).sqrt + wet*dw.sqrt`, so the 0.5 default
+  is half LIVE INPUT — a sample-only preset at 0.5 is quiet for no reason), `mix` = 0
+  (no tape audio ships), and **every momentary param pinned to 0** — a `1` on
+  `print_take` or `chaos_throw` fires its action the instant the preset opens.
+* Scene sidecars were written with norns' OWN `tab.save` (fetched off the device) so
+  the reference-linking format cannot drift; `tab.load` on the device confirmed all
+  five parse. Slot 1 of each bank is the preset as it loaded, so RCL 1 is a way home.
+  Partial slots are fine and intended — `apply()` skips ids a slot does not carry.
+* **A REMOVED PARAM LEAVES A DEAD MIDI MAPPING, SILENTLY.** `mangler.pmap` still mapped
+  CC 100 to `seq_play`, deleted with the sequencer in the 49th change; norns drops an
+  unknown id on read, so the pedal simply did nothing and said nothing. Repointed to
+  `stop_all`. RULE: when a param is deleted, grep `presets/` and the pmap for its id —
+  psets and pmaps name params by id and neither validates.
+* STATED, NOT HIDDEN: **the presets have never been heard.** Values are validated and
+  in range, sample paths confirmed present, actions proven not to throw — the balances
+  are reasoned, not eared.
+* DEVICE STATE at the time: sclang restarted 04:45 with the current .sc (30s after the
+  file changed), so all the batched engine work IS live — but the last script loaded
+  was `buoys`, so **`count: 65` is still unconfirmed and `doc/device-gate.md` is still
+  unrun**. Loading preset 1 is a reasonable first step into that gate: if ◇ lights on
+  a clean loop, a good part of the signal path has proved itself.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
