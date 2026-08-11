@@ -1721,6 +1721,33 @@ the Octatrack utility. These are the parts of foundry that are not Octatrack plu
   export/import, the 44.1k target, and the autosampler — its output is a rack of cells,
   and the instrument has nowhere to put those.
 
+Sixty-third change — **TIGHTEN + the consolidated device gate (Lua-only, fingerprint
+STAYS 65, all 47 renders byte-identical)**.
+* **`ctx.take_tighten`** (the safe half of the deferred pair): pressing REC and then
+  playing leaves your reaction time at the head of every take, and letting go late
+  leaves room tone at the tail — the rec-stop window snaps to where the record HEADS
+  were, which is not where the sound is. `Mpages.onset_bounds` finds the first and last
+  positions above a floor in the dumped take and the window pulls in onto them, with
+  5ms of room either side so a soft attack is never clipped. NON-DESTRUCTIVE by design:
+  it only moves pos_start/pos_end, so it is undoable by hand and TAKE K3 SNAP still
+  remembers where you were. Silence REFUSES rather than windowing nothing. Momentary
+  param in grp_rec (12 -> 13) so a footswitch reaches it.
+  The NORMALIZE half stays deferred on purpose: it would rewrite the buffer, making a
+  fourth writer alongside rec/regen/erode — and those three needed an interlock and a
+  level gate to stop fighting each other, neither of which has been heard on hardware.
+  Adding a writer before validating the existing ones is the pattern that produced the
+  erosion bug in the first place.
+* **`doc/device-gate.md`** — the fifteen pending per-change gates, folded into ONE
+  ordered pass. Ordered so the checks that would invalidate everything else come first
+  (count 65 is fail-stop; the three audio-destroying fixes come before anything that
+  costs you a good take), grouped so a setup is not repeated, and every row names the
+  change to SUSPECT when it fails. With a month of batched work "something sounds
+  wrong" is not a useful report, and that column is the difference.
+* VERIFIED: group counts re-checked against the params that follow each add_group (the
+  desync gotcha); test_wav.lua 47 -> **52 assertions** (onset bounds asserted against a
+  file that is silent except for a known span, both edges, a sub-range search, and the
+  silence refusal).
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
