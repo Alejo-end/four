@@ -119,6 +119,15 @@ this project holds everywhere.
 - **K3** MUTE — silences by level; the head keeps rolling (see below)
 - **K1+K3** held = erase the selected layer (its region and its picture)
 
+## The grid
+
+Rows 3–6 follow the page, like PADS and SCENE. **Row 3 is deck 1, row 4 is deck 2** —
+a row each rather than a shared selector, because on a grid you want to reach
+the other deck without changing what the screen is showing. Each row is the same
+two-pad span gesture the window and the tape loop already use, showing where the
+loop sits and where the head is. Row 5 arms (one column per deck), row 6 mutes.
+Recording blinks; a muted deck's row dims, so what is lit is what you hear.
+
 Thirteen pages drops the header dot pitch from 4 to 3, which the header already
 handles (`min(5, floor(45/(#PAGES-1)))`) and has done before.
 

@@ -1878,6 +1878,27 @@ tooling, not just in that change, so it is now closed.
   reproducible — it is worth understanding before trusting the render suite's
   byte-identity as strongly as this project does.**
 
+Sixty-sixth change — **the grid is testable now, and LAYERS has a grid workspace**.
+* **THE GRID WAS NEVER ACTUALLY DEVICE-ONLY.** Every grid change in this project has
+  shipped unverified on the strength of "the sim stubs the grid". It stubbed
+  `grid.connect()` to return a FRESH table each call, so the `gg.key` handler the
+  script attached was thrown away. Returning ONE object and exposing it (and giving
+  `gg.device` a value, which is what mgrid's redraw guard tests) makes the real key
+  handler drivable and every `gg:led` call observable. Three lines. The LED stubs also
+  had to be METHODS — `gg:led(...)` through a plain function silently shifts every
+  argument by one, which is the same class of mistake as the SCENARIO one above.
+* **LAYERS grid workspace** (rows 3-6, page-aware like PADS and SCENE): a row per deck
+  — row 3 is deck 1, row 4 is deck 2, rather than a shared selector, because on a grid
+  you want to reach the other deck without changing the screen. Each row is the same
+  two-pad span gesture the window and tape loop use; row 5 arms, row 6 mutes. Recording
+  blinks (the write-flag convention), a muted deck's row dims.
+* test_control 123 -> **136 assertions**, now covering the grid: the spine reaches the
+  same params from the LAYERS page, a span sets the RIGHT deck's loop and leaves the
+  other alone, the transports toggle, the same pad means something else on PADS, and
+  the workspace actually lights both deck rows. MUTATION-PROVEN: making both rows
+  address deck 1 fails 3, dropping the workspace dispatch fails 5.
+* Renders byte-identical across all four variants; source == dist.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

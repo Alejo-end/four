@@ -223,10 +223,13 @@ local GRID_BLACK = { nil, 1, 3, nil, 6, 8, 10, nil }
 
 -- window/loop slice pads: track what's held per row so a second press
 -- while the first is down stretches the region between them
-local slice_held = { win = {}, loop = {} }
+local slice_held = { win = {}, loop = {}, lay1 = {}, lay2 = {} }
 local SLICE_IDS = {
   win = { "pos_start", "pos_end" },
   loop = { "loop_start", "loop_end" },
+  -- the layer decks' loops, driven by the same two-pad span gesture
+  lay1 = { "lay1_start", "lay1_end" },
+  lay2 = { "lay2_start", "lay2_end" },
 }
 
 local function slice_key(kind, x, z)
@@ -351,6 +354,12 @@ end
 -- ============================================================================
 local function is_pads_page() return C.PAGES[C.page] == "PADS" end
 local function is_scene_page() return C.PAGES[C.page] == "SCENE" end
+local function is_layers_page() return C.PAGES[C.page] == "LAYERS" end
+
+-- which deck a workspace row addresses: row 3 is layer 1, row 4 is layer 2 —
+-- the same order they are drawn in on the screen
+local function layer_of(y) return (y == 3) and 1 or 2 end
+local function lay(n, k) return "lay" .. n .. "_" .. k end
 
 local function main_ws_key(x, y, z)
   if y == 3 or y == 4 then
@@ -377,6 +386,24 @@ local function pads_ws_key(x, y, z)
   end
 end
 
+-- LAYERS: one loop-span row per deck (the same two-pad gesture the window and
+-- the tape loop use), then rec and mute per deck. The decks are independent, so
+-- each gets its own row rather than sharing a selector — on a grid you want to
+-- reach the other deck without changing what the screen is showing.
+local function layers_ws_key(x, y, z)
+  if y == 3 or y == 4 then
+    local n = layer_of(y)
+    slice_key("lay" .. n, x, z)
+    return
+  end
+  if z ~= 1 then return end
+  if y == 5 then                      -- rec: x1-2 = deck 1/2
+    if x <= 2 then ptoggle(lay(x, "rec")) end
+  elseif y == 6 then                  -- mute: x1-2 = deck 1/2
+    if x <= 2 then ptoggle(lay(x, "play")) end
+  end
+end
+
 local function scene_ws_key(x, y, z)
   if y == 6 then                             -- modifier / momentary pads
     if x == 1 then scene_mod.cap = (z == 1)
@@ -396,6 +423,7 @@ end
 local function surface()
   if is_pads_page() then return "pads" end
   if is_scene_page() then return "scene" end
+  if is_layers_page() then return "layers" end
   return "main"
 end
 
@@ -421,6 +449,7 @@ local function grid_key(x, y, z)
   end
   if s == "pads" then return pads_ws_key(x, y, z) end
   if s == "scene" then return scene_ws_key(x, y, z) end
+  if s == "layers" then return layers_ws_key(x, y, z) end
   return main_ws_key(x, y, z)
 end
 
@@ -537,6 +566,32 @@ local function draw_pads_ws()
   gg:led(8, 6, pget("pad_input", 0) == 1 and 15 or 5, "yellow")          -- route
 end
 
+-- LAYERS: a span row per deck showing where its loop sits and where its head
+-- is, then rec and mute. Recording BLINKS, the way every write flag in this
+-- instrument does; a muted deck's row dims, so what you hear is what is lit.
+local function draw_layers_ws()
+  local decks = C.layers or {}
+  for n = 1, math.min(#decks, 2) do
+    local d = decks[n]
+    local y = n + 2                       -- deck 1 -> row 3, deck 2 -> row 4
+    local a = clamp(pget(d.id .. "_start", 0), 0, 1)
+    local b = clamp(pget(d.id .. "_end", 1), 0, 1)
+    local lo, hi = math.min(a, b), math.max(a, b)
+    local playing = pget(d.id .. "_play", 1) == 1
+    local recing = pget(d.id .. "_rec", 0) == 1
+    local head = math.floor(clamp(d.phase, 0, 0.999) * 8) + 1
+    for x = 1, 8 do
+      local inside = (x > lo * 8) and (x <= hi * 8 + 0.001)
+      local lvl = inside and (playing and 8 or 3) or 1
+      if x == head and inside then lvl = 15 end
+      gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))
+    end
+    -- rec and mute, one column per deck
+    gg:led(n, 5, recing and ((C.frame % 8) < 5 and 15 or 4) or 3, "red")
+    gg:led(n, 6, playing and 9 or 3, "green")
+  end
+end
+
 local function draw_scene_ws()
   local sc = C.scene
   local sel = floor(pget("scene_slot", 1) + 0.5)
@@ -570,6 +625,7 @@ function M.redraw()
   gg:all(0)
   draw_spine()
   if s == "pads" then draw_pads_ws()
+  elseif s == "layers" then draw_layers_ws()
   elseif s == "scene" then draw_scene_ws()
   else draw_main_ws() end
   gg:refresh()

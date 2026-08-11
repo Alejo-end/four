@@ -148,6 +148,7 @@ function M.install(opts)
   -- ============================================================================
 
   local nop = function() end
+  local GRID
 
   local SC_PHASE_FN = nil
   package.preload.softcut = function()
@@ -182,10 +183,23 @@ function M.install(opts)
   function midi.connect(i) return midi.vports[i or 1] end
   function midi.to_msg() return { type = "none" } end
 
-  grid = { vports = { { name = "none" } } }
-  function grid.connect()
-    return { device = nil, led = nop, all = nop, refresh = nop }
+  -- ONE grid object, handed back to every connect() and exposed on the handle.
+  -- mgrid sets `gg.key` on whatever connect returns, so holding that table is
+  -- what makes the grid drivable offscreen at all — this project has treated
+  -- grid code as device-only since the beginning, and it did not have to be.
+  -- device is non-nil so mgrid'''s redraw guard (`gg and gg.device`) passes:
+  -- offscreen we WANT the LED path exercised, since that is where the page-aware
+  -- workspaces decide what to light
+  GRID = { device = { name = "offscreen" }, leds = {}, refreshes = 0 }
+  -- METHOD syntax: mgrid calls gg:led(...), so these take self. Defining them
+  -- as plain functions silently shifts every argument by one.
+  function GRID:led(x, y, z, hue)
+    self.leds[#self.leds + 1] = { x = x, y = y, z = z, hue = hue }
   end
+  function GRID:all(z) self.leds[#self.leds + 1] = { all = z } end
+  function GRID:refresh() self.refreshes = self.refreshes + 1 end
+  grid = { vports = { { name = "none" } } }
+  function grid.connect() return GRID end
 
   local POLL_FNS = {}
   poll = {
@@ -337,6 +351,9 @@ function M.install(opts)
     phase = function(v, pos) if SC_PHASE_FN then SC_PHASE_FN(v, pos) end end,
     has_phase = function() return SC_PHASE_FN ~= nil end,
     poll_fns = POLL_FNS,
+    -- the grid the script connected to. `grid.key(x, y, z)` drives the REAL
+    -- handler; `grid.leds` is every led() call since it was last cleared.
+    grid = GRID,
   }
 end
 

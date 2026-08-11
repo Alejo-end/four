@@ -241,6 +241,78 @@ do
   end
 end
 
+
+
+-- ============================================================================
+-- 7 · the GRID, which used to be device-only
+-- ============================================================================
+-- The offscreen grid stub hands back one object and the script attaches its key
+-- handler to it, so the real handler is drivable here. That was always true; it
+-- simply was not wired up, and every grid change in this project's history
+-- shipped unverified because of it.
+do
+  local g = _h.grid
+  ok(type(g.key) == "function", "the script attached its grid handler")
+
+  local names = {}
+  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+    names[#names + 1] = name
+  end
+  local function page(n)
+    local i; for k, v in ipairs(names) do if v == n then i = k end end
+    enc(1, -30); if i and i > 1 then enc(1, i - 1) end
+    return i
+  end
+
+  -- the page-independent spine: row 2 must reach the same params from anywhere
+  page("LAYERS")
+  local before = params:get("rec")
+  g.key(1, 2, 1); g.key(1, 2, 0)
+  ok(params:get("rec") ~= before, "the state strip reaches `rec` from the LAYERS page")
+  g.key(1, 2, 1); g.key(1, 2, 0)
+
+  -- the LAYERS workspace: a two-pad span sets that deck's loop
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  g.key(3, 3, 1); g.key(6, 3, 1); g.key(3, 3, 0); g.key(6, 3, 0)
+  near(params:get("lay1_start"), 2 / 8, 1e-6, "a grid span sets layer 1's loop start")
+  near(params:get("lay1_end"), 6 / 8, 1e-6, "...and its end")
+  -- and it addresses the RIGHT deck: row 4 is layer 2, and layer 1 must not move
+  local l1s, l1e = params:get("lay1_start"), params:get("lay1_end")
+  g.key(1, 4, 1); g.key(4, 4, 1); g.key(1, 4, 0); g.key(4, 4, 0)
+  near(params:get("lay2_end"), 4 / 8, 1e-6, "row 4 sets layer 2's loop")
+  near(params:get("lay1_start"), l1s, 1e-9, "...and layer 1 is untouched")
+  near(params:get("lay1_end"), l1e, 1e-9, "...both edges")
+
+  -- transports
+  params:set("lay1_rec", 0)
+  g.key(1, 5, 1); g.key(1, 5, 0)
+  ok(params:get("lay1_rec") == 1, "grid row 5 arms the deck")
+  g.key(1, 5, 1); g.key(1, 5, 0)
+  ok(params:get("lay1_rec") == 0, "...and disarms it")
+  params:set("lay2_play", 1)
+  g.key(2, 6, 1); g.key(2, 6, 0)
+  ok(params:get("lay2_play") == 0, "grid row 6 mutes the SECOND deck")
+  params:set("lay2_play", 1)
+
+  -- the workspace follows the page: the same pad means something else elsewhere
+  page("PADS")
+  local l1 = params:get("lay1_start")
+  g.key(3, 3, 1); g.key(3, 3, 0)
+  near(params:get("lay1_start"), l1, 1e-9,
+    "on PADS, row 3 is a slice pad — it must NOT move a layer's loop")
+
+  -- and the LEDs actually light on the layers workspace
+  page("LAYERS")
+  g.leds = {}
+  _h.run_ticks(2)
+  local lit, rows = 0, {}
+  for _, l in ipairs(g.leds) do
+    if l.y and (l.z or 0) > 0 then lit = lit + 1; rows[l.y] = true end
+  end
+  ok(lit > 0, "the layers workspace lights pads (" .. lit .. ")")
+  ok(rows[3] and rows[4], "...on both deck rows")
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then
   print(#fail .. " FAILED:")
