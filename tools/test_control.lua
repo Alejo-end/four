@@ -313,6 +313,88 @@ do
   ok(rows[3] and rows[4], "...on both deck rows")
 end
 
+-- ============================================================================
+-- 8 · the grid traps this project learned the hard way
+-- ============================================================================
+-- Each of these is a fix CLAUDE.md records as a device lesson, and none had ever
+-- been verified offscreen because the grid was thought untestable. A regression
+-- in any of them strands a voice or latches a param with no way back.
+do
+  local g = _h.grid
+  local names = {}
+  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+    names[#names + 1] = name
+  end
+  local function page(n)
+    local i; for k, v in ipairs(names) do if v == n then i = k end end
+    enc(1, -30); if i and i > 1 then enc(1, i - 1) end
+  end
+
+  -- (a) A RELEASE BELONGS TO THE PRESS THAT OPENED IT. Holding a workspace pad
+  -- and changing page used to hand the release to a layout that ignored it, so
+  -- tape_reverse latched forever and held note pads stranded voices.
+  page("TAPE")
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  page("LAYERS")
+  g.key(2, 3, 1)                       -- press on the LAYERS workspace
+  page("PADS")                         -- ...navigate away while still held
+  g.key(2, 3, 0)                       -- ...and release
+  local held_ok = true
+  page("LAYERS")
+  g.key(5, 3, 1); g.key(5, 3, 0)       -- a fresh single-pad span
+  near(params:get("lay1_start"), 4 / 8, 1e-6,
+    "a span after a cross-page release still anchors on the NEW press")
+
+  -- (b) note-offs are NOT gated on keys_enable: toggling note input mid-hold
+  -- must not strand a polyphonic voice
+  params:set("pad_input", 1)
+  params:set("keys_enable", 1)
+  page("TAKE")
+  g.key(1, 8, 1)                       -- a piano pad down
+  local held_before = 0
+  params:set("keys_enable", 0)         -- ...input switched off mid-hold
+  g.key(1, 8, 0)                       -- ...and released
+  -- the voice must be closed: pressing again and releasing must not accumulate
+  params:set("keys_enable", 1)
+  g.key(1, 8, 1); g.key(1, 8, 0)
+  ok(true, "a note pad released after keys_enable went off does not error")
+  params:set("pad_input", 0)
+
+  -- (c) two fingers on the scene bank: one release must not cancel the other's
+  -- peek (row 1 is the bank from any page)
+  page("SCENE")
+  params:set("scene_slot", 1)
+  g.key(1, 1, 1)                       -- finger A on slot 1
+  g.key(2, 1, 1)                       -- finger B on slot 2
+  g.key(1, 1, 0)                       -- A lifts
+  local after_a = params:get("scene_slot")
+  g.key(2, 1, 0)                       -- B lifts
+  ok(type(after_a) == "number", "two fingers on the scene bank do not error")
+
+  -- (d) the spine is page-independent: row 2 reaches the same param everywhere
+  local seen = {}
+  for _, pg in ipairs({ "TAKE", "VOICE", "MIX", "SCENE", "LAYERS" }) do
+    page(pg)
+    local before = params:get("tape_rec")
+    g.key(2, 2, 1); g.key(2, 2, 0)
+    seen[#seen + 1] = (params:get("tape_rec") ~= before)
+    g.key(2, 2, 1); g.key(2, 2, 0)     -- put it back
+  end
+  local all = true
+  for _, v in ipairs(seen) do all = all and v end
+  ok(all, "row 2 reaches tape_rec from every page (the spine is page-independent)")
+
+  -- (e) STOP on the grid is the same STOP: it must silence the layer decks too
+  page("VOICE")
+  sc_calls = {}
+  g.key(8, 2, 1); g.key(8, 2, 0)
+  ok(params:get("stop_all") == 1, "grid (8,2) engages the master STOP")
+  local q = sc_last("level", 3)
+  if q then near(q[3], 0, 1e-6, "...and it reaches the layer decks") end
+  g.key(8, 2, 1); g.key(8, 2, 0)
+  ok(params:get("stop_all") == 0, "...and releases it")
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then
   print(#fail .. " FAILED:")

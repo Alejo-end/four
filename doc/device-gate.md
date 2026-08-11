@@ -208,6 +208,7 @@ Only on the `layers` branch. No engine change, so the count is still 65.
 | 9.4 | **Erase is region-scoped** | K1+K3 on LAYERS | **Only** the selected layer is wiped — the tape and the other layer are untouched | `sc.buffer_clear_region`. This is the one collision that makes layers not purely additive |
 | 9.5 | STOP reaches them | K1+K2 | All four decks silence; START restores the exact mix | `ctx.layers_relevel` |
 | 9.6 | PSET round-trip | Save, reload, load | Both layers' audio returns; an empty layer does not resurrect | |
+| 9.8 | Grid workspace | On LAYERS, rows 3-4 | A two-pad span sets THAT deck's loop; row 5 arms, row 6 mutes; the other deck is untouched |
 | 9.7 | **%CPU with everything running** | Four decks plus a granular drone | No xruns | The number that decides whether a third layer is ever worth adding |
 
 ## When it passes

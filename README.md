@@ -86,8 +86,16 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 | SCENE | Capture, recall and morph whole sounds | K2 recall or peek, K3 capture |
 | ORBIT | The instrument drifts between your scenes by itself | K2 run, K3 capture the moment |
 | EROSION | Each loop pass ages the take a little | K2 heal, K3 scar |
+| LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 
 Notes on the less obvious ones.
+
+LAYERS gives you two independent loop decks beside the tape, so you can keep playing while
+you record the next part. Each has its own loop points and speed, so a four-bar part
+against a three-bar part drifts and re-syncs on its own. They record what the tape records
+(dry input, or the processed output — one switch, on TAPE). What they cannot do is
+granulate or stretch: that is the engine's take, and only the take gets it. MUTE silences
+a deck without stopping its head, so two decks never lose their drift against each other.
 
 ORBIT picks a stored scene, morphs partway toward it, parks there, then picks another. It
 never fully arrives, so it keeps finding sounds between the ones you saved. K3 captures
