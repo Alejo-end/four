@@ -73,8 +73,11 @@ function M.set_fade(v)
   tape_set(function(vc) sc.fade_time(vc, v) end)
 end
 
+-- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
+-- audio with it, so once the layer decks share this buffer a TAPE erase would
+-- silently wipe them too.
 function M.clear_buffer()
-  sc.buffer_clear()
+  sc.buffer_clear_region(0, TAPE_LEN)
 end
 
 -- the tape's RECORD SOURCE (cut_source): 0 = DRY (the
@@ -92,7 +95,7 @@ end
 function M.init_tape()
   M.set_source(pget("cut_source", 0))   -- dry/processed record source (was 1/0)
   audio.level_cut(1)       -- softcut master out: persists across scripts, force up
-  sc.buffer_clear()
+  sc.buffer_clear_region(0, TAPE_LEN)
   for v = 1, 2 do
     sc.enable(v, 1)
     sc.buffer(v, v)
@@ -119,8 +122,12 @@ function M.init_tape()
   -- tape head position events drive the TAPE page needle AND the loop
   -- snap points — 25ms quant keeps snapped loops tight (0.1 was audible)
   sc.phase_quant(1, 0.025)
+  -- ONE softcut phase handler exists, and it lives here. Anything that is not
+  -- the tape's own voice is forwarded, so the layer decks can drive their own
+  -- playheads and waveforms off the same poll.
   sc.event_phase(function(v, pos)
-    if v == 1 then C.tape_phase = pos / TAPE_LEN end
+    if v == 1 then C.tape_phase = pos / TAPE_LEN
+    elseif C.deck_phase then C.deck_phase(v, pos) end
   end)
   sc.poll_start_phase()
 end

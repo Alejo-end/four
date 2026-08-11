@@ -58,6 +58,9 @@ local MOTION_IDS = {
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
   "voice_atk", "voice_rel", "pad_level",
   "cut_source",
+  -- the layer decks (transports excluded, same rule as tape_rec)
+  "lay1_level", "lay1_rate", "lay1_reverse", "lay1_start", "lay1_end", "lay1_pre",
+  "lay2_level", "lay2_rate", "lay2_reverse", "lay2_start", "lay2_end", "lay2_pre",
   -- the scene morph knob. recording THIS records a whole-instrument
   -- sweep in ONE lane — mscenes re-derives every param from it on replay
   -- (and tells us it did, via M.account, so the sweep never punches forty

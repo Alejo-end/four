@@ -47,8 +47,8 @@ errors land there, not in matron. A duplicate engine class is the classic cause.
 
 | # | Check | Pass | Suspect on failure |
 |---|---|---|---|
-| 1.1 | E1 through all **12** pages | Every page draws; no black screen | A black screen is a Lua error in `redraw` — scroll maiden below `<ok>` for the traceback |
-| 1.2 | Page order | TAKE VOICE TAPE · FILTER DELAY REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION | — |
+| 1.1 | E1 through all **13** pages (12 on `main`) | Every page draws; no black screen | A black screen is a Lua error in `redraw` — scroll maiden below `<ok>` for the traceback |
+| 1.2 | Page order | TAKE VOICE TAPE · FILTER DELAY REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION · LAYERS | — |
 | 1.3 | SC tab clean | No errors after load | The guarded plugins (JPverb, MiClouds, DFM1) fall back silently; a *posted* error means a wrong arg order |
 | 1.4 | Input reaches the meter | TAKE's IN meter moves with your source | Levels / `monitor_level`, not the engine |
 
@@ -195,6 +195,20 @@ The one measurement that matters on a Pi 4.
 | 8.4 | Load a 60s 24-bit sample | Waveform draws in progressively; no hitch | Async `load_wave` |
 
 ---
+
+## Stage 9 — Layers (S25)
+
+Only on the `layers` branch. No engine change, so the count is still 65.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 9.1 | Two decks sound | Record the engine take. Record LAYER 1 against it. | Both play, independently | |
+| 9.2 | They drift | LAYER 1 at rate 0.5, LAYER 2 at 1 | They drift and re-sync; no clicks | The rate slew |
+| 9.3 | Overdub vs replace | REC with `pre` 1, then with `pre` 0 | 1 stacks, 0 replaces | |
+| 9.4 | **Erase is region-scoped** | K1+K3 on LAYERS | **Only** the selected layer is wiped — the tape and the other layer are untouched | `sc.buffer_clear_region`. This is the one collision that makes layers not purely additive |
+| 9.5 | STOP reaches them | K1+K2 | All four decks silence; START restores the exact mix | `ctx.layers_relevel` |
+| 9.6 | PSET round-trip | Save, reload, load | Both layers' audio returns; an empty layer does not resurrect | |
+| 9.7 | **%CPU with everything running** | Four decks plus a granular drone | No xruns | The number that decides whether a third layer is ever worth adding |
 
 ## When it passes
 

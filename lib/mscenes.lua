@@ -84,6 +84,12 @@ local TIMBRE_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade", "cut_source",
   -- polyphonic pad voices
   "voices", "voice_atk", "voice_rel", "pad_level",
+  -- the layer decks: their loops, speeds and levels are performance state and
+  -- belong in a scene. rec/play are TRANSPORTS and stay out, exactly like
+  -- tape_rec — a scene changes how it sounds, never whether it is running.
+  -- layer_sel stays out too: it is a UI cursor, like scene_slot.
+  "lay1_level", "lay1_rate", "lay1_start", "lay1_end", "lay1_pre",
+  "lay2_level", "lay2_rate", "lay2_start", "lay2_end", "lay2_pre",
   -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
   -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
   -- move your cursor, and a morph must never lerp it across slices.
@@ -103,6 +109,7 @@ local SWITCH_IDS = {
   "delay_sync",   -- a scene remembers whether the delay follows the clock
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
+  "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's
   "mode",   -- last of the last: this one respawns the voice
 }
 
@@ -306,7 +313,8 @@ end
 -- crossed pair into a 100ms loop, which jumps the head audibly). so: move the
 -- edge that widens the region FIRST, and every intermediate contains a real
 -- region instead of a bogus one. `start` key -> `end` key.
-local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end" }
+local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
+                     lay1_start = "lay1_end", lay2_start = "lay2_end" }
 
 -- set one param and report whether the value actually MOVED. the count of
 -- moved params is what tells a performer why a recall was silent: 0 moved

@@ -52,8 +52,8 @@ local function paint_bins(bins, last, bin, amp, pre)
   until b == bin
   return bin
 end
-
 local M = {}
+M.paint_bins = paint_bins   -- the layer decks paint their own pictures
 
 -- track the buffer's contents as the write head passes over it
 function M.update_wave()
@@ -560,6 +560,12 @@ local SHORT = {
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
+  layer_sel = "LAYER",
+  lay1_level = "L1 LV", lay1_rate = "L1 RT", lay1_reverse = "L1 REV",
+  lay1_start = "L1 ST", lay1_end = "L1 EN", lay1_pre = "L1 DUB",
+  lay2_level = "L2 LV", lay2_rate = "L2 RT", lay2_reverse = "L2 REV",
+  lay2_start = "L2 ST", lay2_end = "L2 EN", lay2_pre = "L2 DUB",
+  ["@lay_level"] = "LVL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -596,6 +602,8 @@ local FULL = {
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE", wear = "WEAR",
+  layer_sel = "LAYER",
+  ["@lay_level"] = "LEVEL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
 }
 
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
@@ -1959,8 +1967,101 @@ local function body_EROSION(frame)
   if e > 0 and (frame % 8) < 5 then chip("ERODING", 2, 12) end
 end
 
+-- ============================================================================
+-- 13 - LAYERS - the loop decks beside the tape
+-- ============================================================================
+-- Two strips, one per deck. Each shows what is actually recorded in it, the
+-- loop bracket over that, and the head. The SELECTED deck is bright and the
+-- other dim -- the audibility rule everywhere else in this instrument: if a
+-- thing is not the one you are working on, it does not compete for your eye.
+-- A deck whose level is down, or that is not playing, dims further, so you can
+-- always see which of them you are actually hearing.
+local function layer_strip(d, y, sel, frame)
+  local rec = pget(d.id .. "_rec", 0) == 1
+  local playing = pget(d.id .. "_play", 1) == 1
+  local lv = pget(d.id .. "_level", 0.8)
+  local audible = playing and lv > 0.01 and pget("stop_all", 0) == 0
+  local base = sel and (audible and 10 or 6) or (audible and 5 or 3)
+
+  -- name, and the state in words rather than an icon to decode
+  ptext(d.name, 3, y - 6, 1, sel and 15 or 6)
+  if rec then
+    -- the only fast blink in the instrument means WRITING, here as everywhere
+    if (frame % 8) < 5 then
+      screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
+    end
+    ptext(pget(d.id .. "_pre", 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
+  elseif not playing then
+    ptext("STOP", 20, y - 6, 1, 5)
+  end
+
+  local x0, x1 = 38, 124
+  local w = x1 - x0
+  -- the material
+  screen.level(base)
+  for x = x0, x1 do
+    local a = d.wave[floor((x - x0) / w * 127) + 1] or 0
+    if a > 0.002 then
+      local h = clamp(sqrt(min(a * 2, 1)) * 5, 1, 5)
+      screen.move(x, y - h)
+      screen.line(x, y + h)
+    end
+  end
+  screen.stroke()
+  -- the loop bracket: where this deck actually reads from
+  local ls = clamp(pget(d.id .. "_start", 0), 0, 1)
+  local le = clamp(pget(d.id .. "_end", 1), 0, 1)
+  local bx0 = x0 + floor(min(ls, le) * w)
+  local bx1 = x0 + floor(max(ls, le) * w)
+  screen.level(sel and 12 or 5)
+  screen.rect(bx0, y - 6, 1, 13)
+  screen.rect(bx1, y - 6, 1, 13)
+  screen.rect(bx0, y - 6, bx1 - bx0, 1)
+  screen.fill()
+
+  -- the invitation goes over the bracket (which is drawn across the same
+  -- space), so it knocks out a pocket first — the rule the footer follows when
+  -- a swelling value meets the key words
+  if not d.any then
+    local msg = sel and "EMPTY - K2 REC" or "EMPTY"
+    local tw = C.font.text_w(msg, 1)
+    local tx = floor((x0 + x1) / 2 - tw / 2)
+    screen.level(0)
+    screen.rect(tx - 2, y - 2, tw + 4, 9)
+    screen.fill()
+    ptext(msg, tx, y + 3, 1, sel and 6 or 3)
+  end
+
+  -- the head, drawn last so it is never hidden
+  screen.level(audible and 15 or 6)
+  screen.rect(x0 + floor(clamp(d.phase, 0, 1) * w), y - 5, 1, 11)
+  screen.fill()
+
+  -- level, as a short bar under the name
+  screen.level(sel and 8 or 4)
+  screen.rect(3, y + 4, floor(clamp(lv, 0, 1) * 30), 1)
+  screen.fill()
+end
+
+local function body_LAYERS(frame)
+  local sel = floor(pget("layer_sel", 1) + 0.5)
+  local decks = C.layers or {}
+  if #decks == 0 then
+    ptext_c("NO LAYER DECKS", 64, 30, 1, 4)
+    return
+  end
+  -- the rate of the selected deck, top right: the number that makes two decks
+  -- drift against each other, which is the whole reason for having two
+  local d = decks[sel] or decks[1]
+  local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
+  ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
+  ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
+  layer_strip(decks[1], 27, sel == 1, frame)
+  layer_strip(decks[2], 45, sel == 2, frame)
+end
+
 local BODY = {
-  ORBIT = body_ORBIT, EROSION = body_EROSION,
+  ORBIT = body_ORBIT, EROSION = body_EROSION, LAYERS = body_LAYERS,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,

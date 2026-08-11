@@ -1748,6 +1748,56 @@ STAYS 65, all 47 renders byte-identical)**.
   file that is silent except for a known span, both edges, a sub-range search, and the
   silence refusal).
 
+Sixty-fourth change — **S25 LAYERS: multitrack on the core that has room for it
+(Lua-only, ENGINE UNTOUCHED, fingerprint STAYS 65, branch `layers`)**. Full design +
+gate: doc/layers.md. Two more independent loop decks on softcut, beside the tape.
+* **The shape, and why.** Not more scsynth drones — that was a deliberate CPU decision
+  (one core on a Pi 4) and four granular voices would break it. softcut is a separate
+  core and near-free, which is this project's own stated rationale for what goes where.
+  So: ONE deep track (the engine take: granular, warp, spectral, window, pads, erosion)
+  plus THREE shallow ones (tape + 2 layers: loop, varispeed, reverse, overdub). Stated
+  plainly in the doc: a softcut deck CANNOT be granulated. It is a loop, not a mangle
+  target.
+* **NEW `lib/mdeck.lua`** (8th lib; amalgamate assert 7 -> 8) — a deck is a voice pair,
+  a buffer region and a param prefix. Instantiated twice: `lay1` (voices 3/4, 120-180s)
+  and `lay2` (voices 5/6, 180-240s). The gap at 60-120 is deliberate: `foundry`
+  auditions chain cells at 70s, so picking around it means the branches merge without a
+  silent buffer collision.
+* **The tape deck is NOT refactored onto mdeck, on purpose.** It is the same shape and
+  the honest move is one abstraction used three times — but it is one of the few paths
+  confirmed on hardware, and nothing since 2026-07-16 has been. Rewriting a proven path
+  before the gate is the wrong order. The duplication is real, named, and gated on the
+  device pass rather than hidden.
+* **THREE collisions**, which is what made this not purely additive:
+  (1) `sc.buffer_clear()` takes the WHOLE buffer — a TAPE erase would have silently
+  wiped both layers. Every clear is now region-scoped. (2) There is ONE
+  `sc.event_phase` handler; mtape owned it and filtered on `v == 1`, and now forwards
+  anything else to `ctx.deck_phase` so each deck drives its own playhead and paints its
+  own picture. (3) The record SOURCE is global to softcut's two input channels, not
+  per-voice, so `cut_source` stays ONE shared control — all decks record the same thing.
+  Documented so nobody later expects per-deck dry/wet.
+* **`pre` defaults to 1 (OVERDUB)**, unlike the tape's 0 (REPLACE): these are LAYERS,
+  stacking is the job, and it is the loop-pedal gesture people already have. The page
+  names the mode (DUB / REP) so it is never hidden, and K1+K3 erases one to start over.
+* **LAYERS = page 13.** Two strips: the deck's real material, the loop bracket over it,
+  the head, a level bar. Selected bright / other dim, and a deck that is stopped or
+  turned down dims further — the audibility rule, so you can always see which of them
+  you are hearing. E2 selects, E3 its level; K1+E2 rate, K1+E3 moves the loop (the
+  existing `move_pair`, which already writes the widening edge first). K2 REC under the
+  punch law, K3 PLAY, K1+K3 erases THIS deck only.
+* Layer params join the curated lists (levels/rates/loops/overdub in TIMBRE, reverse in
+  SWITCH, transports OUT like `tape_rec`, `layer_sel` out as a UI cursor), the loop
+  edges join `EDGE_PAIRS`, and every id got a SHORT label — the drift check in
+  test_wav.lua enforces that last one.
+* VERIFIED: **all 47 prior shots differ in the header dot row and NOWHERE else** —
+  proven by re-rendering `main` with a 25-tick pad standing in for the 13th page's walk,
+  which collapses every wider diff (they were pure animation phase). NEW
+  `tools/test_deck.lua`, **35 assertions**, driving the real module against a softcut
+  stub that records what it was told: region isolation, loop bounds as fractions of the
+  REGION, crossed and zero-length bounds, per-voice phase routing, the master/STOP fold,
+  and per-deck pset files. Mutation-proven: making `clear` whole-buffer fails 4
+  assertions. source == dist across 48 shots.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

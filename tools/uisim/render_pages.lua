@@ -392,6 +392,19 @@ else
       if th < tl then tl, th = th, tl end
       local tp = tl + ((t * 0.009) % 1) * (th - tl)
       SC_PHASE_FN(1, tp * 60)
+      -- the layer decks run on their own voices and their own buffer regions,
+      -- and each free-runs at its own rate — which is the point of having them.
+      -- The real poll reports a position in SECONDS into the whole buffer, so
+      -- the stub has to as well, or the deck's phase maths would never be
+      -- exercised offscreen.
+      for n, dk in ipairs({ { v = 3, from = 120, rate = 0.013 },
+                            { v = 5, from = 180, rate = 0.021 } }) do
+        local id = "lay" .. n
+        local a1, b1 = params:get(id .. "_start"), params:get(id .. "_end")
+        if b1 < a1 then a1, b1 = b1, a1 end
+        local ph = a1 + ((t * dk.rate) % 1) * (b1 - a1)
+        SC_PHASE_FN(dk.v, dk.from + ph * 60)
+      end
     end
   end
 end
@@ -622,6 +635,21 @@ else
   export(pfx("PADS", "_LIVE"))
   key(2, 0)
   params:set("pad_input", 0)
+  -- LAYERS with material: L1 recording (blinking write flag, DUB), L2 looping
+  -- a shorter region at a different rate — the drift that makes two decks worth
+  -- having
+  goto_page("LAYERS")
+  params:set("lay1_rec", 1)
+  params:set("lay2_rate", 0.75)
+  params:set("lay2_start", 0.15)
+  params:set("lay2_end", 0.6)
+  run_ticks(120)
+  params:set("layer_sel", 2)
+  run_ticks(4)
+  redraw()
+  export(pfx("LAYERS", "_LIVE"))
+  params:set("lay1_rec", 0)
+  params:set("layer_sel", 1)
   -- master STOP: the title chip inverts, on every page
   goto_page("MIX")
   params:set("stop_all", 1)

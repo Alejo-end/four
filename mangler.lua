@@ -87,7 +87,7 @@ local min, max = math.min, math.max
 -- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE
 local PAGES = {
   "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION",
+  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION", "LAYERS",
 }
 
 local FPS = 15
@@ -195,6 +195,7 @@ local ctx = {
 
 local Mfont = include "lib/mfont"
 local Mtape = include "lib/mtape"
+local Mdeck = include "lib/mdeck"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
@@ -232,6 +233,27 @@ function ctx.tempo()
 end
 
 Mtape.init(ctx)
+ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
+Mdeck.init(ctx)
+-- TWO more loop decks beside the tape, on softcut voices the script does not
+-- otherwise use. Their buffer regions start at 120s, leaving 60-120 clear:
+-- the chain forge on `foundry` auditions cells at 70s, and picking around it
+-- means the branches can merge without a silent buffer collision.
+ctx.layers = {
+  Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 }),
+  Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 }),
+}
+ctx.deck = Mdeck
+ctx.deck_phase = function(v, pos) Mdeck.on_phase(v, pos) end
+-- which layer the page and its encoders address
+function ctx.layer_sel()
+  return ctx.layers[math.floor(pget("layer_sel", 1) + 0.5)] or ctx.layers[1]
+end
+-- re-send every deck's level: the master, the transport and the global STOP
+-- all fold into it, so anything that moves one of those has to come through here
+function ctx.layers_relevel()
+  for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
+end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
@@ -476,6 +498,26 @@ local KEYS = {
     k2 = pk("RUN", "orbit_on"),
     k3 = { label = "CAP", act = function() ctx.scene.capture_free() end },
   },
+  LAYERS = {
+    -- REC under the punch law: hold to record while you lean on it, tap to
+    -- latch. PLAY is a plain transport toggle. K1+K3 erases THIS layer only —
+    -- the tape and the other layer are untouched (mdeck clears by region).
+    k2 = { label = "REC",
+      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "rec"), 0) == 1 end,
+      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 1) end,
+      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 0) end },
+    k3 = { label = "PLAY",
+      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 0) == 1 end,
+      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end,
+      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end },
+    erase = function()
+      local d = ctx.layer_sel()
+      params:set(Mdeck.p(d, "rec"), 0)
+      Mdeck.clear(d)
+      params:set(Mdeck.p(d, "start"), 0)
+      params:set(Mdeck.p(d, "end"), 1)
+    end,
+  },
   EROSION = {
     -- HEAL parks the decay (round-trips like every throw); SCAR is a full
     -- strength pass while held, latched with a tap.
@@ -566,6 +608,7 @@ local ENC_MAP = {
   SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
   ORBIT  = { "orbit_rate", nil, "orbit_reach", nil },
   EROSION = { "erode", nil, "wear", nil },
+  LAYERS = { "layer_sel", "@lay_rate", "@lay_level", "@lay_move" },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
@@ -1406,6 +1449,7 @@ local function init_params()
   params:set_action("stop_all", function(v)
     if v == 1 then ctx.pads_all_off() end
     Mtape.update_mix()
+    ctx.layers_relevel()   -- the layer decks choke with everything else
   end)
 
   params:add_group("grp_rec", "take - record", 13)
@@ -1597,6 +1641,43 @@ local function init_params()
   add_eng_control("warp_rand", "warp rand",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
   add_eng_binary("pv_freeze", "pv freeze")
+
+  -- ---- the layer decks ---------------------------------------------------
+  -- Two more loop decks on softcut, beside the tape. Same shape, their own
+  -- regions of the buffer. See doc/layers.md; the deck itself is lib/mdeck.lua.
+  -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
+  -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
+  -- already have in their hands. K1+K3 on the page erases one to start over.
+  params:add_group("grp_layers", "layers", 17)
+  params:add_number("layer_sel", "layer", 1, 2, 1)
+  for n = 1, 2 do
+    local id = "lay" .. n
+    local function q(k) return id .. "_" .. k end
+    local function deck() return ctx.layers[n] end
+    params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
+    params:set_action(q("rec"), function() Mdeck.update_rec(deck()) end)
+    params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
+    params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
+    params:add_control(q("level"), "L" .. n .. " level",
+      controlspec.new(0, 1, "lin", 0, 0.8, ""))
+    params:set_action(q("level"), function() Mdeck.update_level(deck()) end)
+    params:add_control(q("rate"), "L" .. n .. " rate",
+      controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
+    params:set_action(q("rate"), function() Mdeck.update_rate(deck()) end)
+    params:add_binary(q("reverse"), "L" .. n .. " reverse", "toggle", 0)
+    params:set_action(q("reverse"), function() Mdeck.update_rate(deck()) end)
+    local ls = controlspec.new(0, 1, "lin", 0, 0.0, "")
+    ls.quantum = 0.002
+    params:add_control(q("start"), "L" .. n .. " loop start", ls)
+    params:set_action(q("start"), function() Mdeck.update_loop(deck()) end)
+    local le = controlspec.new(0, 1, "lin", 0, 1.0, "")
+    le.quantum = 0.002
+    params:add_control(q("end"), "L" .. n .. " loop end", le)
+    params:set_action(q("end"), function() Mdeck.update_loop(deck()) end)
+    params:add_control(q("pre"), "L" .. n .. " overdub",
+      controlspec.new(0, 1, "lin", 0, 1.0, ""))
+    params:set_action(q("pre"), function() Mdeck.update_rec(deck()) end)
+  end
 
   params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
@@ -1921,18 +2002,21 @@ local function init_params()
   -- snapshot as a lua table, the take helpers the engine buffer).
   params.action_write = function(filename, name, number)
     Mtape.pset_write(number)
+    Mdeck.pset_write(number)
     Mscenes.pset_write(number)
     ctx.take_pset_write(number)   -- the engine take, as an L/R pair
     ctx.padlock_pset_write(number)  -- per-pad sound-locks
   end
   params.action_read = function(filename, silent, number)
     Mtape.pset_read(number)
+    Mdeck.pset_read(number)
     Mscenes.pset_read(number)
     ctx.take_pset_read(number)
     ctx.padlock_pset_read(number)
   end
   params.action_delete = function(filename, name, number)
     Mtape.pset_delete(number)
+    Mdeck.pset_delete(number)
     Mscenes.pset_delete(number)
     ctx.take_pset_delete(number)
     ctx.padlock_pset_delete(number)
@@ -1949,6 +2033,7 @@ function init()
   print("mangler: init() called")
   init_params()
   Mtape.init_tape()
+  for _, d in ipairs(ctx.layers) do Mdeck.start(d) end
   Minput.init_midi()
   Mgrid.connect()
   print("mangler: init() done, params built")
@@ -2016,6 +2101,7 @@ function cleanup()
   Minput.cleanup()
   Mgrid.cleanup()
   Mtape.cleanup()
+  Mdeck.cleanup()
   Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
@@ -2043,6 +2129,15 @@ function enc(n, d)
     local id = enc_param(n)
     if id == "@win_move" then
       move_pair("pos_start", "pos_end", d)
+    -- the LAYERS encoders address whichever deck is selected, so they resolve
+    -- to a param id at turn time rather than being fixed in ENC_MAP
+    elseif id == "@lay_level" or id == "@lay_rate" then
+      local real = Mdeck.p(ctx.layer_sel(), id == "@lay_rate" and "rate" or "level")
+      params:delta(real, fine_delta(real, d))
+      id = real
+    elseif id == "@lay_move" then
+      local dk = ctx.layer_sel()
+      move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
     elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
     else
