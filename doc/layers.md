@@ -83,7 +83,7 @@ Per deck, prefixed `lay1_` / `lay2_` (ids are never renamed once shipped):
 | id | kind | default | why |
 |---|---|---|---|
 | `rec` | binary | 0 | arm capture |
-| `play` | binary | 1 | transport |
+| `play` | binary | 1 | audible; MUTE is this at 0 (the head still rolls) |
 | `level` | control 0–1 | 0.8 | |
 | `rate` | control 0.25–4 exp | 1 | varispeed |
 | `reverse` | binary | 0 | latching, like the tape's |
@@ -116,7 +116,7 @@ this project holds everywhere.
 - **K1+E2** rate · **K1+E3** move the loop (start and end together, the existing
   `move_pair` compound, which already writes the widening edge first)
 - **K2** REC under the punch law — hold to record while held, tap to latch
-- **K3** PLAY — transport toggle
+- **K3** MUTE — silences by level; the head keeps rolling (see below)
 - **K1+K3** held = erase the selected layer (its region and its picture)
 
 Thirteen pages drops the header dot pitch from 4 to 3, which the header already
