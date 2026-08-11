@@ -2012,6 +2012,14 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua as
 # IIFEs (proven byte-identical via the seeded render suite). the dist file
 # is GENERATED — never edit it; rebuild after any lua change that ships.
+# the CONTROL surface. the render suite proves the instrument DRAWS; these turn
+# every encoder, press every key, and assert what reaches the params. run them
+# after any change to ENC_MAP, KEYS, a param action, or the softcut decks —
+# three of the four defects in the layers review were invisible to the renderer.
+lua tools/test_control.lua   # encoders, keys, the master, STOP  (123 assertions)
+lua tools/test_deck.lua      # the softcut loop decks: region isolation (35)
+lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
+
 lua tools/amalgamate.lua
 
 # deploy to the norns (the repo IS the script; --delete kills stale engine copies)
