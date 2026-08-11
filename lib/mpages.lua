@@ -377,6 +377,44 @@ function M.convert_sr(path, out_path, sr, yield)
   return true, written / sr
 end
 
+-- WHERE THE SOUND ACTUALLY IS. Returns the first and last positions above a
+-- threshold, as fractions of a `buf_secs` buffer — the same units the window
+-- uses. nil when the file cannot be read, or when nothing clears the floor
+-- (silence), so a caller can tell "nothing there" from "could not look".
+--
+-- The point: pressing REC and then playing leaves your reaction time at the
+-- head of every take, and letting go late leaves room tone at the tail. The
+-- rec-stop window snaps to where the HEADS were, not to where the sound is.
+function M.onset_bounds(path, from01, to01, buf_secs, thresh, yield)
+  local src, err = open_src(path)
+  if not src then return nil, err end
+  local total = floor(buf_secs * src.sr)
+  local from = clamp(floor(from01 * total), 0, src.frames)
+  local to = clamp(floor(to01 * total), 0, src.frames)
+  if to - from < 64 then close_src(src); return nil, "range is empty" end
+  thresh = thresh or 0.004                       -- about -48 dBFS
+  local L, R = {}, {}
+  local CH = 8192
+  local first, last = nil, nil
+  local i = from
+  while i < to do
+    local n = min(CH, to - i)
+    read_frames(src, i, n, L, R)
+    for k = 1, n do
+      local a = abs(L[k]); local b = abs(R[k])
+      if a > thresh or b > thresh then
+        if not first then first = i + k - 1 end
+        last = i + k - 1
+      end
+    end
+    i = i + n
+    if yield then yield() end
+  end
+  close_src(src)
+  if not first then return nil, "silence" end
+  return first / total, (last + 1) / total
+end
+
 -- TRANSIENT DETECTION: where does the material actually start hitting?
 -- A 10ms energy envelope; an onset is where energy jumps against its neighbour
 -- and clears a floor. Energy tolerates a strided decode (a transient is

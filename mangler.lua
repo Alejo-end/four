@@ -727,6 +727,48 @@ end
 -- window's SNAP memory follows.
 function ctx.pads_uncut() ctx.pad_cuts = nil end
 
+-- TIGHTEN: pull the window in onto the sound. Pressing REC and then playing
+-- leaves your reaction time at the head of the take, and letting go late
+-- leaves room tone at the tail — the rec-stop window snaps to where the record
+-- HEADS were, which is not where the sound is.
+-- NON-DESTRUCTIVE on purpose: this only moves pos_start/pos_end. It never
+-- rewrites the buffer, so it is always undoable by moving the edges back (and
+-- TAKE K3 SNAP remembers where you were).
+function ctx.take_tighten()
+  if not ctx.wave_any then
+    print("mangler: TIGHTEN — nothing recorded yet")
+    return
+  end
+  local tmp = norns.state.data .. "mtight-tmp.wav"
+  ctx.take_to_wav(tmp, function(ok)
+    if not ok then
+      print("mangler: TIGHTEN — the take dump did not land")
+      return
+    end
+    local lo, hi = window_bounds()
+    local a, b = Mpages.onset_bounds(tmp, lo, hi, BUF_SECS, nil, ctx.task_yield)
+    os.remove(tmp)
+    if not a then
+      print("mangler: TIGHTEN — the window is silent, left alone")
+      return
+    end
+    -- a hair of room either side so a soft attack is never clipped off
+    local pad = 0.005 / BUF_SECS
+    a = clamp(a - pad, lo, hi)
+    b = clamp(b + pad, lo, hi)
+    if b - a < 0.002 then
+      print("mangler: TIGHTEN — too little sound to window, left alone")
+      return
+    end
+    -- both edges move INWARD, so the pair can never cross; still, set the one
+    -- that moves first and re-read, the way every other edge pair here does
+    params:set("pos_start", a)
+    params:set("pos_end", b)
+    print(string.format("mangler: TIGHTEN — window is %.2fs of sound (was %.2fs)",
+      (b - a) * BUF_SECS, (hi - lo) * BUF_SECS))
+  end)
+end
+
 -- CHOP: put the pads on the material's own attacks instead of eight arbitrary
 -- eighths. Lua cannot read the engine buffer, so the take is dumped to a file
 -- and the transients are found in that (Mpages.transient_cuts). The engine
@@ -1366,7 +1408,7 @@ local function init_params()
     Mtape.update_mix()
   end)
 
-  params:add_group("grp_rec", "take - record", 12)
+  params:add_group("grp_rec", "take - record", 13)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -1439,6 +1481,12 @@ local function init_params()
   params:add_binary("export_take", "export take (wav)", "momentary", 0)
   params:set_action("export_take", function(v)
     if v == 1 then ctx.export_take() end
+  end)
+  -- pull the window in onto the sound (see ctx.take_tighten). momentary so a
+  -- footswitch reaches it; non-destructive — it only moves the window edges.
+  params:add_binary("take_tighten", "tighten window to sound", "momentary", 0)
+  params:set_action("take_tighten", function(v)
+    if v == 1 then ctx.take_tighten() end
   end)
   -- PRINT the master mix back into the buffer (see ctx.print_take). momentary
   -- so a footswitch fires the whole bounce; press edge only.

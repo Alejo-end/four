@@ -29,7 +29,8 @@ local rf = src:match("(local function read_frames.-\nend)\n")
 local blk = src:match("(local SRC_BLOCK = .-\nlocal SRC_PACK = [^\n]*)\n")
 local cs = src:match("(function M%.convert_sr.-\n  return true, written / sr\nend)")
 local tc = src:match("(function M%.transient_cuts.-\n  return cuts\nend)")
-assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc,
+local ob = src:match("(function M%.onset_bounds.-\n  return first / total, %(last %+ 1%) / total\nend)")
+assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc and ob,
   "lift failed")
 local env = setmetatable({
   floor = math.floor, min = math.min, max = math.max, abs = math.abs,
@@ -39,7 +40,7 @@ local env = setmetatable({
 local M = load(
   rp .. "\n" .. dc .. "\n" .. cu .. "\n" .. blk .. "\nlocal M={}\n"
   .. wd .. "\n" .. wr .. "\n" .. os_ .. "\n" .. cl .. "\n" .. rf .. "\n"
-  .. cs .. "\n" .. tc .. "\nreturn M",
+  .. cs .. "\n" .. tc .. "\n" .. ob .. "\nreturn M",
   "mp", "t", env)()
 
 local TMP = "/tmp/main-srtest/"
@@ -148,6 +149,52 @@ do
   -- can tell "no transients" from "could not look"
   ok(M.transient_cuts(TMP .. "notawav.wav", 0, hi, 8, BUF, nil) == nil,
     "an unreadable file refuses transient detection")
+end
+
+-- ---- where the sound actually is ------------------------------------------
+-- What TIGHTEN uses to pull the window in off your reaction time at the head
+-- and the room tone at the tail. Build a file that is silent except for a
+-- known span and check both edges come back.
+do
+  local SR, SECS, BUF = 48000, 4.0, 60
+  local n = math.floor(SR * SECS)
+  local SOUND_FROM, SOUND_TO = 0.80, 2.60          -- seconds
+  local f = assert(io.open(TMP .. "gap.wav", "wb"))
+  local d = n * 2 * 2
+  f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
+  f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
+    string.pack("<I4", SR), string.pack("<I4", SR * 4),
+    string.pack("<I2", 4), string.pack("<I2", 16))
+  f:write("data", string.pack("<I4", d))
+  local buf = {}
+  for i = 0, n - 1 do
+    local t = i / SR
+    local v = 0
+    if t >= SOUND_FROM and t < SOUND_TO then v = math.sin(i * 0.05) * 20000 end
+    buf[#buf + 1] = string.pack("<i2i2", math.floor(v), math.floor(v))
+  end
+  f:write(table.concat(buf)); f:close()
+
+  local hi = SECS / BUF
+  local a, b = M.onset_bounds(TMP .. "gap.wav", 0, hi, BUF, nil, nil)
+  ok(a ~= nil, "onset_bounds finds the sound")
+  near((a or 0) * BUF, SOUND_FROM, 0.02, "the leading silence is found exactly")
+  near((b or 0) * BUF, SOUND_TO, 0.02, "...and so is the tail")
+  -- searching a sub-range must respect it
+  local a2 = M.onset_bounds(TMP .. "gap.wav", 1.5 / BUF, hi, BUF, nil, nil)
+  near((a2 or 0) * BUF, 1.5, 0.02, "a search that starts mid-sound starts there")
+  -- pure silence REFUSES rather than returning the whole range, so the caller
+  -- leaves the window alone instead of windowing nothing
+  local sil = assert(io.open(TMP .. "sil.wav", "wb"))
+  local dd = 48000 * 4
+  sil:write("RIFF", string.pack("<I4", 36 + dd), "WAVE")
+  sil:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
+    string.pack("<I4", SR), string.pack("<I4", SR * 4),
+    string.pack("<I2", 4), string.pack("<I2", 16))
+  sil:write("data", string.pack("<I4", dd))
+  sil:write(string.rep("\0", dd)); sil:close()
+  ok(M.onset_bounds(TMP .. "sil.wav", 0, hi, BUF, nil, nil) == nil,
+    "a silent window refuses — TIGHTEN leaves it alone")
 end
 
 -- ---- the pad slice model ---------------------------------------------------
