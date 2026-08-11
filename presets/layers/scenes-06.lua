@@ -1,0 +1,78 @@
+return {
+-- Table: {1}
+{
+   ["slots"]={2},
+   ["v"]=1,
+},
+-- Table: {2}
+{
+   {3},
+   {4},
+   {5},
+   {6},
+},
+-- Table: {3}
+{
+   ["rev_decay"]=1.8,
+   ["lay2_rate"]=1,
+   ["lay1_pre"]=1,
+   ["pos_start"]=0,
+   ["lay1_play"]=1,
+   ["lay2_rec"]=0,
+   ["mix"]=0,
+   ["lay2_reverse"]=0,
+   ["lay2_level"]=0.8,
+   ["lay1_rate"]=1,
+   ["drive"]=0.1,
+   ["out_level"]=1,
+   ["lay2_start"]=0,
+   ["mode"]=5,
+   ["lay2_end"]=1,
+   ["cutoff"]=20000,
+   ["rev_mix"]=0.15,
+   ["lay2_play"]=1,
+   ["scan"]=1,
+   ["layer_sel"]=1,
+   ["dry_wet"]=1,
+   ["delay_fb"]=0.3,
+   ["lay1_reverse"]=0,
+   ["lay2_pre"]=1,
+   ["lay1_rec"]=0,
+   ["lay1_level"]=0.8,
+   ["resonance"]=0,
+   ["pos_end"]=1,
+   ["lay1_start"]=0,
+   ["delay_mix"]=0.1,
+   ["lay1_end"]=1,
+},
+-- Table: {4}
+{
+   ["cutoff"]=6000,
+   ["lay2_level"]=0.35,
+   ["lay1_level"]=0.8,
+   ["drive"]=0.35,
+   ["delay_mix"]=0.3,
+   ["delay_fb"]=0.55,
+},
+-- Table: {5}
+{
+   ["cutoff"]=20000,
+   ["lay2_rate"]=2,
+   ["lay1_rate"]=0.5,
+   ["rev_decay"]=6,
+   ["delay_mix"]=0.15,
+   ["rev_mix"]=0.4,
+},
+-- Table: {6}
+{
+   ["cutoff"]=9000,
+   ["scan"]=0.4,
+   ["size"]=0.06,
+   ["lay1_level"]=0.5,
+   ["density"]=50,
+   ["rev_mix"]=0.45,
+   ["spread"]=0.9,
+   ["mode"]=2,
+   ["lay2_level"]=0.5,
+},
+}

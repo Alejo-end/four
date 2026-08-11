@@ -17,14 +17,45 @@ Each preset also ships a scene bank of four slots, so SCENE, the morph knob
 and ORBIT all do something the moment you load one. Slot 1 is the preset as it
 loaded, which makes RCL 1 a reliable way back after you have wandered.
 
+`layers/` holds the same set for the branch build running as its own script,
+plus a sixth. Same values, regenerated against that build's paramset — it has
+seventeen parameters the other one does not, and a preset naming an id the
+script has not created is a line norns silently drops.
+
+| # | name | what it shows |
+|---|------|---------------|
+| 6 | LAYERS BED | a bed to overdub against: both decks staged in OVERDUB with levels up, neither recording |
+
+The decks arrive empty on purpose. There is nothing to record from offline,
+and `Mdeck.pset_read` clears a deck whose wav is missing rather than
+resurrecting whatever sat in the softcut buffer — so preset 6 is a launchpad,
+not a finished sound. Both `lay1_rec` and `lay2_rec` are 0: a preset that
+loaded already recording would eat your first bar before you touched anything.
+
 ## installing
 
 ```sh
+# the mangler script
 rsync -av presets/mangler-0*.pset presets/scenes-0*.lua \
   we@norns.local:~/dust/data/mangler/
+
+# the layers build, running as its own script
+rsync -av presets/layers/layers-0*.pset presets/layers/scenes-0*.lua \
+  we@norns.local:~/dust/data/layers/
 ```
 
 Then PARAMS > PSET > LOAD on the device.
+
+The destination folder is not arbitrary: norns derives it from the script
+*filename*, not the folder. `dust/code/layers/layers.lua` gives shortname
+`layers` and data `dust/data/layers/`, but leave the file called
+`untitled.lua` and the name becomes `layers/untitled`, the data path gains a
+level, and the psets have to be called `untitled-NN.pset` to be found at all.
+
+norns also copies `<script folder>/data/*.pset` into the data folder the first
+time a script runs, which is the supported way to ship defaults — worth knowing
+if these ever want to install themselves. It copies psets only, not the scene
+sidecars.
 
 `mangler.pmap.example` is separate on purpose — copy it to
 `~/dust/data/mangler/mangler.pmap` only if you want CC 100 on channel 1 to
