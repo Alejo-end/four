@@ -2779,6 +2779,44 @@ local function cubic(y0, y1, y2, y3, x)
   return ((a * x + b) * x + c) * x + y1
 end
 
+-- open a file for random-access frame reads. nil for anything we cannot
+-- decode, so a caller refuses rather than working on silence.
+local function open_src(path)
+  local f = io.open(path, "rb")
+  if not f then return nil, "cannot open " .. tostring(path) end
+  local afmt, ch, bits, sr, dpos, dlen = riff_parse(f)
+  local dec = afmt and M.wav_decoder(afmt, bits)
+  if not (dec and dpos and ch and ch >= 1 and sr and sr > 0) then
+    f:close(); return nil, "unsupported format"
+  end
+  local bps = bits // 8
+  local fbytes = ch * bps
+  return { f = f, dpos = dpos, ch = ch, bps = bps, fbytes = fbytes, sr = sr,
+           dec = dec, frames = floor(dlen / fbytes), path = path }
+end
+
+local function close_src(s) if s and s.f then s.f:close(); s.f = nil end end
+
+-- read n frames from `from` into L/R (1-based), zero-padding outside the file
+-- so an interpolator may always ask for a neighbour it cannot have.
+local function read_frames(src, from, n, L, R)
+  local a, b = max(from, 0), min(from + n, src.frames)
+  for i = 1, a - from do L[i], R[i] = 0, 0 end
+  for i = max(1, b - from + 1), n do L[i], R[i] = 0, 0 end
+  if b <= a then return end
+  src.f:seek("set", src.dpos + a * src.fbytes)
+  local chunk = src.f:read((b - a) * src.fbytes)
+  if not chunk then return end
+  local dec, ch, bps, fb = src.dec, src.ch, src.bps, src.fbytes
+  local o = a - from
+  for i = 0, (#chunk // fb) - 1 do
+    local p = i * fb + 1
+    local l = dec(chunk, p)
+    L[o + i + 1] = l
+    R[o + i + 1] = ch > 1 and dec(chunk, p + bps) or l
+  end
+end
+
 local SRC_BLOCK = 4096
 local SRC_PACK = "<" .. string.rep("i2", SRC_BLOCK * 2)
 
@@ -2798,22 +2836,14 @@ function M.wav_rate(path)
 end
 
 function M.convert_sr(path, out_path, sr, yield)
-  local f = io.open(path, "rb")
-  if not f then return nil, "cannot open " .. tostring(path) end
-  local afmt, ch, bits, in_sr, dpos, dlen = riff_parse(f)
-  local dec = afmt and M.wav_decoder(afmt, bits)
-  if not (dec and dpos and ch and ch >= 1 and in_sr and in_sr > 0) then
-    f:close()
-    return nil, "unsupported format"
-  end
-  local bps = bits // 8
-  local fbytes = ch * bps
-  local frames = floor(dlen / fbytes)
-  if frames < 2 then f:close(); return nil, "no audio" end
-  if in_sr == sr then f:close(); return false, frames / sr end
+  local src, err = open_src(path)
+  if not src then return nil, err end
+  local in_sr, frames = src.sr, src.frames
+  if frames < 2 then close_src(src); return nil, "no audio" end
+  if in_sr == sr then close_src(src); return false, frames / sr end
 
   local of = io.open(out_path, "wb")
-  if not of then f:close(); return nil, "cannot write " .. tostring(out_path) end
+  if not of then close_src(src); return nil, "cannot write " .. tostring(out_path) end
   -- header with placeholder sizes, backpatched at the end
   of:write("RIFF", string.pack("<I4", 36), "WAVE")
   of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
@@ -2823,26 +2853,7 @@ function M.convert_sr(path, out_path, sr, yield)
 
   local ratio = in_sr / sr
   local out_n = floor(frames / ratio)
-  -- read a window of source frames, zero-padded outside the file so the
-  -- interpolator may always ask for a neighbour it cannot have
   local L, R = {}, {}
-  local function read_window(from, n)
-    local a2, b2 = max(from, 0), min(from + n, frames)
-    for i = 1, a2 - from do L[i], R[i] = 0, 0 end
-    for i = max(1, b2 - from + 1), n do L[i], R[i] = 0, 0 end
-    if b2 <= a2 then return end
-    f:seek("set", dpos + a2 * fbytes)
-    local chunk = f:read((b2 - a2) * fbytes)
-    if not chunk then return end
-    local o = a2 - from
-    for i = 0, (#chunk // fbytes) - 1 do
-      local pp = i * fbytes + 1
-      local l = dec(chunk, pp)
-      L[o + i + 1] = l
-      R[o + i + 1] = ch > 1 and dec(chunk, pp + bps) or l
-    end
-  end
-
   local out_v = {}
   local written, since = 0, 0
   while written < out_n do
@@ -2851,7 +2862,7 @@ function M.convert_sr(path, out_path, sr, yield)
     local p1 = (written + bn - 1) * ratio
     local lo = floor(p0) - 1
     local hi = floor(p1) + 3
-    read_window(lo, hi - lo + 1)
+    read_frames(src, lo, hi - lo + 1, L, R)
     for k = 0, bn - 1 do
       local pos = (written + k) * ratio
       local ip = floor(pos)
@@ -2876,8 +2887,65 @@ function M.convert_sr(path, out_path, sr, yield)
   local datalen = written * 4
   of:seek("set", 4);  of:write(string.pack("<I4", 36 + datalen))
   of:seek("set", 40); of:write(string.pack("<I4", datalen))
-  f:close(); of:close()
+  close_src(src); of:close()
   return true, written / sr
+end
+
+-- TRANSIENT DETECTION: where does the material actually start hitting?
+-- A 10ms energy envelope; an onset is where energy jumps against its neighbour
+-- and clears a floor. Energy tolerates a strided decode (a transient is
+-- milliseconds wide, i.e. hundreds of frames), which is what keeps this
+-- affordable on a Pi.
+--
+-- `from01`/`to01` bound the search as fractions of a `buf_secs` buffer, and the
+-- cuts come back in the same units — so a caller works in the window's own
+-- coordinates and never has to know the file's rate or length.
+-- Returns nil (not an empty list) when the file cannot be read, so a caller can
+-- tell "no transients here" from "could not look".
+function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
+  local src, err = open_src(path)
+  if not src then return nil, err end
+  local total = floor(buf_secs * src.sr)
+  local from = clamp(floor(from01 * total), 0, src.frames)
+  local to = clamp(floor(to01 * total), 0, src.frames)
+  if to - from < 64 then close_src(src); return nil, "range is empty" end
+
+  local win = max(64, floor(src.sr * 0.01))
+  local stride = 8
+  local L, R, env = {}, {}, {}
+  local i, k = from, 0
+  while i < to do
+    local n = min(win, to - i)
+    read_frames(src, i, n, L, R)
+    local e = 0
+    for j = 1, n, stride do
+      local a = abs(L[j]) + abs(R[j])
+      if a > e then e = a end
+    end
+    k = k + 1
+    env[k] = e * 0.5
+    i = i + n
+    if yield and (k % 32 == 0) then yield() end
+  end
+  close_src(src)
+
+  -- floor: a fraction of the loudest window, so quiet material still chops and
+  -- room tone does not
+  local peak = 0
+  for j = 1, k do if env[j] > peak then peak = env[j] end end
+  local floorlv = peak * 0.18
+  local cuts = { from01 }          -- the first slice always starts at the edge
+  local last = -99
+  for j = 2, k do
+    local prev = env[j - 1]
+    if env[j] > floorlv and env[j] > prev * 2.2 and (j - last) > 3 then
+      last = j
+      local f = from + (j - 1) * win
+      cuts[#cuts + 1] = f / total
+      if #cuts >= maxn then break end
+    end
+  end
+  return cuts
 end
 
 -- interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
@@ -3888,8 +3956,22 @@ local function body_PADS(frame)
     end
   end
   screen.stroke()
+  -- the slice boundaries, ON the wave. Even eighths when nothing has been
+  -- chopped; the REAL cut positions once something has, because the whole
+  -- point of a chop is that the slices are not evenly spaced and the picture
+  -- has to say so.
+  local cuts = C.pad_cuts
   screen.level(4)
-  for i = 0, 8 do screen.rect(bx0 + i * sw, by - 5, 1, 10) end
+  if cuts then
+    for i = 1, #cuts do
+      local f = (cuts[i] - wlo) / wspan
+      if f >= 0 and f <= 1 then
+        screen.rect(bx0 + f * (bx1 - bx0), by - 5, 1, 10)
+      end
+    end
+  else
+    for i = 0, 8 do screen.rect(bx0 + i * sw, by - 5, 1, 10) end
+  end
   screen.fill()
   if pget("mode", 5) ~= 1 then
     local ph = (clamp(C.play_phase, 0, 1) - wlo) / wspan
@@ -3920,7 +4002,8 @@ local function body_PADS(frame)
       screen.rect(cx + 3, 30, sw - 6, 7)
       screen.fill()
     end
-    ptext_c(tostring(i + 1), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
+    local sl = (C.pad_slice_of and C.pad_slice_of(i) or i) + 1
+    ptext_c(tostring(sl), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
     -- SOUND-LOCK markers: a bottom bar = SLICE voice, a top-corner dot = pitched
     if (C.pad_type and C.pad_type[i] or 0) == 1 then
       screen.level(lit and 0 or (cur and 15 or 6))
@@ -3933,9 +4016,16 @@ local function body_PADS(frame)
       screen.fill()
     end
   end
-  -- a quiet cue for the sound-lock surface (the two face encoders), so the
-  -- freed row below the slices isn't blank (82px, well under the 124 limit)
-  ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
+  -- the free row below the slices. Normally a quiet cue for the sound-lock
+  -- encoders (82px, well under the 124 limit); once a CHOP is in force that
+  -- row says so instead — what the pads now mean outranks a hint you have
+  -- already read, and the two together overran the line.
+  if C.pad_cuts then
+    local n = #C.pad_cuts - 1
+    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 4)
+  else
+    ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
+  end
 end
 
 -- ============================================================================
@@ -4967,7 +5057,28 @@ ctx.TAP_FRAMES = TAP_FRAMES
 -- at the slice's START — the chop's attack (firing from the centre skipped
 -- the transient the pad was chopped for). GRAIN clouds spread around the
 -- point, so they keep the centre. one law, two anchors.
+-- CHOPPED slices, when there are any: ctx.pad_cuts is a sorted list of
+-- boundaries in buffer fractions, one more entry than there are slices (the
+-- last is where the final slice ends). nil = the even law below.
+-- Chopped boundaries are ABSOLUTE positions in the buffer, not window-relative,
+-- so whoever replaces the material drops them (ctx.pads_uncut).
+-- pad i -> its slice boundaries. A chop finds however many transients are
+-- there, which is usually not eight, so the pads WRAP onto what exists — the
+-- same "more keys than pads" idiom the MIDI and grid note paths already use.
+-- With five slices, pads 6-8 replay slices 1-3 rather than falling back to
+-- even eighths that would overlap the chopped ones.
+local function pad_cut(i)
+  local c = ctx.pad_cuts
+  local n = c and (#c - 1) or 0
+  if n < 1 then return nil end
+  local j = i % n
+  return c[j + 1], c[j + 2], j
+end
+ctx.pad_cut = pad_cut
+
 local function pad_pos(i, at_start)
+  local a, b = pad_cut(i)
+  if a then return at_start and a or (a + (b - a) * 0.5) end
   local lo, _, span = window_bounds()
   return lo + (i + (at_start and 0 or 0.5)) / ctx.pad_n * span
 end
@@ -4977,11 +5088,64 @@ ctx.pad_pos = pad_pos
 -- engine's slice voice needs this or its PlayBuf runs from the slice start
 -- clean through the rest of the 60s buffer — a pad playing its chop and then
 -- everything after it, while the PADS page draws eight bounded cells.
-local function pad_len()
+local function pad_len(i)
+  local a, b = pad_cut(i)
+  if a then return b - a end
   local _, _, span = window_bounds()
   return span / ctx.pad_n
 end
 ctx.pad_len = pad_len
+
+-- how many slices there actually are: a chop finds what it finds, and eight
+-- even slices is only the fallback
+function ctx.pad_count()
+  local c = ctx.pad_cuts
+  return (c and #c > 1) and (#c - 1) or ctx.pad_n
+end
+
+-- which SLICE a pad plays (0-based). Differs from the pad number once a chop
+-- has found fewer than eight, which is why the page labels cells with this.
+function ctx.pad_slice_of(i)
+  local _, _, j = pad_cut(i)
+  return j or i
+end
+
+-- back to even slices. Chopped boundaries point at particular audio, so
+-- anything that replaces the buffer has to let them go — the same rule the
+-- window's SNAP memory follows.
+function ctx.pads_uncut() ctx.pad_cuts = nil end
+
+-- CHOP: put the pads on the material's own attacks instead of eight arbitrary
+-- eighths. Lua cannot read the engine buffer, so the take is dumped to a file
+-- and the transients are found in that (Mpages.transient_cuts). The engine
+-- already takes a position AND a length per note, so nothing here needs a new
+-- command — the slices just stop being uniform.
+function ctx.pad_chop()
+  if not ctx.wave_any then
+    print("mangler: CHOP — nothing recorded yet")
+    return
+  end
+  local tmp = norns.state.data .. "mchop-tmp.wav"
+  ctx.take_to_wav(tmp, function(ok)
+    if not ok then
+      print("mangler: CHOP — the take dump did not land")
+      return
+    end
+    -- this callback runs inside the dump's own coroutine, so the scan can yield
+    local lo, hi = window_bounds()
+    local cuts = Mpages.transient_cuts(tmp, lo, hi, ctx.pad_n, BUF_SECS,
+      ctx.task_yield)
+    os.remove(tmp)
+    if not cuts or #cuts < 2 then
+      ctx.pads_uncut()
+      print("mangler: CHOP found no transients — pads back to even slices")
+      return
+    end
+    cuts[#cuts + 1] = hi            -- the last slice runs to the window end
+    ctx.pad_cuts = cuts
+    print(string.format("mangler: CHOP — %d slices, on the attacks", #cuts - 1))
+  end)
+end
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
 -- the note_on that started it). z=1 press, z=0 release.
@@ -4995,7 +5159,7 @@ function ctx.pad_trigger(id, i, z)
       local pt = ctx.pad_type[i] or 0
       engine.note_on(id, pad_pos(i, pt > 0),
         2 ^ ((ctx.pad_pitch[i] or 0) / 12),
-        pt, pget("pad_level", 0.3), pad_len())
+        pt, pget("pad_level", 0.3), pad_len(i))
     end
     if ctx.pad_held[id] == nil then
       ctx.pad_order[#ctx.pad_order + 1] = id
@@ -5069,6 +5233,7 @@ function ctx.clear_recording()
   Mpages.clear_wave()
   Mpages.erosion_reset()   -- a fresh take starts at generation zero
   ctx.snap_forget()        -- the old window bounds point at audio that is gone
+  ctx.pads_uncut()         -- ...and so do the chopped slice boundaries
   ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
@@ -5102,6 +5267,7 @@ local function read_into_buffer(path, shown, secs)
   Mpages.erosion_reset()   -- different audio, generation zero: the age counter
                            -- belongs to the material, not to the session
   ctx.snap_forget()        -- ...and the remembered window belonged to the old
+  ctx.pads_uncut()         -- ...as did the chop
   local dur = Mpages.load_wave(path, BUF_SECS) or secs
   -- the loaded length bounds a PSET save; unknown length (no preview) -> full
   ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
@@ -5210,6 +5376,7 @@ function ctx.take_pset_read(number)
   local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
   Mpages.erosion_reset()  -- the restored take carries its own age in the audio;
                           -- the counter is per-material, not per-session
+  ctx.pads_uncut()        -- padlock_pset_read restores the pset's own cuts next
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
   ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1  -- bounds a re-save
 end
@@ -5228,7 +5395,7 @@ local function padlock_path(number)
 end
 
 function ctx.padlock_pset_write(number)
-  local t = { v = 1, type = {}, pitch = {} }
+  local t = { v = 1, type = {}, pitch = {}, cuts = ctx.pad_cuts }
   for i = 0, 7 do t.type[i] = ctx.pad_type[i] or 0; t.pitch[i] = ctx.pad_pitch[i] or 0 end
   -- guarded like every other pset writer here: a write failure must PRINT, not
   -- throw out of params.action_write and abort the rest of the save
@@ -5245,6 +5412,10 @@ function ctx.padlock_pset_read(number)
     ctx.pad_type[i] = t.type[i] or 0
     ctx.pad_pitch[i] = (t.pitch and t.pitch[i]) or 0
   end
+  -- the chop belongs to the take, and the take rides the pset too — so the
+  -- slice boundaries come back with the audio they were cut from. (this runs
+  -- AFTER take_pset_read, which drops them along with the old material.)
+  ctx.pad_cuts = (type(t.cuts) == "table" and #t.cuts > 1) and t.cuts or nil
   ctx.pad_edit_sync()   -- editor params -> the restored cursor pad
 end
 
@@ -5309,25 +5480,80 @@ local function next_print_name()
   return stem and (stem .. ".wav")
 end
 
--- PRINT: the one-gesture full-mix resample (the Octatrack move). the norns
--- system TAPE records the MASTER out — engine + tape deck + FX, everything
--- you hear — for print_len seconds (0 = AUTO, the current window length),
--- then the bounce loads back as THE take (engine.read_file via load_sample:
--- window snaps, waveform draws). the print wav stays in dust/audio, so the
--- material is never lost even though the buffer is replaced; older takes
--- live in their PSETs. mangle -> print -> mangle the print.
-local print_clock
-function ctx.print_take()
-  if print_clock then print("mangler: PRINT already running"); return end
+-- A RECORDING PASS: the system TAPE captures the MASTER out — engine + tape
+-- deck + FX, everything you hear — into `path` for `secs`, calling `on_tick`
+-- once per frame so a caller can automate a param ACROSS the pass. That last
+-- part is what makes a pass more than a bounce: sweep the scene morph, or the
+-- erosion, and the recording IS the sweep.
+-- `done(finished, path)` runs after the writer has flushed; `finished` is false
+-- if the pass was aborted.
+-- The duration is LIVE: record_stop ends it now, record_limit re-aims the end.
+local pass, pass_clock
+function ctx.record_pass(path, secs, on_tick, done)
+  if pass then print("mangler: a recording pass is already running"); return false end
   if not (audio.tape_record_open and audio.tape_record_start) then
-    print("mangler: no system tape API — cannot print"); return
+    print("mangler: no system tape API — cannot record"); return false
   end
-  -- printing a CHOKED output would record silence and then load it AS the
-  -- take — a mis-stomp while stopped must not wipe the material with nothing
+  -- recording a CHOKED output would capture silence, and a caller that then
+  -- loads the result would wipe the take with nothing
   if pget("stop_all", 0) == 1 then
-    print("mangler: PRINT refused — output is stopped (K1+K2 to start)")
-    return
+    print("mangler: pass refused — output is stopped (K1+K2 to start)")
+    return false
   end
+  pass = { n = math.max(1, math.floor(secs * FPS + 0.5)), i = 0 }
+  audio.tape_record_open(path)
+  audio.tape_record_start()
+  pass_clock = clock.run(function()
+    local aborted = false
+    while pass and pass.i < pass.n do
+      if on_tick then on_tick(pass.n > 1 and pass.i / (pass.n - 1) or 1) end
+      clock.sleep(1 / FPS)
+      pass.i = pass.i + 1
+      ctx.pass_progress = pass.i / pass.n
+      -- the global STOP is the abort: the one key that always means silence
+      -- has to mean "stop making this" too. Refusing to START while stopped is
+      -- only half the guard — a STOP pressed mid-pass silences the master, and
+      -- the rest of the recording would be digital silence.
+      if pget("stop_all", 0) == 1 then aborted = true; break end
+    end
+    pcall(audio.tape_record_stop)
+    clock.sleep(0.35)          -- let the tape writer flush + close the wav
+    pass, pass_clock = nil, nil
+    ctx.pass_progress = 0
+    if done then done(not aborted, path) end
+  end)
+  return true
+end
+
+function ctx.record_stop()
+  if pass then pass.n = pass.i end          -- the loop falls out next check
+end
+
+function ctx.record_limit(secs)
+  if pass then
+    pass.n = math.max(pass.i + 1, math.floor(secs * FPS + 0.5))
+  end
+end
+
+-- teardown: kill a pass outright without running its `done`. Only cleanup()
+-- wants this — everything else should let the pass finish or abort so the
+-- caller's completion work still runs.
+function ctx.record_cancel()
+  if not pass_clock then return end
+  clock.cancel(pass_clock)
+  pcall(audio.tape_record_stop)
+  pass, pass_clock = nil, nil
+  ctx.pass_progress = 0
+end
+
+-- PRINT: the one-gesture full-mix resample. One pass of print_len seconds
+-- (0 = AUTO, the current window length), and the bounce loads back as THE take
+-- (engine.read_file via load_sample: window snaps, waveform draws). The print
+-- wav stays in dust/audio, so the material is never lost even though the buffer
+-- is replaced; older takes live in their PSETs. mangle -> print -> mangle.
+-- `sweep` (optional) is handed straight to the pass as its per-frame hook, so a
+-- caller can print a MOVE rather than a moment.
+function ctx.print_take(sweep)
   local secs = pget("print_len", 0)
   if secs < 0.05 then
     local _, _, span = window_bounds()
@@ -5338,67 +5564,56 @@ function ctx.print_take()
     print("mangler: 999 prints in dust/audio — clear some out first")
     return
   end
-  local path = _path.audio .. name
-  audio.tape_record_open(path)
-  audio.tape_record_start()
-  print(string.format("mangler: PRINT — recording the master mix, %.1fs", secs))
-  print_clock = clock.run(function()
-    -- WATCH for the STOP, don't just sleep through it. Refusing to START while
-    -- stopped is only half the guard: a STOP pressed mid-bounce silences the
-    -- master, so the rest of the pass records digital silence — and loading
-    -- THAT as the take destroys the buffer with exactly the "nothing" the entry
-    -- check exists to prevent. The one key that always means silence has to
-    -- mean "stop making this" too.
-    local aborted = false
-    local left = secs
-    while left > 0 do
-      local step = left < 0.1 and left or 0.1
-      clock.sleep(step)
-      left = left - step
-      if pget("stop_all", 0) == 1 then aborted = true; break end
-    end
-    audio.tape_record_stop()
-    clock.sleep(0.25)          -- let the tape writer flush + close the wav
-    print_clock = nil
-    if aborted then
-      os.remove(path)          -- a part-silent bounce is not worth keeping
-      print("mangler: PRINT aborted by STOP — the take is untouched")
-      return
-    end
-    ctx.load_sample(path)
-    print("mangler: PRINT done — " .. name .. " is the new take")
-  end)
+  local ok = ctx.record_pass(_path.audio .. name, secs, sweep,
+    function(finished, path)
+      if not finished then
+        os.remove(path)        -- a part-silent bounce is not worth keeping
+        print("mangler: PRINT aborted by STOP — the take is untouched")
+        return
+      end
+      ctx.load_sample(path)
+      print("mangler: PRINT done — " .. name .. " is the new take")
+    end)
+  if ok then
+    print(string.format("mangler: PRINT — recording the master mix, %.1fs", secs))
+  end
 end
 
-function ctx.export_take(name)
+-- dump the live take to ONE stereo wav: write_take drops an L/R pair (bufL and
+-- bufR are two MONO buffers and scsynth has no cheap non-realtime interleave),
+-- we wait out the async /b_write, then zip them. `done(ok, path)` when the file
+-- is there. Lua cannot read an SC buffer, so this file IS the API — the export
+-- and the pad chopper are both built on it.
+function ctx.take_to_wav(out, done)
   if not engine.write_take then
-    print("mangler: engine has no write_take — SYSTEM > RESTART"); return
-  end
-  if not ctx.wave_any then print("mangler: nothing to export"); return end
-  name = name or next_export_name()
-  if not name then
-    print("mangler: 999 exports in dust/audio — clear some out first")
+    print("mangler: engine has no write_take — SYSTEM > RESTART")
+    if done then done(false) end
     return
   end
-  -- REFUSE a second export rather than cancelling the first. Cancelling killed
-  -- the coroutine mid-interleave, leaving a TRUNCATED wav in dust/audio that
-  -- next_export_name then skips over — a broken file that looks finished in the
-  -- browser and is never overwritten.
+  if not ctx.wave_any then
+    print("mangler: nothing to render — the buffer is empty")
+    if done then done(false) end
+    return
+  end
+  -- REFUSE a second dump rather than cancelling the first. Both callers share
+  -- this one clock and one tmp stem; cancelling killed the coroutine
+  -- mid-interleave, leaving a TRUNCATED wav that looks finished in the browser,
+  -- and the new dump would overwrite the files the cancelled one was reading.
   if export_clock then
-    print("mangler: an export is already running")
+    print("mangler: a take dump is already running")
+    if done then done(false) end
     return
   end
-  local out = _path.audio .. name
   local tmp = norns.state.data .. "mexport-tmp"
   -- clear any leftover temp pair first: the names are fixed, so a stale half of
-  -- an interrupted export can satisfy the size-stability wait below and get
+  -- an interrupted dump can satisfy the size-stability wait below and get
   -- interleaved into the new file.
   os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
   -- expected bytes per mono 16-bit wav (2 B/frame + 44 B header). we wait for
   -- BOTH files to REACH that size and stop growing, not just plateau — a slow
   -- SD card could stall mid-write and read as "stable" at a partial size, which
-  -- would export a truncated take. the cap scales with the take so a big
+  -- would hand back a truncated take. the cap scales with the take so a big
   -- (regen/60s) dump gets time to finish; it's only a backstop.
   local exp = take_frames() * 2 + 44
   local cap = math.max(100, math.ceil(exp / 200000) + 80)
@@ -5415,10 +5630,23 @@ function ctx.export_take(name)
     end
     -- yield between chunks so a large interleave doesn't freeze the UI thread
     local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
-      function() clock.sleep(0) end)
+      ctx.task_yield)
     os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
-    print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
     export_clock = nil
+    if done then done(ok, out) end
+  end)
+end
+
+-- the browsable half: the same dump, into dust/audio under a name you can find.
+function ctx.export_take(name)
+  name = name or next_export_name()
+  if not name then
+    print("mangler: 999 exports in dust/audio — clear some out first")
+    return
+  end
+  local out = _path.audio .. name
+  ctx.take_to_wav(out, function(ok)
+    print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
   end)
 end
 
@@ -5838,7 +6066,7 @@ local function init_params()
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
   -- cap (oldest-steal in the engine), voice_atk/voice_rel shape each note.
-  params:add_group("grp_voice", "pads - voices", 8)
+  params:add_group("grp_voice", "pads - voices", 10)
   params:add_binary("pad_input", "pad input", "toggle", 0)
   params:set_action("pad_input", function(v)
     if v == 0 then ctx.pads_all_off() end   -- don't strand voices on switch
@@ -5877,6 +6105,15 @@ local function init_params()
   -- level that stops poly stacks slamming the master limiter). read at note-on.
   params:add_control("pad_level", "pad level",
     controlspec.new(0, 1, "lin", 0, 0.3, ""))
+  -- CHOP the pads onto the take's own attacks. momentary (not a trigger) so it
+  -- is MIDI-learnable — the whole point is a footswitch. Firing it with no
+  -- transients found, or on a fresh buffer, puts the pads back to even slices.
+  params:add_binary("pad_chop", "chop to transients", "momentary", 0)
+  params:set_action("pad_chop", function(v) if v == 1 then ctx.pad_chop() end end)
+  params:add_binary("pad_even", "back to even slices", "momentary", 0)
+  params:set_action("pad_even", function(v)
+    if v == 1 then ctx.pads_uncut(); print("mangler: pads back to even slices") end
+  end)
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
@@ -6113,11 +6350,7 @@ function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
   if export_clock then clock.cancel(export_clock) end  -- stop a pending export
-  if print_clock then                    -- a PRINT mid-flight: stop the tape
-    clock.cancel(print_clock)
-    pcall(audio.tape_record_stop)
-    print_clock = nil
-  end
+  ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mpages.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()

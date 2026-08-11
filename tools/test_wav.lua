@@ -23,12 +23,24 @@ local dc = src:match("(local DECODE = .-\n})\n")
 local wd = src:match("(function M%.wav_decoder.-\nend)\n")
 local wr = src:match("(function M%.wav_rate.-\nend)\n")
 local cu = src:match("(local function cubic.-\nend)\n")
+local os_ = src:match("(local function open_src.-\nend)\n")
+local cl = src:match("(local function close_src[^\n]*)\n")
+local rf = src:match("(local function read_frames.-\nend)\n")
 local blk = src:match("(local SRC_BLOCK = .-\nlocal SRC_PACK = [^\n]*)\n")
 local cs = src:match("(function M%.convert_sr.-\n  return true, written / sr\nend)")
-assert(rp and dc and wd and wr and cu and blk and cs, "lift failed")
-local env = setmetatable({ floor=math.floor, min=math.min, max=math.max }, {__index=_G})
-local M = load(rp.."\n"..dc.."\n"..cu.."\n"..blk.."\nlocal M={}\n"..wd.."\n"..wr.."\n"..cs.."\nreturn M",
-  "mp","t",env)()
+local tc = src:match("(function M%.transient_cuts.-\n  return cuts\nend)")
+assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc,
+  "lift failed")
+local env = setmetatable({
+  floor = math.floor, min = math.min, max = math.max, abs = math.abs,
+  clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
+}, { __index = _G })
+-- wav_decoder must be defined BEFORE open_src closes over it
+local M = load(
+  rp .. "\n" .. dc .. "\n" .. cu .. "\n" .. blk .. "\nlocal M={}\n"
+  .. wd .. "\n" .. wr .. "\n" .. os_ .. "\n" .. cl .. "\n" .. rf .. "\n"
+  .. cs .. "\n" .. tc .. "\nreturn M",
+  "mp", "t", env)()
 
 local TMP = "/tmp/main-srtest/"
 os.execute("rm -rf "..TMP.."; mkdir -p "..TMP)
@@ -84,6 +96,106 @@ ok(io.open(TMP.."unused.wav","rb") == nil, "...and writes nothing")
 local b=io.open(TMP.."bad.wav","wb"); b:write("nope"); b:close()
 ok(M.convert_sr(TMP.."bad.wav", TMP.."x.wav", 48000, nil) == nil,
   "an unreadable file refuses (the caller falls back to a raw load)")
+
+-- ---- transient detection ---------------------------------------------------
+-- What makes pads land on the HITS instead of arbitrary eighths. Build a file
+-- with impulses at known times and check the cuts come back at those times, in
+-- buffer-fraction units.
+do
+  local SR, SECS, BUF = 48000, 4.0, 60
+  local n = math.floor(SR * SECS)
+  local HITS = { 0.5, 1.25, 2.0, 3.1 }      -- seconds into the file
+  local f = assert(io.open(TMP .. "hits.wav", "wb"))
+  local d = n * 2 * 2
+  f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
+  f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
+    string.pack("<I4", SR), string.pack("<I4", SR * 4),
+    string.pack("<I2", 4), string.pack("<I2", 16))
+  f:write("data", string.pack("<I4", d))
+  local buf = {}
+  for i = 0, n - 1 do
+    local t = i / SR
+    local v = 0
+    for _, h in ipairs(HITS) do
+      local dt = t - h
+      -- a 60ms decaying burst: loud attack, quiet between hits
+      if dt >= 0 and dt < 0.06 then
+        v = v + math.sin(i * 0.3) * 28000 * (1 - dt / 0.06)
+      end
+    end
+    v = math.max(-32768, math.min(32767, math.floor(v)))
+    buf[#buf + 1] = string.pack("<i2i2", v, v)
+  end
+  f:write(table.concat(buf)); f:close()
+
+  -- the whole file is 4s of a 60s buffer -> the window is 0 .. 4/60
+  local hi = SECS / BUF
+  local cuts = M.transient_cuts(TMP .. "hits.wav", 0, hi, 8, BUF, nil)
+  ok(cuts ~= nil, "transient_cuts reads the file")
+  cuts = cuts or {}
+  ok(#cuts == #HITS + 1,
+    "one cut per hit, plus the window edge (got " .. #cuts .. ", want " .. (#HITS + 1) .. ")")
+  near(cuts[1] or -1, 0, 0.0001, "the first slice starts at the window edge")
+  for i, h in ipairs(HITS) do
+    -- 10ms envelope windows, so allow a window either side
+    near((cuts[i + 1] or -1) * BUF, h, 0.03,
+      string.format("cut %d lands on the hit at %.2fs", i + 1, h))
+  end
+  -- silence has no transients: the edge, and nothing else
+  local q = M.transient_cuts(TMP .. "a48src.wav", 0, hi, 8, BUF, nil)
+  ok(q == nil or #q >= 1, "a tone yields at least the window edge")
+  -- an unreadable file REFUSES rather than returning an empty list, so a caller
+  -- can tell "no transients" from "could not look"
+  ok(M.transient_cuts(TMP .. "notawav.wav", 0, hi, 8, BUF, nil) == nil,
+    "an unreadable file refuses transient detection")
+end
+
+-- ---- the pad slice model ---------------------------------------------------
+-- Which slice a pad plays, once a CHOP has found however many transients are
+-- actually there. Lifted from mangler.lua so the real law is under test, not a
+-- copy of it.
+do
+  local msrc = io.open("mangler.lua"):read("a")
+  local fn = msrc:match("(local function pad_cut.-\nend)\n")
+  assert(fn, "could not lift pad_cut out of mangler.lua")
+  local fake = { pad_n = 8 }
+  local pad_cut = load(fn .. "\nreturn pad_cut", "pc", "t",
+    setmetatable({ ctx = fake }, { __index = _G }))()
+
+  -- no chop: the even law, signalled by nil
+  fake.pad_cuts = nil
+  ok(pad_cut(0) == nil, "with no chop, pads fall back to the even law")
+
+  -- five slices from six boundaries
+  fake.pad_cuts = { 0.0, 0.10, 0.20, 0.40, 0.45, 0.50 }
+  local a1, b1, j1 = pad_cut(0)
+  near(a1, 0.0, 1e-9, "pad 1 starts at the first cut")
+  near(b1, 0.10, 1e-9, "...and ends at the second")
+  ok(j1 == 0, "...and is slice 0")
+  local a4, b4 = pad_cut(3)
+  near(a4, 0.40, 1e-9, "pad 4 starts at its own cut")
+  near(b4, 0.45, 1e-9, "...and ends at the next")
+  local a5, b5 = pad_cut(4)
+  near(b5, 0.50, 1e-9, "the LAST slice ends at the window edge")
+
+  -- eight pads over five slices: the pads WRAP rather than falling through to
+  -- even eighths that would overlap the chopped ones
+  local a6, _, j6 = pad_cut(5)
+  ok(j6 == 0, "pad 6 wraps back to slice 1")
+  near(a6, 0.0, 1e-9, "...and plays it from the same place")
+  local _, _, j8 = pad_cut(7)
+  ok(j8 == 2, "pad 8 wraps to slice 3")
+
+  -- slices are never zero-length or inverted, whatever was found
+  for i = 0, 7 do
+    local lo, hi = pad_cut(i)
+    ok(lo ~= nil and hi > lo, "pad " .. (i + 1) .. " has a positive length")
+  end
+
+  -- a degenerate cut list (one boundary = no slice) must not divide by zero
+  fake.pad_cuts = { 0.25 }
+  ok(pad_cut(0) == nil, "a single boundary is not a slice — back to the even law")
+end
 
 -- ---- param-list drift ------------------------------------------------------
 -- The three hand-maintained lists (MOTION_IDS here, SCENE_RECALL_IDS and

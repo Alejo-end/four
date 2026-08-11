@@ -265,6 +265,44 @@ local function cubic(y0, y1, y2, y3, x)
   return ((a * x + b) * x + c) * x + y1
 end
 
+-- open a file for random-access frame reads. nil for anything we cannot
+-- decode, so a caller refuses rather than working on silence.
+local function open_src(path)
+  local f = io.open(path, "rb")
+  if not f then return nil, "cannot open " .. tostring(path) end
+  local afmt, ch, bits, sr, dpos, dlen = riff_parse(f)
+  local dec = afmt and M.wav_decoder(afmt, bits)
+  if not (dec and dpos and ch and ch >= 1 and sr and sr > 0) then
+    f:close(); return nil, "unsupported format"
+  end
+  local bps = bits // 8
+  local fbytes = ch * bps
+  return { f = f, dpos = dpos, ch = ch, bps = bps, fbytes = fbytes, sr = sr,
+           dec = dec, frames = floor(dlen / fbytes), path = path }
+end
+
+local function close_src(s) if s and s.f then s.f:close(); s.f = nil end end
+
+-- read n frames from `from` into L/R (1-based), zero-padding outside the file
+-- so an interpolator may always ask for a neighbour it cannot have.
+local function read_frames(src, from, n, L, R)
+  local a, b = max(from, 0), min(from + n, src.frames)
+  for i = 1, a - from do L[i], R[i] = 0, 0 end
+  for i = max(1, b - from + 1), n do L[i], R[i] = 0, 0 end
+  if b <= a then return end
+  src.f:seek("set", src.dpos + a * src.fbytes)
+  local chunk = src.f:read((b - a) * src.fbytes)
+  if not chunk then return end
+  local dec, ch, bps, fb = src.dec, src.ch, src.bps, src.fbytes
+  local o = a - from
+  for i = 0, (#chunk // fb) - 1 do
+    local p = i * fb + 1
+    local l = dec(chunk, p)
+    L[o + i + 1] = l
+    R[o + i + 1] = ch > 1 and dec(chunk, p + bps) or l
+  end
+end
+
 local SRC_BLOCK = 4096
 local SRC_PACK = "<" .. string.rep("i2", SRC_BLOCK * 2)
 
@@ -284,22 +322,14 @@ function M.wav_rate(path)
 end
 
 function M.convert_sr(path, out_path, sr, yield)
-  local f = io.open(path, "rb")
-  if not f then return nil, "cannot open " .. tostring(path) end
-  local afmt, ch, bits, in_sr, dpos, dlen = riff_parse(f)
-  local dec = afmt and M.wav_decoder(afmt, bits)
-  if not (dec and dpos and ch and ch >= 1 and in_sr and in_sr > 0) then
-    f:close()
-    return nil, "unsupported format"
-  end
-  local bps = bits // 8
-  local fbytes = ch * bps
-  local frames = floor(dlen / fbytes)
-  if frames < 2 then f:close(); return nil, "no audio" end
-  if in_sr == sr then f:close(); return false, frames / sr end
+  local src, err = open_src(path)
+  if not src then return nil, err end
+  local in_sr, frames = src.sr, src.frames
+  if frames < 2 then close_src(src); return nil, "no audio" end
+  if in_sr == sr then close_src(src); return false, frames / sr end
 
   local of = io.open(out_path, "wb")
-  if not of then f:close(); return nil, "cannot write " .. tostring(out_path) end
+  if not of then close_src(src); return nil, "cannot write " .. tostring(out_path) end
   -- header with placeholder sizes, backpatched at the end
   of:write("RIFF", string.pack("<I4", 36), "WAVE")
   of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
@@ -309,26 +339,7 @@ function M.convert_sr(path, out_path, sr, yield)
 
   local ratio = in_sr / sr
   local out_n = floor(frames / ratio)
-  -- read a window of source frames, zero-padded outside the file so the
-  -- interpolator may always ask for a neighbour it cannot have
   local L, R = {}, {}
-  local function read_window(from, n)
-    local a2, b2 = max(from, 0), min(from + n, frames)
-    for i = 1, a2 - from do L[i], R[i] = 0, 0 end
-    for i = max(1, b2 - from + 1), n do L[i], R[i] = 0, 0 end
-    if b2 <= a2 then return end
-    f:seek("set", dpos + a2 * fbytes)
-    local chunk = f:read((b2 - a2) * fbytes)
-    if not chunk then return end
-    local o = a2 - from
-    for i = 0, (#chunk // fbytes) - 1 do
-      local pp = i * fbytes + 1
-      local l = dec(chunk, pp)
-      L[o + i + 1] = l
-      R[o + i + 1] = ch > 1 and dec(chunk, pp + bps) or l
-    end
-  end
-
   local out_v = {}
   local written, since = 0, 0
   while written < out_n do
@@ -337,7 +348,7 @@ function M.convert_sr(path, out_path, sr, yield)
     local p1 = (written + bn - 1) * ratio
     local lo = floor(p0) - 1
     local hi = floor(p1) + 3
-    read_window(lo, hi - lo + 1)
+    read_frames(src, lo, hi - lo + 1, L, R)
     for k = 0, bn - 1 do
       local pos = (written + k) * ratio
       local ip = floor(pos)
@@ -362,8 +373,65 @@ function M.convert_sr(path, out_path, sr, yield)
   local datalen = written * 4
   of:seek("set", 4);  of:write(string.pack("<I4", 36 + datalen))
   of:seek("set", 40); of:write(string.pack("<I4", datalen))
-  f:close(); of:close()
+  close_src(src); of:close()
   return true, written / sr
+end
+
+-- TRANSIENT DETECTION: where does the material actually start hitting?
+-- A 10ms energy envelope; an onset is where energy jumps against its neighbour
+-- and clears a floor. Energy tolerates a strided decode (a transient is
+-- milliseconds wide, i.e. hundreds of frames), which is what keeps this
+-- affordable on a Pi.
+--
+-- `from01`/`to01` bound the search as fractions of a `buf_secs` buffer, and the
+-- cuts come back in the same units — so a caller works in the window's own
+-- coordinates and never has to know the file's rate or length.
+-- Returns nil (not an empty list) when the file cannot be read, so a caller can
+-- tell "no transients here" from "could not look".
+function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
+  local src, err = open_src(path)
+  if not src then return nil, err end
+  local total = floor(buf_secs * src.sr)
+  local from = clamp(floor(from01 * total), 0, src.frames)
+  local to = clamp(floor(to01 * total), 0, src.frames)
+  if to - from < 64 then close_src(src); return nil, "range is empty" end
+
+  local win = max(64, floor(src.sr * 0.01))
+  local stride = 8
+  local L, R, env = {}, {}, {}
+  local i, k = from, 0
+  while i < to do
+    local n = min(win, to - i)
+    read_frames(src, i, n, L, R)
+    local e = 0
+    for j = 1, n, stride do
+      local a = abs(L[j]) + abs(R[j])
+      if a > e then e = a end
+    end
+    k = k + 1
+    env[k] = e * 0.5
+    i = i + n
+    if yield and (k % 32 == 0) then yield() end
+  end
+  close_src(src)
+
+  -- floor: a fraction of the loudest window, so quiet material still chops and
+  -- room tone does not
+  local peak = 0
+  for j = 1, k do if env[j] > peak then peak = env[j] end end
+  local floorlv = peak * 0.18
+  local cuts = { from01 }          -- the first slice always starts at the edge
+  local last = -99
+  for j = 2, k do
+    local prev = env[j - 1]
+    if env[j] > floorlv and env[j] > prev * 2.2 and (j - last) > 3 then
+      last = j
+      local f = from + (j - 1) * win
+      cuts[#cuts + 1] = f / total
+      if #cuts >= maxn then break end
+    end
+  end
+  return cuts
 end
 
 -- interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
@@ -1374,8 +1442,22 @@ local function body_PADS(frame)
     end
   end
   screen.stroke()
+  -- the slice boundaries, ON the wave. Even eighths when nothing has been
+  -- chopped; the REAL cut positions once something has, because the whole
+  -- point of a chop is that the slices are not evenly spaced and the picture
+  -- has to say so.
+  local cuts = C.pad_cuts
   screen.level(4)
-  for i = 0, 8 do screen.rect(bx0 + i * sw, by - 5, 1, 10) end
+  if cuts then
+    for i = 1, #cuts do
+      local f = (cuts[i] - wlo) / wspan
+      if f >= 0 and f <= 1 then
+        screen.rect(bx0 + f * (bx1 - bx0), by - 5, 1, 10)
+      end
+    end
+  else
+    for i = 0, 8 do screen.rect(bx0 + i * sw, by - 5, 1, 10) end
+  end
   screen.fill()
   if pget("mode", 5) ~= 1 then
     local ph = (clamp(C.play_phase, 0, 1) - wlo) / wspan
@@ -1406,7 +1488,8 @@ local function body_PADS(frame)
       screen.rect(cx + 3, 30, sw - 6, 7)
       screen.fill()
     end
-    ptext_c(tostring(i + 1), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
+    local sl = (C.pad_slice_of and C.pad_slice_of(i) or i) + 1
+    ptext_c(tostring(sl), cx + sw / 2, 31, 1, lit and 0 or (cur and 15 or 6))
     -- SOUND-LOCK markers: a bottom bar = SLICE voice, a top-corner dot = pitched
     if (C.pad_type and C.pad_type[i] or 0) == 1 then
       screen.level(lit and 0 or (cur and 15 or 6))
@@ -1419,9 +1502,16 @@ local function body_PADS(frame)
       screen.fill()
     end
   end
-  -- a quiet cue for the sound-lock surface (the two face encoders), so the
-  -- freed row below the slices isn't blank (82px, well under the 124 limit)
-  ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
+  -- the free row below the slices. Normally a quiet cue for the sound-lock
+  -- encoders (82px, well under the 124 limit); once a CHOP is in force that
+  -- row says so instead — what the pads now mean outranks a hint you have
+  -- already read, and the two together overran the line.
+  if C.pad_cuts then
+    local n = #C.pad_cuts - 1
+    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 4)
+  else
+    ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
+  end
 end
 
 -- ============================================================================

@@ -1663,6 +1663,64 @@ overnight · a 44.1k sample loads in tune · a SLICE pad plays ONLY its slice ·
 second MOTION lane and the first survives · STOP during a PRINT leaves the take alone ·
 a short punch-in then PSET save/load keeps the whole take.
 
+Sixty-second change — **two pieces brought over from `foundry` to make the INSTRUMENT
+better (Lua-only, fingerprint STAYS 65, all 47 renders byte-identical, UNTESTED on
+device)**. The branches now have distinct jobs: `main` is the instrument, `foundry` is
+the Octatrack utility. These are the parts of foundry that are not Octatrack plumbing.
+* **`ctx.record_pass` — a port, not a feature.** `print_take` was a bespoke
+  reimplementation of the same machinery (open the system tape, count frames, stop,
+  flush, hand back), and it had grown its own STOP-abort by hand. The shared version
+  replaces it: `record_pass(path, secs, on_tick, done)` + `record_stop` /
+  `record_limit` / `record_cancel`. The `on_tick` hook is what it buys — a param
+  automated ACROSS the pass — so `ctx.print_take(sweep)` can now print a MOVE rather
+  than a moment (a scene morph, an erosion decay) with no chain involved. `cleanup`
+  goes through `record_cancel` instead of poking a clock it half-owned.
+* **`ctx.take_to_wav` split out of `export_take`**, so the dump-the-take-to-a-file path
+  has ONE implementation. Lua cannot read an SC buffer, so that file IS the API — the
+  export and the chopper are both built on it.
+* **CHOP: the pads land on the material's own attacks.** `pad_pos` was
+  `lo + (i+0.5)/8 * span` — eight EVEN eighths regardless of what you recorded, so a
+  drum loop chopped arbitrarily. `Mpages.transient_cuts` (a 10ms energy envelope,
+  strided so it is affordable on a Pi) finds the onsets in the dumped take and
+  `ctx.pad_cuts` stores them as absolute buffer fractions. NO engine change was needed:
+  the slice-end fix in the previous change already threads a per-note position AND
+  length, so variable-length slices were already supported.
+  - the pads WRAP onto however many slices were found (five slices -> pads 6-8 replay
+    1-3), the same "more keys than pads" idiom the MIDI and grid note paths use. Falling
+    back to even eighths for the remainder would have overlapped the chopped ones.
+  - chopped boundaries point at PARTICULAR audio, so anything that replaces the buffer
+    drops them (`ctx.pads_uncut` from clear / load / print / take-pset-read) — the same
+    rule the window's SNAP memory follows. They ride the padlock PSET beside the other
+    per-pad state, and `padlock_pset_read` runs after `take_pset_read`, so the cuts come
+    back with the audio they were cut from.
+  - `pad_chop` and `pad_even` are MOMENTARY params (grp_voice 8 -> 10) rather than keys:
+    both PADS key slots are claimed, and momentary means MIDI-learnable — the point is a
+    footswitch. PARAMS-only is the honest limit, like `seq_div`.
+  - the PADS page draws the REAL boundaries once a chop exists (even dividers otherwise)
+    and labels each cell with the SLICE it plays, not the pad number, so the wrap is
+    self-evident. The teaching hint row becomes "CHOP - n SLICES ON THE HITS" while a
+    chop is in force — measured at 117px worst case, under the 124px centered limit;
+    drawing both overran the line, which is why the hint yields.
+* mpages now has ONE file reader (`open_src`/`read_frames`/`close_src`) that both the
+  resampler and the transient detector use, instead of the resampler carrying its own.
+* TESTS: `tools/test_wav.lua` 19 -> **47 assertions**. Transient detection is asserted
+  against a generated file with impulses at KNOWN times (all four found, within a 10ms
+  envelope window either side); the slice model is LIFTED out of mangler.lua (not
+  copied) and asserted for boundaries, the wrap, positive lengths on all eight pads, and
+  a degenerate one-entry cut list.
+* GALLERY: regenerated at 4x, byte-identical — no page's drawing changed, because the
+  chop only alters what is drawn when a chop EXISTS and the suite's walk has none.
+  There is deliberately NO `pads-chop.png`: the suite cannot reach `ctx.pad_cuts` (a
+  local in mangler.lua) and a test-only backdoor in production code is not worth one
+  image. That state was verified by a one-off patched render and by the model tests.
+* DEFERRED, in this order and for this reason: normalize/trim the take (`peak_of` /
+  `trim_tail`) and window-snap-to-first-onset (`first_onset`) both operate on the
+  dumped take file, which the chopper now stands up — doing them after it means reusing
+  that path instead of building it twice. Nothing depends on them.
+* NOT brought over, and should not be: `lib/mot.lua` (pure .ot bytes), the 64-cell rack,
+  export/import, the 44.1k target, and the autosampler — its output is a rack of cells,
+  and the instrument has nowhere to put those.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
