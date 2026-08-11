@@ -1953,6 +1953,34 @@ device-applied 2026-08-11)**. Nothing here touches mangler.lua, lib/, or the .sc
   unrun**. Loading preset 1 is a reasonable first step into that gate: if ◇ lights on
   a clean loop, a good part of the signal path has proved itself.
 
+Sixty-seventh change — **the grid's device lessons, and the Launchpad driver, under
+test at last (tooling only)**.
+* **test_control 136 -> 143**: every grid fix CLAUDE.md records as a device lesson now
+  has a test, and all of them HOLD. A release belongs to the surface that took the
+  press (hold a pad, change page, release — this is what latched `tape_reverse` forever
+  and stranded held note voices); note-offs are not gated on `keys_enable`; two fingers
+  on the scene bank; the spine reaches the same param from every page; grid STOP
+  silences the layer decks. MUTATION-PROVEN on the one that matters most: routing a
+  release by the CURRENT page instead of the press's surface leaves a stale span anchor,
+  and the test reads 0.125 where 0.5 was expected — exactly the documented symptom.
+* **NEW tools/test_launchpad.lua, 41 assertions.** The Mini MK3 driver is
+  device-confirmed but its harness was throwaway. The parts asserted are the ones that
+  fail SILENTLY: pad geometry (Programmer mode numbers from the BOTTOM row while the
+  grid's y=1 is the TOP — get it backwards and the surface is flipped with no error),
+  the full round trip, the semantic palette and its 7-bit ceiling, a monotone brightness
+  ramp, the SysEx header checked against Novation's documented frame, and the port
+  choice.
+* **TWO OF MY OWN TESTS WERE WRONG BEFORE THE CODE WAS**, which is worth recording:
+  `LP_HUE` is the RGB table and the NAMES live in `LP_HUE_ID`; and a DAW-only port is
+  correctly REFUSED (it lights but never reports a press, so falling back to midigrid
+  gives a working grid rather than one that looks alive and does nothing).
+* And the DAW-exclusion test only bit once the device names were REAL: tidy names like
+  "LPMiniMK3 DAW In" do not exercise it, but a true ALSA name carries a `28:0` suffix
+  whose digits match the same "second interface?" heuristic the port choice uses. A test
+  written with clean fixtures passed against a mutant that a real device would have
+  caught.
+* 271 assertions across four harnesses; renders byte-identical; source == dist.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2112,6 +2140,7 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 lua tools/test_control.lua   # encoders, keys, the master, STOP  (123 assertions)
 lua tools/test_deck.lua      # the softcut loop decks: region isolation (35)
 lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
+lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
 
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua as
 # IIFEs (proven byte-identical via the seeded render suite). the dist file
