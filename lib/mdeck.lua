@@ -63,6 +63,12 @@ local function both(d, fn) fn(d.va); fn(d.vb) end
 -- LEVEL folds in the master and the global STOP, exactly like the engine and
 -- tape decks do — one key silences everything that makes sound, with no
 -- exceptions and no deck that forgot.
+--
+-- `play` silences the deck by LEVEL rather than stopping its head, and that is
+-- the point: two decks at different rates are only in a drifting relationship
+-- while both heads keep moving. Stopping one and restarting it would snap it
+-- back to its loop start and lose the phase against the other. The page says
+-- MUTE, not STOP, because that is what it does.
 function M.update_level(d)
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local lv = get(d, "level", 0.8) * out * (get(d, "play", 1) == 1 and 1 or 0)

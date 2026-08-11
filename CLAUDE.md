@@ -1798,6 +1798,30 @@ gate: doc/layers.md. Two more independent loop decks on softcut, beside the tape
   and per-deck pset files. Mutation-proven: making `clear` whole-buffer fails 4
   assertions. source == dist across 48 shots.
 
+S25 REVIEW PASS (same change, pre-gate — four fixes, none of which the render
+suite would have caught, because three of them are only visible while an encoder is
+TURNING or a master is moving):
+(1) **The layer encoders read `--` and drew no dial.** `fmt_value` mapped `@win_move`
+to an anchor param by hand and knew nothing about the new compound targets, and
+`param_norm` (the footer dial) had no idea about ANY of them. Fixed by making ONE
+resolver, `ctx.enc_target`, that enc(), the footer value and the footer dial all ask —
+they each needed the same answer and two of them didn't have it. GOTCHA inside the
+fix: `enc()` must keep `id` as the COMPOUND target, not the resolved one, because the
+footer matches its flash against the slot's id — reassigning it silently stopped the
+value swelling at all. `@win_move` works for exactly this reason.
+(2) **The master output didn't master the layers.** `out_level`'s action was
+`Mtape.update_mix`, which touches the engine and the tape only. STOP had been wired to
+the decks; the master had not.
+(3) `body_LAYERS` indexed `decks[1]`/`decks[2]` directly — a latent crash if the deck
+list is ever shortened. It loops now.
+(4) **`play` is MUTE, and now says so.** It silences by LEVEL rather than stopping the
+head — deliberately, because two decks at different rates only hold their drifting
+relationship while both heads keep moving; stopping one would snap it back to its loop
+start and lose the phase. The strip said "STOP", which is the one thing it does not do.
+The key is labelled MUTE and lit means muted.
+Suite gained LAYERS_TURN (the footer mid-swell — the shot that proves fix 1); 50 shots,
+source == dist.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

@@ -251,6 +251,19 @@ function ctx.layer_sel()
 end
 -- re-send every deck's level: the master, the transport and the global STOP
 -- all fold into it, so anything that moves one of those has to come through here
+-- a compound encoder target ("@...") resolves to a REAL param id: the one the
+-- footer should print and the dial should point at. Pair-movers report their
+-- anchor, the low edge. ONE resolver, because the encoder, the footer value and
+-- the footer dial each need the same answer and two of them used to not have it
+-- (the layer targets read "--" and drew no pointer).
+function ctx.enc_target(id)
+  if id == "@win_move" then return "pos_start" end
+  if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
+  if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
+  if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
+  return id
+end
+
 function ctx.layers_relevel()
   for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
 end
@@ -506,10 +519,12 @@ local KEYS = {
       lit = function() return pget(Mdeck.p(ctx.layer_sel(), "rec"), 0) == 1 end,
       pon = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 1) end,
       poff = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 0) end },
-    k3 = { label = "PLAY",
-      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 0) == 1 end,
-      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end,
-      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end },
+    -- MUTE rather than a transport stop: the head keeps rolling so the decks
+    -- hold their drift against each other (see lib/mdeck.lua). Lit = audible.
+    k3 = { label = "MUTE",
+      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 1) == 0 end,
+      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end,
+      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end },
     erase = function()
       local d = ctx.layer_sel()
       params:set(Mdeck.p(d, "rec"), 0)
@@ -1432,7 +1447,10 @@ local function init_params()
   params:set_action("mix", Mtape.update_mix)
   params:add_control("out_level", "out level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  params:set_action("out_level", Mtape.update_mix)
+  params:set_action("out_level", function()
+    Mtape.update_mix()
+    ctx.layers_relevel()   -- the master masters the layer decks too
+  end)
   params:add_control("sc_level", "eng level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
   params:set_action("sc_level", Mtape.update_mix)
@@ -2132,9 +2150,11 @@ function enc(n, d)
     -- the LAYERS encoders address whichever deck is selected, so they resolve
     -- to a param id at turn time rather than being fixed in ENC_MAP
     elseif id == "@lay_level" or id == "@lay_rate" then
-      local real = Mdeck.p(ctx.layer_sel(), id == "@lay_rate" and "rate" or "level")
+      -- delta the REAL param, but keep `id` as the compound target: the footer
+      -- matches its flash against the slot's id, and the resolver turns it back
+      -- into a value for display. (@win_move works for exactly this reason.)
+      local real = ctx.enc_target(id)
       params:delta(real, fine_delta(real, d))
-      id = real
     elseif id == "@lay_move" then
       local dk = ctx.layer_sel()
       move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)

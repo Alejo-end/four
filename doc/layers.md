@@ -131,6 +131,21 @@ handles (`min(5, floor(45/(#PAGES-1)))`) and has done before.
   capture is a real follow-up, but it is a separate design (what does "one bar"
   mean when the deck is already mid-loop?) and belongs after this is played.
 
+## Two things that are the way they are on purpose
+
+**`play` silences by level; the head keeps rolling.** Two decks at different rates
+are only in a drifting relationship while both heads keep moving — stop one and
+restart it and it snaps back to its loop start, losing the phase against the
+other, which is the whole reason for having two. So the key is **MUTE**, not
+STOP, and the page says so.
+
+**The compound encoder targets resolve through one place.** `@lay_level`,
+`@lay_rate` and `@lay_move` address whichever deck is selected, so they are not
+fixed param ids. `ctx.enc_target` turns them into a real id, and the encoder, the
+footer value and the footer dial all ask it. Note that `enc()` keeps the
+*compound* id afterwards: the footer matches its flash against the slot's id, so
+resolving too early stops the value from ever appearing.
+
 ## Gate
 
 Add to `doc/device-gate.md` after the existing stages:

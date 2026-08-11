@@ -609,6 +609,7 @@ local FULL = {
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
 -- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
 local function param_norm(id)
+  if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return nil end
   local p = params:lookup_param(id)
   local v = params:get(id)
@@ -640,8 +641,7 @@ end
 local RATE_IDS = { scan = true, tape_rate = true }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
-  if id == "@win_move" then id = "pos_start" end
-  if id == "@loop_move" then id = "loop_start" end
+  if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return "--" end
   if id == "seq_slice" then
     return tostring(floor(params:get(id) + 0.5) + 1)   -- slices read 1..8
@@ -1992,7 +1992,10 @@ local function layer_strip(d, y, sel, frame)
     end
     ptext(pget(d.id .. "_pre", 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
   elseif not playing then
-    ptext("STOP", 20, y - 6, 1, 5)
+    -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
+    -- different rates only stay in their drifting relationship if neither one
+    -- restarts, so silencing a layer must not move it. The word has to say so.
+    ptext("MUTE", 20, y - 6, 1, 5)
   end
 
   local x0, x1 = 38, 124
@@ -2056,8 +2059,9 @@ local function body_LAYERS(frame)
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
   ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
-  layer_strip(decks[1], 27, sel == 1, frame)
-  layer_strip(decks[2], 45, sel == 2, frame)
+  for i = 1, math.min(#decks, 2) do
+    layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
+  end
 end
 
 local BODY = {

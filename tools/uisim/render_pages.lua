@@ -648,6 +648,12 @@ else
   run_ticks(4)
   redraw()
   export(pfx("LAYERS", "_LIVE"))
+  -- the footer while a layer encoder is TURNING: it used to read "--" because
+  -- the compound target had no anchor param to resolve to
+  enc(3, 2)
+  run_ticks(2)
+  redraw()
+  export(pfx("LAYERS", "_TURN"))
   params:set("lay1_rec", 0)
   params:set("layer_sel", 1)
   -- master STOP: the title chip inverts, on every page

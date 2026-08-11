@@ -576,6 +576,12 @@ local function both(d, fn) fn(d.va); fn(d.vb) end
 -- LEVEL folds in the master and the global STOP, exactly like the engine and
 -- tape decks do — one key silences everything that makes sound, with no
 -- exceptions and no deck that forgot.
+--
+-- `play` silences the deck by LEVEL rather than stopping its head, and that is
+-- the point: two decks at different rates are only in a drifting relationship
+-- while both heads keep moving. Stopping one and restarting it would snap it
+-- back to its loop start and lose the phase against the other. The page says
+-- MUTE, not STOP, because that is what it does.
 function M.update_level(d)
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local lv = get(d, "level", 0.8) * out * (get(d, "play", 1) == 1 and 1 or 0)
@@ -3380,6 +3386,7 @@ local FULL = {
 -- normalized 0..1 position of a param, for the dial pointer. bipolar
 -- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
 local function param_norm(id)
+  if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return nil end
   local p = params:lookup_param(id)
   local v = params:get(id)
@@ -3411,8 +3418,7 @@ end
 local RATE_IDS = { scan = true, tape_rate = true }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
-  if id == "@win_move" then id = "pos_start" end
-  if id == "@loop_move" then id = "loop_start" end
+  if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return "--" end
   if id == "seq_slice" then
     return tostring(floor(params:get(id) + 0.5) + 1)   -- slices read 1..8
@@ -4763,7 +4769,10 @@ local function layer_strip(d, y, sel, frame)
     end
     ptext(pget(d.id .. "_pre", 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
   elseif not playing then
-    ptext("STOP", 20, y - 6, 1, 5)
+    -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
+    -- different rates only stay in their drifting relationship if neither one
+    -- restarts, so silencing a layer must not move it. The word has to say so.
+    ptext("MUTE", 20, y - 6, 1, 5)
   end
 
   local x0, x1 = 38, 124
@@ -4827,8 +4836,9 @@ local function body_LAYERS(frame)
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
   ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
-  layer_strip(decks[1], 27, sel == 1, frame)
-  layer_strip(decks[2], 45, sel == 2, frame)
+  for i = 1, math.min(#decks, 2) do
+    layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
+  end
 end
 
 local BODY = {
@@ -5034,6 +5044,19 @@ function ctx.layer_sel()
 end
 -- re-send every deck's level: the master, the transport and the global STOP
 -- all fold into it, so anything that moves one of those has to come through here
+-- a compound encoder target ("@...") resolves to a REAL param id: the one the
+-- footer should print and the dial should point at. Pair-movers report their
+-- anchor, the low edge. ONE resolver, because the encoder, the footer value and
+-- the footer dial each need the same answer and two of them used to not have it
+-- (the layer targets read "--" and drew no pointer).
+function ctx.enc_target(id)
+  if id == "@win_move" then return "pos_start" end
+  if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
+  if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
+  if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
+  return id
+end
+
 function ctx.layers_relevel()
   for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
 end
@@ -5289,10 +5312,12 @@ local KEYS = {
       lit = function() return pget(Mdeck.p(ctx.layer_sel(), "rec"), 0) == 1 end,
       pon = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 1) end,
       poff = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 0) end },
-    k3 = { label = "PLAY",
-      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 0) == 1 end,
-      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end,
-      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end },
+    -- MUTE rather than a transport stop: the head keeps rolling so the decks
+    -- hold their drift against each other (see lib/mdeck.lua). Lit = audible.
+    k3 = { label = "MUTE",
+      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 1) == 0 end,
+      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end,
+      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end },
     erase = function()
       local d = ctx.layer_sel()
       params:set(Mdeck.p(d, "rec"), 0)
@@ -6215,7 +6240,10 @@ local function init_params()
   params:set_action("mix", Mtape.update_mix)
   params:add_control("out_level", "out level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  params:set_action("out_level", Mtape.update_mix)
+  params:set_action("out_level", function()
+    Mtape.update_mix()
+    ctx.layers_relevel()   -- the master masters the layer decks too
+  end)
   params:add_control("sc_level", "eng level",
     controlspec.new(0, 1, "lin", 0, 1.0, ""))
   params:set_action("sc_level", Mtape.update_mix)
@@ -6915,9 +6943,11 @@ function enc(n, d)
     -- the LAYERS encoders address whichever deck is selected, so they resolve
     -- to a param id at turn time rather than being fixed in ENC_MAP
     elseif id == "@lay_level" or id == "@lay_rate" then
-      local real = Mdeck.p(ctx.layer_sel(), id == "@lay_rate" and "rate" or "level")
+      -- delta the REAL param, but keep `id` as the compound target: the footer
+      -- matches its flash against the slot's id, and the resolver turns it back
+      -- into a value for display. (@win_move works for exactly this reason.)
+      local real = ctx.enc_target(id)
       params:delta(real, fine_delta(real, d))
-      id = real
     elseif id == "@lay_move" then
       local dk = ctx.layer_sel()
       move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
