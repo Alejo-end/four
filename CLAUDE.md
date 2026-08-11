@@ -1589,6 +1589,13 @@ FROM THE FOUNDRY REVIEW (the shared core — the forge-only findings do not appl
   `Mpages.convert_sr` (cubic, yields, beside the RIFF walker and the shared decoder it
   uses) converts to the server rate before the engine reads it; falls back to a raw
   load and SAYS so if it cannot decode. No new SC command.
+  DECIDED (user, 2026-08-11): the two resamplers stay SEPARATE. `foundry` converts
+  through `Mchain.render_wav` (which also does segments, fades, normalize and the grid
+  stride for chain export); `main` has the plain whole-file `Mpages.convert_sr`. They
+  share the RIFF walker and the sample decoder already, so what is actually duplicated
+  is the 4-line cubic kernel. Do NOT collapse them unasked. The one place this bites is
+  a future merge: `ctx.load_sample` calls a different function on each branch, so that
+  hunk will conflict and someone has to choose which entry point main keeps.
 FROM THIS BRANCH'S REVIEW — three that destroy audio:
 * **PRINT was not aborted by STOP.** Refusing to START while stopped was only half the
   guard: a STOP mid-bounce silences the master, and the rest of the pass recorded
