@@ -2021,8 +2021,9 @@ mutation-proven.
   thirteen), test_control's header (it DOES share tools/uisim/env.lua).
 VERIFIED: luac clean, 275 assertions across the four harnesses, 47 of 50
 base shots byte-identical (the 3 LAYERS diffs are the selector-at-rest
-footer), source == dist across 66 shots x 4 variants. Lua-only: save +
-reload. The engine RESTART + count-65 device gate is unchanged and pending.
+footer), source == dist (66 shots total across the 4 variants). Lua-only:
+save + reload. The engine RESTART + count-65 device gate is unchanged and
+pending.
 
 Sixty-ninth change: **the registry check + the ◇ harness (tooling + list
 exports, NO behavior change, fingerprint STAYS 65, all renders byte-identical,
@@ -2051,9 +2052,10 @@ class without moving the lists.
   every buffer writer — asserting the diamond (detected by its exact
   8-lit/5-dark pixel shape) dies and revives each time. Mutation-proven:
   re-introducing either historical lie fails exactly its assertion.
-* Six mutation checks on the classification (a removed exclude, a removed
-  FINE/RATE/SHORT entry, a stale exclude, a dead CHAOS target, a corrupted
-  preset id) each fail exactly their assertion.
+* Seven mutation checks on the classification (a removed exclude, a removed
+  FINE entry, a removed RATE entry, a removed SHORT entry, a stale exclude,
+  a dead CHAOS target, a corrupted preset id) each fail exactly their
+  assertion.
 VERIFIED: luac clean, 334 assertions across FIVE harnesses (163/37/52/41/41),
 renders byte-identical, source == dist. Save + reload only if deploying; the
 engine RESTART + count-65 device gate is unchanged and still pending — it is
