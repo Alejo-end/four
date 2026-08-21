@@ -49,6 +49,11 @@ local ctx = {
   pget = function(id, d) if P[id] ~= nil then return P[id] end return d end,
   clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
   amp_in = { 0.5, 0.5 }, amp_out = { 0.2, 0.2 },
+  -- the shared record-meter law from mangler.lua, over the amps above
+  cut_rec_amp = function()
+    local cs = P.cut_source or 0
+    return 0.5 * (1 - cs) + 0.2 * cs
+  end,
   paint_bins = function(bins, lastb, bin, amp) bins[bin] = amp; return bin end,
 }
 Mdeck.init(ctx)
@@ -99,6 +104,16 @@ Mdeck.update_loop(d1)
 -- point, which is an artifact of the subtraction, not of what was sent)
 near(last("loop_end", 3)[3] - last("loop_start", 3)[3], 0.1, 1e-6,
   "a zero-length loop is floored, not sent to softcut as zero")
+
+-- ...and the floor never pushes past the region's end: at the far right it
+-- would otherwise loop (and record) the first 100ms of the NEXT deck's region
+P.lay1_start = 1; P.lay1_end = 1
+calls = {}
+Mdeck.update_loop(d1)
+near(last("loop_end", 3)[3], 180, 1e-6,
+  "a loop floored at the far right stays inside the region")
+near(last("loop_start", 3)[3], 179.9, 1e-6,
+  "...by moving the START back instead")
 defaults()
 
 -- ---- ERASE is the collision that matters ---------------------------------

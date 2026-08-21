@@ -96,7 +96,13 @@ function M.update_loop(d)
   local a = d.from + clamp(get(d, "start", 0), 0, 1) * d.len
   local b = d.from + clamp(get(d, "end", 1), 0, 1) * d.len
   local lo, hi = math.min(a, b), math.max(a, b)
-  if hi - lo < 0.1 then hi = lo + 0.1 end     -- softcut's own minimum
+  -- softcut's 0.1s minimum, held INSIDE the region: floored past the end, a
+  -- loop parked at the far right would read (and record) the first 100ms of
+  -- the NEXT deck's region
+  if hi - lo < 0.1 then
+    hi = math.min(lo + 0.1, d.from + d.len)
+    lo = hi - 0.1
+  end
   both(d, function(v)
     sc.loop_start(v, lo)
     sc.loop_end(v, hi)
@@ -163,9 +169,7 @@ function M.on_phase(voice, pos)
     if d.va == voice then
       d.phase = clamp((pos - d.from) / d.len, 0, 1)
       if get(d, "rec", 0) == 1 then
-        local cs = pget("cut_source", 0)
-        local a = math.max(C.amp_in[1], C.amp_in[2]) * (1 - cs)
-          + math.max(C.amp_out[1], C.amp_out[2]) * cs
+        local a = C.cut_rec_amp()   -- what softcut records: the shared law
         if a > 0.01 then d.any = true end
         d.wave_bin = C.paint_bins(d.wave, d.wave_bin,
           math.floor(d.phase * 127.999) + 1, a, get(d, "pre", 1))

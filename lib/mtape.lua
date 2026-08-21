@@ -15,15 +15,21 @@ function M.init(ctx)
   pget = ctx.pget
 end
 
--- MIX page: `mix` crossfades SC engine <-> tape, out_level masters
--- both, each side keeps its own trim. center keeps both at full trim.
-function M.update_mix()
+-- THE gain law: `mix` crossfades SC engine <-> tape (a plateau — center keeps
+-- both at full trim), out_level masters both, stop_all chokes both. returns
+-- eng_gain, tape_gain, master_out. update_mix sends it and the MIX page draws
+-- it, so the picture reads from the one law instead of mirroring it.
+function M.gains()
   local mixv = pget("mix", 0.5)
-  -- stop_all (the master STOP) chokes both decks right here; levels slew,
-  -- so stop/start are click-free and START restores the exact mix
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
-  local sc_l = pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out
-  local tp_l = pget("cut_level", 1) * math.min(1, 2 * mixv) * out
+  return pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out,
+    pget("cut_level", 1) * math.min(1, 2 * mixv) * out,
+    out
+end
+
+-- levels slew, so stop/start are click-free and START restores the exact mix
+function M.update_mix()
+  local sc_l, tp_l = M.gains()
   if engine.level then engine.level(sc_l) end
   sc.level(1, tp_l)
   sc.level(2, tp_l)
@@ -56,7 +62,12 @@ function M.update_tape_loop()
   local a = pget("loop_start", 0) * TAPE_LEN
   local b = pget("loop_end", 1) * TAPE_LEN
   local lo, hi = math.min(a, b), math.max(a, b)
-  if hi - lo < 0.1 then hi = lo + 0.1 end
+  -- the 100ms floor, held inside the tape's own 0-60s (same rule as the layer
+  -- decks): floored past the end it would loop buffer the tape does not own
+  if hi - lo < 0.1 then
+    hi = math.min(lo + 0.1, TAPE_LEN)
+    lo = hi - 0.1
+  end
   tape_set(function(v)
     sc.loop_start(v, lo)
     sc.loop_end(v, hi)
@@ -162,8 +173,7 @@ function M.pset_read(number)
     -- instead of from disk, which is the same failure by another route. An
     -- empty tape in the pset means an empty tape after loading it.
     M.clear_buffer()
-    C.twave_any = false
-    if C.clear_twave then C.clear_twave() end
+    if C.clear_twave then C.clear_twave() end   -- wipes the picture + twave_any
   end
 end
 

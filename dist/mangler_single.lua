@@ -37,9 +37,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (twelve stations: TAKE VOICE TAPE · FILTER DELAY
---          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION — the header dots
---          are the signal map)
+--   E1     select page (thirteen stations: TAKE VOICE TAPE · FILTER DELAY
+--          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION LAYERS — the
+--          header dots are the signal map)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -93,8 +93,9 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- ten stations on one signal path —
--- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE
+-- thirteen stations on one signal path —
+-- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE |
+-- ORBIT EROSION LAYERS
 local PAGES = {
   "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
   "PADS", "MOTION", "SCENE", "ORBIT", "EROSION", "LAYERS",
@@ -131,12 +132,15 @@ local function window_bounds()
   return lo, hi, max(hi - lo, 0.001)
 end
 
--- zoom-aware fine control: window/loop edge params scale their encoder
+-- zoom-aware fine control: window/loop/layer edge params scale their encoder
 -- deltas by the current span, so steps shrink as the region tightens —
 -- a wide-open window moves fast, a tight loop nudges by milliseconds.
 -- (combined with the 0.002 quantum on these specs: ~10ms at the finest.)
+-- every value other than "win" is the param-id prefix of a loop pair.
 local FINE_IDS = { pos_start = "win", pos_end = "win",
-                   loop_start = "loop", loop_end = "loop" }
+                   loop_start = "loop", loop_end = "loop",
+                   lay1_start = "lay1", lay1_end = "lay1",
+                   lay2_start = "lay2", lay2_end = "lay2" }
 
 local function fine_delta(id, d)
   local kind = FINE_IDS[id]
@@ -146,7 +150,7 @@ local function fine_delta(id, d)
     local _, _, s = window_bounds()
     span = s
   else
-    span = math.abs(pget("loop_end", 1) - pget("loop_start", 0))
+    span = math.abs(pget(kind .. "_end", 1) - pget(kind .. "_start", 0))
   end
   return d * clamp(math.max(span, 0.001) * 4, 0.08, 1)
 end
@@ -345,15 +349,21 @@ function M.init(ctx)
   pget = ctx.pget
 end
 
--- MIX page: `mix` crossfades SC engine <-> tape, out_level masters
--- both, each side keeps its own trim. center keeps both at full trim.
-function M.update_mix()
+-- THE gain law: `mix` crossfades SC engine <-> tape (a plateau — center keeps
+-- both at full trim), out_level masters both, stop_all chokes both. returns
+-- eng_gain, tape_gain, master_out. update_mix sends it and the MIX page draws
+-- it, so the picture reads from the one law instead of mirroring it.
+function M.gains()
   local mixv = pget("mix", 0.5)
-  -- stop_all (the master STOP) chokes both decks right here; levels slew,
-  -- so stop/start are click-free and START restores the exact mix
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
-  local sc_l = pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out
-  local tp_l = pget("cut_level", 1) * math.min(1, 2 * mixv) * out
+  return pget("sc_level", 1) * math.min(1, 2 * (1 - mixv)) * out,
+    pget("cut_level", 1) * math.min(1, 2 * mixv) * out,
+    out
+end
+
+-- levels slew, so stop/start are click-free and START restores the exact mix
+function M.update_mix()
+  local sc_l, tp_l = M.gains()
   if engine.level then engine.level(sc_l) end
   sc.level(1, tp_l)
   sc.level(2, tp_l)
@@ -386,7 +396,12 @@ function M.update_tape_loop()
   local a = pget("loop_start", 0) * TAPE_LEN
   local b = pget("loop_end", 1) * TAPE_LEN
   local lo, hi = math.min(a, b), math.max(a, b)
-  if hi - lo < 0.1 then hi = lo + 0.1 end
+  -- the 100ms floor, held inside the tape's own 0-60s (same rule as the layer
+  -- decks): floored past the end it would loop buffer the tape does not own
+  if hi - lo < 0.1 then
+    hi = math.min(lo + 0.1, TAPE_LEN)
+    lo = hi - 0.1
+  end
   tape_set(function(v)
     sc.loop_start(v, lo)
     sc.loop_end(v, hi)
@@ -492,8 +507,7 @@ function M.pset_read(number)
     -- instead of from disk, which is the same failure by another route. An
     -- empty tape in the pset means an empty tape after loading it.
     M.clear_buffer()
-    C.twave_any = false
-    if C.clear_twave then C.clear_twave() end
+    if C.clear_twave then C.clear_twave() end   -- wipes the picture + twave_any
   end
 end
 
@@ -609,7 +623,13 @@ function M.update_loop(d)
   local a = d.from + clamp(get(d, "start", 0), 0, 1) * d.len
   local b = d.from + clamp(get(d, "end", 1), 0, 1) * d.len
   local lo, hi = math.min(a, b), math.max(a, b)
-  if hi - lo < 0.1 then hi = lo + 0.1 end     -- softcut's own minimum
+  -- softcut's 0.1s minimum, held INSIDE the region: floored past the end, a
+  -- loop parked at the far right would read (and record) the first 100ms of
+  -- the NEXT deck's region
+  if hi - lo < 0.1 then
+    hi = math.min(lo + 0.1, d.from + d.len)
+    lo = hi - 0.1
+  end
   both(d, function(v)
     sc.loop_start(v, lo)
     sc.loop_end(v, hi)
@@ -676,9 +696,7 @@ function M.on_phase(voice, pos)
     if d.va == voice then
       d.phase = clamp((pos - d.from) / d.len, 0, 1)
       if get(d, "rec", 0) == 1 then
-        local cs = pget("cut_source", 0)
-        local a = math.max(C.amp_in[1], C.amp_in[2]) * (1 - cs)
-          + math.max(C.amp_out[1], C.amp_out[2]) * cs
+        local a = C.cut_rec_amp()   -- what softcut records: the shared law
         if a > 0.01 then d.any = true end
         d.wave_bin = C.paint_bins(d.wave, d.wave_bin,
           math.floor(d.phase * 127.999) + 1, a, get(d, "pre", 1))
@@ -858,7 +876,6 @@ function M.init(ctx)
     if pget("keys_enable", 1) == 0 then return end
     if code == "Z" or code == "X" then
       params:delta("kb_octave", code == "X" and 1 or -1)
-      C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
     else
       local st = KB_NOTES[code]
       if st then
@@ -1163,12 +1180,10 @@ local function grid_note_key(x, y, z)
     if not st then
       if z == 1 and (x == 1 or x == 8) then
         params:delta("kb_octave", x == 8 and 1 or -1)
-        C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
       end
       return
     end
   end
-  if st == nil then return end
   -- a note pad: route to the drone `pitch` or a polyphonic voice, per
   -- pad_input. both edges, so a voice releases on lift. id 2000+ keeps grid
   -- voice ids distinct from MIDI (1000+) and the screen bank (0..8).
@@ -2475,12 +2490,30 @@ function M.morph(slot, amt, opts)
     if not (amt <= 0 and morph_from) then return false end
     morphing = true
     -- walk the morph list IN ORDER (like every other writer here), restoring
-    -- only the ids this sweep displaced (the last_sent filter)
+    -- only the ids this sweep displaced (the last_sent filter). the region
+    -- pairs go WIDENING EDGE FIRST — the same rule apply() and the sweep
+    -- follow: restored in bare list order a pair can cross for one write,
+    -- and a crossed pair hits the 100ms loop floor and jumps the head.
+    local function back(k)
+      if last_sent[k] ~= nil and morph_from[k] ~= nil
+          and params.lookup[k] then
+        pset(k, morph_from[k])
+      end
+    end
+    local rdone
     for i = 1, #SCENE_MORPH_IDS do
       local id = SCENE_MORPH_IDS[i]
-      if last_sent[id] ~= nil and morph_from[id] ~= nil
-          and params.lookup[id] then
-        pset(id, morph_from[id])
+      if not (rdone and rdone[id]) then
+        local partner = EDGE_PAIRS[id]
+        if partner and morph_from[id] ~= nil and params.lookup[id]
+            and morph_from[partner] ~= nil and params.lookup[partner] then
+          if morph_from[id] < params:get(id) then back(id); back(partner)
+          else back(partner); back(id) end
+          rdone = rdone or {}
+          rdone[partner] = true
+        else
+          back(id)
+        end
       end
     end
     morphing = false
@@ -2852,8 +2885,6 @@ local pget, clamp, window_bounds, FPS, PAGES
 local ptext, ptext_c, ptext_r, chip, text_w
 local amp_in, amp_out
 
-local BAND_T, BAND_B = 15, 40  -- visualization band (strip pages)
-
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
 local wave = {}
@@ -2902,12 +2933,10 @@ end
 function M.update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
-    -- meter what softcut actually records: the ADC tap, the engine output
-    -- (cut_source WET), or the blend — a WET print otherwise painted nothing
+    -- meter what softcut actually records (C.cut_rec_amp — the ADC tap, the
+    -- engine output, or the blend): a WET print otherwise painted nothing
     -- and left twave_any false over audible tape
-    local cs = pget("cut_source", 0)
-    local a = max(amp_in[1], amp_in[2]) * (1 - cs)
-      + max(amp_out[1], amp_out[2]) * cs
+    local a = C.cut_rec_amp()
     if a > 0.01 then C.twave_any = true end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end
@@ -3370,12 +3399,11 @@ local SHORT = {
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   regen = "REGN",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
-  ["@win_move"] = "MOV", ["@loop_move"] = "POS",
+  ["@win_move"] = "MOV",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
   clouds_pos = "POS", clouds_tex = "TEX", clouds_fb = "FB", clouds_lofi = "LOFI",
-  kb_octave = "OCT",
   warp_window = "WIN", warp_rand = "RAND",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
   cut_source = "SRC",
@@ -3416,7 +3444,7 @@ local FULL = {
   rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
   regen = "REGEN",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
-  ["@win_move"] = "MOVE", ["@loop_move"] = "MOVE",
+  ["@win_move"] = "MOVE",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPREAD", density = "DENSITY", grain_level = "GRAIN",
   clouds_pos = "POSITION", clouds_tex = "TEXTURE", clouds_fb = "FEEDBACK",
@@ -3439,25 +3467,8 @@ local FULL = {
   ["@lay_level"] = "LEVEL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
 }
 
--- normalized 0..1 position of a param, for the dial pointer. bipolar
--- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
-local function param_norm(id)
-  if id and C.enc_target then id = C.enc_target(id) end
-  if not (id and params.lookup[id]) then return nil end
-  local p = params:lookup_param(id)
-  local v = params:get(id)
-  if p.controlspec then
-    return clamp(p.controlspec:unmap(v), 0, 1)
-  elseif p.count then
-    return p.count > 1 and (v - 1) / (p.count - 1) or 0
-  elseif p.min and p.max and p.max > p.min then
-    return (v - p.min) / (p.max - p.min)
-  end
-  return clamp(v, 0, 1)
-end
-
--- normalized 0..1 of an ARBITRARY value for a param (not the live value) —
--- used to plot the MOTION lanes' recorded events at their captured heights
+-- normalized 0..1 of a value for a param: controlspec unmap, option index,
+-- or number range. plots the MOTION lanes' events at their captured heights.
 local function value_norm(id, v)
   local p = params.lookup[id] and params:lookup_param(id)
   if not p then return 0 end
@@ -3467,11 +3478,19 @@ local function value_norm(id, v)
   return clamp(v, 0, 1)
 end
 
+-- the LIVE value's normalized position (compound "@" targets resolve first)
+local function param_norm(id)
+  if id and C.enc_target then id = C.enc_target(id) end
+  if not (id and params.lookup[id]) then return nil end
+  return value_norm(id, params:get(id))
+end
+
 -- footer value text for a param: compact, ALL-CAPS abbreviations. a few
 -- ids get hand-tuned units (cutoff kHz, pitch semitones, rates x, times);
 -- a plain 0..1 linear control reads as a percentage; everything else falls
 -- back to the norns string.
-local RATE_IDS = { scan = true, tape_rate = true }
+local RATE_IDS = { scan = true, tape_rate = true,
+                   lay1_rate = true, lay2_rate = true }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
@@ -3547,7 +3566,7 @@ end
 -- selector pages are the one exception to numbers-only-while-turning:
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
-  seq_slice = true, motion_lane = true, scene_slot = true,
+  seq_slice = true, motion_lane = true, scene_slot = true, layer_sel = true,
 }
 
 local FY = 58  -- the footer text row (four quiet words)
@@ -4173,15 +4192,14 @@ end
 
 -- ============================================================================
 -- 6 · MIX — the console (in meter → the two decks at their REAL gains →
---     master VU; the whole signal path on one screen)
+--     master VU). the layer decks live on their own page; this console is
+--     the engine <> tape crossfade.
 -- ============================================================================
 local function body_MIX(frame)
-  -- each lane's energy is its deck's REAL gain — the same law
-  -- Mtape.update_mix sends (trim x crossfade plateau x master x STOP)
+  -- each lane's energy is its deck's REAL gain: the ONE law itself
+  -- (C.mix_gains — trim x crossfade plateau x master x STOP), not a mirror
   local mixv = pget("mix", 0.5)
-  local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
-  local eng_g = pget("sc_level", 1) * min(1, 2 * (1 - mixv)) * out
-  local tape_g = pget("cut_level", 1) * min(1, 2 * mixv) * out
+  local eng_g, tape_g = C.mix_gains()
   local eng_on = pget("mode", 5) ~= 1 and eng_g > 0.001 and C.wave_any
   local tape_on = C.twave_any and tape_g > 0.001
   local newframe = C.frame ~= vu_last_frame
@@ -4939,6 +4957,16 @@ local function purity()
       or pget("resonance", 0) > 0.02 then return false end
   -- the tape deck must not be adding its own material
   if C.twave_any and pget("mix", 0.5) > 0.02 then return false end
+  -- ...and neither may the layer decks: material present and audibly playing
+  -- means the output is not just the take (the same rule, per deck)
+  local decks = C.layers
+  if decks then
+    for i = 1, #decks do
+      local d = decks[i]
+      if d.any and pget(d.id .. "_play", 1) == 1
+          and pget(d.id .. "_level", 0.8) > 0.01 then return false end
+    end
+  end
   return true
 end
 
@@ -5081,7 +5109,19 @@ function ctx.tempo()
   return 120
 end
 
+-- what the softcut decks RECORD right now, for the meters: the ADC tap, the
+-- engine output (cut_source WET), or the blend. one law for the tape picture
+-- (mpages) and the layer decks' pictures (mdeck).
+function ctx.cut_rec_amp()
+  local cs = pget("cut_source", 0)
+  return max(ctx.amp_in[1], ctx.amp_in[2]) * (1 - cs)
+    + max(ctx.amp_out[1], ctx.amp_out[2]) * cs
+end
+
 Mtape.init(ctx)
+-- THE deck gain law (eng, tape, master) lives in mtape; the MIX page draws
+-- the same numbers update_mix sends, so it reads them from here
+ctx.mix_gains = Mtape.gains
 ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
 Mdeck.init(ctx)
 -- TWO more loop decks beside the tape, on softcut voices the script does not
@@ -5092,7 +5132,6 @@ ctx.layers = {
   Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 }),
   Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 }),
 }
-ctx.deck = Mdeck
 ctx.deck_phase = function(v, pos) Mdeck.on_phase(v, pos) end
 -- which layer the page and its encoders address
 function ctx.layer_sel()
@@ -5280,6 +5319,9 @@ local KEYS = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
     erase = function()
+      -- disarm first, like the LAYERS erase: wiping while armed just
+      -- re-records the input into the freshly cleared loop
+      params:set("tape_rec", 0)
       Mtape.clear_buffer()
       ctx.clear_twave()
       params:set("tape_freeze", 0)
@@ -5593,7 +5635,6 @@ local function pad_cut(i)
   local j = i % n
   return c[j + 1], c[j + 2], j
 end
-ctx.pad_cut = pad_cut
 
 local function pad_pos(i, at_start)
   local a, b = pad_cut(i)
@@ -5601,7 +5642,6 @@ local function pad_pos(i, at_start)
   local lo, _, span = window_bounds()
   return lo + (i + (at_start and 0 or 0.5)) / ctx.pad_n * span
 end
-ctx.pad_pos = pad_pos
 
 -- how LONG a slice is, in the same buffer-fraction units as pad_pos. The
 -- engine's slice voice needs this or its PlayBuf runs from the slice start
@@ -5612,14 +5652,6 @@ local function pad_len(i)
   if a then return b - a end
   local _, _, span = window_bounds()
   return span / ctx.pad_n
-end
-ctx.pad_len = pad_len
-
--- how many slices there actually are: a chop finds what it finds, and eight
--- even slices is only the fallback
-function ctx.pad_count()
-  local c = ctx.pad_cuts
-  return (c and #c > 1) and (#c - 1) or ctx.pad_n
 end
 
 -- which SLICE a pad plays (0-based). Differs from the pad number once a chop
@@ -5937,6 +5969,8 @@ function ctx.take_pset_read(number)
   local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
   Mpages.erosion_reset()  -- the restored take carries its own age in the audio;
                           -- the counter is per-material, not per-session
+  ctx.snap_forget()       -- the buffer was replaced: the remembered window
+                          -- pointed at the previous session's material
   ctx.pads_uncut()        -- padlock_pset_read restores the pset's own cuts next
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
   ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1  -- bounds a re-save
@@ -6070,7 +6104,6 @@ function ctx.record_pass(path, secs, on_tick, done)
       if on_tick then on_tick(pass.n > 1 and pass.i / (pass.n - 1) or 1) end
       clock.sleep(1 / FPS)
       pass.i = pass.i + 1
-      ctx.pass_progress = pass.i / pass.n
       -- the global STOP is the abort: the one key that always means silence
       -- has to mean "stop making this" too. Refusing to START while stopped is
       -- only half the guard — a STOP pressed mid-pass silences the master, and
@@ -6080,7 +6113,6 @@ function ctx.record_pass(path, secs, on_tick, done)
     pcall(audio.tape_record_stop)
     clock.sleep(0.35)          -- let the tape writer flush + close the wav
     pass, pass_clock = nil, nil
-    ctx.pass_progress = 0
     if done then done(not aborted, path) end
   end)
   return true
@@ -6104,7 +6136,6 @@ function ctx.record_cancel()
   clock.cancel(pass_clock)
   pcall(audio.tape_record_stop)
   pass, pass_clock = nil, nil
-  ctx.pass_progress = 0
 end
 
 -- PRINT: the one-gesture full-mix resample. One pass of print_len seconds

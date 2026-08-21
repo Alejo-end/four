@@ -263,12 +263,10 @@ local function grid_note_key(x, y, z)
     if not st then
       if z == 1 and (x == 1 or x == 8) then
         params:delta("kb_octave", x == 8 and 1 or -1)
-        C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
       end
       return
     end
   end
-  if st == nil then return end
   -- a note pad: route to the drone `pitch` or a polyphonic voice, per
   -- pad_input. both edges, so a voice releases on lift. id 2000+ keeps grid
   -- voice ids distinct from MIDI (1000+) and the screen bank (0..8).

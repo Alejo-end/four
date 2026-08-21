@@ -27,9 +27,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (twelve stations: TAKE VOICE TAPE · FILTER DELAY
---          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION — the header dots
---          are the signal map)
+--   E1     select page (thirteen stations: TAKE VOICE TAPE · FILTER DELAY
+--          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION LAYERS — the
+--          header dots are the signal map)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -83,8 +83,9 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- ten stations on one signal path —
--- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE
+-- thirteen stations on one signal path —
+-- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE |
+-- ORBIT EROSION LAYERS
 local PAGES = {
   "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
   "PADS", "MOTION", "SCENE", "ORBIT", "EROSION", "LAYERS",
@@ -121,12 +122,15 @@ local function window_bounds()
   return lo, hi, max(hi - lo, 0.001)
 end
 
--- zoom-aware fine control: window/loop edge params scale their encoder
+-- zoom-aware fine control: window/loop/layer edge params scale their encoder
 -- deltas by the current span, so steps shrink as the region tightens —
 -- a wide-open window moves fast, a tight loop nudges by milliseconds.
 -- (combined with the 0.002 quantum on these specs: ~10ms at the finest.)
+-- every value other than "win" is the param-id prefix of a loop pair.
 local FINE_IDS = { pos_start = "win", pos_end = "win",
-                   loop_start = "loop", loop_end = "loop" }
+                   loop_start = "loop", loop_end = "loop",
+                   lay1_start = "lay1", lay1_end = "lay1",
+                   lay2_start = "lay2", lay2_end = "lay2" }
 
 local function fine_delta(id, d)
   local kind = FINE_IDS[id]
@@ -136,7 +140,7 @@ local function fine_delta(id, d)
     local _, _, s = window_bounds()
     span = s
   else
-    span = math.abs(pget("loop_end", 1) - pget("loop_start", 0))
+    span = math.abs(pget(kind .. "_end", 1) - pget(kind .. "_start", 0))
   end
   return d * clamp(math.max(span, 0.001) * 4, 0.08, 1)
 end
@@ -232,7 +236,19 @@ function ctx.tempo()
   return 120
 end
 
+-- what the softcut decks RECORD right now, for the meters: the ADC tap, the
+-- engine output (cut_source WET), or the blend. one law for the tape picture
+-- (mpages) and the layer decks' pictures (mdeck).
+function ctx.cut_rec_amp()
+  local cs = pget("cut_source", 0)
+  return max(ctx.amp_in[1], ctx.amp_in[2]) * (1 - cs)
+    + max(ctx.amp_out[1], ctx.amp_out[2]) * cs
+end
+
 Mtape.init(ctx)
+-- THE deck gain law (eng, tape, master) lives in mtape; the MIX page draws
+-- the same numbers update_mix sends, so it reads them from here
+ctx.mix_gains = Mtape.gains
 ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
 Mdeck.init(ctx)
 -- TWO more loop decks beside the tape, on softcut voices the script does not
@@ -243,7 +259,6 @@ ctx.layers = {
   Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 }),
   Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 }),
 }
-ctx.deck = Mdeck
 ctx.deck_phase = function(v, pos) Mdeck.on_phase(v, pos) end
 -- which layer the page and its encoders address
 function ctx.layer_sel()
@@ -431,6 +446,9 @@ local KEYS = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
     erase = function()
+      -- disarm first, like the LAYERS erase: wiping while armed just
+      -- re-records the input into the freshly cleared loop
+      params:set("tape_rec", 0)
       Mtape.clear_buffer()
       ctx.clear_twave()
       params:set("tape_freeze", 0)
@@ -744,7 +762,6 @@ local function pad_cut(i)
   local j = i % n
   return c[j + 1], c[j + 2], j
 end
-ctx.pad_cut = pad_cut
 
 local function pad_pos(i, at_start)
   local a, b = pad_cut(i)
@@ -752,7 +769,6 @@ local function pad_pos(i, at_start)
   local lo, _, span = window_bounds()
   return lo + (i + (at_start and 0 or 0.5)) / ctx.pad_n * span
 end
-ctx.pad_pos = pad_pos
 
 -- how LONG a slice is, in the same buffer-fraction units as pad_pos. The
 -- engine's slice voice needs this or its PlayBuf runs from the slice start
@@ -763,14 +779,6 @@ local function pad_len(i)
   if a then return b - a end
   local _, _, span = window_bounds()
   return span / ctx.pad_n
-end
-ctx.pad_len = pad_len
-
--- how many slices there actually are: a chop finds what it finds, and eight
--- even slices is only the fallback
-function ctx.pad_count()
-  local c = ctx.pad_cuts
-  return (c and #c > 1) and (#c - 1) or ctx.pad_n
 end
 
 -- which SLICE a pad plays (0-based). Differs from the pad number once a chop
@@ -1088,6 +1096,8 @@ function ctx.take_pset_read(number)
   local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
   Mpages.erosion_reset()  -- the restored take carries its own age in the audio;
                           -- the counter is per-material, not per-session
+  ctx.snap_forget()       -- the buffer was replaced: the remembered window
+                          -- pointed at the previous session's material
   ctx.pads_uncut()        -- padlock_pset_read restores the pset's own cuts next
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
   ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1  -- bounds a re-save
@@ -1221,7 +1231,6 @@ function ctx.record_pass(path, secs, on_tick, done)
       if on_tick then on_tick(pass.n > 1 and pass.i / (pass.n - 1) or 1) end
       clock.sleep(1 / FPS)
       pass.i = pass.i + 1
-      ctx.pass_progress = pass.i / pass.n
       -- the global STOP is the abort: the one key that always means silence
       -- has to mean "stop making this" too. Refusing to START while stopped is
       -- only half the guard — a STOP pressed mid-pass silences the master, and
@@ -1231,7 +1240,6 @@ function ctx.record_pass(path, secs, on_tick, done)
     pcall(audio.tape_record_stop)
     clock.sleep(0.35)          -- let the tape writer flush + close the wav
     pass, pass_clock = nil, nil
-    ctx.pass_progress = 0
     if done then done(not aborted, path) end
   end)
   return true
@@ -1255,7 +1263,6 @@ function ctx.record_cancel()
   clock.cancel(pass_clock)
   pcall(audio.tape_record_stop)
   pass, pass_clock = nil, nil
-  ctx.pass_progress = 0
 end
 
 -- PRINT: the one-gesture full-mix resample. One pass of print_len seconds

@@ -1981,6 +1981,49 @@ test at last (tooling only)**.
   caught.
 * 271 assertions across four harnesses; renders byte-identical; source == dist.
 
+Sixty-eighth change: **design-review fix batch (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65; renders: only the 3 LAYERS shots moved, by design)**. A
+full-codebase review; every finding verified before fixing, the two sharpest
+mutation-proven.
+* **◇ was lying again, this time about the layers.** purity() never looked at
+  the layer decks, so the mark stayed lit while a deck audibly played over the
+  take (proven offscreen: the header was pixel-identical with a playing layer,
+  and drive killed exactly the 8 diamond pixels). It now goes dark when any
+  deck holds material, is playing, and has level up. Same class as the 61st
+  change's dry_wet fix; every NEW audio source must join the mark's checks.
+* **The 100ms loop floor could cross a region boundary.** mdeck floored
+  `hi = lo + 0.1` PAST the region end, so a loop parked at the far right of
+  lay1 would read and record the first 100ms of lay2's material. Clamped
+  inside the region by moving the start back; mtape got the same clamp (its
+  overflow landed in the 60-120s gap reserved for foundry's cells).
+  test_deck 35 -> 37, mutation-proven.
+* **take_pset_read now forgets the SNAP memory**, like the other two buffer
+  replacers (its own stated rule: whoever replaces the buffer forgets the
+  remembered bounds; this was the one path that did not).
+* **The layer loops joined the conventions their siblings had**: FINE_IDS
+  span scaling covers @lay_move (test_control 143 -> 145, mutation-proven),
+  lay rates joined RATE_IDS, layer_sel joined SELECTOR_IDS (the selector
+  reads at rest like SLICE/LANE/SLOT; the only render diff, layers.png
+  regenerated). TAPE's erase now disarms tape_rec first, like the LAYERS
+  erase. The morph's stranded-restore path honours EDGE_PAIRS (widening
+  edge first), the rule apply() and the sweep already followed.
+* **Dead code removed**: BAND_T/B, the @loop_move SHORT/FULL labels,
+  ctx.deck, the unread ctx.pad_cut/pad_pos/pad_len bindings, ctx.pad_count,
+  ctx.pass_progress (write-only), SHORT.kb_octave plus the kb_octave flash
+  writes no surface ever displayed, mtape's redundant twave_any clear,
+  mgrid's unreachable st==nil guard. KEPT deliberately: ctx.record_stop and
+  ctx.record_limit (unused on this branch, foundry merge parity) and
+  note_one_shot (removing it moves the fingerprint).
+* **One law instead of mirrors**: Mtape.gains() is THE deck gain law
+  (update_mix sends it, body_MIX draws it); ctx.cut_rec_amp() is the one
+  record-meter blend (mpages + mdeck); param_norm resolves and calls
+  value_norm. Stale text fixed: mangler.lua's two station counts (now
+  thirteen), test_control's header (it DOES share tools/uisim/env.lua).
+VERIFIED: luac clean, 275 assertions across the four harnesses, 47 of 50
+base shots byte-identical (the 3 LAYERS diffs are the selector-at-rest
+footer), source == dist across 66 shots x 4 variants. Lua-only: save +
+reload. The engine RESTART + count-65 device gate is unchanged and pending.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2137,8 +2180,8 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 # every encoder, press every key, and assert what reaches the params. run them
 # after any change to ENC_MAP, KEYS, a param action, or the softcut decks —
 # three of the four defects in the layers review were invisible to the renderer.
-lua tools/test_control.lua   # encoders, keys, the master, STOP  (123 assertions)
-lua tools/test_deck.lua      # the softcut loop decks: region isolation (35)
+lua tools/test_control.lua   # encoders, keys, the master, STOP  (145 assertions)
+lua tools/test_deck.lua      # the softcut loop decks: region isolation (37)
 lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
 

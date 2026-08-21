@@ -100,7 +100,6 @@ function M.init(ctx)
     if pget("keys_enable", 1) == 0 then return end
     if code == "Z" or code == "X" then
       params:delta("kb_octave", code == "X" and 1 or -1)
-      C.flash_id, C.flash_until = "kb_octave", C.frame + FPS
     else
       local st = KB_NOTES[code]
       if st then

@@ -7,11 +7,10 @@
 -- of the four defects found reviewing the layer decks were exactly that shape.
 --
 -- So this drives the REAL script through enc() and key() and asserts what
--- reaches the params. It deliberately does NOT stub a screen: drawing is the
--- render suite's job, and a no-op screen keeps this harness small enough to
--- read. The two harnesses share no code because they genuinely need different
--- things — the valuable part of the renderer is its pixel model, which nothing
--- here wants.
+-- reaches the params. It runs on the SAME offscreen norns as the render suite
+-- (tools/uisim/env.lua), so the two can never disagree about what norns does;
+-- the screen is real and simply never read here, because drawing is the
+-- render suite's job.
 --
 --   lua tools/test_control.lua        # from the repo root
 
@@ -23,9 +22,6 @@ local function near(a, b, t, w)
 end
 
 -- ---- the offscreen norns, shared with the render suite --------------------
--- The SAME environment the renderer uses, so the two harnesses can never
--- disagree about what norns does. Its screen is real and simply never read
--- here: this harness asserts on params, not pixels.
 local env = dofile("tools/uisim/env.lua")
 local _h = env.install{ dir = "/tmp" }
 
@@ -136,6 +132,35 @@ do
           #moved > 0 and table.concat(moved, ",") or "NOTHING"))
     end
   end
+end
+
+-- ============================================================================
+-- 2b · the zoom-aware fine step covers the layer loops too
+-- ============================================================================
+-- the window and the tape loop tighten their encoder steps as the region
+-- narrows; the layer loop move goes through the same move_pair, and it used
+-- to skip the scaling, so a tight layer loop nudged at full coarseness.
+do
+  local names = {}
+  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+    names[#names + 1] = name
+  end
+  local li
+  for i, n in ipairs(names) do if n == "LAYERS" then li = i end end
+  goto_page(li)
+  params:set("layer_sel", 1)
+  params:set("lay1_start", 0); params:set("lay1_end", 0.5)
+  key(1, 1)                                  -- hold K1: E3 is the loop move
+  enc(3, 1)
+  local wide = params:get("lay1_start")
+  params:set("lay1_start", 0.2); params:set("lay1_end", 0.21)
+  enc(3, 1)
+  local tight = params:get("lay1_start") - 0.2
+  key(1, 0)
+  ok(tight > 0, "a tight layer loop still moves")
+  ok(tight < wide * 0.5,
+    "...but by a FINER step than a wide one (span-scaled, like the window)")
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
 end
 
 -- ============================================================================

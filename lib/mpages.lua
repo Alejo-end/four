@@ -19,8 +19,6 @@ local pget, clamp, window_bounds, FPS, PAGES
 local ptext, ptext_c, ptext_r, chip, text_w
 local amp_in, amp_out
 
-local BAND_T, BAND_B = 15, 40  -- visualization band (strip pages)
-
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
 local wave = {}
@@ -69,12 +67,10 @@ end
 function M.update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
-    -- meter what softcut actually records: the ADC tap, the engine output
-    -- (cut_source WET), or the blend — a WET print otherwise painted nothing
+    -- meter what softcut actually records (C.cut_rec_amp — the ADC tap, the
+    -- engine output, or the blend): a WET print otherwise painted nothing
     -- and left twave_any false over audible tape
-    local cs = pget("cut_source", 0)
-    local a = max(amp_in[1], amp_in[2]) * (1 - cs)
-      + max(amp_out[1], amp_out[2]) * cs
+    local a = C.cut_rec_amp()
     if a > 0.01 then C.twave_any = true end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
   end
@@ -537,12 +533,11 @@ local SHORT = {
   rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
   regen = "REGN",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
-  ["@win_move"] = "MOV", ["@loop_move"] = "POS",
+  ["@win_move"] = "MOV",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
   clouds_pos = "POS", clouds_tex = "TEX", clouds_fb = "FB", clouds_lofi = "LOFI",
-  kb_octave = "OCT",
   warp_window = "WIN", warp_rand = "RAND",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
   cut_source = "SRC",
@@ -583,7 +578,7 @@ local FULL = {
   rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
   regen = "REGEN",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
-  ["@win_move"] = "MOVE", ["@loop_move"] = "MOVE",
+  ["@win_move"] = "MOVE",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPREAD", density = "DENSITY", grain_level = "GRAIN",
   clouds_pos = "POSITION", clouds_tex = "TEXTURE", clouds_fb = "FEEDBACK",
@@ -606,25 +601,8 @@ local FULL = {
   ["@lay_level"] = "LEVEL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
 }
 
--- normalized 0..1 position of a param, for the dial pointer. bipolar
--- controlspecs (scan, tape_rate) land center at zero, which reads correctly.
-local function param_norm(id)
-  if id and C.enc_target then id = C.enc_target(id) end
-  if not (id and params.lookup[id]) then return nil end
-  local p = params:lookup_param(id)
-  local v = params:get(id)
-  if p.controlspec then
-    return clamp(p.controlspec:unmap(v), 0, 1)
-  elseif p.count then
-    return p.count > 1 and (v - 1) / (p.count - 1) or 0
-  elseif p.min and p.max and p.max > p.min then
-    return (v - p.min) / (p.max - p.min)
-  end
-  return clamp(v, 0, 1)
-end
-
--- normalized 0..1 of an ARBITRARY value for a param (not the live value) —
--- used to plot the MOTION lanes' recorded events at their captured heights
+-- normalized 0..1 of a value for a param: controlspec unmap, option index,
+-- or number range. plots the MOTION lanes' events at their captured heights.
 local function value_norm(id, v)
   local p = params.lookup[id] and params:lookup_param(id)
   if not p then return 0 end
@@ -634,11 +612,19 @@ local function value_norm(id, v)
   return clamp(v, 0, 1)
 end
 
+-- the LIVE value's normalized position (compound "@" targets resolve first)
+local function param_norm(id)
+  if id and C.enc_target then id = C.enc_target(id) end
+  if not (id and params.lookup[id]) then return nil end
+  return value_norm(id, params:get(id))
+end
+
 -- footer value text for a param: compact, ALL-CAPS abbreviations. a few
 -- ids get hand-tuned units (cutoff kHz, pitch semitones, rates x, times);
 -- a plain 0..1 linear control reads as a percentage; everything else falls
 -- back to the norns string.
-local RATE_IDS = { scan = true, tape_rate = true }
+local RATE_IDS = { scan = true, tape_rate = true,
+                   lay1_rate = true, lay2_rate = true }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
@@ -714,7 +700,7 @@ end
 -- selector pages are the one exception to numbers-only-while-turning:
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
-  seq_slice = true, motion_lane = true, scene_slot = true,
+  seq_slice = true, motion_lane = true, scene_slot = true, layer_sel = true,
 }
 
 local FY = 58  -- the footer text row (four quiet words)
@@ -1340,15 +1326,14 @@ end
 
 -- ============================================================================
 -- 6 · MIX — the console (in meter → the two decks at their REAL gains →
---     master VU; the whole signal path on one screen)
+--     master VU). the layer decks live on their own page; this console is
+--     the engine <> tape crossfade.
 -- ============================================================================
 local function body_MIX(frame)
-  -- each lane's energy is its deck's REAL gain — the same law
-  -- Mtape.update_mix sends (trim x crossfade plateau x master x STOP)
+  -- each lane's energy is its deck's REAL gain: the ONE law itself
+  -- (C.mix_gains — trim x crossfade plateau x master x STOP), not a mirror
   local mixv = pget("mix", 0.5)
-  local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
-  local eng_g = pget("sc_level", 1) * min(1, 2 * (1 - mixv)) * out
-  local tape_g = pget("cut_level", 1) * min(1, 2 * mixv) * out
+  local eng_g, tape_g = C.mix_gains()
   local eng_on = pget("mode", 5) ~= 1 and eng_g > 0.001 and C.wave_any
   local tape_on = C.twave_any and tape_g > 0.001
   local newframe = C.frame ~= vu_last_frame
@@ -2106,6 +2091,16 @@ local function purity()
       or pget("resonance", 0) > 0.02 then return false end
   -- the tape deck must not be adding its own material
   if C.twave_any and pget("mix", 0.5) > 0.02 then return false end
+  -- ...and neither may the layer decks: material present and audibly playing
+  -- means the output is not just the take (the same rule, per deck)
+  local decks = C.layers
+  if decks then
+    for i = 1, #decks do
+      local d = decks[i]
+      if d.any and pget(d.id .. "_play", 1) == 1
+          and pget(d.id .. "_level", 0.8) > 0.01 then return false end
+    end
+  end
   return true
 end
 

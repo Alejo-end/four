@@ -547,12 +547,30 @@ function M.morph(slot, amt, opts)
     if not (amt <= 0 and morph_from) then return false end
     morphing = true
     -- walk the morph list IN ORDER (like every other writer here), restoring
-    -- only the ids this sweep displaced (the last_sent filter)
+    -- only the ids this sweep displaced (the last_sent filter). the region
+    -- pairs go WIDENING EDGE FIRST — the same rule apply() and the sweep
+    -- follow: restored in bare list order a pair can cross for one write,
+    -- and a crossed pair hits the 100ms loop floor and jumps the head.
+    local function back(k)
+      if last_sent[k] ~= nil and morph_from[k] ~= nil
+          and params.lookup[k] then
+        pset(k, morph_from[k])
+      end
+    end
+    local rdone
     for i = 1, #SCENE_MORPH_IDS do
       local id = SCENE_MORPH_IDS[i]
-      if last_sent[id] ~= nil and morph_from[id] ~= nil
-          and params.lookup[id] then
-        pset(id, morph_from[id])
+      if not (rdone and rdone[id]) then
+        local partner = EDGE_PAIRS[id]
+        if partner and morph_from[id] ~= nil and params.lookup[id]
+            and morph_from[partner] ~= nil and params.lookup[partner] then
+          if morph_from[id] < params:get(id) then back(id); back(partner)
+          else back(partner); back(id) end
+          rdone = rdone or {}
+          rdone[partner] = true
+        else
+          back(id)
+        end
       end
     end
     morphing = false
