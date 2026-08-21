@@ -2061,6 +2061,43 @@ renders byte-identical, source == dist. Save + reload only if deploying; the
 engine RESTART + count-65 device gate is unchanged and still pending — it is
 the one remaining item no harness can substitute for.
 
+Seventieth change: **deeper review — ◇ misses pan, the engine contract check,
+the erase arc under test, doc staleness (Lua + tooling + docs, fingerprint
+STAYS 65, all 66 render shots byte-identical, 344 assertions)**.
+* **◇ missed `pan`, the third source-shaped miss.** The PLAY voice runs
+  Balance2 on `pan`; it is MIDI-mappable and rides scenes, so a recalled
+  scene with pan hard left kept the mark lit over an output that is plainly
+  not the recording. purity() now tests it; test_purity gained the move
+  (41 -> 43) and reverting the check fails exactly its assertion.
+* **The engine command CONTRACT is now checkable offscreen** (test_control
+  section 11): every add_eng_* id and every `engine.X` call is guarded with
+  `if engine[id]`, so a typo'd id was a knob that silently did nothing,
+  forever, on the device only. The harness parses the .sc's command union
+  (ioKeys + playParams + revParams + explicit addCommands) and diffs the Lua
+  side against it. Clean today; a typo'd `rev_locut` mutation fails SIX
+  assertions (the classification net catches it too — defense in depth).
+* **The K1+K3 erase arc finally has a test** (section 6b): the one
+  destructive key path fired from the redraw clock had zero offscreen
+  coverage. It now asserts the landing (TAPE erase disarms tape_rec first,
+  opens the loop), that no DRY leaks on either release, and the abort zone.
+  Writing it caught an interference worth knowing: section 6's key mash
+  latches ORBIT (by design) and it captures scenes, so the wander was
+  morphing the loop edges under the assertions — background movers must be
+  silenced in tests that read params over ticks.
+* **The sim's Control:set now range-clamps** like the real one (env.lua):
+  an out-of-range params:set was stored verbatim offscreen and refused on
+  device, a fidelity gap a harness could hide behind. All 66 render shots
+  proven byte-identical after the change.
+* **Doc staleness fixed**: engine-map.md's erosion paragraph now describes
+  the constant-rate own head and the STOP/level gate (60th/61st changes) and
+  the slice voice's note_len bound (61st); device-gate row 6.12's purity
+  criterion now includes the tape/layer/pan conditions; stage 9's rows
+  renumbered in order. Checked clean: both workflow docs already carry
+  HISTORICAL banners, README's page table needs no count.
+VERIFIED: luac clean, 344 assertions (171/37/52/41/43), all 66 shots
+byte-identical across the 4 variants and source == dist. The device gate
+remains the one open item.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2217,13 +2254,14 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 # every encoder, press every key, and assert what reaches the params. run them
 # after any change to ENC_MAP, KEYS, a param action, or the softcut decks —
 # three of the four defects in the layers review were invisible to the renderer.
-lua tools/test_control.lua   # encoders, keys, the master, STOP, and the
+lua tools/test_control.lua   # encoders, keys, the master, STOP, the erase
+                             # arc, the engine command CONTRACT, and the
                              # CLASSIFICATION checks: every param must be in
-                             # or explicitly out of every curated list (163)
+                             # or explicitly out of every curated list (171)
 lua tools/test_deck.lua      # the softcut loop decks: region isolation (37)
 lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
-lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (41)
+lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (43)
 
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua as
 # IIFEs (proven byte-identical via the seeded render suite). the dist file

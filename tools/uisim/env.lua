@@ -279,6 +279,12 @@ function M.install(opts)
     local p = self:lookup_param(id)
     if p.min then v = math.max(p.min, math.min(p.max, v)) end
     if p.count then v = math.max(1, math.min(p.count, math.floor(v + 0.5))) end
+    -- the real Control:set lands on map(unmap(v)), which clamps to the spec's
+    -- range; without this an out-of-range set is stored verbatim here and a
+    -- harness can pass on a value the device would refuse
+    if p.controlspec then
+      v = math.max(p.controlspec.minval, math.min(p.controlspec.maxval, v))
+    end
     if p.value ~= v then
       p.value = v
       if p.action then p.action(v) end

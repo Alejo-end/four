@@ -49,7 +49,7 @@ SCENARIO = nil
 
 -- ---- the pure state -------------------------------------------------------
 local PURE = {
-  mode = 5, pitch = 1, scan = 1, dry_wet = 1,
+  mode = 5, pitch = 1, scan = 1, pan = 0, dry_wet = 1,
   filt_type = 1, cutoff = 20000, resonance = 0,
   drive = 0, delay_mix = 0, rev_mix = 0, shimmer = 0, clouds_fb = 0,
   resample = 0, regen = 0, erode = 0, freeze = 0, pv_freeze = 0,
@@ -113,6 +113,7 @@ local MOVES = {
   { "a mangling mode", "mode", 2 },
   { "pitch off unity", "pitch", 1.5 },
   { "scan off unity", "scan", 0.5 },
+  { "pan off center", "pan", 0.5 },
   { "drive", "drive", 0.3 },
   { "delay", "delay_mix", 0.3 },
   { "reverb", "rev_mix", 0.3 },

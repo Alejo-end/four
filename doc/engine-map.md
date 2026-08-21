@@ -58,11 +58,13 @@ because a muted minute of regen used to overwrite the take with silence. The pol
 position advances with the same signal the record head uses, so the next take's window
 cannot snap to a stale position.
 
-`erode` is the window synced version, and it lives in the PLAY voice instead: each loop pass
-reads the exact stored sample without interpolation and writes back a slightly darkened,
-slightly quieter copy. At zero the exact sample is written back unchanged, which is only
-true because the read is not interpolated. Recording and freeze suspend it so two write
-heads never fight.
+`erode` lives in the PLAY voice and runs on its OWN head, one pass per window length
+regardless of playback speed or direction: it reads the exact stored sample without
+interpolation and writes back a slightly darkened, slightly quieter copy. At zero the exact
+sample is written back unchanged, which is only true because the read is not interpolated.
+Recording, freeze and a silenced deck (STOP) all suspend it, and the Lua layer interlocks it
+against `regen`: two write heads never fight, and a stopped instrument never grinds the
+take away with nobody listening.
 
 The take rides the PSET as a left and right WAV pair, written only as far as the take
 actually reaches.
@@ -91,7 +93,9 @@ were checked against upstream documentation and left alone on purpose.
 
 Pad voices copy the drone's grain character at spawn so a note sounds like this instrument.
 The slice voice plays forward from the slice start, because the transient you chopped for
-lives there.
+lives there, and it carries the slice LENGTH, closed with a three millisecond fade. Given
+only a start it used to play its slice and then everything after it, while the PADS page
+drew eight bounded cells.
 
 ## The chain
 

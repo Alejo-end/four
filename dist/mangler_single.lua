@@ -5005,6 +5005,9 @@ local function purity()
   if pget("mode", 5) ~= 5 then return false end             -- PLAY only
   if abs(pget("pitch", 1) - 1) > 0.001 then return false end
   if abs(pget("scan", 1) - 1) > 0.001 then return false end
+  -- pan reaches the PLAY voice's Balance2: off-center output is not the
+  -- recording, however clean the rest of the path is
+  if abs(pget("pan", 0)) > 0.001 then return false end
   if pget("drive", 0) > 0.001 or pget("delay_mix", 0) > 0.001
       or pget("rev_mix", 0) > 0.001 or pget("shimmer", 0) > 0.001
       or pget("clouds_fb", 0) > 0.001 or pget("resample", 0) > 0.001

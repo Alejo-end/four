@@ -285,6 +285,52 @@ end
 
 
 -- ============================================================================
+-- 6b · the erase arc — the one destructive key path, and it had no test
+-- ============================================================================
+-- K1+K3 held to the arc wipes a page's material from the redraw clock
+-- (tick_keys). Its device history is all edge cases: firing after an abort,
+-- retargeting, leaking a DRY on the release. Drive the real clock and assert
+-- the landing, the abort zone, and that neither path fires DRY.
+do
+  local names = {}
+  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+    names[#names + 1] = name
+  end
+  local ti
+  for i, n in ipairs(names) do if n == "TAPE" then ti = i end end
+  goto_page(ti)
+  -- section 6's key mash latches things by design (ORBIT RUN among them, and
+  -- it captured scenes to wander between) — silence the background movers or
+  -- the orbit morphs the very loop edges these assertions read
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("scene_morph_amt", 0)
+  params:set("tape_rec", 1)
+  params:set("loop_start", 0.3); params:set("loop_end", 0.6)
+  params:set("rev_mix", 0.4)
+  key(1, 1); key(3, 1)
+  _h.run_ticks(20)                     -- past ERASE_FRAMES: the arc lands
+  ok(params:get("tape_rec") == 0, "the TAPE erase disarms the deck first")
+  ok(params:get("loop_start") == 0 and params:get("loop_end") == 1,
+    "...and opens the loop")
+  key(3, 0); key(1, 0)
+  ok(params:get("rev_mix") > 0.3, "the release after an erase does not fire DRY")
+  -- the abort zone: releasing K1 before the arc lands wipes nothing
+  params:set("tape_rec", 1)
+  params:set("loop_start", 0.3)
+  key(1, 1); key(3, 1)
+  _h.run_ticks(5)                      -- inside the abort zone
+  key(1, 0)                            -- K1 release = abort
+  _h.run_ticks(20)
+  ok(params:get("tape_rec") == 1, "releasing K1 aborts the erase")
+  ok(params:get("rev_mix") > 0.3, "...and the abort does not fire DRY")
+  key(3, 0)
+  ok(params:get("rev_mix") > 0.3, "...nor does the K3 release after it")
+  params:set("tape_rec", 0)
+  params:set("loop_start", 0); params:set("rev_mix", 0)
+end
+
+-- ============================================================================
 -- 7 · the GRID, which used to be device-only
 -- ============================================================================
 -- The offscreen grid stub hands back one object and the script attaches its key
@@ -562,6 +608,49 @@ do
   ok(checked >= 12, "the shipped presets are all readable (" .. checked .. ")")
   ok(#dead == 0, "every preset/pmap id exists in the paramset (dead: "
     .. table.concat(dead, ",") .. ")")
+end
+
+-- ============================================================================
+-- 11 · the engine contract — every Lua id lands on a real command
+-- ============================================================================
+-- add_eng_control and every `engine.X` call are guarded (`if engine[id]`), so
+-- a typo'd id is not an error anywhere: the knob simply does nothing, forever,
+-- and only on the device. The command set the engine builds at alloc (ioKeys
+-- plus the playParams/revParams dictionaries plus the explicit addCommands)
+-- is parseable from the .sc, so the contract is checkable offscreen.
+do
+  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local cmds = {}
+  for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do
+    cmds[id] = true
+  end
+  for _, dict in ipairs({ "playParams", "revParams" }) do
+    for id in (sc:match(dict .. " = Dictionary%[(.-)%]") or "")
+        :gmatch("\\([%w_]+)%s*%->") do
+      cmds[id] = true
+    end
+  end
+  for id in sc:gmatch("addCommand%(\\([%w_]+)") do cmds[id] = true end
+  ok(cmds.mode and cmds.rev_mix and cmds.erode, "the .sc command set parsed")
+  local used = {}
+  local function collect(path)
+    local s = io.open(path):read("a")
+    for id in s:gmatch('add_eng_control%("([%w_]+)"') do used[id] = true end
+    for id in s:gmatch('add_eng_binary%("([%w_]+)"') do used[id] = true end
+    for id in s:gmatch("engine%.([%w_]+)") do
+      if id ~= "name" then used[id] = true end
+    end
+  end
+  collect("mangler.lua")
+  for _, f in ipairs({ "mtape", "mdeck", "mpages", "mscenes", "mmotion",
+                       "mgrid", "minput" }) do
+    collect("lib/" .. f .. ".lua")
+  end
+  local miss = {}
+  for id in pairs(used) do if not cmds[id] then miss[#miss + 1] = id end end
+  table.sort(miss)
+  ok(#miss == 0, "every Lua engine id is a real command (typo'd: "
+    .. table.concat(miss, ",") .. ")")
 end
 
 print(string.format("\n%d assertions passed", ok_count))
