@@ -55,6 +55,13 @@ softcut's buffer is ~349 s × 2 channels, so this fits with room left. The gap a
 60–120 is deliberate: `foundry` auditions chain cells there, and picking regions
 that avoid it means the branches can merge without a silent buffer collision.
 
+The REGIONS merge cleanly; the VOICES do not. `foundry`'s audition claims
+softcut voices 3/4 (`lib/mchain.lua`), which are layer 1's here, and all six
+voices are taken on this branch. A merge has to re-home the audition — borrow
+a layer's pair for the duration of an audition and hand it back, since there
+is no free pair to give it. The buffer planning above does not solve that
+half; it is the known line item of the merge, not a surprise.
+
 Each deck is **stereo**: the lower voice takes input channel 1 and pans left, the
 upper takes channel 2 and pans right — the same pairing `init_tape` uses.
 

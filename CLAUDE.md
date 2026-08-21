@@ -2098,6 +2098,44 @@ VERIFIED: luac clean, 344 assertions (171/37/52/41/43), all 66 shots
 byte-identical across the 4 variants and source == dist. The device gate
 remains the one open item.
 
+Seventy-first change: **robustness pass — malformed audio files (Lua +
+tests + docs, fingerprint STAYS 65, renders byte-identical, 350 assertions)**.
+A fuzz probe fed ten malformed WAVs to every parser entry point and found two
+real defects; both fixed at the boundary, both regression-tested.
+* **A data chunk that lies about its size crashed the instrument.** A file
+  whose header claims more audio than the file holds (a truncated copy, an
+  interrupted download, write_take cut off mid-save) made `read_frames`
+  return without honouring its own zero-pad contract; `onset_bounds` and
+  `transient_cuts` then indexed nil and THREW — inside the TIGHTEN and CHOP
+  param actions, where a Lua error is a black screen mid-set. read_frames now
+  zero-fills whatever a short read leaves uncovered. Mutation-proven (3
+  assertions), but only after sharpening the test file: a PARTLY truncated
+  file passed the unfixed code by reading STALE values from the reused L/R
+  tables — the crash needs the very first read to come back empty. That
+  subtlety is written into the test.
+* **A corrupt rate header was a disk bomb.** `convert_sr` sized its output
+  from `frames / (in_sr/sr)`: a wav claiming 1 Hz would expand 4800 frames
+  into 230M output frames (~921 MB, minutes of work). The unfixed behaviour
+  ran until killed when probed. Two fences now: convert_sr REFUSES an
+  implausible declared rate (outside 4 kHz..384 kHz) at its own boundary —
+  an opt-in cap is protection a future caller forgets — and it takes an
+  optional `max_secs` output cap, which `load_sample` passes as BUF_SECS + 1:
+  converting past what the buffer can hold was pure waste even for honest
+  files (a 30-minute DJ mix used to convert in full for 60 seconds kept).
+* All ten fuzz shapes (empty, non-RIFF, header-only, truncated fmt, zero
+  channels, zero bits, zero/1 Hz rates, a 4 GB chunk-size claim, a lying data
+  chunk) now degrade to nil returns, never a throw.
+* **Measured today, offscreen (Mac, sim, draw+grid stubbed to no-ops):** the
+  allocation-free hot path HOLDS at all 13 pages under a loaded state —
+  0.000–0.003 KB garbage/tick (worst PADS), 61–160 µs/tick. The 5th change's
+  claim, re-verified at 2.6x the page count.
+* **doc/layers.md now records the merge's real conflict**: the regions merge
+  cleanly but `foundry`'s audition claims softcut voices 3/4 — layer 1's here,
+  with all six voices taken — so the audition must borrow a pair on merge.
+  The buffer planning never solved that half, and the doc now says so.
+VERIFIED: luac clean, 350 assertions (171/37/58/41/43), renders byte-identical,
+source == dist. The device gate remains the one open item.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2259,7 +2297,8 @@ lua tools/test_control.lua   # encoders, keys, the master, STOP, the erase
                              # CLASSIFICATION checks: every param must be in
                              # or explicitly out of every curated list (171)
 lua tools/test_deck.lua      # the softcut loop decks: region isolation (37)
-lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
+lua tools/test_wav.lua       # resampling, transients, onsets, list drift,
+                             # lying/truncated wav headers (58)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
 lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (43)
 

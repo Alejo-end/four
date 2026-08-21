@@ -3222,16 +3222,20 @@ local function read_frames(src, from, n, L, R)
   for i = max(1, b - from + 1), n do L[i], R[i] = 0, 0 end
   if b <= a then return end
   src.f:seek("set", src.dpos + a * src.fbytes)
-  local chunk = src.f:read((b - a) * src.fbytes)
-  if not chunk then return end
+  -- a file can be SHORTER than its header claims (a truncated copy, an
+  -- interrupted write): a short read must still honour the zero-pad contract
+  -- above, or a caller indexes nil exactly where the data chunk lied
+  local chunk = src.f:read((b - a) * src.fbytes) or ""
   local dec, ch, bps, fb = src.dec, src.ch, src.bps, src.fbytes
   local o = a - from
-  for i = 0, (#chunk // fb) - 1 do
+  local got = #chunk // fb
+  for i = 0, got - 1 do
     local p = i * fb + 1
     local l = dec(chunk, p)
     L[o + i + 1] = l
     R[o + i + 1] = ch > 1 and dec(chunk, p + bps) or l
   end
+  for i = o + got + 1, b - from do L[i], R[i] = 0, 0 end
 end
 
 local SRC_BLOCK = 4096
@@ -3252,11 +3256,18 @@ function M.wav_rate(path)
   return sr
 end
 
-function M.convert_sr(path, out_path, sr, yield)
+function M.convert_sr(path, out_path, sr, yield, max_secs)
   local src, err = open_src(path)
   if not src then return nil, err end
   local in_sr, frames = src.sr, src.frames
   if frames < 2 then close_src(src); return nil, "no audio" end
+  -- refuse an implausible declared rate HERE, not just via the caller's cap:
+  -- a corrupt header claiming 1 Hz turns a 4800-frame file into 230M output
+  -- frames, and an opt-in cap is protection a future caller forgets (the
+  -- caller falls back to loading the file as-is, which is bounded)
+  if in_sr < 4000 or in_sr > 384000 then
+    close_src(src); return nil, "implausible sample rate " .. tostring(in_sr)
+  end
   if in_sr == sr then close_src(src); return false, frames / sr end
 
   local of = io.open(out_path, "wb")
@@ -3270,6 +3281,11 @@ function M.convert_sr(path, out_path, sr, yield)
 
   local ratio = in_sr / sr
   local out_n = floor(frames / ratio)
+  -- bound the OUTPUT, not just the input: the take buffer only holds max_secs
+  -- anyway, and without this a corrupt header declaring a tiny rate expands a
+  -- small file into gigabytes (4800 frames at a claimed 1 Hz = 921 MB out) —
+  -- while a long DJ mix converts minutes of audio the buffer would discard
+  if max_secs then out_n = min(out_n, floor(sr * max_secs)) end
   local L, R = {}, {}
   local out_v = {}
   local written, since = 0, 0
@@ -5974,7 +5990,10 @@ function ctx.load_sample(path)
     .. " (it would play %+.1f%% otherwise)",
     in_sr, SERVER_SR, (in_sr / SERVER_SR - 1) * 100))
   local started = ctx.run_task(function(yield)
-    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield)
+    -- capped at what the buffer can hold: converting past BUF_SECS is pure
+    -- waste, and a corrupt rate header must never expand into gigabytes
+    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield,
+      BUF_SECS + 1)
     if not ok then error(err or "conversion failed", 0) end
   end, function(ok, err)
     if ok then

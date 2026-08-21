@@ -98,6 +98,42 @@ local b=io.open(TMP.."bad.wav","wb"); b:write("nope"); b:close()
 ok(M.convert_sr(TMP.."bad.wav", TMP.."x.wav", 48000, nil) == nil,
   "an unreadable file refuses (the caller falls back to a raw load)")
 
+-- ---- lying and truncated headers -------------------------------------------
+-- A file can be SHORTER than its data chunk claims (a truncated copy, an
+-- interrupted write). read_frames must still zero-pad the missing tail, or
+-- the onset/transient scans index nil and THROW — and their callers are param
+-- actions, where a Lua error is a black screen on device.
+do
+  -- the crash shape: the header claims 4s of data and the file holds NONE, so
+  -- the scan's very first read comes back empty. (a file truncated mid-way is
+  -- gentler: earlier blocks have filled the reused L/R tables, so the unfixed
+  -- code read stale values instead of nil — wrong, but not a throw.)
+  local f = assert(io.open(TMP .. "lie.wav", "wb"))
+  f:write("RIFF", string.pack("<I4", 36 + 4 * 48000 * 4), "WAVE")
+  f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
+    string.pack("<I2", 2), string.pack("<I4", 48000),
+    string.pack("<I4", 48000 * 4), string.pack("<I2", 4), string.pack("<I2", 16))
+  f:write("data", string.pack("<I4", 4 * 48000 * 4))
+  f:close()
+  local okc, a = pcall(M.onset_bounds, TMP .. "lie.wav", 0, 1, 60, nil, nil)
+  ok(okc, "onset_bounds survives a data chunk that lies about its size")
+  ok(okc and a == nil, "...and reads the missing tail as silence")
+  local okt = pcall(M.transient_cuts, TMP .. "lie.wav", 0, 1, 8, 60, nil)
+  ok(okt, "transient_cuts survives it too")
+  -- an implausible declared rate refuses instead of expanding a small file
+  -- into gigabytes of output (4800 frames at a claimed 1 Hz = 230M frames;
+  -- the unfixed behaviour ran until killed when probed)
+  ramp(TMP .. "hz1.wav", 0.1, 48000, 2)
+  local g = assert(io.open(TMP .. "hz1.wav", "r+b"))
+  g:seek("set", 24); g:write(string.pack("<I4", 1)); g:close()
+  ok(M.convert_sr(TMP .. "hz1.wav", TMP .. "y.wav", 48000, nil) == nil,
+    "a wav claiming 1 Hz refuses to convert")
+  -- and a caller can cap the OUTPUT at what its buffer can hold
+  local c2, s2 = M.convert_sr(TMP .. "a441.wav", TMP .. "cap.wav", 48000, nil, 0.5)
+  ok(c2 == true, "a capped conversion still converts")
+  near(s2, 0.5, 0.01, "...but writes only the capped duration")
+end
+
 -- ---- transient detection ---------------------------------------------------
 -- What makes pads land on the HITS instead of arbitrary eighths. Build a file
 -- with impulses at known times and check the cuts come back at those times, in

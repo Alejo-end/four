@@ -1029,7 +1029,10 @@ function ctx.load_sample(path)
     .. " (it would play %+.1f%% otherwise)",
     in_sr, SERVER_SR, (in_sr / SERVER_SR - 1) * 100))
   local started = ctx.run_task(function(yield)
-    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield)
+    -- capped at what the buffer can hold: converting past BUF_SECS is pure
+    -- waste, and a corrupt rate header must never expand into gigabytes
+    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield,
+      BUF_SECS + 1)
     if not ok then error(err or "conversion failed", 0) end
   end, function(ok, err)
     if ok then
