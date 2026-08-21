@@ -197,6 +197,52 @@ near(w[3], 120, 0.001, "...from its own region")
 near(w[4], 60, 0.001, "...for its own length")
 ok(count("buffer_write_stereo") == 1, "an EMPTY deck writes nothing")
 
+-- ---- the pset restore repaints the picture --------------------------------
+-- lua cannot read the softcut buffer, so a restored loop used to play under a
+-- blank strip; a deck now hands the wav it restored FROM to the painter.
+do
+  local painted = {}
+  ctx.wave_from_file = function(path, bins, secs)
+    painted[#painted + 1] = { path = path, bins = bins, secs = secs }
+  end
+  d1.any = false; d2.any = true
+  util.file_exists = function(p) return p:find("lay1-9", 1, true) ~= nil end
+  Mdeck.pset_read(9)
+  ok(#painted == 1, "a deck with a wav asks for exactly ONE repaint")
+  local cp = painted[1] or {}
+  ok(cp.path ~= nil and cp.path:find("lay1-9.wav", 1, true) ~= nil,
+    "...from its own file")
+  ok(cp.bins == d1.wave, "...into its own bins")
+  near(cp.secs or -1, 60, 0.001, "...spanning its region length")
+  ok(d1.any == true, "the restored deck holds audio")
+  ok(d2.any == false, "the deck with NO wav is cleared, not repainted")
+  util.file_exists = function() return false end
+  ctx.wave_from_file = nil
+  d1.any = false
+  defaults()
+end
+
+-- the TAPE deck's restore takes the same path (mtape is the sibling this
+-- module deliberately has not absorbed yet — its wiring is asserted here so
+-- the two cannot drift apart)
+do
+  local Mtape = dofile("lib/mtape.lua")
+  local painted
+  local tctx = {
+    pget = ctx.pget,
+    repaint_twave = function(path, secs) painted = { path, secs } end,
+    clear_twave = function() end,
+  }
+  Mtape.init(tctx)
+  util.file_exists = function(p) return p:find("tape-4", 1, true) ~= nil end
+  Mtape.pset_read(4)
+  ok(painted ~= nil and painted[1]:find("tape-4.wav", 1, true) ~= nil,
+    "the tape restore repaints from its wav")
+  near(painted and painted[2] or -1, 60, 0.001, "...over the tape length")
+  ok(tctx.twave_any == true, "...and marks the tape as holding audio")
+  util.file_exists = function() return false end
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then
   print(#fail .. " FAILED:")

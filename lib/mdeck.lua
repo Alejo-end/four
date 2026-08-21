@@ -211,6 +211,10 @@ function M.pset_read(number)
     if util.file_exists(path) then
       sc.buffer_read_stereo(path, 0, d.from, d.len)
       d.any = true
+      -- repaint this deck's strip from its wav (same reason as the tape:
+      -- the softcut buffer is unreadable from lua, the file is right there)
+      d.wave_bin = 0
+      if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
     else
       M.clear(d)
     end

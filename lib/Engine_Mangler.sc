@@ -564,7 +564,9 @@ Engine_Mangler : CroneEngine {
             delay_fb = delay_fb.lag(0.03);   // the last unlagged performance knob
             fbIn = LocalIn.ar(2);
             dIn = wet + (fbIn * delay_fb);
-            dOut = DelayC.ar(dIn, 1.0, delay_time.clip(0.01, 1.0).lag(0.2));
+            // 2s line: a half-note sync below 120 BPM needs more than 1s,
+            // and the extra second costs ~0.75 MB of server memory
+            dOut = DelayC.ar(dIn, 2.0, delay_time.clip(0.01, 2.0).lag(0.2));
             delayFb = LPF.ar(dOut, 3500).softclip;
             wet = (wet * (1 - delay_mix).sqrt) + (dOut * delay_mix.sqrt);
             LocalOut.ar(delayFb);

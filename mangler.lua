@@ -212,6 +212,10 @@ ctx.motion = Mmotion
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
+-- ...and repaints it from the PSET wav on restore (plus the layer decks'
+-- strips, which own their bins and hand them in)
+ctx.repaint_twave = Mpages.repaint_twave
+ctx.wave_from_file = Mpages.fill_wave_bins
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -1375,7 +1379,8 @@ end
 -- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
 -- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
--- tape-style glide, and times beyond the 1s delay line clamp there. the
+-- tape-style glide, and times beyond the 2s delay line clamp there (2s so
+-- a half note fits down to 60 BPM). the
 -- redraw tick calls this each frame — it only WRITES when the tempo actually
 -- changed (or the division did), so idle frames set nothing.
 local SYNC_BEATS = { 0, 0.25, 0.5, 0.75, 1, 1.5, 2 }  -- FREE 1/16 1/8 1/8. 1/4 1/4. 1/2
@@ -1387,7 +1392,7 @@ local function sync_delay_time(force)
   if not (t and t > 0) then return end
   if not force and t == last_sync_tempo then return end
   last_sync_tempo = t
-  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 1))
+  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 2))
   -- tell the gesture looper this wasn't a hand on the knob (its polling
   -- capture would otherwise punch a delay_time lane on every tempo move)
   if ctx.motion and ctx.motion.account then ctx.motion.account("delay_time") end
@@ -1776,7 +1781,7 @@ local function init_params()
 
   params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
-    controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
+    controlspec.new(0.01, 2, "exp", 0, 0.3, "s"))
   -- tempo sync (DELAY K1+E3): FREE = the time knob; a division = delay_time
   -- follows the clock (re-asserted on tempo changes from the redraw tick)
   params:add_option("delay_sync", "delay sync",

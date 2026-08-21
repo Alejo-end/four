@@ -166,6 +166,9 @@ function M.pset_read(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
+    -- repaint the strip from the wav we just restored: lua cannot read the
+    -- softcut buffer, so without this the loop played under a blank picture
+    if C.repaint_twave then C.repaint_twave(path, TAPE_LEN) end
   else
     -- NO wav means the pset was saved with an EMPTY tape (pset_write deletes
     -- the file in that case, precisely so old audio cannot resurrect). Leaving

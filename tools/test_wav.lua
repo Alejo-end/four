@@ -302,6 +302,44 @@ do
       .. table.concat(missing, ", ") .. ")")
 end
 
+-- ---- the async bin-fill queue ----------------------------------------------
+-- One queue now serves every strip (the take, the tape, the layer decks — the
+-- pset restore repaints all of them). Drive a REAL mpages instance: fills for
+-- different targets coexist, a fill for the SAME target supersedes the queued
+-- one, and each fill spans its own seconds so a short file parks at the left
+-- of a long strip and fills a matching one.
+do
+  local nop = function() end
+  local MP = dofile("lib/mpages.lua")
+  MP.init({
+    pget = function(_, d) return d end,
+    clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
+    window_bounds = function() return 0, 1, 1 end,
+    FPS = 15, PAGES = {}, amp_in = { 0, 0 }, amp_out = { 0, 0 },
+    SERVER_SR = 48000,
+    font = { ptext = nop, ptext_c = nop, ptext_r = nop, chip = nop,
+             text_w = function() return 0 end },
+  })
+  ramp(TMP .. "fill.wav", 1.0, 48000, 2)
+  local binsA, binsB = {}, {}
+  local dA = MP.fill_wave_bins(TMP .. "fill.wav", binsA, 60)
+  near(dA, 1.0, 0.01, "a fill reports the file's duration")
+  MP.fill_wave_bins(TMP .. "fill.wav", binsB, 1.0)
+  for _ = 1, 40 do MP.load_tick() end
+  ok((binsA[1] or 0) > 0 and (binsA[64] or 0) == 0,
+    "a 60s-span strip parks the 1s file at its left edge")
+  ok((binsB[120] or 0) > 0.8,
+    "a 1s-span strip spreads the same file across its width")
+  -- supersede: queue a fill, then a second one for the SAME bins — only the
+  -- second may land (queued in the reverse order the outcomes differ)
+  local binsC = {}
+  MP.fill_wave_bins(TMP .. "fill.wav", binsC, 1.0)
+  MP.fill_wave_bins(TMP .. "fill.wav", binsC, 60)
+  for _ = 1, 40 do MP.load_tick() end
+  ok((binsC[120] or 0) == 0 and (binsC[1] or 0) > 0,
+    "a new fill for the same target supersedes the queued one")
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then print(#fail.." FAILED:"); for _,f in ipairs(fail) do print("  x "..f) end; os.exit(1) end
 print("main resampler OK")

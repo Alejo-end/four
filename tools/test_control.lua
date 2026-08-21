@@ -611,6 +611,23 @@ do
 end
 
 -- ============================================================================
+-- 10b · the tempo-synced delay reaches a half note at slow tempos
+-- ============================================================================
+-- the delay line was raised 1s -> 2s exactly so a 1/2 division fits below
+-- 120 BPM; the sync clamp has to follow the line or the raise is silent.
+do
+  ok(params:lookup_param("delay_time").controlspec.maxval >= 2,
+    "the delay_time spec reaches the 2s line")
+  clock.get_tempo = function() return 60 end
+  params:set("delay_sync", 7)              -- 1/2
+  near(params:get("delay_time"), 2.0, 1e-6,
+    "a half note at 60 BPM syncs to the full 2 seconds")
+  params:set("delay_sync", 1)              -- FREE
+  params:set("delay_time", 0.3)
+  clock.get_tempo = nil
+end
+
+-- ============================================================================
 -- 11 · the engine contract — every Lua id lands on a real command
 -- ============================================================================
 -- add_eng_control and every `engine.X` call are guarded (`if engine[id]`), so

@@ -500,6 +500,9 @@ function M.pset_read(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
+    -- repaint the strip from the wav we just restored: lua cannot read the
+    -- softcut buffer, so without this the loop played under a blank picture
+    if C.repaint_twave then C.repaint_twave(path, TAPE_LEN) end
   else
     -- NO wav means the pset was saved with an EMPTY tape (pset_write deletes
     -- the file in that case, precisely so old audio cannot resurrect). Leaving
@@ -738,6 +741,10 @@ function M.pset_read(number)
     if util.file_exists(path) then
       sc.buffer_read_stereo(path, 0, d.from, d.len)
       d.any = true
+      -- repaint this deck's strip from its wav (same reason as the tape:
+      -- the softcut buffer is unreadable from lua, the file is right there)
+      d.wave_bin = 0
+      if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
     else
       M.clear(d)
     end
@@ -3012,7 +3019,28 @@ function M.update_tape_wave()
 end
 
 -- wipe the tape picture (the CLR gesture starts the loop over)
+-- the async fill queue lives up here so the clear functions can cancel their
+-- own strip's fill (a CLR must stop the very repaint that would redraw what
+-- it just erased — and ONLY that one, not another strip's fill in flight)
+local fills = {}
+local BINS_PER_TICK = 10
+local function cancel_fill(bins)
+  for i = #fills, 1, -1 do
+    if fills[i].bins == bins then
+      pcall(function() fills[i].f:close() end)
+      table.remove(fills, i)
+    end
+  end
+end
+local function cancel_all_fills()
+  for i = #fills, 1, -1 do
+    pcall(function() fills[i].f:close() end)
+    fills[i] = nil
+  end
+end
+
 function M.clear_twave()
+  cancel_fill(twave)
   for i = 1, 128 do twave[i] = 0 end
   twave_bin = 0
   C.twave_any = false
@@ -3021,7 +3049,7 @@ end
 -- wipe the engine's picture (the engine `clear` command): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
-  if M.cancel_load then M.cancel_load() end  -- stop an in-flight fill first
+  cancel_fill(wave)   -- stop an in-flight TAKE fill first
   for i = 1, 128 do wave[i] = 0 end
   wave_bin = 0
   C.wave_any = false
@@ -3040,13 +3068,12 @@ end
 -- async waveform read: the FAST part (header → dur, window, wave_any) runs now
 -- and RETURNS immediately; the slow per-bin peak read is deferred to load_tick
 -- (BINS_PER_TICK bins/frame on the redraw clock) so a long take/sample load
--- draws IN over ~1s instead of freezing the screen. A new load supersedes the
--- previous fill; the file handle lives on load_pending until the fill finishes.
-local load_pending = nil
-local BINS_PER_TICK = 10
-local function cancel_load()
-  if load_pending then pcall(function() load_pending.f:close() end); load_pending = nil end
-end
+-- draws IN over ~1s instead of freezing the screen. ONE queue serves every
+-- strip — the take, the tape, the layer decks — so a pset restore can repaint
+-- all of them; a new fill for the SAME bins table supersedes the queued one,
+-- and fills for different targets coexist. File handles live on the queue
+-- entries until each fill finishes (the queue itself is declared above the
+-- clear functions, which cancel per-strip).
 
 -- walk a RIFF/WAVE file to its fmt + data chunks, leaving f positioned at the
 -- data. returns afmt, ch, bits, sr, dpos, dlen — or nil if not RIFF/WAVE. shared
@@ -3103,19 +3130,19 @@ function M.wav_decoder(afmt, bits)
   return DECODE[afmt] and DECODE[afmt][bits]
 end
 
-function M.load_wave(path, buf_secs)
-  cancel_load()
-  -- clear the strip FIRST, so an unsupported-format / unreadable early return
-  -- leaves a flat strip instead of the previous take's waveform.
-  for i = 1, 128 do wave[i] = 0 end
-  wave_bin = 0
+-- open `path` and queue an async fill of `bins`: 128 peak bins spanning
+-- `secs` seconds, so a file shorter than the span occupies only its share of
+-- the strip (the engine clamps its reads the same way — a longer file only
+-- occupies `secs` of the buffer, and drawing more would misalign every
+-- playhead and slice). supersedes any queued fill of the SAME bins table.
+-- returns the seconds the file occupies, or nil for a format the shared
+-- decoders cannot read (the caller leaves the strip alone rather than lie).
+local function queue_fill(path, bins, secs)
+  cancel_fill(bins)
   local f = io.open(path, "rb")
   if not f then return nil end
   local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
   if not afmt then f:close(); return nil end
-  -- the shared decoder (above): a 24-bit drop-in draws + windows correctly
-  -- instead of "loads audibly but shows EMPTY", the bug this once had for
-  -- everything except 16-bit.
   local readpeak = M.wav_decoder(afmt, bits)
   if not dpos or ch < 1 or not readpeak then
     f:close()
@@ -3123,34 +3150,58 @@ function M.load_wave(path, buf_secs)
   end
   local bps = bits // 8
   local fbytes = ch * bps
-  -- the engine reads WITHOUT sample-rate conversion into a `buf_secs` buffer at
-  -- the server's 48k and CLAMPS to it (readChannel numFrames), so the picture
-  -- must clamp too — a file longer than the buffer only occupies buf_secs of it;
-  -- drawing all of it would stretch the wave and misalign every playhead/slice.
   local SR = C.SERVER_SR
-  local frames = min(floor(dlen / fbytes), floor(SR * buf_secs))
-  local span = clamp(frames / (SR * buf_secs), 0, 1)
+  local frames = min(floor(dlen / fbytes), floor(SR * secs))
+  local span = clamp(frames / (SR * secs), 0, 1)
   local nb = max(1, floor(span * 128 + 0.5))
-  C.wave_any = span > 0
   -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
   -- vanished when this sampled a few windows per bin instead.
   local stride = max(1, floor(frames * ch / 200000))
   if nb >= 1 and frames > 0 then
-    load_pending = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
-      nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0 }
+    fills[#fills + 1] = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
+      nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0,
+      bins = bins }
   else
     f:close()
   end
   return frames / SR
 end
 
--- fill up to BINS_PER_TICK waveform bins per call (driven by the redraw clock),
--- then close the file. bounded work per frame → the read never blocks the UI;
--- the waveform draws IN over ~ceil(nb/BINS_PER_TICK) frames.
+-- the TAKE's preview: clear the strip FIRST, so an unsupported-format /
+-- unreadable early return leaves a flat strip instead of the previous take's
+-- waveform; a 24-bit drop-in draws + windows correctly via the shared decoder
+-- (the bug this once had for everything except 16-bit).
+function M.load_wave(path, buf_secs)
+  for i = 1, 128 do wave[i] = 0 end
+  wave_bin = 0
+  local dur = queue_fill(path, wave, buf_secs)
+  if dur ~= nil then C.wave_any = dur > 0 end
+  return dur
+end
+
+-- fill an ARBITRARY 128-bin strip from a wav — the layer decks own their bins
+-- and hand them here when a pset restores their audio (lua cannot read the
+-- softcut buffer, but the wav it was restored FROM is right there; without
+-- this a restored loop played audibly under a blank picture).
+function M.fill_wave_bins(path, bins, secs)
+  for i = 1, 128 do bins[i] = 0 end
+  return queue_fill(path, bins, secs)
+end
+
+-- the tape strip's version of the same (mpages owns twave)
+function M.repaint_twave(path, secs)
+  twave_bin = 0
+  return M.fill_wave_bins(path, twave, secs)
+end
+
+-- fill up to BINS_PER_TICK bins of the queue's HEAD per call (driven by the
+-- redraw clock), then close its file and move on. bounded work per frame →
+-- the reads never block the UI; each strip draws IN over ~nb/10 frames.
 function M.load_tick()
-  local p = load_pending
+  local p = fills[1]
   if not p then return end
+  local bins = p.bins
   local last = min(p.i + BINS_PER_TICK, p.nb)
   for i = p.i + 1, last do
     local b0 = floor((i - 1) / p.nb * p.frames)
@@ -3168,14 +3219,14 @@ function M.load_tick()
         end
       end
     end
-    wave[i] = peak > 1 and 1 or peak
+    bins[i] = peak > 1 and 1 or peak
   end
   p.i = last
-  if p.i >= p.nb then p.f:close(); load_pending = nil end
+  if p.i >= p.nb then p.f:close(); table.remove(fills, 1) end
 end
 
--- cancel any in-flight fill (cleanup, or a superseding load)
-function M.cancel_load() cancel_load() end
+-- cancel EVERY in-flight fill (script cleanup)
+function M.cancel_load() cancel_all_fills() end
 
 -- ============================================================================
 -- sample-rate conversion
@@ -3626,7 +3677,8 @@ local function fmt_value(id)
     return string.format("%+.2fX", params:get(id))
   elseif id == "delay_time" then
     local v = params:get(id)
-    return v >= 0.9995 and "1.0S" or string.format("%dMS", floor(v * 1000 + 0.5))
+    return v >= 0.9995 and string.format("%.2fS", v)
+      or string.format("%dMS", floor(v * 1000 + 0.5))
   elseif id == "size" or id == "voice_atk" then
     local v = params:get(id)
     return v >= 1 and string.format("%.1fS", v)
@@ -5173,6 +5225,10 @@ ctx.motion = Mmotion
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
+-- ...and repaints it from the PSET wav on restore (plus the layer decks'
+-- strips, which own their bins and hand them in)
+ctx.repaint_twave = Mpages.repaint_twave
+ctx.wave_from_file = Mpages.fill_wave_bins
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -6336,7 +6392,8 @@ end
 -- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
 -- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
--- tape-style glide, and times beyond the 1s delay line clamp there. the
+-- tape-style glide, and times beyond the 2s delay line clamp there (2s so
+-- a half note fits down to 60 BPM). the
 -- redraw tick calls this each frame — it only WRITES when the tempo actually
 -- changed (or the division did), so idle frames set nothing.
 local SYNC_BEATS = { 0, 0.25, 0.5, 0.75, 1, 1.5, 2 }  -- FREE 1/16 1/8 1/8. 1/4 1/4. 1/2
@@ -6348,7 +6405,7 @@ local function sync_delay_time(force)
   if not (t and t > 0) then return end
   if not force and t == last_sync_tempo then return end
   last_sync_tempo = t
-  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 1))
+  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 2))
   -- tell the gesture looper this wasn't a hand on the knob (its polling
   -- capture would otherwise punch a delay_time lane on every tempo move)
   if ctx.motion and ctx.motion.account then ctx.motion.account("delay_time") end
@@ -6737,7 +6794,7 @@ local function init_params()
 
   params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
-    controlspec.new(0.01, 1, "exp", 0, 0.3, "s"))
+    controlspec.new(0.01, 2, "exp", 0, 0.3, "s"))
   -- tempo sync (DELAY K1+E3): FREE = the time knob; a division = delay_time
   -- follows the clock (re-asserted on tempo changes from the redraw tick)
   params:add_option("delay_sync", "delay sync",

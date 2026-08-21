@@ -2136,6 +2136,31 @@ real defects; both fixed at the boundary, both regression-tested.
 VERIFIED: luac clean, 350 assertions (171/37/58/41/43), renders byte-identical,
 source == dist. The device gate remains the one open item.
 
+Seventy-second change: **the pset restore repaints every strip + the delay
+line reaches 2s (Lua + ONE engine constant, NO new command, fingerprint STAYS
+65, all 66 render shots byte-identical, 365 assertions)**.
+* **A restored loop no longer plays under a blank picture.** Lua cannot read
+  the softcut buffer, but the wav a pset restore reads FROM is right there —
+  the tape and both layer decks now hand it to a repaint. mpages' async fill
+  became ONE queue serving every strip (the take, the tape, the deck bins):
+  fills for different targets coexist, a fill for the same bins table
+  supersedes its queued one, and each clear cancels only its OWN strip's fill
+  (a CLR must stop the very repaint that would redraw what it erased, and
+  nothing else). load_wave keeps its exact take semantics on top of the
+  shared queue_fill. Wiring mutation-proven in test_deck for BOTH decks —
+  mtape's restore is asserted there too, so the sibling this module has
+  deliberately not absorbed cannot drift.
+* **DelayC 1s -> 2s** (the one ceiling worth raising): a half-note sync now
+  fits down to 60 BPM instead of silently clamping below 120. The spec, the
+  sync clamp and the footer format follow the line; ~0.75 MB of server
+  memory; an ARG CONSTANT, not a new command — count STAYS 65, and the
+  change rides the SAME pending RESTART as everything since the 48th batch.
+  Gate addition: sync 1/2 at 60 BPM and hear a true 2s repeat.
+VERIFIED: luac clean, engine parens balanced, 365 assertions
+(173/46/62/41/43), all four mutations fail exactly their assertions
+(each deck's missing repaint, the sync clamp left at 1s, the supersede
+removed), renders byte-identical across the 4 variants, source == dist.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2295,10 +2320,11 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 lua tools/test_control.lua   # encoders, keys, the master, STOP, the erase
                              # arc, the engine command CONTRACT, and the
                              # CLASSIFICATION checks: every param must be in
-                             # or explicitly out of every curated list (171)
-lua tools/test_deck.lua      # the softcut loop decks: region isolation (37)
+                             # or explicitly out of every curated list (173)
+lua tools/test_deck.lua      # the softcut loop decks: region isolation +
+                             # the pset repaint wiring (46)
 lua tools/test_wav.lua       # resampling, transients, onsets, list drift,
-                             # lying/truncated wav headers (58)
+                             # lying/truncated wav headers, the fill queue (62)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
 lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (43)
 
