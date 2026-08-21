@@ -182,6 +182,36 @@ append(SAFE_SNAPSHOT_IDS, SCENE_RECALL_IDS)
 -- overwrite everything it just restored. (they're also UI selectors — not
 -- sound.) this is a note to whoever adds the next param to the lists above.
 
+-- WHAT A SCENE DELIBERATELY LEAVES OUT — the other half of the recall list.
+-- membership is TOTAL: tools/test_control.lua asserts every param in the
+-- paramset is in SCENE_RECALL_IDS or here, never neither and never both, so
+-- a NEW param cannot silently miss the decision (the defect that recurred:
+-- purity, FINE_IDS, RATE_IDS and these lists each missed a layers param).
+-- adding a param now FAILS the harness until it is placed on one side.
+local SCENE_EXCLUDE = {
+  -- the master + STOP: a scene must never rewrite stage volume or unmute
+  -- (out_level is the ONE of these the safe snapshot takes — SAFE_EXTRA_IDS)
+  "out_level", "stop_all",
+  -- capture transports + write plumbing: a scene changes how it sounds,
+  -- never whether or what it is recording
+  "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
+  "export_take", "take_tighten", "print_take", "print_len",
+  "pad_chop", "pad_even",
+  "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
+  -- padlock pset, not scenes)
+  "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  -- config / keys
+  "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
+  -- the other machines' transports, and scene's own params (NEVER capture
+  -- scene_*: scene_morph_amt's action re-fires the morph)
+  "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "orbit_on", "orbit_rate", "orbit_reach",
+  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_capture",
+  "scene_recall", "scene_next", "scene_clear", "scene_safe_capture",
+  "scene_safe_restore", "chaos_throw",
+}
+
 -- ===========================================================================
 -- module state
 -- ===========================================================================
@@ -192,10 +222,11 @@ local M = {
   pending = nil,      -- slot waiting on a quantized recall (nil = none)
   chaos_live = false, -- a chaos throw is currently held
   NUM_SLOTS = NUM_SLOTS,
-  -- exposed for docs/tests/inspection: the three lists, as built above
+  -- exposed for docs/tests/inspection: the lists, as built above
   SCENE_RECALL_IDS = SCENE_RECALL_IDS,
   SCENE_MORPH_IDS = SCENE_MORPH_IDS,
   SAFE_SNAPSHOT_IDS = SAFE_SNAPSHOT_IDS,
+  SCENE_EXCLUDE = SCENE_EXCLUDE,
 }
 
 local dirty = false      -- a morph is pending for the next tick
@@ -315,6 +346,7 @@ end
 -- region instead of a bogus one. `start` key -> `end` key.
 local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
                      lay1_start = "lay1_end", lay2_start = "lay2_end" }
+M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 
 -- set one param and report whether the value actually MOVED. the count of
 -- moved params is what tells a performer why a recall was silent: 0 moved
@@ -801,6 +833,7 @@ local CHAOS = {
   { "shimmer", 0.20, 0.90 },
   { "warp_rand", 0.30, 1.00 },
 }
+M.CHAOS = CHAOS   -- exposed so the harness can flag an entry for a dead param
 
 -- scan is bipolar — normalized 0.5 is STOPPED. throw it to one side or the
 -- other so chaos always keeps moving.

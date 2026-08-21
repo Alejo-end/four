@@ -2024,6 +2024,41 @@ base shots byte-identical (the 3 LAYERS diffs are the selector-at-rest
 footer), source == dist across 66 shots x 4 variants. Lua-only: save +
 reload. The engine RESTART + count-65 device gate is unchanged and pending.
 
+Sixty-ninth change: **the registry check + the ◇ harness (tooling + list
+exports, NO behavior change, fingerprint STAYS 65, all renders byte-identical,
+334 assertions total)**. The 52nd change named the structural risk ("three
+hand-lists over one registry") and deferred the fix; this retires the defect
+class without moving the lists.
+* **Membership is now TOTAL.** mscenes gained `SCENE_EXCLUDE` and mmotion
+  `MOTION_EXCLUDE`: explicit, reasoned lists of what each machine deliberately
+  leaves out (exported beside the includes; EDGE_PAIRS and CHAOS exported
+  too). test_control's new section 9 walks the REAL paramset and asserts every
+  param is in the list or its exclude, never neither and never both, and that
+  no entry names a deleted param. A NEW param now FAILS the harness until
+  someone decides — the exact failure mode of the 64th change (LAYERS missed
+  purity, FINE_IDS, RATE_IDS and SELECTOR_IDS in one change) can no longer
+  ship silently. Mechanical siblings enforced the same way: every
+  `*_start`/`*_end` pair must be in EDGE_PAIRS and FINE_IDS; every
+  x-unit rate param in RATE_IDS (pitch excepted, its own formatter); every
+  ENC_MAP + VOICE_FACE target has a SHORT footer word.
+* **Section 10: the shipped presets/pmaps are validated** against the live
+  paramset — a pset or pmap line naming a deleted param is silently dropped
+  by norns (the dead seq_play CC 100 pedal), so now it fails offscreen.
+* **NEW tools/test_purity.lua (41 assertions): the ◇ mark, end to end.** It
+  has lied twice (dry_wet default; the layer decks). The harness records
+  material into the take, the tape AND a layer, renders the REAL header, then
+  flips all 20 reasons the mark must die — every audible source, every hold,
+  every buffer writer — asserting the diamond (detected by its exact
+  8-lit/5-dark pixel shape) dies and revives each time. Mutation-proven:
+  re-introducing either historical lie fails exactly its assertion.
+* Six mutation checks on the classification (a removed exclude, a removed
+  FINE/RATE/SHORT entry, a stale exclude, a dead CHAOS target, a corrupted
+  preset id) each fail exactly their assertion.
+VERIFIED: luac clean, 334 assertions across FIVE harnesses (163/37/52/41/41),
+renders byte-identical, source == dist. Save + reload only if deploying; the
+engine RESTART + count-65 device gate is unchanged and still pending — it is
+the one remaining item no harness can substitute for.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2180,10 +2215,13 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 # every encoder, press every key, and assert what reaches the params. run them
 # after any change to ENC_MAP, KEYS, a param action, or the softcut decks —
 # three of the four defects in the layers review were invisible to the renderer.
-lua tools/test_control.lua   # encoders, keys, the master, STOP  (145 assertions)
+lua tools/test_control.lua   # encoders, keys, the master, STOP, and the
+                             # CLASSIFICATION checks: every param must be in
+                             # or explicitly out of every curated list (163)
 lua tools/test_deck.lua      # the softcut loop decks: region isolation (37)
 lua tools/test_wav.lua       # resampling, transients, onsets, list drift (52)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
+lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (41)
 
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua as
 # IIFEs (proven byte-identical via the seeded render suite). the dist file

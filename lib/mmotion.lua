@@ -68,6 +68,36 @@ local MOTION_IDS = {
   "scene_morph_amt",
 }
 
+-- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
+-- membership is TOTAL: tools/test_control.lua asserts every param sits in
+-- MOTION_IDS or here, never neither and never both, so a new param cannot
+-- silently miss the decision. each line names its reason once.
+local MOTION_EXCLUDE = {
+  -- stage-setting levels + STOP (mix, the performance crossfade, IS recorded)
+  "sc_level", "cut_level", "out_level", "stop_all",
+  -- capture transports + write plumbing: a replayed arm or blend writes the
+  -- buffer, which a loop must never do behind your back
+  "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
+  "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
+  "print_len", "pad_chop", "pad_even",
+  "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  -- PARAMS-only discretes: no performance surface reaches them
+  "grain_shape", "warp_overlaps", "tape_fade",
+  -- routing + structure (see the header: pad_input re-points the keyboard,
+  -- the voices cap re-caps the allocator)
+  "pad_input", "voices",
+  -- UI cursors + the per-pad lock editors
+  "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  -- config / keys
+  "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
+  -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
+  -- scene param that IS recorded — the whole-sweep lane above)
+  "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "scene_slot", "scene_recall_mode", "scene_capture", "scene_recall",
+  "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
+  "chaos_throw", "orbit_on", "orbit_rate", "orbit_reach",
+}
+
 local M = {
   loop_len = 0,     -- frames; 0 = empty (no take yet). the PLAYBACK length —
                     -- motion_len may retime it away from the recorded length.
@@ -77,6 +107,9 @@ local M = {
   playhead = 0,     -- current loop frame while playing (0 .. loop_len)
   lane_ids = {},    -- ordered active param ids (first-touch order)
   lanes = {},       -- lanes[id] = { f, v, n, cur, last_fire }
+  -- exposed for the harness's totality check (see MOTION_EXCLUDE above)
+  MOTION_IDS = MOTION_IDS,
+  MOTION_EXCLUDE = MOTION_EXCLUDE,
 }
 
 -- purely-internal state (not read by the page)

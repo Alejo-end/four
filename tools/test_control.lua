@@ -49,6 +49,11 @@ local plist, lookup = params.list, params.lookup
 dofile("mangler.lua")
 init()
 
+-- the params MANGLER owns, captured before the system ones are stubbed in —
+-- this is the universe the classification checks (section 9) walk
+local MANGLER_IDS = {}
+for _, p in ipairs(plist) do MANGLER_IDS[#MANGLER_IDS + 1] = p.id end
+
 -- system params mangler references but norns owns
 params:add_control("input_level", "in", controlspec.new(0, 1, "lin", 0, 0.8, ""))
 params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, ""))
@@ -82,9 +87,20 @@ do
        or (short or ""):find(id, 1, true) ~= nil,
       "SHORT names " .. id)
   end
+  -- the VOICE face pairs are encoder targets too (mode-contextual E2/E3)
+  local vface = src:match("local VOICE_FACE = %{(.-)\n%}")
+  for id in (vface or ""):gmatch('"([%w_]+)"') do plain[id] = true end
+  local unnamed = {}
   for id in pairs(plain) do
     ok(lookup[id] ~= nil, "ENC_MAP target " .. id .. " is a real param")
+    -- every encoder target needs a footer word (FULL falls back to SHORT,
+    -- so SHORT is the one that must exist)
+    if not (short or ""):find("%f[%w_]" .. id .. " =") then
+      unnamed[#unnamed + 1] = id
+    end
   end
+  ok(#unnamed == 0, "every encoder target has a SHORT footer word (missing: "
+    .. table.concat(unnamed, ",") .. ")")
 end
 
 -- ============================================================================
@@ -418,6 +434,134 @@ do
   if q then near(q[3], 0, 1e-6, "...and it reaches the layer decks") end
   g.key(8, 2, 1); g.key(8, 2, 0)
   ok(params:get("stop_all") == 0, "...and releases it")
+end
+
+-- ============================================================================
+-- 9 · every param is CLASSIFIED — the registry check
+-- ============================================================================
+-- The recurring defect in this codebase's history is a NEW param missing one
+-- of the hand-maintained lists its siblings joined: the scene lists, the
+-- motion list, the edge pairs, the fine step, the rate format — the layers
+-- alone missed four of them in one change. The lists stay where they are,
+-- with their ordering and their reasons; what is new is that membership is
+-- TOTAL. Every param must sit in a list or in that list's explicit exclude,
+-- never neither and never both, so the next param FAILS here until someone
+-- decides. Stale entries fail too: an exclude naming a deleted param is the
+-- same drift that left a pedal mapped to the deleted seq_play, silently.
+do
+  local Msc = dofile("lib/mscenes.lua")
+  local Mmo = dofile("lib/mmotion.lua")
+  -- the universe must be the real paramset, or everything below is vacuous
+  ok(#MANGLER_IDS > 100, "the param universe is populated (" .. #MANGLER_IDS .. ")")
+  local function set_of(list)
+    local s = {}
+    for _, id in ipairs(list) do s[id] = true end
+    return s
+  end
+  local function check(name, includes, excludes)
+    local inc, exc = set_of(includes), set_of(excludes)
+    local neither, both, stale = {}, {}, {}
+    for _, id in ipairs(MANGLER_IDS) do
+      if not inc[id] and not exc[id] then neither[#neither + 1] = id end
+      if inc[id] and exc[id] then both[#both + 1] = id end
+    end
+    for _, id in ipairs(includes) do
+      if not lookup[id] then stale[#stale + 1] = id end
+    end
+    for _, id in ipairs(excludes) do
+      if not lookup[id] then stale[#stale + 1] = id end
+    end
+    ok(#neither == 0, name .. " leaves params UNDECIDED: "
+      .. table.concat(neither, ","))
+    ok(#both == 0, name .. " lists params on BOTH sides: "
+      .. table.concat(both, ","))
+    ok(#stale == 0, name .. " names params that no longer exist: "
+      .. table.concat(stale, ","))
+  end
+  check("scenes", Msc.SCENE_RECALL_IDS, Msc.SCENE_EXCLUDE)
+  check("motion", Mmo.MOTION_IDS, Mmo.MOTION_EXCLUDE)
+
+  -- every *_start/*_end pair is a REGION: it must move widening-edge-first
+  -- in the scenes (EDGE_PAIRS) and take the span-scaled fine step (FINE_IDS)
+  local src = io.open("mangler.lua"):read("a")
+  local fine = src:match("local FINE_IDS = %{(.-)%}") or ""
+  local no_edge, no_fine = {}, {}
+  for _, id in ipairs(MANGLER_IDS) do
+    local stem = id:match("^([%w_]+)_start$")
+    if stem and lookup[stem .. "_end"] then
+      if Msc.EDGE_PAIRS[id] ~= stem .. "_end" then no_edge[#no_edge + 1] = id end
+      if not fine:find("%f[%w_]" .. id .. " =") then no_fine[#no_fine + 1] = id end
+    end
+  end
+  ok(#no_edge == 0, "every edge pair is in EDGE_PAIRS (missing: "
+    .. table.concat(no_edge, ",") .. ")")
+  ok(#no_fine == 0, "every edge pair takes the fine step (missing: "
+    .. table.concat(no_fine, ",") .. ")")
+
+  -- every rate-shaped param (controlspec units "x") formats as a rate in the
+  -- footer; pitch is the one exception, with its own semitone formatter
+  local pages_src = io.open("lib/mpages.lua"):read("a")
+  local rate = pages_src:match("local RATE_IDS = %{(.-)%}") or ""
+  local no_rate = {}
+  for _, id in ipairs(MANGLER_IDS) do
+    local p = params:lookup_param(id)
+    if p.controlspec and p.controlspec.units == "x" and id ~= "pitch"
+        and not rate:find("%f[%w_]" .. id .. " =") then
+      no_rate[#no_rate + 1] = id
+    end
+  end
+  ok(#no_rate == 0, "every x-rate param is in RATE_IDS (missing: "
+    .. table.concat(no_rate, ",") .. ")")
+
+  -- the chaos throw's target list survives param deletions
+  local dead_chaos = {}
+  for _, c in ipairs(Msc.CHAOS) do
+    if not lookup[c[1]] then dead_chaos[#dead_chaos + 1] = c[1] end
+  end
+  ok(#dead_chaos == 0, "every CHAOS target exists (dead: "
+    .. table.concat(dead_chaos, ",") .. ")")
+end
+
+-- ============================================================================
+-- 10 · the shipped presets and pmap name only params that exist
+-- ============================================================================
+-- psets and pmaps reference params by id and norns validates neither: a line
+-- naming a deleted param is silently dropped on load. That is how a pedal
+-- stayed mapped to seq_play, deleted with the sequencer, and did nothing.
+do
+  local function ids_in(path)
+    local f = io.open(path)
+    if not f then return nil end
+    local out = {}
+    for line in f:lines() do
+      local id = line:match('^"([%w_]+)"%s*:')
+      if id then out[#out + 1] = id end
+    end
+    f:close()
+    return out
+  end
+  local checked, dead = 0, {}
+  local sets = {
+    "presets/mangler-01.pset", "presets/mangler-02.pset",
+    "presets/mangler-03.pset", "presets/mangler-04.pset",
+    "presets/mangler-05.pset", "presets/mangler.pmap.example",
+    "presets/layers/layers-01.pset", "presets/layers/layers-02.pset",
+    "presets/layers/layers-03.pset", "presets/layers/layers-04.pset",
+    "presets/layers/layers-05.pset", "presets/layers/layers-06.pset",
+    "presets/layers/layers.pmap.example",
+  }
+  for _, path in ipairs(sets) do
+    local ids = ids_in(path)
+    if ids then
+      checked = checked + 1
+      for _, id in ipairs(ids) do
+        if not lookup[id] then dead[#dead + 1] = path:match("[^/]+$") .. ":" .. id end
+      end
+    end
+  end
+  ok(checked >= 12, "the shipped presets are all readable (" .. checked .. ")")
+  ok(#dead == 0, "every preset/pmap id exists in the paramset (dead: "
+    .. table.concat(dead, ",") .. ")")
 end
 
 print(string.format("\n%d assertions passed", ok_count))
