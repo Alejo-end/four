@@ -153,7 +153,10 @@ end
 -- voice pair; a MONO file feeds both sides. The loop opens to the file's
 -- length so it plays at once; unknown length (unreadable header) = the whole
 -- region. A load IS material: `any` goes true and the strip repaints.
-function M.load_file(d, path, shown)
+-- `keep_loop`: the PSET restore passes true — params:read has just restored
+-- the session's own loop points, and the interactive snap below would stomp
+-- them back to the full file on every load. A hand-picked load keeps snapping.
+function M.load_file(d, path, shown, keep_loop)
   local ch, dur
   if C.wav_info then ch, dur = C.wav_info(path) end
   sc.buffer_clear_region(d.from, d.len)
@@ -166,11 +169,14 @@ function M.load_file(d, path, shown)
   d.any = true
   d.wave_bin = 0
   if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
-  local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
-  params:set(p(d, "start"), 0)
-  params:set(p(d, "end"), frac)
+  if not keep_loop then
+    local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
+    params:set(p(d, "start"), 0)
+    params:set(p(d, "end"), frac)
+  end
   print(string.format("mangler: %s -> %s%s", shown or path, d.name,
-    dur and string.format(" (%.1fs, loop snapped)", math.min(dur, d.len)) or ""))
+    (dur and not keep_loop)
+      and string.format(" (%.1fs, loop snapped)", math.min(dur, d.len)) or ""))
 end
 
 function M.start(d)
@@ -267,7 +273,9 @@ function M.pset_read(number)
       local fp = pget(p(d, "file"), "")
       if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
           and util.file_exists(fp) then
-        M.load_file(d, fp)
+        -- keep_loop: the pset's loop points are already restored and are
+        -- authoritative — reloading the audio must not re-snap them
+        M.load_file(d, fp, nil, true)
       else
         M.clear(d)
       end

@@ -267,12 +267,18 @@ end
 do
   P.lay1_file = "/tmp/bed.wav"
   util.file_exists = function(p) return p == "/tmp/bed.wav" end
+  -- the pset restored a CUSTOM loop; the reload must not re-snap it
+  P.lay1_start = 0.1; P.lay1_end = 0.3
+  ctx.wav_info = function() return 2, 15 end
   calls = {}
   Mdeck.pset_read(3)
   local r = last("buffer_read_stereo")
   ok(r ~= nil and r[2] == "/tmp/bed.wav",
     "a missing deck wav with a named file reloads the file")
   ok(d1.any == true, "...and the deck holds audio")
+  near(P.lay1_start, 0.1, 1e-9, "the pset's loop start survives the reload")
+  near(P.lay1_end, 0.3, 1e-9, "...and its end (no re-snap over restored params)")
+  ctx.wav_info = nil
   P.lay1_file = ""
   calls = {}
   Mdeck.pset_read(3)
