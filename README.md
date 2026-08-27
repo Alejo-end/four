@@ -62,7 +62,7 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 
 | Control | Action |
 |---|---|
-| E1 | Select page |
+| E1 | Select page. The destination's name pops up big while you scroll. |
 | E2, E3 | The page's two knobs. Hold K1 for the second pair. Values show while turning. |
 | K1 | Shift, hold |
 | K2, K3 | The page's two actions, named in the footer |
@@ -72,11 +72,17 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 
 ## Pages
 
+The stations sit in families: the take (TAKE, VOICE, EROSION), the loop decks (TAPE,
+LAYERS), the tone (FILTER, DELAY, REVERB), the console (MIX), and the performance layer
+(PADS, MOTION, SCENE, ORBIT).
+
 | Page | What it does | Keys |
 |---|---|---|
 | TAKE | Record and frame the material | K2 record, K3 snap window |
 | VOICE | How the take plays: PLAY, GRAIN, WARP, PV | K2 freeze, K3 mode |
+| EROSION | Each loop pass ages the take a little | K2 heal, K3 scar |
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
+| LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 | FILTER | Diode ladder filter plus drive | K2 open, K3 type |
 | DELAY | Feedback echoes, optionally clocked | K2 infinite hold, K3 kill |
 | REVERB | Tail and shimmer, added on top of the dry sound | K2 wash, K3 shimmer bloom |
@@ -85,17 +91,22 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 | MOTION | Record and replay knob movements | K2 record, K3 play |
 | SCENE | Capture, recall and morph whole sounds | K2 recall or peek, K3 capture |
 | ORBIT | The instrument drifts between your scenes by itself | K2 run, K3 capture the moment |
-| EROSION | Each loop pass ages the take a little | K2 heal, K3 scar |
-| LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 
 Notes on the less obvious ones.
 
 LAYERS gives you two independent loop decks beside the tape, so you can keep playing while
 you record the next part. Each has its own loop points and speed, so a four-bar part
 against a three-bar part drifts and re-syncs on its own. They record what the tape records
-(dry input, or the processed output — one switch, on TAPE). What they cannot do is
-granulate or stretch: that is the engine's take, and only the take gets it. MUTE silences
-a deck without stopping its head, so two decks never lose their drift against each other.
+(dry input, or the processed output: one switch, on TAPE, and the page says SRC WET when it
+is up). A wav can also be loaded straight into a deck: PARAMS > layers > load file, with the
+loop snapping to the file. What a deck cannot do is granulate or stretch: that is the
+engine's take, and only the take gets it. MUTE silences a deck without stopping its head,
+so two decks never lose their drift against each other.
+
+To resample with the layers: on TAPE hold K1 and turn E3 to WET, then arm a layer. It now
+prints the processed engine output (the mangled sound, not the input), and you can mute
+the engine and mangle something new over it. For a full-mix bounce that becomes the new
+take, use print (below).
 
 ORBIT picks a stored scene, morphs partway toward it, parks there, then picks another. It
 never fully arrives, so it keeps finding sounds between the ones you saved. K3 captures
@@ -109,6 +120,9 @@ take has aged. Heal stops the decay where it stands. Recording is never affected
 SCENE slot zero, drawn as a left arrow, is the way back: every recall and chaos throw parks
 the previous sound there automatically. Select it and tap K2 to undo. The `next scene`
 parameter steps through filled slots and can be mapped to a footswitch, as can `chaos throw`.
+A recalled scene never opens the playback window past the recorded material: a scene
+captured with the window wide, recalled over a short take, lands on the take instead of
+sixty seconds of mostly silence.
 
 ## Notes and pads
 
@@ -119,7 +133,8 @@ Settings live in PARAMS under keys. The space bar stops and starts everything.
 ## Samples
 
 Load: PARAMS > take > load sample reads WAV in 16, 24 or 32 bit. The window snaps to the
-file. A 44.1 kHz file plays about nine percent fast; export at 48 kHz.
+file. A file at any sample rate loads in tune: off-rate files are resampled on the way in.
+PARAMS > layers > load file does the same into a layer deck.
 
 Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo WAV.
 

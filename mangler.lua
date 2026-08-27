@@ -27,9 +27,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (thirteen stations: TAKE VOICE TAPE · FILTER DELAY
---          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION LAYERS — the
---          header dots are the signal map)
+--   E1     select page (thirteen stations, by family: TAKE VOICE EROSION ·
+--          TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE ORBIT;
+--          the page name pops big while you scroll)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -83,12 +83,14 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- thirteen stations on one signal path —
--- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE |
--- ORBIT EROSION LAYERS
+-- thirteen stations, ordered by FAMILY so neighbours belong together:
+-- the take (TAKE VOICE EROSION) · the loop decks (TAPE LAYERS) · the tone
+-- (FILTER DELAY REVERB) · the console (MIX) · the performance layer
+-- (PADS MOTION SCENE ORBIT). ORBIT/EROSION/LAYERS used to sit appended at
+-- the tail in the order they were built, which is history, not a map.
 local PAGES = {
-  "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION", "LAYERS",
+  "TAKE", "VOICE", "EROSION", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "MIX", "PADS", "MOTION", "SCENE", "ORBIT",
 }
 
 local FPS = 15
@@ -216,6 +218,7 @@ ctx.clear_twave = Mpages.clear_twave
 -- strips, which own their bins and hand them in)
 ctx.repaint_twave = Mpages.repaint_twave
 ctx.wave_from_file = Mpages.fill_wave_bins
+ctx.wav_info = Mpages.wav_info
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -553,6 +556,13 @@ local KEYS = {
       Mdeck.clear(d)
       params:set(Mdeck.p(d, "start"), 0)
       params:set(Mdeck.p(d, "end"), 1)
+      -- forget the loaded file too, like clear_recording forgets sample_file:
+      -- a PSET saved after this erase must not resurrect the very file you
+      -- wiped ("" is a no-op through layer_load's own guard)
+      local fid = Mdeck.p(d, "file")
+      if params.lookup[fid] and params:get(fid) ~= "" then
+        params:set(fid, "")
+      end
     end,
   },
   EROSION = {
@@ -1050,6 +1060,45 @@ function ctx.load_sample(path)
   if not started then
     print("mangler: busy — loading at the original rate, it will play sharp")
     read_into_buffer(path)
+  end
+end
+
+-- load a wav into a LAYER deck (PARAMS > layers > L1/L2 load file, the answer
+-- to "how do I get material into a layer without playing it in live"). Same
+-- rate rule as the take: softcut's buffer read does no sample-rate conversion,
+-- so an off-rate file goes through the resampler first; if that cannot run,
+-- load as-is and say so (audible-but-sharp beats silence). Each deck gets its
+-- own conversion temp so a take load and a layer load can never race over one
+-- file the server is still reading.
+function ctx.layer_load(d, path)
+  if path == nil or path == "" or path == "-" or path == _path.audio then return end
+  if not util.file_exists(path) then
+    print("mangler: no such file — " .. tostring(path))
+    return
+  end
+  local okp, in_sr = pcall(Mpages.wav_rate, path)
+  if not (okp and in_sr and in_sr ~= SERVER_SR) then
+    Mdeck.load_file(d, path)
+    return
+  end
+  local conv = norns.state.data .. d.id .. "-srconv.wav"
+  print(string.format("mangler: %d Hz sample — resampling to %d before the %s load",
+    in_sr, SERVER_SR, d.name))
+  local started = ctx.run_task(function(yield)
+    local ok, err = Mpages.convert_sr(path, conv, SERVER_SR, yield, d.len + 1)
+    if not ok then error(err or "conversion failed", 0) end
+  end, function(ok, err)
+    if ok then
+      Mdeck.load_file(d, conv, path)
+    else
+      print("mangler: resample failed (" .. tostring(err)
+        .. ") — loading at the original rate, it will play sharp")
+      Mdeck.load_file(d, path)
+    end
+  end)
+  if not started then
+    print("mangler: busy — loading at the original rate, it will play sharp")
+    Mdeck.load_file(d, path)
   end
 end
 
@@ -1681,12 +1730,16 @@ local function init_params()
   -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
   -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
   -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 17)
+  params:add_group("grp_layers", "layers", 19)
   params:add_number("layer_sel", "layer", 1, 2, 1)
   for n = 1, 2 do
     local id = "lay" .. n
     local function q(k) return id .. "_" .. k end
     local function deck() return ctx.layers[n] end
+    -- load a wav straight into this deck (norns fileselect; the path rides the
+    -- PSET, so a session reloads its layer material even with no deck wav)
+    params:add_file(q("file"), "L" .. n .. " load file", _path.audio)
+    params:set_action(q("file"), function(f) ctx.layer_load(deck(), f) end)
     params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
     params:set_action(q("rec"), function() Mdeck.update_rec(deck()) end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
@@ -2157,6 +2210,10 @@ function enc(n, d)
       end
     else
       ctx.page = clamp(ctx.page + d, 1, #PAGES)
+      -- pop the page name big for a moment: thirteen stations scroll past
+      -- faster than the 1x title reads, and finding the page mid-set should
+      -- not need squinting (mpages draws the overlay while this is armed)
+      ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
     end
   else
     local id = enc_param(n)

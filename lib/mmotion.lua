@@ -10,7 +10,7 @@
 -- data model: one loop, per-param lanes.
 --   loop_len   loop length in FRAMES (the 15fps redraw grid is the timeline;
 --              no new clock). 0 until the first take sets it (free length).
---   lanes[id]  { f={}, v={}, n, cur, last_fire } — flat, pre-grown arrays of
+--   lanes[id]  { f={}, v={}, n, cur } — flat, pre-grown arrays of
 --              {frame-offset, value} events over [0, loop_len). sparse: only
 --              params you actually moved exist, so they layer independently.
 --   punch-in replace: the first time a param moves in a record pass its lane
@@ -81,6 +81,7 @@ local MOTION_EXCLUDE = {
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  "lay1_file", "lay2_file",
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade",
   -- routing + structure (see the header: pad_input re-points the keyboard,
@@ -106,7 +107,7 @@ local M = {
                     -- rec_len/loop_len ratio, so retiming is lossless.
   playhead = 0,     -- current loop frame while playing (0 .. loop_len)
   lane_ids = {},    -- ordered active param ids (first-touch order)
-  lanes = {},       -- lanes[id] = { f, v, n, cur, last_fire }
+  lanes = {},       -- lanes[id] = { f, v, n, cur }
   -- exposed for the harness's totality check (see MOTION_EXCLUDE above)
   MOTION_IDS = MOTION_IDS,
   MOTION_EXCLUDE = MOTION_EXCLUDE,
@@ -184,7 +185,7 @@ local function capture_poll(offset)
         -- punch-in replace: first move this pass clears (or creates) the lane
         if not touched_this_pass[id] then
           if not L then
-            L = { f = {}, v = {}, n = 0, cur = 1, last_fire = -1 }
+            L = { f = {}, v = {}, n = 0, cur = 1 }
             M.lanes[id] = L
             M.lane_ids[#M.lane_ids + 1] = id
           else
@@ -291,13 +292,6 @@ function M.clear_lane()
   end
 end
 
--- wipe the whole loop back to empty
-function M.clear_all()
-  if pget("motion_rec", 0) == 1 then params:set("motion_rec", 0) end
-  wipe()
-  if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
-end
-
 -- ===========================================================================
 -- tick — one per redraw frame: capture live moves, then replay the loop
 -- ===========================================================================
@@ -362,7 +356,6 @@ function M.tick()
         -- REPLACING the very lane an overdub was meant to extend. M.account
         -- re-reads for the same reason.
         last_val[id] = params:get(id)
-        L.last_fire = M.playhead
         cur = cur + 1
       end
       L.cur = cur

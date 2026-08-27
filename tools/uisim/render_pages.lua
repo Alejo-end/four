@@ -138,7 +138,13 @@ local PAGES = (function()
 end)()
 local PAGE_IDX = {}
 for i, n in ipairs(PAGES) do PAGE_IDX[n] = i end
-local function goto_page(name) enc(1, -20) enc(1, (PAGE_IDX[name] or 1) - 1) end
+local function goto_page(name)
+  enc(1, -20)
+  enc(1, (PAGE_IDX[name] or 1) - 1)
+  -- run out the page-name pop (E1 arms it for ~0.7s): the shots depict the
+  -- settled page, not the navigation chrome on top of it
+  run_ticks(12)
+end
 local function pfx(name, suffix)
   return string.format("%s_%02d_%s%s", PREFIX, PAGE_IDX[name], name, suffix or "")
 end

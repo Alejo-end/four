@@ -2161,6 +2161,88 @@ VERIFIED: luac clean, engine parens balanced, 365 assertions
 (each deck's missing repaint, the sync clamp left at 1s, the supersede
 removed), renders byte-identical across the 4 variants, source == dist.
 
+Seventy-third change: **the design-review batch from the play-test voice memo
+(Lua + presets + tooling, ENGINE UNTOUCHED, fingerprint STAYS 65, branch
+`layers`)**. The report was "running scenes resets the take window and it takes
+a long time to hear the buffer again", plus asks for easier resampling, layer
+loading, deeper presets, dead-code cleanup. Everything below is Lua or data:
+save + reload. The engine RESTART for count 65 is unchanged and still pending.
+* **THE WINDOW RESET, root-caused and fixed at BOTH ends.** pos_start/pos_end
+  ride scenes by design, so any scene captured while the window was the full
+  60s buffer reopened ~56s of silence over a short take on recall. Worse, the
+  SHIPPED presets baked it in twice: every pset carried pos_start 0 / pos_end 1
+  AFTER the sample_file line, so the menu load (params:read fires actions in
+  FILE order, no bang after; verified against norns source) snapped the window
+  to the sample and then overwrote the snap back to the full buffer, and every
+  scene sidecar's slot 1 did the same on RCL 1. Fix one, the runtime clamp:
+  mscenes' clamp_stored() caps a STORED window edge (recall, safe restore,
+  morph target) at C.take_len, the content high-water mark. Beyond it is
+  silence by definition, so the clamp can only remove silence. Live values and
+  the morph's exact-home restore stay verbatim (morph_from bypasses it), and
+  the clamp stands down with no material or full material. Fix two, the data:
+  every shipped pset and scene slot dropped the window pair entirely (the
+  sample snap is now the only writer), and section 10 of the control harness
+  FAILS if the pair ever returns. Both mutation-proven; the pset fix proven by
+  replaying norns' reader loop (pos_end stays 0.0333, was 1.0).
+* **Presets canonicalized and deepened.** presets/mangler-0N.pset now carries
+  the FULL current paramset (the old set stopped at 108 ids, so the set the
+  normal `mangler` deploy can actually load never staged the layer decks), a
+  sixth preset (LAYERS BED) joins it, and slot 1 of every scene bank is a FULL
+  capture over SCENE_RECALL_IDS (78 ids) instead of a 15-id partial, so RCL 1
+  is a real way home. The layN_file params are pinned to the audio dir (empty)
+  in every pset. Scene sidecars regenerated in the exact tab.save reference
+  format (verified against norns tabutil). The harness now also validates the
+  scene SIDECAR ids (they were never checked; apply() drops unknown ids
+  silently).
+* **Layers load files now.** lay1_file/lay2_file (params:add_file, grp_layers
+  17 to 19) drive ctx.layer_load: off-rate files go through convert_sr first
+  (per-deck temp so it cannot race the take's), Mdeck.load_file clears the
+  region, reads stereo in one call or a MONO file into both sides, snaps the
+  loop to the file length (Mpages.wav_info, the new header-only channel and
+  duration probe) and repaints the strip. Mdeck.pset_read's no-wav branch now
+  reloads a named file instead of clearing (the file action may not re-fire
+  when the value is unchanged); an EMPTY file param still clears, the tape
+  rule. The LAYERS erase forgets the file param like clear_recording forgets
+  sample_file. Classified in SCENE_EXCLUDE and MOTION_EXCLUDE.
+* **Stations reordered by FAMILY + the page-name pop.** PAGES is now TAKE
+  VOICE EROSION · TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE
+  ORBIT (the last three used to sit appended at the tail in build order,
+  history not a map). All dispatch is name-based so nothing else moved. E1
+  arms ctx.page_flash (~0.7s) and mpages draws the destination's name BIG and
+  centered in the footer-swell framed-box idiom; the render suite's goto_page
+  runs the pop out so shots depict the settled page. LAYERS also grew the
+  "SRC WET" flag (cut_source is ONE global softcut send, so the tape's source
+  knob governs what the layers record; that must not be a hidden mode).
+* **Grid fixes from review, both mutation-proven paths.** draw_layers_ws used
+  a CONTAINMENT LED law while draw_main_ws uses OVERLAP, so a layer loop
+  narrower than one eighth was entirely dark on its own row (@lay_move and
+  MIDI park loops at arbitrary fractions; grid-set spans land on eighths,
+  which is why it never showed). Now one law. And slice_key wrote start-then-
+  end unconditionally, violating the widening-edge-first rule every other
+  edge writer follows; a span right of the old one crossed the pair for one
+  write and the 100ms floor turns a crossed pair into a head jump.
+* **Dead code out** (all call-site-verified by the review agents, harness
+  green): mmotion's clear_all export (0 callers since the NU redesign) and
+  the write-only last_fire field; mpages' 8 stale SHORT keys, 18 stale FULL
+  keys and 7 fmt_value arms stranded by the NU-1 banking deletion (none
+  reachable: SHORT's live key set is ENC_MAP + VOICE_FACE + MOTION_IDS); the
+  vacuous nb >= 1; erosion_tick/body_EROSION re-deriving the window law by
+  hand (now window_bounds, the bound upvalue); layer_strip reaching text_w
+  through C.font.
+* TESTS: control 173 to 184 (section 12, the window clamp, driven through a
+  real simulated take; the sidecar and no-window-pair checks; the narrow-loop
+  LED), deck 46 to 55 (load_file stereo/mono/region, the pset file fallback).
+  Mutations: neutering clamp_stored fails exactly its 2 assertions; the old
+  containment LED law fails exactly its 1.
+* VERIFIED: luac clean, 385 assertions across the five harnesses
+  (184/55/62/41/43), all 66 shots source == dist across the 4 variants
+  (base/empty/grain/filter), gallery regenerated (18 pngs, new page indices),
+  the page pop and the SRC flag eyeballed via probe renders. READMEs updated
+  (family table, resample workflow, layer loading, the stale "44.1k plays
+  sharp" line, presets story). DEFERRED as user decisions, not built: page
+  MERGES (fewer stations), E1 wrap-around, a one-key layer BOUNCE gesture,
+  auto-WET while a layer records.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

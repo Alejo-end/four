@@ -398,6 +398,19 @@ do
   end
   ok(lit > 0, "the layers workspace lights pads (" .. lit .. ")")
   ok(rows[3] and rows[4], "...on both deck rows")
+
+  -- a loop NARROWER than one eighth must still light the pad it touches.
+  -- the containment law this row used to carry left it entirely dark (@lay_move
+  -- and MIDI park loops at arbitrary fractions; grid-set spans hid the bug)
+  params:set("lay1_play", 1)
+  params:set("lay1_start", 0.4); params:set("lay1_end", 0.45)
+  g.leds = {}
+  _h.run_ticks(2)
+  local narrow = 0
+  for _, l in ipairs(g.leds) do
+    if l.y == 3 and l.x == 4 and (l.z or 0) >= 4 then narrow = narrow + 1 end
+  end
+  ok(narrow > 0, "a sub-eighth layer loop still lights its pad")
 end
 
 -- ============================================================================
@@ -590,7 +603,8 @@ do
   local sets = {
     "presets/mangler-01.pset", "presets/mangler-02.pset",
     "presets/mangler-03.pset", "presets/mangler-04.pset",
-    "presets/mangler-05.pset", "presets/mangler.pmap.example",
+    "presets/mangler-05.pset", "presets/mangler-06.pset",
+    "presets/mangler.pmap.example",
     "presets/layers/layers-01.pset", "presets/layers/layers-02.pset",
     "presets/layers/layers-03.pset", "presets/layers/layers-04.pset",
     "presets/layers/layers-05.pset", "presets/layers/layers-06.pset",
@@ -605,9 +619,51 @@ do
       end
     end
   end
-  ok(checked >= 12, "the shipped presets are all readable (" .. checked .. ")")
+  ok(checked >= 13, "the shipped presets are all readable (" .. checked .. ")")
   ok(#dead == 0, "every preset/pmap id exists in the paramset (dead: "
     .. table.concat(dead, ",") .. ")")
+
+  -- the scene SIDECARS name params by id too, and a dead id there is even
+  -- quieter: apply() skips unknown ids without a word. Scan every ["id"]= key.
+  local sdead, schecked = {}, 0
+  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+    for n = 1, 6 do
+      local path = string.format("%sscenes-%02d.lua", dir, n)
+      local f = io.open(path)
+      if f then
+        schecked = schecked + 1
+        for line in f:lines() do
+          local id = line:match('^%s*%["([%w_]+)"%]=')
+          if id and id ~= "slots" and id ~= "safe" and id ~= "v"
+              and not lookup[id] then
+            sdead[#sdead + 1] = path:match("[^/]+$") .. ":" .. id
+          end
+        end
+        f:close()
+      end
+    end
+  end
+  ok(schecked >= 12, "the shipped scene sidecars are all readable (" .. schecked .. ")")
+  ok(#sdead == 0, "every scene-sidecar id exists in the paramset (dead: "
+    .. table.concat(sdead, ",") .. ")")
+  -- and none of them may carry the window pair: a stored full-buffer window
+  -- recalled over a short sample is the "long silence" trap (the runtime clamp
+  -- guards live captures; the SHIPPED banks simply leave the window alone)
+  local wnd = {}
+  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+    for n = 1, 6 do
+      local path = string.format("%sscenes-%02d.lua", dir, n)
+      local f = io.open(path)
+      if f then
+        local s = f:read("a"); f:close()
+        if s:find('"pos_start"', 1, true) or s:find('"pos_end"', 1, true) then
+          wnd[#wnd + 1] = path:match("[^/]+$")
+        end
+      end
+    end
+  end
+  ok(#wnd == 0, "no shipped scene bank stores the window pair ("
+    .. table.concat(wnd, ",") .. ")")
 end
 
 -- ============================================================================
@@ -668,6 +724,76 @@ do
   table.sort(miss)
   ok(#miss == 0, "every Lua engine id is a real command (typo'd: "
     .. table.concat(miss, ",") .. ")")
+end
+
+-- ============================================================================
+-- 12 · a recalled scene never opens the window onto silence
+-- ============================================================================
+-- pos_start/pos_end ride scenes, but the material can be SHORTER by the time
+-- the scene comes back. The reported trap: capture a scene while the window
+-- was the whole 60s buffer, record a 4s phrase (the rec-stop snaps the window
+-- to it), recall the scene, and the window reopened over ~56 seconds of
+-- nothing, so the take came around once a minute. Stored windows (recall,
+-- safe restore, morph target) now clamp to the material's high-water mark;
+-- live values and the morph's exact-home restore stay untouched.
+do
+  -- silence the background movers and undo anything section 6's key mash
+  -- latched (same reason as 6b): these assertions read params over ticks
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_recall_mode", 1)             -- NOW, not queued
+  params:set("rec", 0)
+  -- clear_recording refuses without an engine `clear` (device truth), and the
+  -- env's engine is a bare table. Lend it one so the reset actually resets
+  -- take_len/wave_any (section 6's key mash latched a rec-stop at pos_end=1,
+  -- which is exactly the full-material state where the clamp stands down)
+  local had_clear = engine.clear
+  engine.clear = engine.clear or function() end
+  params:set("clear_rec", 1); params:set("clear_rec", 0)   -- fresh buffer
+  engine.clear = had_clear
+  -- a full-buffer window, captured BEFORE any take exists
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  params:set("scene_slot", 7)
+  params:set("scene_capture", 1); params:set("scene_capture", 0)
+  -- record a short take: the head walks 0 -> 0.1 and the rec-stop snaps
+  _h.push("rec_phase", 0.0); _h.run_ticks(2)
+  params:set("rec", 1)
+  for i = 1, 10 do
+    _h.push("rec_phase", i * 0.01)
+    _h.push("rec_amp", 0.5)
+    _h.run_ticks(1)
+  end
+  params:set("rec", 0)
+  near(params:get("pos_end"), 0.1, 0.02, "the rec-stop snapped the window to the take")
+  local tl = params:get("pos_end")
+  -- recall the wide scene: the window lands on the material, not the 60s buffer
+  params:set("scene_recall", 1); params:set("scene_recall", 0)
+  ok(params:get("pos_end") <= tl + 1e-6,
+    "recalling a full-window scene clamps the window to the take")
+  ok(params:get("pos_start") < params:get("pos_end"),
+    "...and the clamped window still has width")
+  -- a stored window INSIDE the material recalls exactly (the clamp never bites)
+  params:set("pos_start", 0.02); params:set("pos_end", 0.06)
+  params:set("scene_slot", 8)
+  params:set("scene_capture", 1); params:set("scene_capture", 0)
+  params:set("pos_start", 0); params:set("pos_end", tl)
+  params:set("scene_recall", 1); params:set("scene_recall", 0)
+  near(params:get("pos_start"), 0.02, 1e-6, "a window inside the material recalls exactly")
+  near(params:get("pos_end"), 0.06, 1e-6, "...both edges")
+  -- the morph aims at the clamped window too, and still comes home exactly
+  params:set("pos_start", 0); params:set("pos_end", tl)
+  params:set("scene_slot", 7)                    -- the wide scene again
+  params:set("scene_morph_amt", 1); _h.run_ticks(2)
+  ok(params:get("pos_end") <= tl + 1e-6,
+    "a morph at full amount lands on the clamped window, not the 60s buffer")
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  near(params:get("pos_end"), tl, 1e-6, "sweeping home restores the origin exactly")
+  for _, s in ipairs({ 7, 8 }) do                -- leave the bank as found
+    params:set("scene_slot", s)
+    params:set("scene_clear", 1); params:set("scene_clear", 0)
+  end
 end
 
 print(string.format("\n%d assertions passed", ok_count))

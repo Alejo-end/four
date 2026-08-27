@@ -238,8 +238,19 @@ local function slice_key(kind, x, z)
     local anchor = h[1] or x   -- first held pad anchors the span
     h[#h + 1] = x
     local lo, hi = min(anchor, x), max(anchor, x)
-    params:set(SLICE_IDS[kind][1], (lo - 1) / 8)
-    params:set(SLICE_IDS[kind][2], hi / 8)
+    local sid, eid = SLICE_IDS[kind][1], SLICE_IDS[kind][2]
+    local nlo, nhi = (lo - 1) / 8, hi / 8
+    -- widening edge FIRST, the move_pair/EDGE_PAIRS rule. Written start-then-
+    -- end unconditionally, a span to the RIGHT of the old one crossed the pair
+    -- for one write, and a crossed pair is a region that is neither the old
+    -- nor the new one (the tape/layer actions floor it to a 100ms loop).
+    if nlo < pget(sid, 0) then
+      params:set(sid, nlo)
+      params:set(eid, nhi)
+    else
+      params:set(eid, nhi)
+      params:set(sid, nlo)
+    end
   else
     for i = #h, 1, -1 do
       if h[i] == x then table.remove(h, i) end
@@ -574,12 +585,15 @@ local function draw_layers_ws()
     local y = n + 2                       -- deck 1 -> row 3, deck 2 -> row 4
     local a = clamp(pget(d.id .. "_start", 0), 0, 1)
     local b = clamp(pget(d.id .. "_end", 1), 0, 1)
-    local lo, hi = math.min(a, b), math.max(a, b)
+    local lo, hi = min(a, b), max(a, b)
     local playing = pget(d.id .. "_play", 1) == 1
     local recing = pget(d.id .. "_rec", 0) == 1
-    local head = math.floor(clamp(d.phase, 0, 0.999) * 8) + 1
+    local head = floor(clamp(d.phase, 0, 0.999) * 8) + 1
     for x = 1, 8 do
-      local inside = (x > lo * 8) and (x <= hi * 8 + 0.001)
+      -- the OVERLAP law, same as draw_main_ws's window/loop rows: a pad lights
+      -- when the region touches any of its eighth. The old containment test
+      -- left a loop narrower than one eighth entirely dark on its own row.
+      local inside = (x - 1) / 8 < hi and x / 8 > lo
       local lvl = inside and (playing and 8 or 3) or 1
       if x == head and inside then lvl = 15 end
       gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))

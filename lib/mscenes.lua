@@ -198,6 +198,7 @@ local SCENE_EXCLUDE = {
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  "lay1_file", "lay2_file",
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
@@ -348,6 +349,27 @@ local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
                      lay1_start = "lay1_end", lay2_start = "lay2_end" }
 M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 
+-- A STORED window is clamped to the material before it is applied. Scenes
+-- capture pos_start/pos_end verbatim, but the take may be shorter by the time
+-- the scene comes back. The classic trap: capture a scene before recording
+-- (window = the whole 60s buffer), record a 4s phrase (the rec-stop snaps the
+-- window to it), recall the scene, and the window reopens over ~56 seconds of
+-- nothing, so what you were listening to comes around once a minute. Beyond
+-- C.take_len (the content high-water mark, from frame 0) there is silence BY
+-- DEFINITION, so clamping a stored edge into it can only remove silence,
+-- never sound. Only STORED values pass through here: a recall, a safe
+-- restore, a morph target. Live values stay exact, so the encoder can still
+-- open the window wherever it likes, and a sweep coming home restores the
+-- origin verbatim (morph_from bypasses this).
+local WINDOW_IDS = { pos_start = true, pos_end = true }
+local function clamp_stored(id, v)
+  if v == nil or not WINDOW_IDS[id] then return v end
+  local tl = (C and C.wave_any and C.take_len) or 0
+  if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
+  local cap = id == "pos_end" and tl or (tl - 0.002)
+  return v < cap and v or cap
+end
+
 -- set one param and report whether the value actually MOVED. the count of
 -- moved params is what tells a performer why a recall was silent: 0 moved
 -- means the scene and the live sound are already the same.
@@ -367,10 +389,10 @@ local function apply(tbl, ids)
   local done                      -- edge partners already set (nil until needed)
   for i = 1, #ids do
     local id = ids[i]
-    local v = tbl[id]
+    local v = clamp_stored(id, tbl[id])
     if v ~= nil and params.lookup[id] and not (done and done[id]) then
       local partner = EDGE_PAIRS[id]
-      local pv = partner and tbl[partner]
+      local pv = partner and clamp_stored(partner, tbl[partner])
       if pv ~= nil and params.lookup[partner] then
         -- outward edge first: if the new start moves LEFT it's the widening
         -- one, else the new end is
@@ -628,6 +650,7 @@ function M.morph(slot, amt, opts)
   -- still lands exactly at both ends.
   local function emit(id, va, vb)
     if va == nil or vb == nil or not params.lookup[id] then return end
+    vb = clamp_stored(id, vb)   -- a stored window sweeps toward the material
     if not (va ~= vb or (force and last_sent[id] ~= nil)) then return end
     local v, tn = morph_value(id, va, vb, amt, opts.linear)
     if v == nil then return end
@@ -656,7 +679,7 @@ function M.morph(slot, amt, opts)
         -- hits the 100ms minimum-length floor, which jumps the softcut head.
         -- The morph runs this 15 times a second, so it meets the hazard far
         -- more often than a recall does.
-        local nv = morph_value(id, A[id], B[id], amt, opts.linear)
+        local nv = morph_value(id, A[id], clamp_stored(id, B[id]), amt, opts.linear)
         if nv ~= nil and nv < params:get(id) then
           emit(id, A[id], B[id]); emit(partner, A[partner], B[partner])
         else

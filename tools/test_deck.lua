@@ -222,6 +222,55 @@ do
   defaults()
 end
 
+-- ---- loading a FILE into a deck -------------------------------------------
+-- layN_file lands here via ctx.layer_load; the deck must read into ITS region,
+-- snap the loop to the file, and feed a mono file to both sides of the pair
+do
+  ctx.wav_info = function() return 2, 15 end       -- stereo, 15s
+  ctx.wave_from_file = function() end
+  calls = {}
+  Mdeck.load_file(d1, "/tmp/loop.wav")
+  local r = last("buffer_read_stereo")
+  ok(r ~= nil and r[2] == "/tmp/loop.wav", "a stereo file reads in one stereo read")
+  near(r and r[4] or -1, 120, 0.001, "...into this deck's own region")
+  near(P.lay1_end or -1, 0.25, 0.001, "the loop snaps to the file's length (15s/60s)")
+  ok(d1.any == true, "a load IS material")
+  calls = {}
+  ctx.wav_info = function() return 1, 60 end       -- mono, full region
+  Mdeck.load_file(d2, "/tmp/mono.wav")
+  ok(count("buffer_read_mono") == 2, "a mono file is read into BOTH sides of the pair")
+  ok(count("buffer_read_stereo") == 0, "...never as a stereo read")
+  ctx.wav_info = nil
+  ctx.wave_from_file = nil
+  d1.any = false; d2.any = false
+  defaults()
+end
+
+-- ---- the pset restore honours a loaded file --------------------------------
+-- no deck wav in the pset, but the file param names one: reload the file
+-- rather than clearing (the file action may not have re-fired during
+-- params:read if its value did not change across the load). An EMPTY file
+-- param still clears: the tape rule, unchanged.
+do
+  P.lay1_file = "/tmp/bed.wav"
+  util.file_exists = function(p) return p == "/tmp/bed.wav" end
+  calls = {}
+  Mdeck.pset_read(3)
+  local r = last("buffer_read_stereo")
+  ok(r ~= nil and r[2] == "/tmp/bed.wav",
+    "a missing deck wav with a named file reloads the file")
+  ok(d1.any == true, "...and the deck holds audio")
+  P.lay1_file = ""
+  calls = {}
+  Mdeck.pset_read(3)
+  ok(count("buffer_read_stereo") == 0 and last("buffer_clear_region") ~= nil,
+    "an empty file param clears the deck as before")
+  util.file_exists = function() return false end
+  P.lay1_file = nil
+  d1.any = false; d2.any = false
+  defaults()
+end
+
 -- the TAPE deck's restore takes the same path (mtape is the sibling this
 -- module deliberately has not absorbed yet — its wiring is asserted here so
 -- the two cannot drift apart)

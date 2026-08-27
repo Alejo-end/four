@@ -37,9 +37,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (thirteen stations: TAKE VOICE TAPE · FILTER DELAY
---          REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION LAYERS — the
---          header dots are the signal map)
+--   E1     select page (thirteen stations, by family: TAKE VOICE EROSION ·
+--          TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE ORBIT;
+--          the page name pops big while you scroll)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -93,12 +93,14 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- thirteen stations on one signal path —
--- TAKE VOICE TAPE | FILTER DELAY REVERB | MIX | PADS MOTION SCENE |
--- ORBIT EROSION LAYERS
+-- thirteen stations, ordered by FAMILY so neighbours belong together:
+-- the take (TAKE VOICE EROSION) · the loop decks (TAPE LAYERS) · the tone
+-- (FILTER DELAY REVERB) · the console (MIX) · the performance layer
+-- (PADS MOTION SCENE ORBIT). ORBIT/EROSION/LAYERS used to sit appended at
+-- the tail in the order they were built, which is history, not a map.
 local PAGES = {
-  "TAKE", "VOICE", "TAPE", "FILTER", "DELAY", "REVERB", "MIX",
-  "PADS", "MOTION", "SCENE", "ORBIT", "EROSION", "LAYERS",
+  "TAKE", "VOICE", "EROSION", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "MIX", "PADS", "MOTION", "SCENE", "ORBIT",
 }
 
 local FPS = 15
@@ -659,6 +661,32 @@ function M.clear(d)
   d.any = false
 end
 
+-- read a wav into this deck's region (the `layN_file` params land here, via
+-- ctx.layer_load, which resamples off-rate files first: softcut's buffer read
+-- does no sample-rate conversion either). Stereo lands L/R on the deck's
+-- voice pair; a MONO file feeds both sides. The loop opens to the file's
+-- length so it plays at once; unknown length (unreadable header) = the whole
+-- region. A load IS material: `any` goes true and the strip repaints.
+function M.load_file(d, path, shown)
+  local ch, dur
+  if C.wav_info then ch, dur = C.wav_info(path) end
+  sc.buffer_clear_region(d.from, d.len)
+  if ch == 1 then
+    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 1)
+    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 2)
+  else
+    sc.buffer_read_stereo(path, 0, d.from, d.len)
+  end
+  d.any = true
+  d.wave_bin = 0
+  if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
+  local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
+  params:set(p(d, "start"), 0)
+  params:set(p(d, "end"), frac)
+  print(string.format("mangler: %s -> %s%s", shown or path, d.name,
+    dur and string.format(" (%.1fs, loop snapped)", math.min(dur, d.len)) or ""))
+end
+
 function M.start(d)
   sc.enable(d.va, 1); sc.enable(d.vb, 1)
   -- voice -> buffer channel, and the stereo split
@@ -746,7 +774,17 @@ function M.pset_read(number)
       d.wave_bin = 0
       if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
     else
-      M.clear(d)
+      -- no deck wav, but the pset names a loaded FILE: put the file back
+      -- rather than clearing. The file param's action may not have re-fired
+      -- during params:read if its value did not change across the load. A
+      -- pset whose file param is empty still clears, same rule as the tape.
+      local fp = pget(p(d, "file"), "")
+      if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
+          and util.file_exists(fp) then
+        M.load_file(d, fp)
+      else
+        M.clear(d)
+      end
     end
   end
 end
@@ -1165,8 +1203,19 @@ local function slice_key(kind, x, z)
     local anchor = h[1] or x   -- first held pad anchors the span
     h[#h + 1] = x
     local lo, hi = min(anchor, x), max(anchor, x)
-    params:set(SLICE_IDS[kind][1], (lo - 1) / 8)
-    params:set(SLICE_IDS[kind][2], hi / 8)
+    local sid, eid = SLICE_IDS[kind][1], SLICE_IDS[kind][2]
+    local nlo, nhi = (lo - 1) / 8, hi / 8
+    -- widening edge FIRST, the move_pair/EDGE_PAIRS rule. Written start-then-
+    -- end unconditionally, a span to the RIGHT of the old one crossed the pair
+    -- for one write, and a crossed pair is a region that is neither the old
+    -- nor the new one (the tape/layer actions floor it to a 100ms loop).
+    if nlo < pget(sid, 0) then
+      params:set(sid, nlo)
+      params:set(eid, nhi)
+    else
+      params:set(eid, nhi)
+      params:set(sid, nlo)
+    end
   else
     for i = #h, 1, -1 do
       if h[i] == x then table.remove(h, i) end
@@ -1501,12 +1550,15 @@ local function draw_layers_ws()
     local y = n + 2                       -- deck 1 -> row 3, deck 2 -> row 4
     local a = clamp(pget(d.id .. "_start", 0), 0, 1)
     local b = clamp(pget(d.id .. "_end", 1), 0, 1)
-    local lo, hi = math.min(a, b), math.max(a, b)
+    local lo, hi = min(a, b), max(a, b)
     local playing = pget(d.id .. "_play", 1) == 1
     local recing = pget(d.id .. "_rec", 0) == 1
-    local head = math.floor(clamp(d.phase, 0, 0.999) * 8) + 1
+    local head = floor(clamp(d.phase, 0, 0.999) * 8) + 1
     for x = 1, 8 do
-      local inside = (x > lo * 8) and (x <= hi * 8 + 0.001)
+      -- the OVERLAP law, same as draw_main_ws's window/loop rows: a pad lights
+      -- when the region touches any of its eighth. The old containment test
+      -- left a loop narrower than one eighth entirely dark on its own row.
+      local inside = (x - 1) / 8 < hi and x / 8 > lo
       local lvl = inside and (playing and 8 or 3) or 1
       if x == head and inside then lvl = 15 end
       gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))
@@ -1607,7 +1659,7 @@ local Mmotion = (function()  -- inlined lib/mmotion.lua
 -- data model: one loop, per-param lanes.
 --   loop_len   loop length in FRAMES (the 15fps redraw grid is the timeline;
 --              no new clock). 0 until the first take sets it (free length).
---   lanes[id]  { f={}, v={}, n, cur, last_fire } — flat, pre-grown arrays of
+--   lanes[id]  { f={}, v={}, n, cur } — flat, pre-grown arrays of
 --              {frame-offset, value} events over [0, loop_len). sparse: only
 --              params you actually moved exist, so they layer independently.
 --   punch-in replace: the first time a param moves in a record pass its lane
@@ -1678,6 +1730,7 @@ local MOTION_EXCLUDE = {
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  "lay1_file", "lay2_file",
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade",
   -- routing + structure (see the header: pad_input re-points the keyboard,
@@ -1703,7 +1756,7 @@ local M = {
                     -- rec_len/loop_len ratio, so retiming is lossless.
   playhead = 0,     -- current loop frame while playing (0 .. loop_len)
   lane_ids = {},    -- ordered active param ids (first-touch order)
-  lanes = {},       -- lanes[id] = { f, v, n, cur, last_fire }
+  lanes = {},       -- lanes[id] = { f, v, n, cur }
   -- exposed for the harness's totality check (see MOTION_EXCLUDE above)
   MOTION_IDS = MOTION_IDS,
   MOTION_EXCLUDE = MOTION_EXCLUDE,
@@ -1781,7 +1834,7 @@ local function capture_poll(offset)
         -- punch-in replace: first move this pass clears (or creates) the lane
         if not touched_this_pass[id] then
           if not L then
-            L = { f = {}, v = {}, n = 0, cur = 1, last_fire = -1 }
+            L = { f = {}, v = {}, n = 0, cur = 1 }
             M.lanes[id] = L
             M.lane_ids[#M.lane_ids + 1] = id
           else
@@ -1888,13 +1941,6 @@ function M.clear_lane()
   end
 end
 
--- wipe the whole loop back to empty
-function M.clear_all()
-  if pget("motion_rec", 0) == 1 then params:set("motion_rec", 0) end
-  wipe()
-  if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
-end
-
 -- ===========================================================================
 -- tick — one per redraw frame: capture live moves, then replay the loop
 -- ===========================================================================
@@ -1959,7 +2005,6 @@ function M.tick()
         -- REPLACING the very lane an overdub was meant to extend. M.account
         -- re-reads for the same reason.
         last_val[id] = params:get(id)
-        L.last_fire = M.playhead
         cur = cur + 1
       end
       L.cur = cur
@@ -2184,6 +2229,7 @@ local SCENE_EXCLUDE = {
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
+  "lay1_file", "lay2_file",
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
@@ -2334,6 +2380,27 @@ local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
                      lay1_start = "lay1_end", lay2_start = "lay2_end" }
 M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 
+-- A STORED window is clamped to the material before it is applied. Scenes
+-- capture pos_start/pos_end verbatim, but the take may be shorter by the time
+-- the scene comes back. The classic trap: capture a scene before recording
+-- (window = the whole 60s buffer), record a 4s phrase (the rec-stop snaps the
+-- window to it), recall the scene, and the window reopens over ~56 seconds of
+-- nothing, so what you were listening to comes around once a minute. Beyond
+-- C.take_len (the content high-water mark, from frame 0) there is silence BY
+-- DEFINITION, so clamping a stored edge into it can only remove silence,
+-- never sound. Only STORED values pass through here: a recall, a safe
+-- restore, a morph target. Live values stay exact, so the encoder can still
+-- open the window wherever it likes, and a sweep coming home restores the
+-- origin verbatim (morph_from bypasses this).
+local WINDOW_IDS = { pos_start = true, pos_end = true }
+local function clamp_stored(id, v)
+  if v == nil or not WINDOW_IDS[id] then return v end
+  local tl = (C and C.wave_any and C.take_len) or 0
+  if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
+  local cap = id == "pos_end" and tl or (tl - 0.002)
+  return v < cap and v or cap
+end
+
 -- set one param and report whether the value actually MOVED. the count of
 -- moved params is what tells a performer why a recall was silent: 0 moved
 -- means the scene and the live sound are already the same.
@@ -2353,10 +2420,10 @@ local function apply(tbl, ids)
   local done                      -- edge partners already set (nil until needed)
   for i = 1, #ids do
     local id = ids[i]
-    local v = tbl[id]
+    local v = clamp_stored(id, tbl[id])
     if v ~= nil and params.lookup[id] and not (done and done[id]) then
       local partner = EDGE_PAIRS[id]
-      local pv = partner and tbl[partner]
+      local pv = partner and clamp_stored(partner, tbl[partner])
       if pv ~= nil and params.lookup[partner] then
         -- outward edge first: if the new start moves LEFT it's the widening
         -- one, else the new end is
@@ -2614,6 +2681,7 @@ function M.morph(slot, amt, opts)
   -- still lands exactly at both ends.
   local function emit(id, va, vb)
     if va == nil or vb == nil or not params.lookup[id] then return end
+    vb = clamp_stored(id, vb)   -- a stored window sweeps toward the material
     if not (va ~= vb or (force and last_sent[id] ~= nil)) then return end
     local v, tn = morph_value(id, va, vb, amt, opts.linear)
     if v == nil then return end
@@ -2642,7 +2710,7 @@ function M.morph(slot, amt, opts)
         -- hits the 100ms minimum-length floor, which jumps the softcut head.
         -- The morph runs this 15 times a second, so it meets the hazard far
         -- more often than a recall does.
-        local nv = morph_value(id, A[id], B[id], amt, opts.linear)
+        local nv = morph_value(id, A[id], clamp_stored(id, B[id]), amt, opts.linear)
         if nv ~= nil and nv < params:get(id) then
           emit(id, A[id], B[id]); emit(partner, A[partner], B[partner])
         else
@@ -3158,7 +3226,7 @@ local function queue_fill(path, bins, secs)
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
   -- vanished when this sampled a few windows per bin instead.
   local stride = max(1, floor(frames * ch / 200000))
-  if nb >= 1 and frames > 0 then
+  if frames > 0 then
     fills[#fills + 1] = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
       nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0,
       bins = bins }
@@ -3305,6 +3373,20 @@ function M.wav_rate(path)
   f:close()
   if not afmt or not sr or sr <= 0 then return nil end
   return sr
+end
+
+-- channels and duration of a wav, from the header alone. nil for anything that
+-- is not a readable RIFF/WAVE; the layer loader then reads it as stereo and
+-- leaves the loop at the whole region rather than guessing.
+function M.wav_info(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local afmt, ch, bits, sr, _, dlen = riff_parse(f)
+  f:close()
+  if not afmt or not sr or sr <= 0 or not ch or ch < 1 then return nil end
+  local dur = (dlen and dlen > 0 and bits and bits > 0)
+    and dlen / (ch * (bits / 8) * sr) or nil
+  return ch, dur, sr
 end
 
 function M.convert_sr(path, out_path, sr, yield, max_secs)
@@ -3530,15 +3612,14 @@ end
 -- footer words per param id: the owning page's own vocabulary — these are
 -- also the MOTION lane names, so a lane says what its page says
 local SHORT = {
-  mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
+  mix = "MIX", out_level = "OUT",
   input_level = "IN", monitor_level = "MON",
-  rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
-  regen = "REGN",
+  dry_wet = "D/W",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
   ["@win_move"] = "MOV",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
-  grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
+  grain_jitter = "GJIT", grain_pitch_spread = "DTUN",
   clouds_pos = "POS", clouds_tex = "TEX", clouds_fb = "FB", clouds_lofi = "LOFI",
   warp_window = "WIN", warp_rand = "RAND",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
@@ -3551,7 +3632,7 @@ local SHORT = {
   rev_moddepth = "MOD", rev_modfreq = "MRAT", rev_low = "LOW",
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
-  voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
+  voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
@@ -3575,26 +3656,22 @@ local SHORT = {
 -- value is up (turning, or a selector), where the digits need the room. a full
 -- word that would collide with the key words falls back to SHORT (flabel_r).
 local FULL = {
-  mix = "MIX", out_level = "OUT", sc_level = "ENGINE", cut_level = "TAPE",
+  mix = "MIX", out_level = "OUT",
   input_level = "INPUT", monitor_level = "MONITOR",
-  rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
-  regen = "REGEN",
+  dry_wet = "DRY/WET",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
   scan = "SPEED", pitch = "PITCH",
-  size = "SIZE", spread = "SPREAD", density = "DENSITY", grain_level = "GRAIN",
-  clouds_pos = "POSITION", clouds_tex = "TEXTURE", clouds_fb = "FEEDBACK",
-  clouds_lofi = "LOFI",
+  size = "SIZE", density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
-  tape_rate = "RATE", tape_pre = "PRE", loop_start = "START", loop_end = "LOOP",
+  tape_rate = "RATE", tape_pre = "PRE", loop_end = "LOOP",
   cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
   delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "REVERB",
   rev_decay = "DECAY", rev_damp = "DAMP",
-  shimmer = "SHIMMER", shimmer_pitch = "OCT", shimmer_tone = "AIR",
-  voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
+  voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
@@ -3656,18 +3733,12 @@ local function fmt_value(id)
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
   end
-  if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
-      or id == "shimmer_tone" then
+  if id == "cutoff" then
     local v = params:get(id)
     return v >= 1000 and string.format("%.1fKHZ", v / 1000)
       or string.format("%dHZ", floor(v + 0.5))
-  elseif id == "shimmer_pitch" then
-    local v = floor(params:get(id) + 0.5)
-    return (v >= 0 and "+" or "") .. v .. "ST"
   elseif id == "rev_decay" then
     return string.format("%.1fS", params:get(id))
-  elseif id == "rev_modfreq" then
-    return string.format("%.1fHZ", params:get(id))
   elseif id == "rev_size" then
     return string.format("%.1f", params:get(id))
   elseif id == "pitch" then
@@ -3679,11 +3750,11 @@ local function fmt_value(id)
     local v = params:get(id)
     return v >= 0.9995 and string.format("%.2fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "size" or id == "voice_atk" then
+  elseif id == "size" then
     local v = params:get(id)
     return v >= 1 and string.format("%.1fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "density" or id == "voices" then
+  elseif id == "density" then
     return tostring(floor(params:get(id) + 0.5))
   end
   local p = params:lookup_param(id)
@@ -4905,8 +4976,7 @@ function M.erosion_tick()
   -- the same conditions the engine pauses (rec, freeze, not in PLAY).
   if pget("erode", 0) > 0 and pget("mode", 5) == 5
       and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
-    local a, b = pget("pos_start", 0), pget("pos_end", 1)
-    local span = max(max(a, b) - min(a, b), 0.001)
+    local _, _, span = window_bounds()
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then
       eros_gen = eros_gen + 1
@@ -4937,9 +5007,7 @@ local function body_EROSION(frame)
   end
   screen.fill()
   -- playhead, window relative (play_phase is a buffer position)
-  local a, b = pget("pos_start", 0), pget("pos_end", 1)
-  local wlo = min(a, b)
-  local wspan = max(max(a, b) - wlo, 0.001)
+  local wlo, _, wspan = window_bounds()
   local hx = 4 + floor(clamp((C.play_phase - wlo) / wspan, 0, 1) * 120)
   screen.level(15)
   screen.rect(hx, 20, 1, 22)
@@ -5015,7 +5083,7 @@ local function layer_strip(d, y, sel, frame)
   -- a swelling value meets the key words
   if not d.any then
     local msg = sel and "EMPTY - K2 REC" or "EMPTY"
-    local tw = C.font.text_w(msg, 1)
+    local tw = text_w(msg, 1)
     local tx = floor((x0 + x1) / 2 - tw / 2)
     screen.level(0)
     screen.rect(tx - 2, y - 2, tw + 4, 9)
@@ -5047,6 +5115,15 @@ local function body_LAYERS(frame)
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
   ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
+  -- what the decks RECORD: cut_source is ONE global send into softcut, so the
+  -- tape's source knob (TAPE K1+E3) governs the layers just as much. Flag a
+  -- processed print here too, or the resample rig is a hidden mode. DRY, the
+  -- default, draws nothing, same law as the TAPE page's flag.
+  local src = pget("cut_source", 0)
+  if src > 0.02 then
+    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
+      44, 12, 1, 9)
+  end
   for i = 1, math.min(#decks, 2) do
     layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
   end
@@ -5189,6 +5266,25 @@ end
 -- cut to keep the OLED from burning the static chrome in; the first touch
 -- restores full brightness. one closure, made once.
 local orig_level, dim_level
+-- the page-name pop: E1 arms C.page_flash while stations scroll past, and the
+-- destination's name reads BIG and centered for a beat. Thirteen pages go by
+-- faster than the 1x title reads, and finding the page mid-set should not
+-- need squinting. Same framed-box idiom as the footer value swell, so it is
+-- legible over any body; transient chrome, gone by itself.
+local function draw_page_flash()
+  if not (C.page_flash and C.frame < C.page_flash) then return end
+  local name = PAGES[C.page]
+  local w = text_w(name, 2) + 9
+  local bx = floor(64 - w / 2 + 0.5)
+  screen.level(0)
+  screen.rect(bx, 23, w + 2, 15)
+  screen.fill()
+  screen.level(12)
+  screen.rect(bx, 23, w + 2, 15)
+  screen.stroke()
+  ptext(name, bx + 5, 26, 2, 15)
+end
+
 function M.redraw()
   if orig_level == nil then
     orig_level = screen.level
@@ -5201,6 +5297,7 @@ function M.redraw()
   draw_header()
   draw_body()
   draw_footer()
+  draw_page_flash()
   screen.update()
   screen.level = orig_level
 end
@@ -5229,6 +5326,7 @@ ctx.clear_twave = Mpages.clear_twave
 -- strips, which own their bins and hand them in)
 ctx.repaint_twave = Mpages.repaint_twave
 ctx.wave_from_file = Mpages.fill_wave_bins
+ctx.wav_info = Mpages.wav_info
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -5566,6 +5664,13 @@ local KEYS = {
       Mdeck.clear(d)
       params:set(Mdeck.p(d, "start"), 0)
       params:set(Mdeck.p(d, "end"), 1)
+      -- forget the loaded file too, like clear_recording forgets sample_file:
+      -- a PSET saved after this erase must not resurrect the very file you
+      -- wiped ("" is a no-op through layer_load's own guard)
+      local fid = Mdeck.p(d, "file")
+      if params.lookup[fid] and params:get(fid) ~= "" then
+        params:set(fid, "")
+      end
     end,
   },
   EROSION = {
@@ -6063,6 +6168,45 @@ function ctx.load_sample(path)
   if not started then
     print("mangler: busy — loading at the original rate, it will play sharp")
     read_into_buffer(path)
+  end
+end
+
+-- load a wav into a LAYER deck (PARAMS > layers > L1/L2 load file, the answer
+-- to "how do I get material into a layer without playing it in live"). Same
+-- rate rule as the take: softcut's buffer read does no sample-rate conversion,
+-- so an off-rate file goes through the resampler first; if that cannot run,
+-- load as-is and say so (audible-but-sharp beats silence). Each deck gets its
+-- own conversion temp so a take load and a layer load can never race over one
+-- file the server is still reading.
+function ctx.layer_load(d, path)
+  if path == nil or path == "" or path == "-" or path == _path.audio then return end
+  if not util.file_exists(path) then
+    print("mangler: no such file — " .. tostring(path))
+    return
+  end
+  local okp, in_sr = pcall(Mpages.wav_rate, path)
+  if not (okp and in_sr and in_sr ~= SERVER_SR) then
+    Mdeck.load_file(d, path)
+    return
+  end
+  local conv = norns.state.data .. d.id .. "-srconv.wav"
+  print(string.format("mangler: %d Hz sample — resampling to %d before the %s load",
+    in_sr, SERVER_SR, d.name))
+  local started = ctx.run_task(function(yield)
+    local ok, err = Mpages.convert_sr(path, conv, SERVER_SR, yield, d.len + 1)
+    if not ok then error(err or "conversion failed", 0) end
+  end, function(ok, err)
+    if ok then
+      Mdeck.load_file(d, conv, path)
+    else
+      print("mangler: resample failed (" .. tostring(err)
+        .. ") — loading at the original rate, it will play sharp")
+      Mdeck.load_file(d, path)
+    end
+  end)
+  if not started then
+    print("mangler: busy — loading at the original rate, it will play sharp")
+    Mdeck.load_file(d, path)
   end
 end
 
@@ -6694,12 +6838,16 @@ local function init_params()
   -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
   -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
   -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 17)
+  params:add_group("grp_layers", "layers", 19)
   params:add_number("layer_sel", "layer", 1, 2, 1)
   for n = 1, 2 do
     local id = "lay" .. n
     local function q(k) return id .. "_" .. k end
     local function deck() return ctx.layers[n] end
+    -- load a wav straight into this deck (norns fileselect; the path rides the
+    -- PSET, so a session reloads its layer material even with no deck wav)
+    params:add_file(q("file"), "L" .. n .. " load file", _path.audio)
+    params:set_action(q("file"), function(f) ctx.layer_load(deck(), f) end)
     params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
     params:set_action(q("rec"), function() Mdeck.update_rec(deck()) end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
@@ -7170,6 +7318,10 @@ function enc(n, d)
       end
     else
       ctx.page = clamp(ctx.page + d, 1, #PAGES)
+      -- pop the page name big for a moment: thirteen stations scroll past
+      -- faster than the 1x title reads, and finding the page mid-set should
+      -- not need squinting (mpages draws the overlay while this is armed)
+      ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
     end
   else
     local id = enc_param(n)

@@ -216,7 +216,7 @@ local function queue_fill(path, bins, secs)
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
   -- vanished when this sampled a few windows per bin instead.
   local stride = max(1, floor(frames * ch / 200000))
-  if nb >= 1 and frames > 0 then
+  if frames > 0 then
     fills[#fills + 1] = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
       nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0,
       bins = bins }
@@ -363,6 +363,20 @@ function M.wav_rate(path)
   f:close()
   if not afmt or not sr or sr <= 0 then return nil end
   return sr
+end
+
+-- channels and duration of a wav, from the header alone. nil for anything that
+-- is not a readable RIFF/WAVE; the layer loader then reads it as stereo and
+-- leaves the loop at the whole region rather than guessing.
+function M.wav_info(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local afmt, ch, bits, sr, _, dlen = riff_parse(f)
+  f:close()
+  if not afmt or not sr or sr <= 0 or not ch or ch < 1 then return nil end
+  local dur = (dlen and dlen > 0 and bits and bits > 0)
+    and dlen / (ch * (bits / 8) * sr) or nil
+  return ch, dur, sr
 end
 
 function M.convert_sr(path, out_path, sr, yield, max_secs)
@@ -588,15 +602,14 @@ end
 -- footer words per param id: the owning page's own vocabulary — these are
 -- also the MOTION lane names, so a lane says what its page says
 local SHORT = {
-  mix = "MIX", out_level = "OUT", sc_level = "ENG", cut_level = "TAPE",
+  mix = "MIX", out_level = "OUT",
   input_level = "IN", monitor_level = "MON",
-  rec_level = "LVL", pre_level = "OVR", dry_wet = "D/W", resample = "RSMP",
-  regen = "REGN",
+  dry_wet = "D/W",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
   ["@win_move"] = "MOV",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
-  grain_jitter = "GJIT", grain_pitch_spread = "DTUN", grain_shape = "SHP",
+  grain_jitter = "GJIT", grain_pitch_spread = "DTUN",
   clouds_pos = "POS", clouds_tex = "TEX", clouds_fb = "FB", clouds_lofi = "LOFI",
   warp_window = "WIN", warp_rand = "RAND",
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
@@ -609,7 +622,7 @@ local SHORT = {
   rev_moddepth = "MOD", rev_modfreq = "MRAT", rev_low = "LOW",
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
-  voices = "VOX", voice_atk = "ATK", voice_rel = "REL",
+  voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
@@ -633,26 +646,22 @@ local SHORT = {
 -- value is up (turning, or a selector), where the digits need the room. a full
 -- word that would collide with the key words falls back to SHORT (flabel_r).
 local FULL = {
-  mix = "MIX", out_level = "OUT", sc_level = "ENGINE", cut_level = "TAPE",
+  mix = "MIX", out_level = "OUT",
   input_level = "INPUT", monitor_level = "MONITOR",
-  rec_level = "LEVEL", pre_level = "OVER", dry_wet = "DRY/WET", resample = "RESAMPLE",
-  regen = "REGEN",
+  dry_wet = "DRY/WET",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
   scan = "SPEED", pitch = "PITCH",
-  size = "SIZE", spread = "SPREAD", density = "DENSITY", grain_level = "GRAIN",
-  clouds_pos = "POSITION", clouds_tex = "TEXTURE", clouds_fb = "FEEDBACK",
-  clouds_lofi = "LOFI",
+  size = "SIZE", density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
-  tape_rate = "RATE", tape_pre = "PRE", loop_start = "START", loop_end = "LOOP",
+  tape_rate = "RATE", tape_pre = "PRE", loop_end = "LOOP",
   cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
   delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
   delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "REVERB",
   rev_decay = "DECAY", rev_damp = "DAMP",
-  shimmer = "SHIMMER", shimmer_pitch = "OCT", shimmer_tone = "AIR",
-  voices = "VOICES", voice_atk = "ATTACK", voice_rel = "RELEASE",
+  voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
@@ -714,18 +723,12 @@ local function fmt_value(id)
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
   end
-  if id == "cutoff" or id == "rev_lowcut" or id == "rev_highcut"
-      or id == "shimmer_tone" then
+  if id == "cutoff" then
     local v = params:get(id)
     return v >= 1000 and string.format("%.1fKHZ", v / 1000)
       or string.format("%dHZ", floor(v + 0.5))
-  elseif id == "shimmer_pitch" then
-    local v = floor(params:get(id) + 0.5)
-    return (v >= 0 and "+" or "") .. v .. "ST"
   elseif id == "rev_decay" then
     return string.format("%.1fS", params:get(id))
-  elseif id == "rev_modfreq" then
-    return string.format("%.1fHZ", params:get(id))
   elseif id == "rev_size" then
     return string.format("%.1f", params:get(id))
   elseif id == "pitch" then
@@ -737,11 +740,11 @@ local function fmt_value(id)
     local v = params:get(id)
     return v >= 0.9995 and string.format("%.2fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "size" or id == "voice_atk" then
+  elseif id == "size" then
     local v = params:get(id)
     return v >= 1 and string.format("%.1fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "density" or id == "voices" then
+  elseif id == "density" then
     return tostring(floor(params:get(id) + 0.5))
   end
   local p = params:lookup_param(id)
@@ -1963,8 +1966,7 @@ function M.erosion_tick()
   -- the same conditions the engine pauses (rec, freeze, not in PLAY).
   if pget("erode", 0) > 0 and pget("mode", 5) == 5
       and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
-    local a, b = pget("pos_start", 0), pget("pos_end", 1)
-    local span = max(max(a, b) - min(a, b), 0.001)
+    local _, _, span = window_bounds()
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then
       eros_gen = eros_gen + 1
@@ -1995,9 +1997,7 @@ local function body_EROSION(frame)
   end
   screen.fill()
   -- playhead, window relative (play_phase is a buffer position)
-  local a, b = pget("pos_start", 0), pget("pos_end", 1)
-  local wlo = min(a, b)
-  local wspan = max(max(a, b) - wlo, 0.001)
+  local wlo, _, wspan = window_bounds()
   local hx = 4 + floor(clamp((C.play_phase - wlo) / wspan, 0, 1) * 120)
   screen.level(15)
   screen.rect(hx, 20, 1, 22)
@@ -2073,7 +2073,7 @@ local function layer_strip(d, y, sel, frame)
   -- a swelling value meets the key words
   if not d.any then
     local msg = sel and "EMPTY - K2 REC" or "EMPTY"
-    local tw = C.font.text_w(msg, 1)
+    local tw = text_w(msg, 1)
     local tx = floor((x0 + x1) / 2 - tw / 2)
     screen.level(0)
     screen.rect(tx - 2, y - 2, tw + 4, 9)
@@ -2105,6 +2105,15 @@ local function body_LAYERS(frame)
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
   ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
+  -- what the decks RECORD: cut_source is ONE global send into softcut, so the
+  -- tape's source knob (TAPE K1+E3) governs the layers just as much. Flag a
+  -- processed print here too, or the resample rig is a hidden mode. DRY, the
+  -- default, draws nothing, same law as the TAPE page's flag.
+  local src = pget("cut_source", 0)
+  if src > 0.02 then
+    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
+      44, 12, 1, 9)
+  end
   for i = 1, math.min(#decks, 2) do
     layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
   end
@@ -2247,6 +2256,25 @@ end
 -- cut to keep the OLED from burning the static chrome in; the first touch
 -- restores full brightness. one closure, made once.
 local orig_level, dim_level
+-- the page-name pop: E1 arms C.page_flash while stations scroll past, and the
+-- destination's name reads BIG and centered for a beat. Thirteen pages go by
+-- faster than the 1x title reads, and finding the page mid-set should not
+-- need squinting. Same framed-box idiom as the footer value swell, so it is
+-- legible over any body; transient chrome, gone by itself.
+local function draw_page_flash()
+  if not (C.page_flash and C.frame < C.page_flash) then return end
+  local name = PAGES[C.page]
+  local w = text_w(name, 2) + 9
+  local bx = floor(64 - w / 2 + 0.5)
+  screen.level(0)
+  screen.rect(bx, 23, w + 2, 15)
+  screen.fill()
+  screen.level(12)
+  screen.rect(bx, 23, w + 2, 15)
+  screen.stroke()
+  ptext(name, bx + 5, 26, 2, 15)
+end
+
 function M.redraw()
   if orig_level == nil then
     orig_level = screen.level
@@ -2259,6 +2287,7 @@ function M.redraw()
   draw_header()
   draw_body()
   draw_footer()
+  draw_page_flash()
   screen.update()
   screen.level = orig_level
 end

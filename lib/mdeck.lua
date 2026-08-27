@@ -129,6 +129,32 @@ function M.clear(d)
   d.any = false
 end
 
+-- read a wav into this deck's region (the `layN_file` params land here, via
+-- ctx.layer_load, which resamples off-rate files first: softcut's buffer read
+-- does no sample-rate conversion either). Stereo lands L/R on the deck's
+-- voice pair; a MONO file feeds both sides. The loop opens to the file's
+-- length so it plays at once; unknown length (unreadable header) = the whole
+-- region. A load IS material: `any` goes true and the strip repaints.
+function M.load_file(d, path, shown)
+  local ch, dur
+  if C.wav_info then ch, dur = C.wav_info(path) end
+  sc.buffer_clear_region(d.from, d.len)
+  if ch == 1 then
+    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 1)
+    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 2)
+  else
+    sc.buffer_read_stereo(path, 0, d.from, d.len)
+  end
+  d.any = true
+  d.wave_bin = 0
+  if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
+  local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
+  params:set(p(d, "start"), 0)
+  params:set(p(d, "end"), frac)
+  print(string.format("mangler: %s -> %s%s", shown or path, d.name,
+    dur and string.format(" (%.1fs, loop snapped)", math.min(dur, d.len)) or ""))
+end
+
 function M.start(d)
   sc.enable(d.va, 1); sc.enable(d.vb, 1)
   -- voice -> buffer channel, and the stereo split
@@ -216,7 +242,17 @@ function M.pset_read(number)
       d.wave_bin = 0
       if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
     else
-      M.clear(d)
+      -- no deck wav, but the pset names a loaded FILE: put the file back
+      -- rather than clearing. The file param's action may not have re-fired
+      -- during params:read if its value did not change across the load. A
+      -- pset whose file param is empty still clears, same rule as the tape.
+      local fp = pget(p(d, "file"), "")
+      if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
+          and util.file_exists(fp) then
+        M.load_file(d, fp)
+      else
+        M.clear(d)
+      end
     end
   end
 end
