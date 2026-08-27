@@ -1061,9 +1061,12 @@ local eros_gen, eros_acc = 0, 0
 function M.erosion_tick()
   -- the erosion head runs at exactly one pass per window length, so a
   -- generation is span times sixty seconds of eroding time. paused under
-  -- the same conditions the engine pauses (rec, freeze, not in PLAY).
+  -- the same conditions the engine pauses (rec, freeze, not in PLAY — and a
+  -- SILENCED deck: the engine gates the write on level > 0.001, so the GEN
+  -- counter must not keep counting through a STOP or a full mix throw).
   if pget("erode", 0) > 0 and pget("mode", 5) == 5
-      and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
+      and pget("rec", 0) == 0 and pget("freeze", 0) == 0
+      and (C.mix_gains()) > 0.001 then
     local _, _, span = window_bounds()
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then

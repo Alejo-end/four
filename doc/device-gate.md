@@ -211,6 +211,22 @@ Only on the `layers` branch. No engine change, so the count is still 65.
 | 9.7 | Grid workspace | On LAYERS, rows 3-4 | A two-pad span sets THAT deck's loop; row 5 arms, row 6 mutes; the other deck is untouched | |
 | 9.8 | **%CPU with everything running** | Four decks plus a granular drone | No xruns | The number that decides whether a third layer is ever worth adding |
 
+## Stage 10 — The spawn/free delay + true STOP + clear (the engine batch after the fold)
+
+Engine changes with NO new command — the count must STILL read **65** (stage 0
+already checked it; a different number here means a stray command).
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 10.1 | The delay still delays | Take playing, raise `delay_mix`, ride `delay_time`/`delay_fb` | Echoes as before, times glide, repeats darken | The `\mangler_delay` split: send/return buses, `updateDelay` |
+| 10.2 | **%CPU drops at rest** | `delay_mix` 0, `rev_mix` 0, watch %CPU | Lower than the pre-split build in the same state | The whole point of the split |
+| 10.3 | The dub hold survives KILL | INF (DELAY K2), feed it a phrase, then KILL (K3), wait, un-KILL | The spinning loop is still there | The `delay_fb > 0.9` keep-alive in `updateDelay` |
+| 10.4 | Mix up from rest is clean | From silence at mix 0, raise `delay_mix` | No click on spawn; echoes build from NOW (the line starts empty — accepted trade) | |
+| 10.5 | **STOP truly halts** | Play the take + tape + a layer, K1+K2 | Every on-screen head FREEZES; no click. START: everything resumes from the exact spot, decks still in their drifted relationship | `winRead`'s `(run > 0.001)`; the stop action's transport re-sends |
+| 10.6 | STOP pauses an armed take | Arm REC mid-phrase, K1+K2, wait, K1+K2 again | The write head freezes and resumes; the take has no gap of silence printed | The `engine.rec` gate in the stop/rec actions |
+| 10.7 | Full tape throw pauses the drone head | MIX K3 (TAPE throw), watch VOICE/TAKE playheads | The engine head freezes while thrown, resumes on release — stated behavior, same law as erosion/regen | If this feels wrong in play, say so: the alternative is a dedicated run flag (a new command) |
+| 10.8 | **Clear is silence** | Echoes + a long reverb tail ringing, then K1+K3 hold on TAKE (erase) | The tails CUT with the take; with `regen` up beforehand, nothing re-records into the cleared buffer | The `\clear` flush; `clear_recording`'s regen zero |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new

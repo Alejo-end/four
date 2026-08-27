@@ -2315,6 +2315,74 @@ Save + reload; the RESTART for count 65 is unchanged and still pending.
   11-station table, the bounce as the default resample story, orbit/erosion
   notes rewritten as surfaces, capture scope documented.
 
+Seventy-fifth change: **the parked ENGINE work — spawn/free delay + S23 Batch B
+true STOP + clear-is-silence (ENGINE + Lua, fingerprint STAYS 65 — verified by
+parser: (ioKeys 15 U playParams 26 U revParams 14 U delayParams 3) = 54, + 11
+explicit = 65; parens/braces/brackets balance 0 — UNTESTED, no sclang here,
+rides the SAME pending RESTART; gate = doc/device-gate.md stage 10, added)**.
+User-directed ("do the engine work"); written with the same static discipline
+as the 48th-63rd engine batches.
+* **The delay is now a spawn/free synth** (`\mangler_delay`, `updateDelay`),
+  the split the 52nd change priced and parked. Mirrors the reverb exactly:
+  io sends the post-drive wet on dlySendBus, reads the echo back via
+  InFeedback on dlyRetBus (one block late; the REGENERATION loop lives inside
+  the delay synth, so repeat spacing stays exact), and keeps the equal-power
+  crossfade + lag in its own graph (the dub duck is the point; the reverb
+  stays a send). io lost its LocalIn/LocalOut and DelayC entirely. delayParams
+  = {delay_time, delay_fb, delay_mix} route like revParams; delay_mix stays in
+  ioKeys TOO (the crossfade) and the union is unchanged → count 65. THE GATE
+  IS NOT PLAIN mix>0: the synth also stays alive while `delay_fb > 0.9`
+  (curved; ~0.87 on the knob) so the dub gesture — INF, then KILL, then
+  un-KILL — gets its spinning loop back instead of losing it to the free. In
+  the DEFAULT state (mix 0, fb ~0.48) the synth is gone: the CPU the delay
+  cost at rest is reclaimed, same as the reverb split. `\mangler_delay`
+  accepts an unused delay_mix arg so the generic per-key .set never names an
+  unknown control. ACCEPTED TRADES, stated: raising mix from rest starts an
+  EMPTY line (echoes of what plays from then on, not before); automating fb
+  high->low at mix 0 frees the line mid-hold.
+* **S23 B1, true STOP.** The engine half is ONE multiply in winRead: the read
+  head's Phasor increment gains `(run > 0.001)` where run = the deck `level`
+  (all five defs pass it — level was already fanned to playParams by the 61st
+  change for the erosion/regen heads; this extends the SAME "silent deck =
+  stopped deck" law to the READ head). Under STOP the drone head freezes and
+  the play_phase poll stops sweeping; START resumes from the exact spot.
+  STATED CONFLATION, same as the write heads: a MIX thrown fully to tape also
+  lands level at exact 0, so a fully-thrown-away deck pauses rather than
+  spinning unheard (gate row 10.7 asks for an ear verdict; the alternative is
+  a new command). The Lua half: the stop_all action now re-sends the tape and
+  layer rate/rec laws, which fold `(1 - stop_all)` in Mdeck.update_rate/
+  update_rec (shared with the tape through the 74th change's fold — ONE edit
+  covered all three decks); every head glides to 0 on the existing slew and
+  they stop AS ONE, so the decks' relative drift survives a stop/start (MUTE
+  alone still keeps heads moving). The engine record head pauses too:
+  `engine.rec` is gated on stop in BOTH the rec action and the stop action
+  (param stays armed; arming while stopped waits for START; the window
+  bookkeeping still runs against the frozen head, so the arm position is
+  exactly where START resumes).
+* **S23 B2, clear is silence.** The engine `\clear` now frees + respawns both
+  FX synths — their internal state IS the delay line and the reverb/shimmer
+  recirculation, so the restart is the flush and nothing rings on with the
+  erased material. `ctx.clear_recording` zeroes `regen` first (it would
+  re-record the output — monitor + tails — straight into the freshly erased
+  buffer). And a truth fix the STOP work exposed: `erosion_tick`'s GEN
+  counter now pauses when the deck is silenced (`(C.mix_gains()) > 0.001`) —
+  the engine's write head has gated on level since the 61st change, but the
+  Lua counter kept counting through a STOP.
+* TESTS: control 192 → 204 (section 15: STOP halts all six softcut voices,
+  pauses the armed engine head, an arm-during-stop waits, START restores
+  tape + layer rates and the head; the section-11 contract parser gained
+  delayParams so delay_time/delay_fb still resolve as real commands). deck
+  66 → 72 (the stop gate on a layer and, through the delegation, the tape).
+  422 assertions total (204/72/62/41/43).
+* VERIFIED: luac clean, .sc delimiters balanced, count 65 by parse, all five
+  harnesses green, all 66 shots byte-identical to the pre-engine-work run AND
+  source == dist across the 4 variants. engine-map.md rewritten for the delay
+  split + the stopped-head law; spec §S23 Batch B marked BUILT (count note
+  63 → 65); device-gate.md gained stage 10 (delay character, %CPU at rest,
+  the dub hold, true STOP incl. the 10.7 ear verdict, clear kills tails).
+  DEPLOY: ENGINE change — rsync, SYSTEM > RESTART, confirm `count: 65`, then
+  stage 10 rides the same walkthrough as everything since the 48th batch.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

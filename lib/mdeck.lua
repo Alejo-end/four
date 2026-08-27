@@ -85,7 +85,11 @@ function M.update_level(d)
 end
 
 function M.update_rate(d)
+  -- the global STOP halts the head, not just the level (true stop: START
+  -- resumes from the exact spot). every deck stops AS ONE, so their relative
+  -- drift survives; MUTE (play = 0) alone keeps the head moving, unchanged.
   local r = get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1)
+    * (1 - pget("stop_all", 0))
   both(d, function(v) sc.rate(v, r) end)
 end
 
@@ -97,7 +101,10 @@ end
 -- branch is inert.
 function M.update_rec(d)
   local frozen = get(d, "freeze", 0) == 1
+  -- STOP gates capture too (the head is frozen anyway; an armed deck resumes
+  -- recording on START, like the engine's record head)
   local on = get(d, "rec", 0) == 1 and not frozen
+    and pget("stop_all", 0) == 0
   both(d, function(v)
     sc.rec_level(v, on and 1 or 0)
     sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))

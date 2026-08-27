@@ -153,6 +153,19 @@ calls = {}; Mdeck.update_rate(d1)
 near(last("rate", 3)[3], -0.5, 0.001, "reverse negates it, keeping the rate positive")
 defaults()
 
+-- ---- the global STOP halts the head, not just the level -------------------
+P.stop_all = 1
+calls = {}; Mdeck.update_rate(d1)
+near(last("rate", 3)[3], 0, 1e-9, "STOP halts a layer head")
+P.lay1_rec = 1
+calls = {}; Mdeck.update_rec(d1)
+near(last("rec_level", 3)[3], 0, 1e-6, "...and gates layer capture while armed")
+P.stop_all = 0
+calls = {}; Mdeck.update_rate(d1); Mdeck.update_rec(d1)
+near(last("rate", 3)[3], 1, 1e-6, "START restores the layer rate")
+near(last("rec_level", 3)[3], 1, 1e-6, "...and the armed capture resumes")
+defaults()
+
 -- ---- rec and overdub -----------------------------------------------------
 P.lay1_rec = 1; P.lay1_pre = 1
 calls = {}; Mdeck.update_rec(d1)
@@ -330,7 +343,16 @@ do
   local tc = last("buffer_clear_region")
   near(tc and tc[2] or -1, 0, 1e-6, "tape clear starts at 0")
   near(tc and tc[3] or -1, 60, 1e-6, "...and takes exactly the tape's 60s")
-  P.loop_start = 0; P.loop_end = 1; P.tape_rate = 1; P.tape_reverse = 0
+  -- the true STOP reaches the tape through the same delegated law
+  P.tape_rate = 1; P.tape_reverse = 0; P.stop_all = 1
+  calls = {}
+  Mtape.update_tape_rate()
+  near(last("rate", 1)[3], 0, 1e-9, "STOP halts the tape head too")
+  P.stop_all = 0
+  calls = {}
+  Mtape.update_tape_rate()
+  near(last("rate", 1)[3], 1, 1e-6, "...and START restores its rate")
+  P.loop_start = 0; P.loop_end = 1
 end
 
 print(string.format("\n%d assertions passed", ok_count))

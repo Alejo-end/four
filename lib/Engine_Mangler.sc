@@ -4,12 +4,13 @@
 // hangs every norns script forever on "LOADING".
 //
 // Architecture: one persistent `io` synth (input, record head, dry/wet mix,
-// resample/regen feedback, FILTER/DELAY, output) + ONE `mode` drone at a time
+// resample/regen feedback, FILTER, output) + ONE `mode` drone at a time
 // (OFF/GRAIN/WARP/PV/PLAY, spawned/freed by setMode) + a polyphonic voice layer
-// + a spawn/free reverb synth (updateReverb, only while rev_mix > 0). Drone and
-// voices Out.ar additively onto play_bus; io reads it. Plugin UGens (JPverb,
-// MiClouds, DFM1) are guarded via .asClass -> stock fallback so a missing
-// plugin never bricks the load.
+// + TWO spawn/free FX synths: the delay (updateDelay — alive while delay_mix
+// > 0 or the feedback is a near-infinite hold) and the reverb (updateReverb,
+// only while rev_mix > 0). Drone and voices Out.ar additively onto play_bus;
+// io reads it. Plugin UGens (JPverb, MiClouds, DFM1) are guarded via .asClass
+// -> stock fallback so a missing plugin never bricks the load.
 //
 // DEVICE NOTES: context.in_b is an ARRAY of two mono busses, out_b one stereo
 // bus. SC errors land in maiden's SC tab, not matron. Editing this file needs
@@ -27,7 +28,10 @@ Engine_Mangler : CroneEngine {
     var <ioKeys;
     // reverb+shimmer spawn/free synth: freed at rev_mix==0. send/return busses
     // + last-known reverb params (handed over when the synth is spawned).
-    var <revSynth, <revSendBus, <revRetBus, <revParams;
+    var <revSynth, <revSendBus, <revRetBus, <revParams, <revMixV;
+    // delay spawn/free synth, same shape: its regeneration loop lives inside
+    // it, so freeing it is what flushes the line (which is what \clear wants)
+    var <delaySynth, <dlySendBus, <dlyRetBus, <delayParams;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
     // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
@@ -72,6 +76,27 @@ Engine_Mangler : CroneEngine {
             });
         }, {
             revSynth.notNil.if({ revSynth.free; revSynth = nil });
+        });
+    }
+
+    // spawn/free the delay synth: alive while the mix is up, OR while the
+    // feedback is a near-infinite hold with the mix down — the dub gesture
+    // (INF, then KILL) parks a spinning loop at mix 0 and expects it back on
+    // un-KILL; freeing at plain mix 0 would discard exactly that tail. a
+    // low-feedback tail dies by itself in a few repeats, so only the high-fb
+    // hold is kept alive. (delay_fb arrives CURVED from Lua: 0.9 here is
+    // ~0.87 on the knob; the INF throw sends 0.98.) in the DEFAULT state
+    // (mix 0, fb ~0.48) the synth is gone and the delay costs nothing.
+    updateDelay {
+        var want = (delayParams[\delay_mix] > 0) or: { delayParams[\delay_fb] > 0.9 };
+        want.if({
+            delaySynth.isNil.if({
+                delaySynth = Synth.new(\mangler_delay, [
+                    \in_bus, dlySendBus, \out_bus, dlyRetBus,
+                ] ++ delayParams.getPairs, ioSynth, \addAfter);
+            });
+        }, {
+            delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
         });
     }
 
@@ -152,9 +177,11 @@ Engine_Mangler : CroneEngine {
         grainEnv2.loadCollection(Env([0, 1, 0], [0.02, 0.98], [4, -4]).asSignal(2048));
 
         playBus = Bus.audio(s, 2);
-        // reverb send/return busses (each 2ch)
+        // reverb + delay send/return busses (each 2ch)
         revSendBus = Bus.audio(s, 2);
         revRetBus = Bus.audio(s, 2);
+        dlySendBus = Bus.audio(s, 2);
+        dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
@@ -185,12 +212,14 @@ Engine_Mangler : CroneEngine {
             // erosion (PLAY mode only; the other defs take and ignore them)
             \erode -> 0.0, \wear -> 0.5
         ];
-        // reverb params live in revParams (routed to \mangler_reverb); io keeps
-        // only rev_mix. (ioKeys U revParams) is the old ioKeys -> same commands.
+        // reverb params live in revParams (routed to \mangler_reverb) and the
+        // delay's in delayParams (routed to \mangler_delay); io keeps the two
+        // MIX knobs it needs for its own crossfade/add. (ioKeys U revParams U
+        // delayParams) is the original ioKeys -> the command set is unchanged.
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
             \dry_wet, \resample, \regen, \grain_level,
             \filt_type, \cutoff, \resonance, \drive,
-            \delay_time, \delay_fb, \delay_mix,
+            \delay_mix,
             \rev_mix];
         revParams = Dictionary[
             \rev_size -> 1.0, \rev_decay -> 2.0, \rev_damp -> 0.3, \rev_early -> 0.7,
@@ -198,6 +227,12 @@ Engine_Mangler : CroneEngine {
             \rev_low -> 1.0, \rev_mid -> 1.0, \rev_high -> 1.0,
             \rev_lowcut -> 500, \rev_highcut -> 2000,
             \shimmer -> 0.0, \shimmer_pitch -> 12.0, \shimmer_tone -> 4500.0
+        ];
+        revMixV = 0;
+        // delay_mix sits in BOTH ioKeys (io's crossfade) and here (the
+        // spawn/free gate + a handover value for a fresh synth's unused arg)
+        delayParams = Dictionary[
+            \delay_time -> 0.3, \delay_fb -> 0.3, \delay_mix -> 0.0
         ];
 
         // ---- drone playback defs: ONE runs at a time. all share the full
@@ -210,12 +245,20 @@ Engine_Mangler : CroneEngine {
         // PERFORMANCE encoders (TAKE E2/E3) and an unsmoothed edge move
         // jumped the read head with a click per detent. pitchMul folds
         // varispeed into the phase rate (only \mangler_play passes it).
-        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1;
+        // `run` is the deck LEVEL (every def passes it): a SILENCED engine
+        // deck freezes its read head, so STOP truly halts — the on-screen
+        // head stops sweeping and START resumes from the exact spot. this is
+        // the same "silent deck = stopped deck" law the erosion and regen
+        // write heads already follow, and like them it also engages when the
+        // MIX is thrown fully to tape (level lands at exact 0 there too) —
+        // a fully-thrown-away deck pauses rather than spinning unheard.
+        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1;
             var lo, hi, span, incr, phase, winPos;
             lo = Lag.kr(pos_start.min(pos_end), 0.02);
             hi = Lag.kr(pos_start.max(pos_end), 0.02);
             span = (hi - lo).max(0.001);
-            incr = Lag.kr(scan, 0.02) * pitchMul * SampleDur.ir / (BufDur.kr(buf) * span);
+            incr = Lag.kr(scan, 0.02) * pitchMul * (run > 0.001)
+                * SampleDur.ir / (BufDur.kr(buf) * span);
             phase = Phasor.ar(0, incr, 0, 1);
             winPos = lo + (phase * span);
             Out.kr(phase_out, A2K.kr(winPos));
@@ -235,7 +278,7 @@ Engine_Mangler : CroneEngine {
             var winPos, phase, span, look;
             var trigL, trigR, posL, posR, panL, panR, sig, comp;
             var durL, durR, pchL, pchR, envSel;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
             look = (0.25 / BufDur.kr(buf_l)) * rec * (1 - freeze);
             // Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
             // kr quantized grain onsets to the ~1.3ms control block, which
@@ -277,7 +320,7 @@ Engine_Mangler : CroneEngine {
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, ptr, l, r, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
             ptr = A2K.kr(winPos);
             l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
             r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
@@ -296,7 +339,7 @@ Engine_Mangler : CroneEngine {
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
@@ -328,7 +371,7 @@ Engine_Mangler : CroneEngine {
                 erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
             var eroPhase, eroPos, idx, eff, rawL, rawR, wearF;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch, level);
             bufDur = BufDur.kr(buf_l);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
@@ -386,7 +429,7 @@ Engine_Mangler : CroneEngine {
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                         pv_freeze = 0, erode = 0, wear = 0.5, level = 1;
                     var winPos, phase, span, srcL, srcR, sig;
-                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out);
+                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
                     srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
                     srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
                     // POSITIONAL args (keyword args don't survive perform on a
@@ -493,11 +536,12 @@ Engine_Mangler : CroneEngine {
                 freeze = 0, dry_wet = 0.5, resample = 0.0, regen = 0.0,
                 grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
-                delay_time = 0.3, delay_fb = 0.3, delay_mix = 0.0,
-                // reverb runs in \mangler_reverb; io keeps the return mix + buses
+                // delay + reverb run in their own spawn/free synths; io keeps
+                // only the mix knobs and the send/return buses
+                delay_mix = 0.0, dly_send = 0, dly_ret = 0,
                 rev_mix = 0.0, rev_send = 0, rev_ret = 0;
             var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
-            var cf, res, pre, fbIn, dIn, dOut, delayFb, rvRet, dfmClass, mmFilter;
+            var cf, res, pre, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
@@ -556,20 +600,18 @@ Engine_Mangler : CroneEngine {
             wet = LinXFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
 
-            // delay feedback loop (own LocalIn/LocalOut(2); the shimmer loop
-            // moved into the reverb synth).
-            // the mix laws are equal-power .sqrt (steep near the ends), so a
-            // CC step lands as an audible zipper without these lags
+            // the delay runs in \mangler_delay (spawn/free — alive while
+            // delay_mix > 0 or the feedback is a near-infinite hold). io
+            // sends the post-drive wet and reads the echo back via InFeedback
+            // (one block late; the regeneration spacing itself lives inside
+            // the delay synth and is exact). the mix law stays the equal-power
+            // CROSSFADE — a dub throw wants the direct to duck — and the lag
+            // keeps a CC step from zippering it. at rest the synth is gone
+            // and the return reads 0: this stage is a multiply by zero.
             delay_mix = delay_mix.lag(0.03);
-            delay_fb = delay_fb.lag(0.03);   // the last unlagged performance knob
-            fbIn = LocalIn.ar(2);
-            dIn = wet + (fbIn * delay_fb);
-            // 2s line: a half-note sync below 120 BPM needs more than 1s,
-            // and the extra second costs ~0.75 MB of server memory
-            dOut = DelayC.ar(dIn, 2.0, delay_time.clip(0.01, 2.0).lag(0.2));
-            delayFb = LPF.ar(dOut, 3500).softclip;
-            wet = (wet * (1 - delay_mix).sqrt) + (dOut * delay_mix.sqrt);
-            LocalOut.ar(delayFb);
+            Out.ar(dly_send, wet);
+            dlyRet = InFeedback.ar(dly_ret, 2);
+            wet = (wet * (1 - delay_mix).sqrt) + (dlyRet * delay_mix.sqrt);
 
             // reverb + shimmer run in a spawn/free synth (\mangler_reverb, only
             // while rev_mix > 0). io sends the post-delay wet and reads the tail
@@ -634,6 +676,27 @@ Engine_Mangler : CroneEngine {
             Out.kr(rec_amp_out,
                 Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
             Out.ar(out, sig);
+        }).add;
+
+        // delay synth (spawned by updateDelay). reads io's post-drive wet,
+        // returns the 100%-wet echo; io does the crossfade. the regeneration
+        // loop lives HERE (this def's own LocalIn/LocalOut pair), so freeing
+        // the synth is what flushes the line — \clear leans on exactly that.
+        // all core UGens. delay_mix is accepted and unused: the generic
+        // command handler sets every delayParams key on the live synth, and
+        // an unknown control name would be a server complaint per knob move.
+        SynthDef(\mangler_delay, {
+            arg in_bus, out_bus, delay_time = 0.3, delay_fb = 0.3, delay_mix = 0;
+            var sig, fbIn, dIn, dOut;
+            sig = In.ar(in_bus, 2);
+            delay_fb = delay_fb.lag(0.03);   // CC steps zipper without this
+            fbIn = LocalIn.ar(2);
+            dIn = sig + (fbIn * delay_fb);
+            // 2s line: a half-note sync below 120 BPM needs more than 1s,
+            // and the extra second costs ~0.75 MB of server memory
+            dOut = DelayC.ar(dIn, 2.0, delay_time.clip(0.01, 2.0).lag(0.2));
+            LocalOut.ar(LPF.ar(dOut, 3500).softclip);
+            Out.ar(out_bus, dOut);
         }).add;
 
         // reverb + shimmer synth (spawned by updateReverb while rev_mix > 0).
@@ -701,11 +764,15 @@ Engine_Mangler : CroneEngine {
             \rec_amp_out, recAmpBus,
             \rev_send, revSendBus,
             \rev_ret, revRetBus,
+            \dly_send, dlySendBus,
+            \dly_ret, dlyRetBus,
         ], playGroup, \addAfter);
 
-        // every float control as one command; rec/freeze fan out to both synths;
-        // revParams route to \mangler_reverb; rev_mix also spawns/frees it.
-        allKeys = (ioKeys ++ playParams.keys.asArray ++ revParams.keys.asArray).asSet;
+        // every float control as one command; rec/freeze/level fan out to both
+        // synths; revParams route to \mangler_reverb and delayParams to
+        // \mangler_delay; the mix/fb knobs also spawn/free their synths.
+        allKeys = (ioKeys ++ playParams.keys.asArray ++ revParams.keys.asArray
+            ++ delayParams.keys.asArray).asSet;
         allKeys.do({ arg name;
             this.addCommand(name, "f", { arg msg;
                 var v = msg[1];
@@ -714,11 +781,18 @@ Engine_Mangler : CroneEngine {
                     revParams[name] = v;
                     revSynth.notNil.if({ revSynth.set(name, v) });
                 });
+                delayParams.includesKey(name).if({
+                    delayParams[name] = v;
+                    delaySynth.notNil.if({ delaySynth.set(name, v) });
+                });
                 playParams.includesKey(name).if({
                     playParams[name] = v;
                     playSynth.notNil.if({ playSynth.set(name, v) });
                 });
-                (name == \rev_mix).if({ this.updateReverb(v) });
+                ((name == \delay_mix) or: { name == \delay_fb }).if({
+                    this.updateDelay;
+                });
+                (name == \rev_mix).if({ revMixV = v; this.updateReverb(v) });
             });
         });
 
@@ -754,6 +828,14 @@ Engine_Mangler : CroneEngine {
         this.addCommand(\clear, "", { arg msg;
             bufL.zero;
             bufR.zero;
+            // a clear must be SILENCE: the delay line and the reverb/shimmer
+            // recirculation still ring with the erased material. their state
+            // lives inside the spawn/free synths, so a free + respawn IS the
+            // flush (the update methods re-spawn only if the mixes want them).
+            delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
+            this.updateDelay;
+            revSynth.notNil.if({ revSynth.free; revSynth = nil });
+            this.updateReverb(revMixV);
             "mangler: engine buffer cleared".postln;
         });
 
@@ -832,6 +914,7 @@ Engine_Mangler : CroneEngine {
         activeVoices.notNil.if({ activeVoices.do({ arg v; v.notNil.if({ v.free }) }) });
         playSynth.notNil.if({ playSynth.free });
         revSynth.notNil.if({ revSynth.free });
+        delaySynth.notNil.if({ delaySynth.free });
         ioSynth.free;
         playGroup.free;
         bufL.free;
@@ -841,6 +924,8 @@ Engine_Mangler : CroneEngine {
         playBus.free;
         revSendBus.free;
         revRetBus.free;
+        dlySendBus.free;
+        dlyRetBus.free;
         phaseBus.free;
         recPhaseBus.free;
         recAmpBus.free;

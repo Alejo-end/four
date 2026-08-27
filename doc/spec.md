@@ -1498,7 +1498,12 @@ play_phase`. Give the playhead a distinct tone/shape (dimmer, or a caret/dashed 
 LAST so it isn't buried. Sources are already separate: `C.play_phase` (`mangler.lua:162`) vs
 `C.rec_phase` (`:163`).
 
-#### Batch B — engine (ONE restart, confirm count 63)
+#### Batch B — engine (ONE restart)
+
+> STATUS: **BUILT** in the 75th change. The fingerprint moved to 65 since this
+> section was written — confirm count **65** (not 63), and gate via
+> doc/device-gate.md stage 10. The delay also moved into a spawn/free synth in
+> the same change, which is what makes the B2 tail flush possible.
 
 **B1. STOP truly halts (§20).** Today `stop_all` (`mangler.lua:848-852`) only zeroes `engine.level`
 + `sc.level` in `Mtape.update_mix` (`mtape.lua:20-30`) — a click-free MUTE; the play voice, the

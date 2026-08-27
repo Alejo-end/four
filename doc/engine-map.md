@@ -6,7 +6,7 @@ and this file tells you what you are about to fight.
 
 ## What runs
 
-One persistent `io` synth owns input, the record head, the filter, the delay and the output.
+One persistent `io` synth owns input, the record head, the filter and the output.
 It never dies because everything flows through it and respawning it would click.
 
 Exactly one drone voice runs at a time (OFF, GRAIN, WARP, PV, PLAY, swapped by `setMode`).
@@ -23,6 +23,15 @@ shimmer pitch shifter are the most expensive things in the file, and the mix kno
 at zero. The io synth sends into it and reads the tail back one block late, which is the
 price of reading a node that runs later in the chain. Accepted trade: automating the mix
 through zero frees the synth and cuts the tail, which was inaudible at zero anyway.
+
+The delay is the same shape: its own synth, alive only while the mix is up, with one
+exception. A near infinite feedback hold stays alive at mix zero, because the dub gesture
+(pin the feedback, kill the mix, bring it back) parks a spinning loop behind a closed door
+and expects it back. A low feedback tail dies on its own in a few repeats, so only the hold
+is kept. The regeneration loop lives inside the synth, so freeing it is what flushes the
+line, and `clear` uses exactly that: erasing the take also restarts both FX synths, so
+nothing rings on with the erased material. Accepted trade: at rest the line is empty, so
+raising the mix reveals echoes of what plays from then on, not of what played before.
 
 ## Why it cannot brick
 
@@ -113,7 +122,14 @@ three decibel loudness bump at mid knob.
 The delay darkens as it repeats: a low pass filter and a soft clip sit inside the feedback
 loop, so repeats decay like tape. The feedback knob's curve lives in Lua and spreads the
 useful range across the whole travel. Delay time is interpolated and smoothed, so time and
-tempo changes glide instead of stepping.
+tempo changes glide instead of stepping. The mix stays a crossfade (a dub throw wants the
+direct to duck), unlike the reverb's send.
+
+A silenced deck is a stopped deck. Every drone def's read head runs on the deck level, the
+same law the erosion and regen write heads follow: under a STOP, or with the mix thrown
+fully to tape, the head freezes where it stands and resumes from that exact spot. The Lua
+side halts the softcut transports and pauses the record head with it, all together, so the
+decks keep their relative drift across a stop and start.
 
 The reverb is a send, not a crossfade. The direct sound stays at full level across the whole
 knob and the knob only decides how much tail is added. It used to trade the direct sound

@@ -66,7 +66,7 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 | E2, E3 | The page's two knobs. Hold K1 for the second pair. Values show while turning. |
 | K1 | Shift, hold |
 | K2, K3 | The page's two actions, named in the footer |
-| K1 + K2 | Stop and start everything, from any page |
+| K1 + K2 | Stop and start everything, from any page. Every head freezes and resumes in place. |
 | K1 + K3 | Tap: dry playback. Hold about a second: erase this page's material. |
 | K1 + E1 | Morph toward the selected scene, from any page |
 

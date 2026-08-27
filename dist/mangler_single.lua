@@ -620,7 +620,11 @@ function M.update_level(d)
 end
 
 function M.update_rate(d)
+  -- the global STOP halts the head, not just the level (true stop: START
+  -- resumes from the exact spot). every deck stops AS ONE, so their relative
+  -- drift survives; MUTE (play = 0) alone keeps the head moving, unchanged.
   local r = get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1)
+    * (1 - pget("stop_all", 0))
   both(d, function(v) sc.rate(v, r) end)
 end
 
@@ -632,7 +636,10 @@ end
 -- branch is inert.
 function M.update_rec(d)
   local frozen = get(d, "freeze", 0) == 1
+  -- STOP gates capture too (the head is frozen anyway; an armed deck resumes
+  -- recording on START, like the engine's record head)
   local on = get(d, "rec", 0) == 1 and not frozen
+    and pget("stop_all", 0) == 0
   both(d, function(v)
     sc.rec_level(v, on and 1 or 0)
     sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))
@@ -4100,9 +4107,12 @@ local eros_gen, eros_acc = 0, 0
 function M.erosion_tick()
   -- the erosion head runs at exactly one pass per window length, so a
   -- generation is span times sixty seconds of eroding time. paused under
-  -- the same conditions the engine pauses (rec, freeze, not in PLAY).
+  -- the same conditions the engine pauses (rec, freeze, not in PLAY — and a
+  -- SILENCED deck: the engine gates the write on level > 0.001, so the GEN
+  -- counter must not keep counting through a STOP or a full mix throw).
   if pget("erode", 0) > 0 and pget("mode", 5) == 5
-      and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
+      and pget("rec", 0) == 0 and pget("freeze", 0) == 0
+      and (C.mix_gains()) > 0.001 then
     local _, _, span = window_bounds()
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then
@@ -6063,6 +6073,11 @@ function ctx.clear_recording()
     print("mangler: engine has no `clear` — SYSTEM > RESTART for the new engine")
     return
   end
+  -- a clear must be SILENCE (S23 B2): regen would immediately re-record the
+  -- OUTPUT — input monitor, ringing tails — into the freshly erased buffer,
+  -- resurrecting what you just wiped. the engine's `clear` flushes the
+  -- delay/reverb tails on its side; this stops the write head at the params.
+  if pget("regen", 0) > 0 then params:set("regen", 0) end
   Mpages.clear_wave()
   Mpages.erosion_reset()   -- a fresh take starts at generation zero
   ctx.snap_forget()        -- the old window bounds point at audio that is gone
@@ -6631,6 +6646,23 @@ local function init_params()
     if v == 1 then ctx.pads_all_off() end
     Mtape.update_mix()
     ctx.layers_relevel()   -- the layer decks choke with everything else
+    -- TRUE STOP (S23 B1): the transports HALT too, not just the levels. every
+    -- softcut head glides to rate 0 (the slew keeps it click-free) and START
+    -- resumes each exactly where it stood — and because they all stop AS ONE,
+    -- the decks' relative drift survives a stop/start. the rate/rec laws fold
+    -- (1 - stop_all), so re-sending them applies it in both directions. the
+    -- engine drone's head freezes on its own: its level lands at 0 and the
+    -- read head runs on (level > 0), same law as the erosion/regen heads.
+    Mtape.update_tape_rate()
+    Mtape.update_tape_rec()
+    for _, d in ipairs(ctx.layers) do
+      Mdeck.update_rate(d)
+      Mdeck.update_rec(d)
+    end
+    -- the engine record head pauses with everything else. the param stays
+    -- armed, so START resumes the take mid-punch; the rec action gates its
+    -- own sends the same way, so arming DURING a stop also waits for START.
+    if engine.rec then engine.rec(v == 1 and 0 or pget("rec", 0)) end
   end)
 
   params:add_group("grp_rec", "take - record", 13)
@@ -6638,7 +6670,13 @@ local function init_params()
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
   params:set_action("rec", function(v)
-    if engine.rec then engine.rec(v) end
+    if engine.rec then
+      -- under a STOP everything is halted, capture included: an arm made
+      -- while stopped takes effect on START (the stop action re-sends it).
+      -- the window bookkeeping below still runs — the head is frozen, so
+      -- the arm position it records is exactly where START will resume.
+      engine.rec(pget("stop_all", 0) == 1 and 0 or v)
+    end
     if v == 1 then
       ctx.rec_arm_phase = ctx.rec_phase
     elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then

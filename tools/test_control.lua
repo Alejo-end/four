@@ -697,7 +697,7 @@ do
   for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do
     cmds[id] = true
   end
-  for _, dict in ipairs({ "playParams", "revParams" }) do
+  for _, dict in ipairs({ "playParams", "revParams", "delayParams" }) do
     for id in (sc:match(dict .. " = Dictionary%[(.-)%]") or "")
         :gmatch("\\([%w_]+)%s*%->") do
       cmds[id] = true
@@ -913,6 +913,40 @@ do
   params:set("scene_scope", 1)                -- back to ALL
   params:set("scene_clear", 1); params:set("scene_clear", 0)
   params:set("scan", 1); params:set("cutoff", 20000)
+end
+
+-- ============================================================================
+-- 15 · TRUE STOP — the transports halt, not just the levels
+-- ============================================================================
+-- S23 B1: STOP used to be a click-free MUTE while every head kept advancing
+-- ("24.4s kept advancing"). now the softcut heads glide to rate 0, capture
+-- gates, and the engine record head pauses; START resumes all of it in place.
+do
+  params:set("stop_all", 0)
+  params:set("tape_rate", 1); params:set("tape_reverse", 0)
+  params:set("lay1_rate", 1); params:set("lay2_rate", 1)
+  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
+  local rec_sent
+  engine.rec = function(v) rec_sent = v end
+  params:set("rec", 1)
+  ok(rec_sent == 1, "arming opens the engine record head")
+  params:set("stop_all", 1)
+  for v = 1, 6 do
+    local c = sc_last("rate", v)
+    ok(c ~= nil and math.abs(c[3]) < 1e-9,
+      "STOP halts softcut voice " .. v .. "'s head")
+  end
+  ok(rec_sent == 0, "STOP pauses the armed engine record head")
+  params:set("rec", 0); params:set("rec", 1)
+  ok(rec_sent == 0, "an arm made while stopped waits for START")
+  params:set("stop_all", 0)
+  ok(rec_sent == 1, "START resumes the armed head")
+  local c = sc_last("rate", 1)
+  ok(c ~= nil and math.abs(c[3] - 1) < 1e-6, "START restores the tape rate")
+  c = sc_last("rate", 3)
+  ok(c ~= nil and math.abs(c[3] - 1) < 1e-6, "...and the layer decks' rates")
+  params:set("rec", 0)
+  engine.rec = nil
 end
 
 print(string.format("\n%d assertions passed", ok_count))
