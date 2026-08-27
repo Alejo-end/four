@@ -7,12 +7,34 @@ local TAPE_LEN = 60  -- seconds of softcut buffer used by the tape loop
 
 local C     -- shared ctx, bound at init
 local pget
+local D     -- the deck module (lib/mdeck), handed in at init — `include` has
+            -- no module cache, so including it here would build a SECOND
+            -- instance with its own deck list and the phase/pset walks would
+            -- split across the two
+
+-- the tape as a DECK DESCRIPTOR: the shape mdeck builds, but NOT registered
+-- in Mdeck.decks — its level law (the MIX crossfade in gains()), its pset
+-- files, its phase events and its lifecycle stay this module's own. What it
+-- borrows is the deck MECHANICS: rate and direction, rec/pre/freeze gating,
+-- the loop bounds with the 100ms floor held inside the region, and the
+-- region-scoped clear. Those laws existed twice, verbatim, and had already
+-- drifted once before the layers review caught it; now they exist once.
+local TAPE = {
+  id = "tape", name = "TAPE", va = 1, vb = 2, from = 0, len = TAPE_LEN,
+  pre_default = 0,   -- classic tape: REPLACE unless tape_pre is raised
+  keymap = { rec = "tape_rec", rate = "tape_rate", reverse = "tape_reverse",
+             pre = "tape_pre", freeze = "tape_freeze",
+             start = "loop_start", ["end"] = "loop_end" },
+  -- display fields, unused here (the tape picture lives in mpages as twave)
+  wave = {}, wave_bin = 0, any = false, phase = 0,
+}
 
 local M = { TAPE_LEN = TAPE_LEN }
 
-function M.init(ctx)
+function M.init(ctx, deckmod)
   C = ctx
   pget = ctx.pget
+  D = deckmod
 end
 
 -- THE gain law: `mix` crossfades SC engine <-> tape (a plateau — center keeps
@@ -41,38 +63,14 @@ local function tape_set(fn)
   fn(2)
 end
 
-function M.update_tape_rate()
-  local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
-  tape_set(function(v) sc.rate(v, r) end)
-end
-
--- rec/freeze/pre interact: freeze stops capture and holds the loop at full
--- regeneration; otherwise rec gates capture and tape_pre sets the overdub
-function M.update_tape_rec()
-  local frozen = pget("tape_freeze", 0) == 1
-  local rec_on = pget("tape_rec", 0) == 1 and not frozen
-  tape_set(function(v)
-    sc.rec_level(v, rec_on and 1 or 0)
-    sc.pre_level(v, frozen and 1 or pget("tape_pre", 0))
-    sc.rec(v, rec_on and 1 or 0)
-  end)
-end
-
-function M.update_tape_loop()
-  local a = pget("loop_start", 0) * TAPE_LEN
-  local b = pget("loop_end", 1) * TAPE_LEN
-  local lo, hi = math.min(a, b), math.max(a, b)
-  -- the 100ms floor, held inside the tape's own 0-60s (same rule as the layer
-  -- decks): floored past the end it would loop buffer the tape does not own
-  if hi - lo < 0.1 then
-    hi = math.min(lo + 0.1, TAPE_LEN)
-    lo = hi - 0.1
-  end
-  tape_set(function(v)
-    sc.loop_start(v, lo)
-    sc.loop_end(v, hi)
-  end)
-end
+-- the deck mechanics, delegated (see the TAPE descriptor above). Proven
+-- call-for-call identical to the hand-written versions they replace: the
+-- softcut command stream over a state matrix (rates, reverse, rec x freeze x
+-- pre, five loop shapes, clear) was captured before and after the fold and
+-- byte-diffed empty.
+function M.update_tape_rate() D.update_rate(TAPE) end
+function M.update_tape_rec() D.update_rec(TAPE) end
+function M.update_tape_loop() D.update_loop(TAPE) end
 
 -- jump both heads to a normalized tape position (loop-snap lands the head
 -- at the take's start so it plays back tight immediately)
@@ -86,9 +84,10 @@ end
 
 -- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
 -- audio with it, so once the layer decks share this buffer a TAPE erase would
--- silently wipe them too.
+-- silently wipe them too. (Mdeck.clear also resets the descriptor's unused
+-- display fields — harmless; the tape picture is mpages' twave.)
 function M.clear_buffer()
-  sc.buffer_clear_region(0, TAPE_LEN)
+  D.clear(TAPE)
 end
 
 -- the tape's RECORD SOURCE (cut_source): 0 = DRY (the

@@ -468,6 +468,24 @@ else
   export(pfx("SCENE", "_UNLANDED"))
   params:set("scene_morph_amt", 0)
   run_ticks(2)
+
+  -- the merged surfaces, LAST so their state cannot leak into other shots:
+  -- VOICE in PLAY with the take eroding (the EROSION page lives here now)...
+  goto_page("VOICE")
+  params:set("mode", 5)
+  params:set("erode", 0.5)
+  run_ticks(8)
+  redraw()
+  export(pfx("VOICE", "_ERODE"))
+  params:set("erode", 0)
+  -- ...and SCENE with the orbit running (the ORBIT page lives here now).
+  -- the wander rewrites params, which is why nothing renders after it.
+  goto_page("SCENE")
+  params:set("orbit_on", 1)
+  run_ticks(6)
+  redraw()
+  export(pfx("SCENE", "_ORBIT"))
+  params:set("orbit_on", 0)
 end
 
 print("done: " .. _h.ticks() .. " ticks")

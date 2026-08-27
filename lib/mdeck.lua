@@ -47,8 +47,14 @@ function M.new(o)
   return d
 end
 
--- a param id for this deck: p(d, "rec") -> "lay1_rec"
-local function p(d, k) return d.id .. "_" .. k end
+-- a param id for this deck: p(d, "rec") -> "lay1_rec". A deck may carry a
+-- `keymap` overriding the scheme — the TAPE deck's ids predate the layN_
+-- naming (loop_start, tape_pre, ...) and ids are never renamed, so the map
+-- is how it borrows these mechanics without touching its params.
+local function p(d, k)
+  local km = d.keymap
+  return (km and km[k]) or (d.id .. "_" .. k)
+end
 M.p = p
 
 local function get(d, k, dflt) return pget(p(d, k), dflt) end
@@ -84,12 +90,17 @@ function M.update_rate(d)
 end
 
 -- rec gates capture; `pre` is what survives a pass. pre 1 = OVERDUB (stack),
--- pre 0 = REPLACE. Layers default to overdub because stacking is their job.
+-- pre 0 = REPLACE. Layers default to overdub because stacking is their job
+-- (a deck may set `pre_default` — the tape's is 0, REPLACE). A deck with a
+-- `freeze` key (the tape) holds instead: capture stops and the loop
+-- regenerates at full pre; decks without one read the default 0 and the
+-- branch is inert.
 function M.update_rec(d)
-  local on = get(d, "rec", 0) == 1
+  local frozen = get(d, "freeze", 0) == 1
+  local on = get(d, "rec", 0) == 1 and not frozen
   both(d, function(v)
     sc.rec_level(v, on and 1 or 0)
-    sc.pre_level(v, get(d, "pre", 1))
+    sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))
     sc.rec(v, on and 1 or 0)
   end)
 end

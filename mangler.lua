@@ -27,9 +27,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (thirteen stations, by family: TAKE VOICE EROSION ·
---          TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE ORBIT;
---          the page name pops big while you scroll)
+--   E1     select page (eleven stations, by family: TAKE VOICE · TAPE LAYERS
+--          · FILTER DELAY REVERB · MIX · PADS MOTION SCENE; the page name
+--          pops big while you scroll)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -83,14 +83,18 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- thirteen stations, ordered by FAMILY so neighbours belong together:
--- the take (TAKE VOICE EROSION) · the loop decks (TAPE LAYERS) · the tone
+-- eleven stations, ordered by FAMILY so neighbours belong together:
+-- the take (TAKE VOICE) · the loop decks (TAPE LAYERS) · the tone
 -- (FILTER DELAY REVERB) · the console (MIX) · the performance layer
--- (PADS MOTION SCENE ORBIT). ORBIT/EROSION/LAYERS used to sit appended at
--- the tail in the order they were built, which is history, not a map.
+-- (PADS MOTION SCENE). EROSION and ORBIT are no longer pages: erosion only
+-- ever worked in PLAY mode, so its controls live on VOICE's PLAY face (the
+-- alt pair, which was a redundant scan/pitch copy there); the orbit drives
+-- the scene machinery, so its knobs live on SCENE's alt pair and its RUN
+-- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
+-- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "EROSION", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
-  "MIX", "PADS", "MOTION", "SCENE", "ORBIT",
+  "TAKE", "VOICE", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "MIX", "PADS", "MOTION", "SCENE",
 }
 
 local FPS = 15
@@ -243,16 +247,38 @@ function ctx.tempo()
   return 120
 end
 
+-- the EFFECTIVE softcut record source. cut_source is the knob; the layer
+-- BOUNCE overrides it: while `layer_wet` is on and any layer is armed, the
+-- decks record the processed engine output (WET), so "resample into a layer"
+-- is just arming one — no trip to the TAPE page first. the send is global,
+-- so the tape records the same thing while a bounce runs; both pages' SRC
+-- flags read THIS, never the raw knob, so the override is never hidden.
+function ctx.eff_cut_source()
+  if pget("layer_wet", 1) == 1 then
+    for _, d in ipairs(ctx.layers or {}) do
+      if pget(d.id .. "_rec", 0) == 1 then return 1 end
+    end
+  end
+  return pget("cut_source", 0)
+end
+
+-- ONE writer for the softcut input sends: everything that can change the
+-- effective source (the knob, a layer arming/disarming, the layer_wet toggle)
+-- funnels through here, so the routing can never disagree with the flags.
+function ctx.update_cut_source()
+  Mtape.set_source(ctx.eff_cut_source())
+end
+
 -- what the softcut decks RECORD right now, for the meters: the ADC tap, the
--- engine output (cut_source WET), or the blend. one law for the tape picture
--- (mpages) and the layer decks' pictures (mdeck).
+-- engine output (WET), or the blend. one law for the tape picture (mpages)
+-- and the layer decks' pictures (mdeck).
 function ctx.cut_rec_amp()
-  local cs = pget("cut_source", 0)
+  local cs = ctx.eff_cut_source()
   return max(ctx.amp_in[1], ctx.amp_in[2]) * (1 - cs)
     + max(ctx.amp_out[1], ctx.amp_out[2]) * cs
 end
 
-Mtape.init(ctx)
+Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 -- THE deck gain law (eng, tape, master) lives in mtape; the MIX page draws
 -- the same numbers update_mix sends, so it reads them from here
 ctx.mix_gains = Mtape.gains
@@ -528,14 +554,6 @@ local KEYS = {
     k3 = pk("PLAY", "motion_play"),
     erase = function() ctx.motion.clear_lane() end,
   },
-  ORBIT = {
-    -- RUN under the punch law: hold = a temporary wander, tap = latch it.
-    -- CAP bottles the in-between sound into the first EMPTY slot — never
-    -- the selected one, because the orbit keeps re-selecting its target
-    -- and would overwrite a scene it navigates by.
-    k2 = pk("RUN", "orbit_on"),
-    k3 = { label = "CAP", act = function() ctx.scene.capture_free() end },
-  },
   LAYERS = {
     -- REC under the punch law: hold to record while you lean on it, tap to
     -- latch. PLAY is a plain transport toggle. K1+K3 erases THIS layer only —
@@ -564,19 +582,6 @@ local KEYS = {
         params:set(fid, "")
       end
     end,
-  },
-  EROSION = {
-    -- HEAL parks the decay (round-trips like every throw); SCAR is a full
-    -- strength pass while held, latched with a tap.
-    -- both snapshot regen as well as erode: raising erode ZEROES regen through
-    -- the interlock, so a throw that remembered only erode handed back an
-    -- instrument with the performer's regen setting silently gone.
-    k2 = throw("HEAL", { "erode", "regen" }, function()
-      params:set("erode", 0)
-    end),
-    k3 = throw("SCAR", { "erode", "regen" }, function()
-      params:set("erode", 1)
-    end),
   },
   SCENE = {
     -- RCL under the punch law — hold = PEEK (borrow the scene via the
@@ -621,11 +626,27 @@ local KEYS = {
 local ALT_STOP = pk("STOP", "stop_all")
 local ALT_DRY = { label = "DRY", dryerase = true }
 
+-- HEAL parks the erosion decay (round-trips like every throw). It snapshots
+-- regen as well as erode: raising erode ZEROES regen through the interlock,
+-- so a throw that remembered only erode handed back an instrument with the
+-- performer's regen setting silently gone. It lives on VOICE's K2 in PLAY
+-- mode only — the one mode where erosion runs (FRZ, which it displaces, is
+-- inert in PLAY: pv_freeze holds the PV/clouds voices). SCAR, the old
+-- throw-to-full, retired to the erode knob itself (VOICE K1+E2 in PLAY).
+local VOICE_HEAL = throw("HEAL", { "erode", "regen" }, function()
+  params:set("erode", 0)
+end)
+
 local function key_def(n)
   if ctx.alt then
     return n == 2 and ALT_STOP or ALT_DRY
   end
-  local defs = KEYS[PAGES[ctx.page]]
+  local page = PAGES[ctx.page]
+  -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
+  if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
+    return VOICE_HEAL
+  end
+  local defs = KEYS[page]
   if not defs then return nil end
   return n == 2 and defs.k2 or defs.k3
 end
@@ -652,9 +673,10 @@ local ENC_MAP = {
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
-  SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
-  ORBIT  = { "orbit_rate", nil, "orbit_reach", nil },
-  EROSION = { "erode", nil, "wear", nil },
+  -- the alt pair is the ORBIT: drift time + how far each leg reaches. the
+  -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
+  -- config knob lost its encoder to a performance one.
+  SCENE  = { "scene_slot", "orbit_rate", "scene_morph_amt", "orbit_reach" },
   LAYERS = { "layer_sel", "@lay_rate", "@lay_level", "@lay_move" },
 }
 
@@ -674,6 +696,14 @@ local function enc_param(n)
   if page == "VOICE" and not ctx.alt then
     local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
     return n == 2 and f[1] or f[2]
+  end
+  -- VOICE's alt pair is mode-contextual too: in PLAY mode the face already IS
+  -- scan/pitch, so the alt copy was redundant there — it now carries the
+  -- EROSION controls, which only ever work in PLAY mode (the engine erodes in
+  -- \mangler_play alone). every other mode keeps alt scan/pitch, so pitch
+  -- stays reachable under a GRAIN or WARP face.
+  if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 then
+    return n == 2 and "erode" or "wear"
   end
   local m = ENC_MAP[page]
   if not m then return nil end
@@ -1730,8 +1760,14 @@ local function init_params()
   -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
   -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
   -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 19)
+  params:add_group("grp_layers", "layers", 20)
   params:add_number("layer_sel", "layer", 1, 2, 1)
+  -- the BOUNCE: while ON (the default), arming a layer records the processed
+  -- engine output instead of the raw input — resampling is just K2 on LAYERS.
+  -- OFF = the decks follow cut_source like the tape always has. the SRC flag
+  -- on TAPE and LAYERS shows the EFFECTIVE source either way.
+  params:add_binary("layer_wet", "layers record the mix", "toggle", 1)
+  params:set_action("layer_wet", function() ctx.update_cut_source() end)
   for n = 1, 2 do
     local id = "lay" .. n
     local function q(k) return id .. "_" .. k end
@@ -1741,7 +1777,13 @@ local function init_params()
     params:add_file(q("file"), "L" .. n .. " load file", _path.audio)
     params:set_action(q("file"), function(f) ctx.layer_load(deck(), f) end)
     params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
-    params:set_action(q("rec"), function() Mdeck.update_rec(deck()) end)
+    params:set_action(q("rec"), function(v)
+      -- arming: settle the record SOURCE before the head opens (the bounce
+      -- may throw it WET); disarming: close the head before restoring it
+      if v == 1 then ctx.update_cut_source() end
+      Mdeck.update_rec(deck())
+      if v ~= 1 then ctx.update_cut_source() end
+    end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
     params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
     params:add_control(q("level"), "L" .. n .. " level",
@@ -1817,7 +1859,9 @@ local function init_params()
   -- you reach for it.
   params:add_control("cut_source", "tape source",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  params:set_action("cut_source", function(v) Mtape.set_source(v) end)
+  -- through the one source writer: while a layer bounce holds the send WET,
+  -- turning the knob re-resolves rather than silently fighting it
+  params:set_action("cut_source", function() ctx.update_cut_source() end)
 
   params:add_group("grp_filter", "filter", 4)
   params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
@@ -1993,7 +2037,7 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 10)
+  params:add_group("grp_scene", "scenes", 11)
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
@@ -2013,6 +2057,9 @@ local function init_params()
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)
   params:add_option("scene_recall_mode", "recall quantize",
     { "NOW", "BEAT", "BAR" }, 1)
+  -- what CAP stores: the whole mangle, or just the wet path (an FX preset
+  -- that lands over whatever material is playing — Octatrack-style)
+  params:add_option("scene_scope", "capture scope", { "ALL", "FX" }, 1)
   -- actions on the selected slot (also the SCENE page's K2/K3)
   params:add_binary("scene_capture", "capture to slot", "momentary", 0)
   params:set_action("scene_capture", function(v)
@@ -2210,9 +2257,9 @@ function enc(n, d)
       end
     else
       ctx.page = clamp(ctx.page + d, 1, #PAGES)
-      -- pop the page name big for a moment: thirteen stations scroll past
-      -- faster than the 1x title reads, and finding the page mid-set should
-      -- not need squinting (mpages draws the overlay while this is armed)
+      -- pop the page name big for a moment: the stations scroll past faster
+      -- than the 1x title reads, and finding the page mid-set should not
+      -- need squinting (mpages draws the overlay while this is armed)
       ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
     end
   else

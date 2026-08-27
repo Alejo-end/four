@@ -2243,6 +2243,78 @@ save + reload. The engine RESTART for count 65 is unchanged and still pending.
   MERGES (fewer stations), E1 wrap-around, a one-key layer BOUNCE gesture,
   auto-WET while a layer records.
 
+Seventy-fourth change: **eleven stations, the layer bounce, FX scenes, and the
+tape on the deck mechanics (Lua + tooling, ENGINE UNTOUCHED, fingerprint STAYS
+65, branch `layers`)**. The "do all these improvements" batch; everything
+offline-provable was built, and the two engine wishes (spawn/free delay, true
+STOP) stay parked — more untested SC on the ungated pile breaks invariant 3.
+Save + reload; the RESTART for count 65 is unchanged and still pending.
+* **PAGES 13 to 11 — two pages became surfaces on the pages they always
+  belonged to, losing NO reach.** EROSION only ever worked in PLAY mode (the
+  engine erodes in \mangler_play alone; its page said so in words). Its
+  controls are now VOICE's PLAY-mode alt pair — which was a REDUNDANT copy of
+  scan/pitch there, since the PLAY face already is scan/pitch — and VOICE K2
+  is mode-contextual: HEAL (the erode+regen throw) in PLAY, FRZ elsewhere
+  (pv_freeze is inert in PLAY). GRAIN/WARP/PV keep alt scan/pitch, so pitch
+  stays encoder-reachable under every face. SCAR retired to the erode knob.
+  The GEN counter, pass-progress line and fuzz now draw INSIDE the PLAY
+  texture (two-pass fill so every pixel gets its own level; the erosion state
+  moved ABOVE body_VOICE — a later local would silently read as a global, the
+  65th change's lesson). ORBIT's knobs are SCENE's alt pair (drift + reach);
+  scene_recall_mode moved to PARAMS-only (set-and-forget config lost its
+  encoder to a performance knob, its readout stays on the page); orbit RUN =
+  the param (footswitch), a new grid pad on the scene workspace row 6 x6, and
+  a blinking ORBIT chip on the page; CAP during a wander already redirected
+  to the first empty slot, so no key was needed. All page dispatch was
+  name-based, so nothing else moved. Body-section header numbers renumbered.
+* **The layer BOUNCE — resampling is one key.** New `layer_wet` toggle
+  (default ON, grp_layers 19 to 20): while ON, arming ANY layer throws the
+  softcut record source WET (the processed engine output) and disarming
+  restores the knob. ONE writer (`ctx.update_cut_source`) resolves the
+  effective source from `ctx.eff_cut_source()`; the cut_source action, the
+  layN_rec actions (source settles BEFORE the head opens on arm; head closes
+  before restore on disarm) and layer_wet all funnel through it. The TAPE and
+  LAYERS "SRC WET" flags and the record-meter law (`cut_rec_amp`) all read
+  the EFFECTIVE source, so the override is never hidden — including that the
+  tape records wet too while a bounce runs (one global send, stated). OFF =
+  the decks follow cut_source exactly as before.
+* **FX-only scenes (Octatrack-style).** `scene_scope` option ALL/FX
+  (grp_scene 10 to 11): CAP with FX stores only SPACE_IDS (filter, drive,
+  delay, reverb, shimmer), so a slot becomes an effects preset that recalls
+  and morphs OVER whatever material is playing. apply() always skipped
+  missing ids, so partial slots were legal — this makes them a gesture. say()
+  reports "SAVED n FX". Both new params classified (SCENE_EXCLUDE +
+  MOTION_EXCLUDE).
+* **The tape now runs on the DECK MECHANICS — proven, not hoped.** mdeck's
+  p() honors a per-deck `keymap` (the tape's ids predate the layN_ scheme and
+  ids are never renamed), update_rec grew the freeze hold (inert for decks
+  without a freeze key) and a `pre_default` (tape 0 = REPLACE; `0 or 1` is 0,
+  Lua truthiness). mtape's update_tape_rate/rec/loop and clear_buffer are now
+  one-line delegations through a TAPE descriptor that is deliberately NOT
+  registered in Mdeck.decks — its level law (the MIX crossfade), pset files,
+  phase events and lifecycle stay mtape's own, and mtape receives the module
+  via `Mtape.init(ctx, Mdeck)` because norns `include` has NO cache and a
+  second instance would split the deck walks. EQUIVALENCE PROOF: the softcut
+  call stream over a 146-line state matrix (4 rates x 2 directions, rec x
+  freeze x pre, six loop shapes incl. crossed/degenerate/far-right, clear)
+  captured before and after the fold, byte-diffed EMPTY. What remains
+  deliberately un-folded: level/pset/phase/display — gated on the device
+  pass, as the 64th change ruled.
+* TESTS: control 185 to 192 (section 13 — the merges: alt reach in both
+  modes, the contextual K2 punch, GRAIN keeps pitch, the grid orbit pad;
+  section 14 — the bounce observed at the audio sends incl. the layer_wet=OFF
+  opt-out, and FX scope proven behaviorally: recall restores the filter and
+  does NOT touch scan). deck 55 to 66 (the tape's delegated mechanics:
+  REPLACE default, freeze hold, the floor inside 0-60s, crossed sort,
+  region-scoped clear). 404 assertions total (192/66/62/41/43).
+* VERIFIED: luac clean, all five harnesses, 66 shots source == dist across
+  the 4 variants, suite gained VOICE_ERODE + SCENE_ORBIT (rendered LAST in
+  the scenario — the orbit rewrites params, nothing may render after it),
+  gallery regenerated for 11 pages (erosion.png/orbit.png replaced by
+  voice-erode.png/scene-orbit.png), both new surfaces eyeballed. README:
+  11-station table, the bounce as the default resample story, orbit/erosion
+  notes rewritten as surfaces, capture scope documented.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

@@ -129,7 +129,7 @@ do
   for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
     names[#names + 1] = name
   end
-  ok(#names >= 12, "the page list is readable (" .. #names .. " pages)")
+  ok(#names >= 11, "the page list is readable (" .. #names .. " pages)")
   for i, name in ipairs(names) do
     goto_page(i)
     for _, e in ipairs({ 2, 3 }) do
@@ -794,6 +794,125 @@ do
     params:set("scene_slot", s)
     params:set("scene_clear", 1); params:set("scene_clear", 0)
   end
+end
+
+-- ============================================================================
+-- 13 · the page merges: EROSION on VOICE's PLAY face, ORBIT on SCENE
+-- ============================================================================
+-- two pages became surfaces on the pages they always belonged to. the params
+-- are untouched; what must not regress is the REACH — every control that had
+-- an encoder or key still has one, in the right mode.
+do
+  local names = {}
+  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+    names[#names + 1] = name
+  end
+  local has = {}
+  for _, n in ipairs(names) do has[n] = true end
+  ok(not has.EROSION and not has.ORBIT, "EROSION and ORBIT are no longer pages")
+  ok(has.VOICE and has.SCENE, "...their host pages exist")
+
+  local vi, si
+  for i, n in ipairs(names) do
+    if n == "VOICE" then vi = i elseif n == "SCENE" then si = i end
+  end
+
+  -- VOICE alt in PLAY mode = the erosion pair; other modes keep scan/pitch
+  goto_page(vi)
+  params:set("mode", 5)                       -- PLAY
+  key(1, 1)                                   -- hold K1: the alt layer
+  local e0 = params:get("erode")
+  enc(2, 3)
+  ok(params:get("erode") > e0, "VOICE K1+E2 in PLAY moves erode")
+  local w0 = params:get("wear")
+  enc(3, 3)
+  ok(params:get("wear") ~= w0, "VOICE K1+E3 in PLAY moves wear")
+  params:set("mode", 2)                       -- GRAIN: pitch must stay reachable
+  local p0 = params:get("pitch")
+  enc(3, 3)
+  ok(params:get("pitch") ~= p0, "VOICE K1+E3 in GRAIN still moves pitch")
+  key(1, 0)
+  params:set("pitch", p0)
+
+  -- VOICE K2 is mode-contextual: PLAY = HEAL (a throw on erode), else FRZ.
+  -- a DRY tap first: section 6's key mash may have LATCHED the HEAL throw,
+  -- and a press on a latched throw unlatches instead of punching
+  key(1, 1); key(3, 1); key(3, 0); key(1, 0)
+  params:set("mode", 5)
+  params:set("erode", 0.5)
+  key(2, 1)                                   -- press engages NOW
+  near(params:get("erode"), 0, 1e-6, "VOICE K2 in PLAY punches HEAL (erode to 0)")
+  _h.run_ticks(7); key(2, 0)                  -- held past TAP: release restores
+  near(params:get("erode"), 0.5, 1e-6, "...and the release restores it")
+  params:set("erode", 0)
+  params:set("mode", 2)
+  local f0 = params:get("pv_freeze")
+  key(2, 1); key(2, 0)                        -- a tap latches FRZ
+  ok(params:get("pv_freeze") ~= f0, "VOICE K2 outside PLAY is still FRZ")
+  key(2, 1); key(2, 0)
+  params:set("mode", 5)
+
+  -- SCENE alt = the orbit knobs
+  goto_page(si)
+  key(1, 1)
+  local r0 = params:get("orbit_rate")
+  enc(2, 3)
+  ok(params:get("orbit_rate") ~= r0, "SCENE K1+E2 moves orbit drift")
+  local rc0 = params:get("orbit_reach")
+  enc(3, 3)
+  ok(params:get("orbit_reach") ~= rc0, "SCENE K1+E3 moves orbit reach")
+  key(1, 0)
+
+  -- the grid's scene workspace runs the orbit (the wander's only pad)
+  local g = _h.grid
+  params:set("orbit_on", 0)
+  g.key(6, 6, 1); g.key(6, 6, 0)
+  ok(params:get("orbit_on") == 1, "grid scene row 6 starts the orbit")
+  g.key(6, 6, 1); g.key(6, 6, 0)
+  ok(params:get("orbit_on") == 0, "...and stops it")
+end
+
+-- ============================================================================
+-- 14 · the layer BOUNCE and the FX capture scope
+-- ============================================================================
+-- the bounce: arming a layer records the processed engine output (WET) and
+-- disarming restores the knob's source — resampling is one key. observed at
+-- the audio sends Mtape.set_source drives, which is what softcut records.
+do
+  local adc, eng
+  audio.level_adc_cut = function(v) adc = v end
+  audio.level_eng_cut = function(v) eng = v end
+  params:set("layer_wet", 1)
+  params:set("cut_source", 0.5)   -- move it so the set back to 0 fires
+  params:set("cut_source", 0)     -- (an equal set is equality-guarded)
+  near(eng or -1, 0, 1e-6, "at rest the decks record the input (knob DRY)")
+  params:set("lay1_rec", 1)
+  near(eng or -1, 1, 1e-6, "arming a layer throws the source WET (the bounce)")
+  near(adc or -1, 0, 1e-6, "...and drops the input tap")
+  params:set("lay1_rec", 0)
+  near(eng or -1, 0, 1e-6, "disarming restores the knob's source")
+  params:set("layer_wet", 0)
+  params:set("lay2_rec", 1)
+  near(eng or -1, 0, 1e-6, "layer_wet OFF: arming leaves the source alone")
+  params:set("lay2_rec", 0)
+  params:set("layer_wet", 1)
+  audio.level_adc_cut, audio.level_eng_cut = nil, nil   -- back to the env nop
+
+  -- FX capture scope: an FX slot carries the wet path and NOTHING else, so
+  -- recalling it moves the effects and leaves the material/voice alone
+  params:set("scene_recall_mode", 1)
+  params:set("scene_scope", 2)                -- FX
+  params:set("cutoff", 1234)
+  params:set("scene_slot", 7)
+  params:set("scene_capture", 1); params:set("scene_capture", 0)
+  params:set("cutoff", 20000)
+  params:set("scan", 0.5)
+  params:set("scene_recall", 1); params:set("scene_recall", 0)
+  near(params:get("cutoff"), 1234, 2, "recalling an FX scene restores the filter")
+  near(params:get("scan"), 0.5, 1e-6, "...and does NOT touch the voice (scan)")
+  params:set("scene_scope", 1)                -- back to ALL
+  params:set("scene_clear", 1); params:set("scene_clear", 0)
+  params:set("scan", 1); params:set("cutoff", 20000)
 end
 
 print(string.format("\n%d assertions passed", ok_count))

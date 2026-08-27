@@ -282,7 +282,7 @@ do
     repaint_twave = function(path, secs) painted = { path, secs } end,
     clear_twave = function() end,
   }
-  Mtape.init(tctx)
+  Mtape.init(tctx, Mdeck)
   util.file_exists = function(p) return p:find("tape-4", 1, true) ~= nil end
   Mtape.pset_read(4)
   ok(painted ~= nil and painted[1]:find("tape-4.wav", 1, true) ~= nil,
@@ -290,6 +290,47 @@ do
   near(painted and painted[2] or -1, 60, 0.001, "...over the tape length")
   ok(tctx.twave_any == true, "...and marks the tape as holding audio")
   util.file_exists = function() return false end
+end
+
+-- ---- the tape runs on the SAME deck mechanics ------------------------------
+-- mtape delegates rate/rec/loop/clear to mdeck through a keymapped descriptor
+-- (proven call-for-call identical to the hand-written originals at fold time).
+-- what must not regress: the tape's own semantics riding through the shared
+-- code — REPLACE by default, freeze holds, the floor stays inside 0-60s.
+do
+  local Mtape = dofile("lib/mtape.lua")
+  Mtape.init({ pget = ctx.pget, clamp = ctx.clamp }, Mdeck)
+  P.tape_rate = 0.75; P.tape_reverse = 1
+  calls = {}
+  Mtape.update_tape_rate()
+  near(last("rate", 1)[3], -0.75, 1e-6, "tape reverse negates the rate")
+  near(last("rate", 2)[3], -0.75, 1e-6, "...on both voices")
+  P.tape_rec = 1; P.tape_freeze = 0; P.tape_pre = 0
+  calls = {}
+  Mtape.update_tape_rec()
+  near(last("rec_level", 1)[3], 1, 1e-6, "arming opens the tape record level")
+  near(last("pre_level", 1)[3], 0, 1e-6, "tape default is REPLACE (pre 0), not the layers' overdub")
+  P.tape_freeze = 1
+  calls = {}
+  Mtape.update_tape_rec()
+  near(last("rec_level", 1)[3], 0, 1e-6, "freeze stops capture even while armed")
+  near(last("pre_level", 1)[3], 1, 1e-6, "...and holds the loop at full regeneration")
+  P.tape_freeze = 0; P.tape_rec = 0
+  P.loop_start = 1; P.loop_end = 1
+  calls = {}
+  Mtape.update_tape_loop()
+  near(last("loop_end", 1)[3], 60, 1e-6, "the tape's floored loop stays inside 0-60s")
+  near(last("loop_start", 1)[3], 59.9, 1e-6, "...by moving the start back")
+  P.loop_start = 0.8; P.loop_end = 0.2
+  calls = {}
+  Mtape.update_tape_loop()
+  ok(last("loop_end", 1)[3] > last("loop_start", 1)[3], "crossed tape bounds sort")
+  calls = {}
+  Mtape.clear_buffer()
+  local tc = last("buffer_clear_region")
+  near(tc and tc[2] or -1, 0, 1e-6, "tape clear starts at 0")
+  near(tc and tc[3] or -1, 60, 1e-6, "...and takes exactly the tape's 60s")
+  P.loop_start = 0; P.loop_end = 1; P.tape_rate = 1; P.tape_reverse = 0
 end
 
 print(string.format("\n%d assertions passed", ok_count))

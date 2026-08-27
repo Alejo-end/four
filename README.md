@@ -72,15 +72,14 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 
 ## Pages
 
-The stations sit in families: the take (TAKE, VOICE, EROSION), the loop decks (TAPE,
-LAYERS), the tone (FILTER, DELAY, REVERB), the console (MIX), and the performance layer
-(PADS, MOTION, SCENE, ORBIT).
+The stations sit in families: the take (TAKE, VOICE), the loop decks (TAPE, LAYERS), the
+tone (FILTER, DELAY, REVERB), the console (MIX), and the performance layer (PADS, MOTION,
+SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives on SCENE.
 
 | Page | What it does | Keys |
 |---|---|---|
 | TAKE | Record and frame the material | K2 record, K3 snap window |
-| VOICE | How the take plays: PLAY, GRAIN, WARP, PV | K2 freeze, K3 mode |
-| EROSION | Each loop pass ages the take a little | K2 heal, K3 scar |
+| VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
 | LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 | FILTER | Diode ladder filter plus drive | K2 open, K3 type |
@@ -89,40 +88,43 @@ LAYERS), the tone (FILTER, DELAY, REVERB), the console (MIX), and the performanc
 | MIX | Input, both decks, output | K2 engine throw, K3 tape throw |
 | PADS | The take chopped into eight playable slices | K2 play slice, K3 route notes |
 | MOTION | Record and replay knob movements | K2 record, K3 play |
-| SCENE | Capture, recall and morph whole sounds | K2 recall or peek, K3 capture |
-| ORBIT | The instrument drifts between your scenes by itself | K2 run, K3 capture the moment |
+| SCENE | Capture, recall and morph whole sounds. The alt knobs run the orbit. | K2 recall or peek, K3 capture |
 
 Notes on the less obvious ones.
 
 LAYERS gives you two independent loop decks beside the tape, so you can keep playing while
 you record the next part. Each has its own loop points and speed, so a four-bar part
-against a three-bar part drifts and re-syncs on its own. They record what the tape records
-(dry input, or the processed output: one switch, on TAPE, and the page says SRC WET when it
-is up). A wav can also be loaded straight into a deck: PARAMS > layers > load file, with the
-loop snapping to the file. What a deck cannot do is granulate or stretch: that is the
-engine's take, and only the take gets it. MUTE silences a deck without stopping its head,
-so two decks never lose their drift against each other.
+against a three-bar part drifts and re-syncs on its own. **Arming a layer records the
+processed engine output by default**: resampling the mangled sound into a loop is just K2,
+and both deck pages say SRC WET while it happens. Turn `layers record the mix` off in
+PARAMS and the decks follow the tape's source switch instead (dry input, or the processed
+output, on TAPE). A wav can also be loaded straight into a deck: PARAMS > layers > load
+file, with the loop snapping to the file. What a deck cannot do is granulate or stretch:
+that is the engine's take, and only the take gets it. MUTE silences a deck without stopping
+its head, so two decks never lose their drift against each other. For a full-mix bounce
+that becomes the new take, use print (below).
 
-To resample with the layers: on TAPE hold K1 and turn E3 to WET, then arm a layer. It now
-prints the processed engine output (the mangled sound, not the input), and you can mute
-the engine and mangle something new over it. For a full-mix bounce that becomes the new
-take, use print (below).
+The orbit lives on SCENE: it picks a stored scene, morphs partway toward it, parks there,
+then picks another, never fully arriving, so it keeps finding sounds between the ones you
+saved. Hold K1 on SCENE for its two knobs (drift time and reach); start and stop it with
+the `orbit run` parameter (MIDI-map a footswitch) or the grid's scene row, and an ORBIT
+chip blinks on the page while it wanders. CAP during a wander bottles the in-between sound
+into the first empty slot.
 
-ORBIT picks a stored scene, morphs partway toward it, parks there, then picks another. It
-never fully arrives, so it keeps finding sounds between the ones you saved. K3 captures
-whatever it found into the first empty slot. It needs at least one captured scene, and it
-owns the morph knob while running.
-
-EROSION works in PLAY mode. With erode up, every pass of the loop rewrites the window
-slightly darker and quieter. Wear sets how dark. The GEN counter shows how many passes the
-take has aged. Heal stops the decay where it stands. Recording is never affected.
+Erosion lives on VOICE and works in PLAY mode, the one mode the engine erodes in. With
+erode up (hold K1 for erode and wear), every pass of the loop rewrites the window slightly
+darker and quieter, the GEN counter counts the passes, and K2 becomes HEAL: hold it to
+park the decay and let go to resume, or tap to latch it stopped. Recording is never
+affected.
 
 SCENE slot zero, drawn as a left arrow, is the way back: every recall and chaos throw parks
 the previous sound there automatically. Select it and tap K2 to undo. The `next scene`
 parameter steps through filled slots and can be mapped to a footswitch, as can `chaos throw`.
 A recalled scene never opens the playback window past the recorded material: a scene
 captured with the window wide, recalled over a short take, lands on the take instead of
-sixty seconds of mostly silence.
+sixty seconds of mostly silence. The `capture scope` parameter switches CAP to FX-only
+scenes: a slot that stores just filter, drive, delay, reverb and shimmer, and lands or
+morphs over whatever material is playing.
 
 ## Notes and pads
 

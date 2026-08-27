@@ -37,9 +37,9 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (thirteen stations, by family: TAKE VOICE EROSION ·
---          TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE ORBIT;
---          the page name pops big while you scroll)
+--   E1     select page (eleven stations, by family: TAKE VOICE · TAPE LAYERS
+--          · FILTER DELAY REVERB · MIX · PADS MOTION SCENE; the page name
+--          pops big while you scroll)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
 --   K1     shift (hold). the footer swaps whole while it's down
@@ -93,14 +93,18 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- thirteen stations, ordered by FAMILY so neighbours belong together:
--- the take (TAKE VOICE EROSION) · the loop decks (TAPE LAYERS) · the tone
+-- eleven stations, ordered by FAMILY so neighbours belong together:
+-- the take (TAKE VOICE) · the loop decks (TAPE LAYERS) · the tone
 -- (FILTER DELAY REVERB) · the console (MIX) · the performance layer
--- (PADS MOTION SCENE ORBIT). ORBIT/EROSION/LAYERS used to sit appended at
--- the tail in the order they were built, which is history, not a map.
+-- (PADS MOTION SCENE). EROSION and ORBIT are no longer pages: erosion only
+-- ever worked in PLAY mode, so its controls live on VOICE's PLAY face (the
+-- alt pair, which was a redundant scan/pitch copy there); the orbit drives
+-- the scene machinery, so its knobs live on SCENE's alt pair and its RUN
+-- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
+-- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "EROSION", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
-  "MIX", "PADS", "MOTION", "SCENE", "ORBIT",
+  "TAKE", "VOICE", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "MIX", "PADS", "MOTION", "SCENE",
 }
 
 local FPS = 15
@@ -343,12 +347,34 @@ local TAPE_LEN = 60  -- seconds of softcut buffer used by the tape loop
 
 local C     -- shared ctx, bound at init
 local pget
+local D     -- the deck module (lib/mdeck), handed in at init — `include` has
+            -- no module cache, so including it here would build a SECOND
+            -- instance with its own deck list and the phase/pset walks would
+            -- split across the two
+
+-- the tape as a DECK DESCRIPTOR: the shape mdeck builds, but NOT registered
+-- in Mdeck.decks — its level law (the MIX crossfade in gains()), its pset
+-- files, its phase events and its lifecycle stay this module's own. What it
+-- borrows is the deck MECHANICS: rate and direction, rec/pre/freeze gating,
+-- the loop bounds with the 100ms floor held inside the region, and the
+-- region-scoped clear. Those laws existed twice, verbatim, and had already
+-- drifted once before the layers review caught it; now they exist once.
+local TAPE = {
+  id = "tape", name = "TAPE", va = 1, vb = 2, from = 0, len = TAPE_LEN,
+  pre_default = 0,   -- classic tape: REPLACE unless tape_pre is raised
+  keymap = { rec = "tape_rec", rate = "tape_rate", reverse = "tape_reverse",
+             pre = "tape_pre", freeze = "tape_freeze",
+             start = "loop_start", ["end"] = "loop_end" },
+  -- display fields, unused here (the tape picture lives in mpages as twave)
+  wave = {}, wave_bin = 0, any = false, phase = 0,
+}
 
 local M = { TAPE_LEN = TAPE_LEN }
 
-function M.init(ctx)
+function M.init(ctx, deckmod)
   C = ctx
   pget = ctx.pget
+  D = deckmod
 end
 
 -- THE gain law: `mix` crossfades SC engine <-> tape (a plateau — center keeps
@@ -377,38 +403,14 @@ local function tape_set(fn)
   fn(2)
 end
 
-function M.update_tape_rate()
-  local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
-  tape_set(function(v) sc.rate(v, r) end)
-end
-
--- rec/freeze/pre interact: freeze stops capture and holds the loop at full
--- regeneration; otherwise rec gates capture and tape_pre sets the overdub
-function M.update_tape_rec()
-  local frozen = pget("tape_freeze", 0) == 1
-  local rec_on = pget("tape_rec", 0) == 1 and not frozen
-  tape_set(function(v)
-    sc.rec_level(v, rec_on and 1 or 0)
-    sc.pre_level(v, frozen and 1 or pget("tape_pre", 0))
-    sc.rec(v, rec_on and 1 or 0)
-  end)
-end
-
-function M.update_tape_loop()
-  local a = pget("loop_start", 0) * TAPE_LEN
-  local b = pget("loop_end", 1) * TAPE_LEN
-  local lo, hi = math.min(a, b), math.max(a, b)
-  -- the 100ms floor, held inside the tape's own 0-60s (same rule as the layer
-  -- decks): floored past the end it would loop buffer the tape does not own
-  if hi - lo < 0.1 then
-    hi = math.min(lo + 0.1, TAPE_LEN)
-    lo = hi - 0.1
-  end
-  tape_set(function(v)
-    sc.loop_start(v, lo)
-    sc.loop_end(v, hi)
-  end)
-end
+-- the deck mechanics, delegated (see the TAPE descriptor above). Proven
+-- call-for-call identical to the hand-written versions they replace: the
+-- softcut command stream over a state matrix (rates, reverse, rec x freeze x
+-- pre, five loop shapes, clear) was captured before and after the fold and
+-- byte-diffed empty.
+function M.update_tape_rate() D.update_rate(TAPE) end
+function M.update_tape_rec() D.update_rec(TAPE) end
+function M.update_tape_loop() D.update_loop(TAPE) end
 
 -- jump both heads to a normalized tape position (loop-snap lands the head
 -- at the take's start so it plays back tight immediately)
@@ -422,9 +424,10 @@ end
 
 -- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
 -- audio with it, so once the layer decks share this buffer a TAPE erase would
--- silently wipe them too.
+-- silently wipe them too. (Mdeck.clear also resets the descriptor's unused
+-- display fields — harmless; the tape picture is mpages' twave.)
 function M.clear_buffer()
-  sc.buffer_clear_region(0, TAPE_LEN)
+  D.clear(TAPE)
 end
 
 -- the tape's RECORD SOURCE (cut_source): 0 = DRY (the
@@ -579,8 +582,14 @@ function M.new(o)
   return d
 end
 
--- a param id for this deck: p(d, "rec") -> "lay1_rec"
-local function p(d, k) return d.id .. "_" .. k end
+-- a param id for this deck: p(d, "rec") -> "lay1_rec". A deck may carry a
+-- `keymap` overriding the scheme — the TAPE deck's ids predate the layN_
+-- naming (loop_start, tape_pre, ...) and ids are never renamed, so the map
+-- is how it borrows these mechanics without touching its params.
+local function p(d, k)
+  local km = d.keymap
+  return (km and km[k]) or (d.id .. "_" .. k)
+end
 M.p = p
 
 local function get(d, k, dflt) return pget(p(d, k), dflt) end
@@ -616,12 +625,17 @@ function M.update_rate(d)
 end
 
 -- rec gates capture; `pre` is what survives a pass. pre 1 = OVERDUB (stack),
--- pre 0 = REPLACE. Layers default to overdub because stacking is their job.
+-- pre 0 = REPLACE. Layers default to overdub because stacking is their job
+-- (a deck may set `pre_default` — the tape's is 0, REPLACE). A deck with a
+-- `freeze` key (the tape) holds instead: capture stops and the loop
+-- regenerates at full pre; decks without one read the default 0 and the
+-- branch is inert.
 function M.update_rec(d)
-  local on = get(d, "rec", 0) == 1
+  local frozen = get(d, "freeze", 0) == 1
+  local on = get(d, "rec", 0) == 1 and not frozen
   both(d, function(v)
     sc.rec_level(v, on and 1 or 0)
-    sc.pre_level(v, get(d, "pre", 1))
+    sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))
     sc.rec(v, on and 1 or 0)
   end)
 end
@@ -1383,6 +1397,8 @@ local function scene_ws_key(x, y, z)
     if x == 1 then scene_mod.cap = (z == 1)
     elseif x == 2 then scene_mod.clr = (z == 1)
     elseif x == 4 then params:set("chaos_throw", z)
+    elseif x == 6 and z == 1 then            -- ORBIT run/stop (page merge:
+      C.ptoggle("orbit_on")                  -- the wander has no key of its own)
     elseif x == 8 and z == 1 then            -- ◄ the way back
       C.pulse("scene_safe_restore")
     end
@@ -1589,6 +1605,9 @@ local function draw_scene_ws()
   gg:led(1, 6, scene_mod.cap and 15 or 4, scene_mod.cap and "green" or nil)
   gg:led(2, 6, scene_mod.clr and 15 or 4, scene_mod.clr and "purple" or nil)
   gg:led(4, 6, pget("chaos_throw", 0) == 1 and 15 or 5, "purple")
+  -- the orbit: yellow = mode, blinking while the wander runs
+  local orb = pget("orbit_on", 0) == 1
+  gg:led(6, 6, orb and ((C.frame % 8) < 5 and 15 or 6) or 3, "yellow")
   gg:led(8, 6, sc.safe and 10 or 2, sc.safe and "white" or nil)
 end
 
@@ -1730,7 +1749,7 @@ local MOTION_EXCLUDE = {
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
-  "lay1_file", "lay2_file",
+  "lay1_file", "lay2_file", "layer_wet",
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade",
   -- routing + structure (see the header: pad_input re-points the keyboard,
@@ -1743,7 +1762,8 @@ local MOTION_EXCLUDE = {
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
-  "scene_slot", "scene_recall_mode", "scene_capture", "scene_recall",
+  "scene_slot", "scene_recall_mode", "scene_scope", "scene_capture",
+  "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
   "chaos_throw", "orbit_on", "orbit_rate", "orbit_reach",
 }
@@ -2229,7 +2249,7 @@ local SCENE_EXCLUDE = {
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
-  "lay1_file", "lay2_file",
+  "lay1_file", "lay2_file", "layer_wet",
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
@@ -2239,7 +2259,8 @@ local SCENE_EXCLUDE = {
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
   "orbit_on", "orbit_rate", "orbit_reach",
-  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_capture",
+  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
+  "scene_capture",
   "scene_recall", "scene_next", "scene_clear", "scene_safe_capture",
   "scene_safe_restore", "chaos_throw",
 }
@@ -2472,12 +2493,20 @@ function M.capture(slot)
   -- redirect to the first empty slot; an EXPLICIT slot stays explicit.
   if slot == nil and M.orbit_running then return M.capture_free() end
   slot = slot_idx(slot)
-  local t, n = snapshot_ids(SCENE_RECALL_IDS)
+  -- capture SCOPE (Octatrack-style): ALL = the whole mangle; FX = just the
+  -- wet path (SPACE_IDS: filter, drive, delay, reverb, shimmer), so a slot
+  -- becomes an effects preset that recalls and morphs OVER whatever material
+  -- and voice you have at the time. apply() skips ids a slot does not carry,
+  -- so partial slots were always legal; this makes them a supported gesture.
+  local fx_only = floor(pget("scene_scope", 1) + 0.5) == 2
+  local t, n = snapshot_ids(fx_only and SPACE_IDS or SCENE_RECALL_IDS)
   M.slots[slot] = t
   M.invalidate()   -- an endpoint's contents may have just changed under us
-  say("SAVED " .. slot,
-    "scene " .. slot .. " captured — " .. n .. " params (the whole mangle:"
-    .. " window, grain, stretch, tape loop, filter, FX, voices)", slot)
+  say("SAVED " .. slot .. (fx_only and " FX" or ""),
+    "scene " .. slot .. " captured — " .. n .. (fx_only
+      and " params (FX only: filter, drive, delay, reverb, shimmer)"
+      or " params (the whole mangle: window, grain, stretch, tape loop,"
+      .. " filter, FX, voices)"), slot)
   return true
 end
 
@@ -3636,7 +3665,7 @@ local SHORT = {
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
-  scene_slot = "SLOT", scene_morph_amt = "MRF", scene_recall_mode = "QNT",
+  scene_slot = "SLOT", scene_morph_amt = "MRF",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
   layer_sel = "LAYER",
   lay1_level = "L1 LV", lay1_rate = "L1 RT", lay1_reverse = "L1 REV",
@@ -3674,7 +3703,7 @@ local FULL = {
   voice_rel = "RELEASE",
   motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
   seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
-  scene_slot = "SLOT", scene_morph_amt = "MORPH", scene_recall_mode = "QUANT",
+  scene_slot = "SLOT", scene_morph_amt = "MORPH",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE", wear = "WEAR",
   layer_sel = "LAYER",
   ["@lay_level"] = "LEVEL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
@@ -4063,6 +4092,27 @@ local function voice_wy(x, ph, rate)
   return 33 + sin((x + ph) * 0.35 * rate) * 8
 end
 
+-- EROSION state: how aged the take is. The generation counter counts
+-- completed loop passes while eroding; drawn inside VOICE's PLAY texture
+-- (PLAY is the only mode the engine erodes in). Declared BEFORE body_VOICE:
+-- referenced from there, and a later local would silently read as a global.
+local eros_gen, eros_acc = 0, 0
+function M.erosion_tick()
+  -- the erosion head runs at exactly one pass per window length, so a
+  -- generation is span times sixty seconds of eroding time. paused under
+  -- the same conditions the engine pauses (rec, freeze, not in PLAY).
+  if pget("erode", 0) > 0 and pget("mode", 5) == 5
+      and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
+    local _, _, span = window_bounds()
+    eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
+    if eros_acc >= 1 then
+      eros_gen = eros_gen + 1
+      eros_acc = eros_acc - 1
+    end
+  end
+end
+function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
+
 local function body_VOICE(frame)
   local mode = pget("mode", 5)
   local held_pv = pget("pv_freeze", 0) == 1
@@ -4117,12 +4167,40 @@ local function body_VOICE(frame)
       screen.rect(gx, 45 - h, 2, h)
     end
     screen.fill()
-  else                         -- PLAY: one unbroken wave — the exact sample
-    screen.level(9)
+  else                         -- PLAY: one unbroken wave — the exact sample,
+    -- aged by EROSION when it runs (PLAY is the only mode that erodes; the
+    -- controls are this page's alt pair). two passes so every pixel fills at
+    -- its own level: the base wave dims as erosion deepens, then the fuzz
+    -- flecks eat into it. dormant at erode 0 — the wave is untouched.
+    local e = clamp(pget("erode", 0), 0, 1)
+    screen.level(9 - floor(e * 5))
     for gx = 0, 127 do
-      screen.rect(gx, voice_wy(gx, ph, rate), 1, 1)
+      if e <= 0 or hash(gx, frame % 8, 3) >= e * 0.7 then
+        screen.rect(gx, voice_wy(gx, ph, rate), 1, 1)
+      end
     end
     screen.fill()
+    if e > 0 then
+      screen.level(2)
+      for gx = 0, 127 do
+        if hash(gx, frame % 8, 3) < e * 0.7 then
+          screen.rect(gx, voice_wy(gx, ph, rate), 1, 1)
+        end
+      end
+      screen.fill()
+      -- generation counter + progress through the current pass. the mode
+      -- rail runs nearly to the right edge, so the counter sits below it in
+      -- its own pocket (the footer's swelling-value rule).
+      local gtxt = "GEN " .. eros_gen
+      local tw = text_w(gtxt, 1)
+      screen.level(0)
+      screen.rect(124 - tw, 21, tw + 4, 7)
+      screen.fill()
+      ptext(gtxt, 126 - tw, 22, 1, 12)
+      screen.level(5)
+      screen.rect(0, 46, floor(clamp(eros_acc, 0, 1) * 128), 1)
+      screen.fill()
+    end
   end
   -- window bar + the playhead (nothing moves that can't be heard)
   local lo, hi = window_bounds()
@@ -4187,8 +4265,10 @@ local function body_TAPE(frame)
   screen.stroke()
   ptext_r(string.format("%.1fS", lspan * C.BUF_SECS), 126, 12, 1, 4)
   -- record SOURCE: flag when the tape is printing PROCESSED audio (never a
-  -- hidden mode — DRY, the default, draws nothing so classic tape is unchanged)
-  local src = pget("cut_source", 0)
+  -- hidden mode — DRY, the default, draws nothing so classic tape is
+  -- unchanged). the EFFECTIVE source: a layer bounce throws it WET globally,
+  -- and the tape page must say so while it does.
+  local src = C.eff_cut_source()
   if src > 0.02 then
     ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
       2, 46, 1, 9)
@@ -4201,7 +4281,7 @@ local function body_TAPE(frame)
 end
 
 -- ============================================================================
--- 4 · FILTER — tone (approx DFM1 response, with labeled measurement rails;
+-- 5 · FILTER — tone (approx DFM1 response, with labeled measurement rails;
 --     drive = grit on the line, not a number)
 -- ============================================================================
 local function body_FILTER(frame)
@@ -4284,7 +4364,7 @@ local function body_FILTER(frame)
 end
 
 -- ============================================================================
--- 5 · DELAY / REVERB — the time-smear, split into two stations. DELAY draws
+-- 6 · DELAY / REVERB — the time-smear, split into two stations. DELAY draws
 --     the onset + echo taps decaying by feedback; REVERB draws the tail as a
 --     slope + shimmer motes. shared time axis, rails at 1s/2s, dormant flat
 --     at mix 0. (was one merged SPACE page, split after play-testing.)
@@ -4399,7 +4479,7 @@ local function body_REVERB(frame)
 end
 
 -- ============================================================================
--- 6 · MIX — the console (in meter → the two decks at their REAL gains →
+-- 8 · MIX — the console (in meter → the two decks at their REAL gains →
 --     master VU). the layer decks live on their own page; this console is
 --     the engine <> tape crossfade.
 -- ============================================================================
@@ -4508,7 +4588,7 @@ local function body_MIX(frame)
 end
 
 -- ============================================================================
--- 7 · PADS — the take chopped into 8 playable slices: the window zoomed full
+-- 9 · PADS — the take chopped into 8 playable slices: the window zoomed full
 --     width over 8 numbered cells, each with its own voice + pitch sound-lock;
 --     lit while sounding, the cursor squared for editing.
 -- ============================================================================
@@ -4620,7 +4700,7 @@ local function body_PADS(frame)
 end
 
 -- ============================================================================
--- 8 · MOTION — the gesture loop (dynamic lanes: one automation CURVE per
+-- 10 · MOTION — the gesture loop (dynamic lanes: one automation CURVE per
 --     recorded param, named with its page's own word; one playhead crosses
 --     every lane with a live-value dot)
 -- ============================================================================
@@ -4750,7 +4830,7 @@ local function body_MOTION(frame)
 end
 
 -- ============================================================================
--- 9 · SCENE — states and the way back (the slot row + the morph rail; undo
+-- 11 · SCENE — states and the way back (the slot row + the morph rail; undo
 --     is the ◄ cell, a slot you can see)
 -- ============================================================================
 local function body_SCENE(frame)
@@ -4765,6 +4845,11 @@ local function body_SCENE(frame)
     ptext_c("K2 TO LAND THE REST", 64, 13, 1, 5)
   else
     ptext_r(string.upper(params:string("scene_recall_mode")), 126, 13, 1, 4)
+  end
+  -- the orbit lives here now (its knobs are this page's alt pair): a blinking
+  -- chip while the wander runs — the moving selector and rail are its motion
+  if pget("orbit_on", 0) == 1 and (frame % 16) < 10 then
+    chip("ORBIT", 2, 11)
   end
   -- the ◄ cell: the way back (the safe state, auto-marked by chaos)
   if sc.safe then
@@ -4904,127 +4989,8 @@ end
 
 -- each page draws its body through this dispatch table, selected by name;
 -- built ONCE at load, so the redraw stays allocation-free
--- ORBIT: the eight slots in a row, the wanderer travelling from where it
--- last parked toward the current target. filled slots bright, empties dim,
--- target bracketed. truth rules: the traveller only moves while running.
--- the trail is a preallocated ring of recent positions that fades with
--- age; it freezes when the orbit stops, showing the path it took.
-local ORB_TRAIL = 12
-local orb_trail = {}
-for i = 1, ORB_TRAIL do orb_trail[i] = -1 end
-local orb_head = 0
-local function body_ORBIT(frame)
-  local on = pget("orbit_on", 0) == 1
-  local target = clamp(floor(pget("scene_slot", 1) + 0.5), 0, 8)
-  local amt = clamp(pget("scene_morph_amt", 0), 0, 1)
-  local filled = 0
-  for s = 1, 8 do if C.scenes[s] then filled = filled + 1 end end
-  if filled == 0 then
-    ptext_c("NO SCENES TO ORBIT", 64, 24, 1, 4)
-    ptext_c("CAPTURE SOME ON SCENE", 64, 32, 1, 3)
-    return
-  end
-  for s = 1, 8 do
-    local x = 6 + (s - 1) * 15
-    local has = C.scenes[s] ~= nil
-    screen.level(has and (s == target and 12 or 7) or 2)
-    screen.rect(x, 22, 11, 11)
-    if has then screen.fill() else screen.stroke() end
-    if s == target and on then
-      screen.level(15)
-      screen.rect(x - 1, 20, 13, 1)
-      screen.fill()
-    end
-  end
-  -- the traveller: a dot on a rail under the slots, position = morph amount
-  -- toward the target slot's x. resting position is the left edge (LIVE).
-  local tx = 6 + (target - 1) * 15 + 5
-  local px = 6 + (tx - 6) * amt
-  screen.level(3)
-  screen.rect(6, 42, 116, 1)
-  screen.fill()
-  if on and (frame % 2) == 0 then
-    orb_head = orb_head % ORB_TRAIL + 1
-    orb_trail[orb_head] = px
-  end
-  for i = 1, ORB_TRAIL do
-    local t = orb_trail[i]
-    if t >= 0 then
-      local age = (orb_head - i) % ORB_TRAIL
-      screen.level(max(1, 6 - floor(age / 2)))
-      screen.rect(clamp(t, 2, 124), 42, 1, 1)
-    end
-  end
-  screen.fill()
-  screen.level(on and 15 or 6)
-  screen.rect(clamp(px, 2, 124), 40, 3, 5)
-  screen.fill()
-  if on then
-    if (frame % 16) < 10 then chip("RUN", 2, 12) end
-  else
-    ptext("HELD", 2, 12, 1, 5)
-  end
-  ptext_r(filled .. " SCENES", 126, 12, 1, 4)
-end
-
--- EROSION: how aged the take is. generation counter counts completed loop
--- passes while eroding; the strip fuzzes and dims with erosion depth.
-local eros_gen, eros_acc = 0, 0
-function M.erosion_tick()
-  -- the erosion head runs at exactly one pass per window length, so a
-  -- generation is span times sixty seconds of eroding time. paused under
-  -- the same conditions the engine pauses (rec, freeze, not in PLAY).
-  if pget("erode", 0) > 0 and pget("mode", 5) == 5
-      and pget("rec", 0) == 0 and pget("freeze", 0) == 0 then
-    local _, _, span = window_bounds()
-    eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
-    if eros_acc >= 1 then
-      eros_gen = eros_gen + 1
-      eros_acc = eros_acc - 1
-    end
-  end
-end
-function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
-
-local function body_EROSION(frame)
-  local e = clamp(pget("erode", 0), 0, 1)
-  local w = clamp(pget("wear", 0), 0, 1)
-  if pget("mode", 5) ~= 5 then
-    ptext_c("EROSION WORKS IN PLAY MODE", 64, 26, 1, 4)
-    ptext_c("VOICE K3 TO SWITCH", 64, 34, 1, 3)
-    return
-  end
-  if not C.wave_any then
-    ptext_c("EMPTY - K2 REC ON TAKE", 64, 28, 1, 4)
-    return
-  end
-  -- the material line: fuzz density and dimming follow the erosion depth
-  local lvl = 10 - floor(e * 6)
-  for x = 4, 124 do
-    local h = 4 + floor(hash(x, 0, 7) * 8 * (1 - w * 0.5))
-    screen.level(hash(x, frame % 8, 3) < e * 0.7 and 2 or lvl)
-    screen.rect(x, 31 - floor(h / 2), 1, h)
-  end
-  screen.fill()
-  -- playhead, window relative (play_phase is a buffer position)
-  local wlo, _, wspan = window_bounds()
-  local hx = 4 + floor(clamp((C.play_phase - wlo) / wspan, 0, 1) * 120)
-  screen.level(15)
-  screen.rect(hx, 20, 1, 22)
-  screen.fill()
-  -- progress through the CURRENT generation (the erosion head runs at one
-  -- pass per window length; eros_acc tracks it exactly)
-  if e > 0 then
-    screen.level(5)
-    screen.rect(4, 45, floor(clamp(eros_acc, 0, 1) * 120), 1)
-    screen.fill()
-  end
-  ptext_r("GEN " .. eros_gen, 126, 12, 1, e > 0 and 13 or 5)
-  if e > 0 and (frame % 8) < 5 then chip("ERODING", 2, 12) end
-end
-
 -- ============================================================================
--- 13 - LAYERS - the loop decks beside the tape
+-- 4 · LAYERS - the loop decks beside the tape
 -- ============================================================================
 -- Two strips, one per deck. Each shows what is actually recorded in it, the
 -- loop bracket over that, and the head. The SELECTED deck is bright and the
@@ -5115,11 +5081,10 @@ local function body_LAYERS(frame)
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
   ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
-  -- what the decks RECORD: cut_source is ONE global send into softcut, so the
-  -- tape's source knob (TAPE K1+E3) governs the layers just as much. Flag a
-  -- processed print here too, or the resample rig is a hidden mode. DRY, the
-  -- default, draws nothing, same law as the TAPE page's flag.
-  local src = pget("cut_source", 0)
+  -- what the decks RECORD: the EFFECTIVE source (the knob, or the bounce's
+  -- WET override while a layer is armed). Flag a processed print, or the
+  -- resample rig is a hidden mode. DRY draws nothing, same law as TAPE's.
+  local src = C.eff_cut_source()
   if src > 0.02 then
     ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
       44, 12, 1, 9)
@@ -5130,7 +5095,7 @@ local function body_LAYERS(frame)
 end
 
 local BODY = {
-  ORBIT = body_ORBIT, EROSION = body_EROSION, LAYERS = body_LAYERS,
+  LAYERS = body_LAYERS,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
@@ -5351,16 +5316,38 @@ function ctx.tempo()
   return 120
 end
 
+-- the EFFECTIVE softcut record source. cut_source is the knob; the layer
+-- BOUNCE overrides it: while `layer_wet` is on and any layer is armed, the
+-- decks record the processed engine output (WET), so "resample into a layer"
+-- is just arming one — no trip to the TAPE page first. the send is global,
+-- so the tape records the same thing while a bounce runs; both pages' SRC
+-- flags read THIS, never the raw knob, so the override is never hidden.
+function ctx.eff_cut_source()
+  if pget("layer_wet", 1) == 1 then
+    for _, d in ipairs(ctx.layers or {}) do
+      if pget(d.id .. "_rec", 0) == 1 then return 1 end
+    end
+  end
+  return pget("cut_source", 0)
+end
+
+-- ONE writer for the softcut input sends: everything that can change the
+-- effective source (the knob, a layer arming/disarming, the layer_wet toggle)
+-- funnels through here, so the routing can never disagree with the flags.
+function ctx.update_cut_source()
+  Mtape.set_source(ctx.eff_cut_source())
+end
+
 -- what the softcut decks RECORD right now, for the meters: the ADC tap, the
--- engine output (cut_source WET), or the blend. one law for the tape picture
--- (mpages) and the layer decks' pictures (mdeck).
+-- engine output (WET), or the blend. one law for the tape picture (mpages)
+-- and the layer decks' pictures (mdeck).
 function ctx.cut_rec_amp()
-  local cs = pget("cut_source", 0)
+  local cs = ctx.eff_cut_source()
   return max(ctx.amp_in[1], ctx.amp_in[2]) * (1 - cs)
     + max(ctx.amp_out[1], ctx.amp_out[2]) * cs
 end
 
-Mtape.init(ctx)
+Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 -- THE deck gain law (eng, tape, master) lives in mtape; the MIX page draws
 -- the same numbers update_mix sends, so it reads them from here
 ctx.mix_gains = Mtape.gains
@@ -5636,14 +5623,6 @@ local KEYS = {
     k3 = pk("PLAY", "motion_play"),
     erase = function() ctx.motion.clear_lane() end,
   },
-  ORBIT = {
-    -- RUN under the punch law: hold = a temporary wander, tap = latch it.
-    -- CAP bottles the in-between sound into the first EMPTY slot — never
-    -- the selected one, because the orbit keeps re-selecting its target
-    -- and would overwrite a scene it navigates by.
-    k2 = pk("RUN", "orbit_on"),
-    k3 = { label = "CAP", act = function() ctx.scene.capture_free() end },
-  },
   LAYERS = {
     -- REC under the punch law: hold to record while you lean on it, tap to
     -- latch. PLAY is a plain transport toggle. K1+K3 erases THIS layer only —
@@ -5672,19 +5651,6 @@ local KEYS = {
         params:set(fid, "")
       end
     end,
-  },
-  EROSION = {
-    -- HEAL parks the decay (round-trips like every throw); SCAR is a full
-    -- strength pass while held, latched with a tap.
-    -- both snapshot regen as well as erode: raising erode ZEROES regen through
-    -- the interlock, so a throw that remembered only erode handed back an
-    -- instrument with the performer's regen setting silently gone.
-    k2 = throw("HEAL", { "erode", "regen" }, function()
-      params:set("erode", 0)
-    end),
-    k3 = throw("SCAR", { "erode", "regen" }, function()
-      params:set("erode", 1)
-    end),
   },
   SCENE = {
     -- RCL under the punch law — hold = PEEK (borrow the scene via the
@@ -5729,11 +5695,27 @@ local KEYS = {
 local ALT_STOP = pk("STOP", "stop_all")
 local ALT_DRY = { label = "DRY", dryerase = true }
 
+-- HEAL parks the erosion decay (round-trips like every throw). It snapshots
+-- regen as well as erode: raising erode ZEROES regen through the interlock,
+-- so a throw that remembered only erode handed back an instrument with the
+-- performer's regen setting silently gone. It lives on VOICE's K2 in PLAY
+-- mode only — the one mode where erosion runs (FRZ, which it displaces, is
+-- inert in PLAY: pv_freeze holds the PV/clouds voices). SCAR, the old
+-- throw-to-full, retired to the erode knob itself (VOICE K1+E2 in PLAY).
+local VOICE_HEAL = throw("HEAL", { "erode", "regen" }, function()
+  params:set("erode", 0)
+end)
+
 local function key_def(n)
   if ctx.alt then
     return n == 2 and ALT_STOP or ALT_DRY
   end
-  local defs = KEYS[PAGES[ctx.page]]
+  local page = PAGES[ctx.page]
+  -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
+  if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
+    return VOICE_HEAL
+  end
+  local defs = KEYS[page]
   if not defs then return nil end
   return n == 2 and defs.k2 or defs.k3
 end
@@ -5760,9 +5742,10 @@ local ENC_MAP = {
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
-  SCENE  = { "scene_slot", "scene_recall_mode", "scene_morph_amt", nil },
-  ORBIT  = { "orbit_rate", nil, "orbit_reach", nil },
-  EROSION = { "erode", nil, "wear", nil },
+  -- the alt pair is the ORBIT: drift time + how far each leg reaches. the
+  -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
+  -- config knob lost its encoder to a performance one.
+  SCENE  = { "scene_slot", "orbit_rate", "scene_morph_amt", "orbit_reach" },
   LAYERS = { "layer_sel", "@lay_rate", "@lay_level", "@lay_move" },
 }
 
@@ -5782,6 +5765,14 @@ local function enc_param(n)
   if page == "VOICE" and not ctx.alt then
     local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
     return n == 2 and f[1] or f[2]
+  end
+  -- VOICE's alt pair is mode-contextual too: in PLAY mode the face already IS
+  -- scan/pitch, so the alt copy was redundant there — it now carries the
+  -- EROSION controls, which only ever work in PLAY mode (the engine erodes in
+  -- \mangler_play alone). every other mode keeps alt scan/pitch, so pitch
+  -- stays reachable under a GRAIN or WARP face.
+  if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 then
+    return n == 2 and "erode" or "wear"
   end
   local m = ENC_MAP[page]
   if not m then return nil end
@@ -6838,8 +6829,14 @@ local function init_params()
   -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
   -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
   -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 19)
+  params:add_group("grp_layers", "layers", 20)
   params:add_number("layer_sel", "layer", 1, 2, 1)
+  -- the BOUNCE: while ON (the default), arming a layer records the processed
+  -- engine output instead of the raw input — resampling is just K2 on LAYERS.
+  -- OFF = the decks follow cut_source like the tape always has. the SRC flag
+  -- on TAPE and LAYERS shows the EFFECTIVE source either way.
+  params:add_binary("layer_wet", "layers record the mix", "toggle", 1)
+  params:set_action("layer_wet", function() ctx.update_cut_source() end)
   for n = 1, 2 do
     local id = "lay" .. n
     local function q(k) return id .. "_" .. k end
@@ -6849,7 +6846,13 @@ local function init_params()
     params:add_file(q("file"), "L" .. n .. " load file", _path.audio)
     params:set_action(q("file"), function(f) ctx.layer_load(deck(), f) end)
     params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
-    params:set_action(q("rec"), function() Mdeck.update_rec(deck()) end)
+    params:set_action(q("rec"), function(v)
+      -- arming: settle the record SOURCE before the head opens (the bounce
+      -- may throw it WET); disarming: close the head before restoring it
+      if v == 1 then ctx.update_cut_source() end
+      Mdeck.update_rec(deck())
+      if v ~= 1 then ctx.update_cut_source() end
+    end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
     params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
     params:add_control(q("level"), "L" .. n .. " level",
@@ -6925,7 +6928,9 @@ local function init_params()
   -- you reach for it.
   params:add_control("cut_source", "tape source",
     controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  params:set_action("cut_source", function(v) Mtape.set_source(v) end)
+  -- through the one source writer: while a layer bounce holds the send WET,
+  -- turning the knob re-resolves rather than silently fighting it
+  params:set_action("cut_source", function() ctx.update_cut_source() end)
 
   params:add_group("grp_filter", "filter", 4)
   params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
@@ -7101,7 +7106,7 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 10)
+  params:add_group("grp_scene", "scenes", 11)
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
@@ -7121,6 +7126,9 @@ local function init_params()
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)
   params:add_option("scene_recall_mode", "recall quantize",
     { "NOW", "BEAT", "BAR" }, 1)
+  -- what CAP stores: the whole mangle, or just the wet path (an FX preset
+  -- that lands over whatever material is playing — Octatrack-style)
+  params:add_option("scene_scope", "capture scope", { "ALL", "FX" }, 1)
   -- actions on the selected slot (also the SCENE page's K2/K3)
   params:add_binary("scene_capture", "capture to slot", "momentary", 0)
   params:set_action("scene_capture", function(v)
@@ -7318,9 +7326,9 @@ function enc(n, d)
       end
     else
       ctx.page = clamp(ctx.page + d, 1, #PAGES)
-      -- pop the page name big for a moment: thirteen stations scroll past
-      -- faster than the 1x title reads, and finding the page mid-set should
-      -- not need squinting (mpages draws the overlay while this is armed)
+      -- pop the page name big for a moment: the stations scroll past faster
+      -- than the 1x title reads, and finding the page mid-set should not
+      -- need squinting (mpages draws the overlay while this is armed)
       ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
     end
   else

@@ -198,7 +198,7 @@ local SCENE_EXCLUDE = {
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
-  "lay1_file", "lay2_file",
+  "lay1_file", "lay2_file", "layer_wet",
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
@@ -208,7 +208,8 @@ local SCENE_EXCLUDE = {
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
   "orbit_on", "orbit_rate", "orbit_reach",
-  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_capture",
+  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
+  "scene_capture",
   "scene_recall", "scene_next", "scene_clear", "scene_safe_capture",
   "scene_safe_restore", "chaos_throw",
 }
@@ -441,12 +442,20 @@ function M.capture(slot)
   -- redirect to the first empty slot; an EXPLICIT slot stays explicit.
   if slot == nil and M.orbit_running then return M.capture_free() end
   slot = slot_idx(slot)
-  local t, n = snapshot_ids(SCENE_RECALL_IDS)
+  -- capture SCOPE (Octatrack-style): ALL = the whole mangle; FX = just the
+  -- wet path (SPACE_IDS: filter, drive, delay, reverb, shimmer), so a slot
+  -- becomes an effects preset that recalls and morphs OVER whatever material
+  -- and voice you have at the time. apply() skips ids a slot does not carry,
+  -- so partial slots were always legal; this makes them a supported gesture.
+  local fx_only = floor(pget("scene_scope", 1) + 0.5) == 2
+  local t, n = snapshot_ids(fx_only and SPACE_IDS or SCENE_RECALL_IDS)
   M.slots[slot] = t
   M.invalidate()   -- an endpoint's contents may have just changed under us
-  say("SAVED " .. slot,
-    "scene " .. slot .. " captured — " .. n .. " params (the whole mangle:"
-    .. " window, grain, stretch, tape loop, filter, FX, voices)", slot)
+  say("SAVED " .. slot .. (fx_only and " FX" or ""),
+    "scene " .. slot .. " captured — " .. n .. (fx_only
+      and " params (FX only: filter, drive, delay, reverb, shimmer)"
+      or " params (the whole mangle: window, grain, stretch, tape loop,"
+      .. " filter, FX, voices)"), slot)
   return true
 end
 

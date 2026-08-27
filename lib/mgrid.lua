@@ -418,6 +418,8 @@ local function scene_ws_key(x, y, z)
     if x == 1 then scene_mod.cap = (z == 1)
     elseif x == 2 then scene_mod.clr = (z == 1)
     elseif x == 4 then params:set("chaos_throw", z)
+    elseif x == 6 and z == 1 then            -- ORBIT run/stop (page merge:
+      C.ptoggle("orbit_on")                  -- the wander has no key of its own)
     elseif x == 8 and z == 1 then            -- ◄ the way back
       C.pulse("scene_safe_restore")
     end
@@ -624,6 +626,9 @@ local function draw_scene_ws()
   gg:led(1, 6, scene_mod.cap and 15 or 4, scene_mod.cap and "green" or nil)
   gg:led(2, 6, scene_mod.clr and 15 or 4, scene_mod.clr and "purple" or nil)
   gg:led(4, 6, pget("chaos_throw", 0) == 1 and 15 or 5, "purple")
+  -- the orbit: yellow = mode, blinking while the wander runs
+  local orb = pget("orbit_on", 0) == 1
+  gg:led(6, 6, orb and ((C.frame % 8) < 5 and 15 or 6) or 3, "yellow")
   gg:led(8, 6, sc.safe and 10 or 2, sc.safe and "white" or nil)
 end
 
