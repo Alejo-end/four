@@ -600,16 +600,12 @@ do
     return out
   end
   local checked, dead = 0, {}
-  local sets = {
-    "presets/mangler-01.pset", "presets/mangler-02.pset",
-    "presets/mangler-03.pset", "presets/mangler-04.pset",
-    "presets/mangler-05.pset", "presets/mangler-06.pset",
-    "presets/mangler.pmap.example",
-    "presets/layers/layers-01.pset", "presets/layers/layers-02.pset",
-    "presets/layers/layers-03.pset", "presets/layers/layers-04.pset",
-    "presets/layers/layers-05.pset", "presets/layers/layers-06.pset",
-    "presets/layers/layers.pmap.example",
-  }
+  local sets = { "presets/mangler.pmap.example",
+    "presets/layers/layers.pmap.example" }
+  for n = 1, 10 do
+    sets[#sets + 1] = string.format("presets/mangler-%02d.pset", n)
+    sets[#sets + 1] = string.format("presets/layers/layers-%02d.pset", n)
+  end
   for _, path in ipairs(sets) do
     local ids = ids_in(path)
     if ids then
@@ -619,7 +615,7 @@ do
       end
     end
   end
-  ok(checked >= 13, "the shipped presets are all readable (" .. checked .. ")")
+  ok(checked >= 21, "the shipped presets are all readable (" .. checked .. ")")
   ok(#dead == 0, "every preset/pmap id exists in the paramset (dead: "
     .. table.concat(dead, ",") .. ")")
 
@@ -627,7 +623,7 @@ do
   -- quieter: apply() skips unknown ids without a word. Scan every ["id"]= key.
   local sdead, schecked = {}, 0
   for _, dir in ipairs({ "presets/", "presets/layers/" }) do
-    for n = 1, 6 do
+    for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
       if f then
@@ -643,7 +639,7 @@ do
       end
     end
   end
-  ok(schecked >= 12, "the shipped scene sidecars are all readable (" .. schecked .. ")")
+  ok(schecked >= 20, "the shipped scene sidecars are all readable (" .. schecked .. ")")
   ok(#sdead == 0, "every scene-sidecar id exists in the paramset (dead: "
     .. table.concat(sdead, ",") .. ")")
   -- and none of them may carry the window pair: a stored full-buffer window
@@ -651,7 +647,7 @@ do
   -- guards live captures; the SHIPPED banks simply leave the window alone)
   local wnd = {}
   for _, dir in ipairs({ "presets/", "presets/layers/" }) do
-    for n = 1, 6 do
+    for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
       if f then

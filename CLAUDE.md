@@ -2383,6 +2383,53 @@ as the 48th-63rd engine batches.
   DEPLOY: ENGINE change — rsync, SYSTEM > RESTART, confirm `count: 65`, then
   stage 10 rides the same walkthrough as everything since the 48th batch.
 
+Seventy-sixth change: **four performance psets (7-10) + the loop-restore fix
+they exposed (Lua one-liner + preset DATA, ENGINE UNTOUCHED, fingerprint STAYS
+65)**. Asked for "a pset that uses the two layers to the max" plus "3 psets
+that ezbot would add" — the live dub-techno / resample-looping workflow.
+* **THE FIX FIRST — designing the preset exposed it.** Mdeck.load_file always
+  re-snapped the loop to the file, and the PSET restore path calls it — so a
+  pset (or the performer's own saved session) with a CUSTOM layer loop lost it
+  to a full-file re-snap on every load. load_file gained `keep_loop`;
+  pset_read passes true (params:read already restored the authoritative loop
+  points), the interactive path still snaps. test_deck 72 to 74, asserted on
+  the reload path.
+* **Preset 7 LAYER DRIFT** — the layers-to-the-max one, possible only since
+  layN_file rides the pset: the 115 drums as the take, the music box loaded
+  INTO L1, the 128 drone into L2 at 0.9x, three loop lengths drifting;
+  scenes: layers alone (sc_level 0) · half drift · the box chopped to a
+  ~1.2s stab. **8 DUB THROW**: the delay as the instrument (dotted-eighth at
+  the material's 128, fb 0.55, dark DFM1 at 5.5k), empty decks staged as the
+  looper bed for the wet bounce; scene 2 IS the throw (fb 0.85, mix 0.5,
+  cutoff 2.5k) — recall it and morph home. **9 RESAMPLE RIG**: GRAIN mangle
+  on the 97 break, print_len ~2 bars, decks waiting; scene 3 recalls CLEAN
+  PLAY (mode is SWITCH, lands last) so the loop is mangle → arm a layer →
+  clean → play over the bounce. **10 SLOW ORBIT**: the Am atmos at scan 0.5,
+  erode 0.12, its own copy an octave lower in L2 (same file, rate 0.5 — the
+  other atmos is Bbm and would clash), shimmer + 12s tail, orbit staged at
+  rate 22 / reach 0.35 with mood poles in slots 2-4 (tap RUN to wander).
+* GENERATION RULES, all enforced by the generator (scratchpad gen_presets):
+  values driven through the LIVE paramset and read back (spec-valid by
+  construction); momentaries asserted 0; mix pinned 0, dry_wet 1; NO window
+  pair; loaded decks' loop pairs OMITTED (the snap owns them; the keep_loop
+  fix is what lets a user's own saved loops survive instead); slot 1 = a full
+  74-id capture DROPPING the window AND layer-loop pairs (a stored 0/1 would
+  re-open a loop onto the silent rest of a region — the window trap's
+  sibling); sample paths ONLY from the six device-proven library files, never
+  guessed. Presets 1-6 regenerated too: they gained the layer_wet and
+  scene_scope lines born after their last generation, and their slot 1s
+  dropped the layer-loop pairs (78 to 74 ids).
+* VERIFIED: preset 7 replayed through norns' reader loop end to end with a
+  local wav standing in for the three library files — 123 lines apply, no
+  action throws, the take window AND both layer loops end snapped (the
+  pset_read reload keeps them). Harness section 10 now loops presets 1-10 in
+  both sets (24 files incl. pmaps and 20 sidecars, ids + no-window-pair).
+  424 assertions (204/74/62/41/43), renders byte-identical, source == dist.
+  STATED: like every shipped preset, these have never been heard — balances
+  are reasoned (tempo-matched delay times, the plateau law, the bounce
+  default), not eared. Lua half: save + reload; the engine RESTART for count
+  65 (75th change) is unchanged and still pending.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)

@@ -1,6 +1,6 @@
 # demo presets
 
-Six ready-to-play PSETs, so the instrument makes an interesting sound within
+Ten ready-to-play PSETs, so the instrument makes an interesting sound within
 a couple of seconds of loading rather than after a minute of dialling. They
 live here because `dust/data/` is not part of this repo — reflash the card and
 they are gone otherwise.
@@ -13,6 +13,16 @@ they are gone otherwise.
 | 4 | STRETCH PV | phase vocoder with the scan almost stopped, quarter-note delay | cinematic atmos, Am |
 | 5 | EROSION DRIFT | the take ageing as it loops, under shimmer and a nine-second tail | cinematic atmos, Bbm |
 | 6 | LAYERS BED | a bed to overdub against: both layer decks staged in OVERDUB with levels up, neither recording | drum loop, 115 |
+| 7 | LAYER DRIFT | BOTH decks loaded from disk: drums as the take, the music box in L1, the drone in L2 at 0.9x — three loop lengths drifting; scenes solo the layers, half-time them, chop the box to a stab | all three 115/128 sources |
+| 8 | DUB THROW | the delay as the instrument: dotted-eighth echoes, dark ladder filter, empty decks staged as a looper bed (arming prints the dub — the wet bounce). Scene 2 IS the throw: recall it, ride the morph home | atmospheric texture, 128 |
+| 9 | RESAMPLE RIG | the live-looping loop: granular mangle on the break, arm a layer to print it, recall scene 3 (CLEAN PLAY) and play over your own bounce; `print mix` staged at ~2 bars | hiphop break, 97 BPM |
+| 10 | SLOW ORBIT | the ambient interlude: the atmos an octave down and slowly eroding, its own copy another octave down in L2, shimmer, and the orbit staged — tap ORBIT run (grid or PARAMS) and it wanders scenes 2-4 | cinematic atmos, Am |
+
+Presets 7 and 10 load audio INTO the layer decks via the `layN_file` params:
+the files read in during the pset load and the deck loops snap to them. The
+psets deliberately omit the layer loop lines for loaded decks (like the
+window pair) — the snap owns the loop, and a session you save yourself keeps
+its own loop points because the pset restore no longer re-snaps them.
 
 Each preset also ships a scene bank of four slots, so SCENE, the morph knob
 and ORBIT all do something the moment you load one. Slot 1 is a FULL capture

@@ -39,6 +39,7 @@
 "warp_rand": 0
 "pv_freeze": 0
 "layer_sel": 1
+"layer_wet": 1
 "lay1_rec": 0
 "lay1_play": 1
 "lay1_level": 0.8
@@ -48,6 +49,7 @@
 "lay1_end": 1
 "lay1_pre": 1
 "lay1_file": /home/we/dust/audio/
+"lay1_file": /home/we/dust/audio/
 "lay2_rec": 0
 "lay2_play": 1
 "lay2_level": 0.8
@@ -56,6 +58,7 @@
 "lay2_start": 0
 "lay2_end": 1
 "lay2_pre": 1
+"lay2_file": /home/we/dust/audio/
 "lay2_file": /home/we/dust/audio/
 "tape_rec": 0
 "tape_rate": 1
@@ -112,6 +115,7 @@
 "scene_slot": 1
 "scene_morph_amt": 0
 "scene_recall_mode": 1
+"scene_scope": 1
 "scene_capture": 0
 "scene_recall": 0
 "scene_next": 0
