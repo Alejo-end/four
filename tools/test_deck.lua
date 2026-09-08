@@ -361,6 +361,210 @@ do
   P.loop_start = 0; P.loop_end = 1
 end
 
+-- ---------------------------------------------------------------------------
+-- the LOOP-PEDAL law
+-- ---------------------------------------------------------------------------
+-- Without this a fresh layer records into the whole 60-second region, so the
+-- first thing you play comes back once a minute. That is a deck, not a looper,
+-- and it is the gap the snap work closes.
+do
+  defaults()
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0.4, 0.55       -- some leftover loop
+  d1.phase = 0.10
+  Mdeck.arm_loop(d1)
+  near(P.lay1_start, 0, 1e-9, "arming an EMPTY deck opens the loop to the region")
+  near(P.lay1_end, 1, 1e-9, "...at both ends, so nothing played is cut off")
+  d1.phase = 0.30                            -- 12 seconds later, at rate 1
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0.10, 1e-9, "disarming closes the loop where recording began")
+  near(P.lay1_end, 0.30, 1e-9, "...and ends it where recording stopped")
+  local j = last("position", 3)
+  near(j and j[3] or -1, 120 + 0.10 * 60, 1e-6,
+    "...and drops the head at the loop start, inside the deck's own region")
+
+  -- a deck that ALREADY holds audio overdubs into the loop it has. That is the
+  -- whole difference between defining a loop and adding to one.
+  d1.any = true
+  P.lay1_start, P.lay1_end = 0.10, 0.30
+  d1.phase = 0.15
+  Mdeck.arm_loop(d1)
+  near(P.lay1_start, 0.10, 1e-9, "arming a deck WITH material leaves its loop alone")
+  near(P.lay1_end, 0.30, 1e-9, "...both edges")
+  d1.phase = 0.22
+  Mdeck.close_loop(d1)
+  near(P.lay1_end, 0.30, 1e-9, "...and disarming does not re-cut it")
+
+  -- too short, or the head wrapped past the region end: softcut loops cannot
+  -- cross the seam, so keep the whole region rather than snap a wrong slice
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0, 1
+  d1.phase = 0.9
+  Mdeck.arm_loop(d1)
+  d1.phase = 0.05                            -- wrapped
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0, 1e-9, "a pass that wrapped the region keeps the full loop")
+  near(P.lay1_end, 1, 1e-9, "...rather than snapping to a slice that is not it")
+
+  -- the erase disarms on its way past, and must not snap around material it
+  -- is about to destroy
+  d1.any = false
+  d1.phase = 0.2
+  Mdeck.arm_loop(d1)
+  Mdeck.abort_loop(d1)
+  d1.phase = 0.6
+  Mdeck.close_loop(d1)
+  near(P.lay1_end, 1, 1e-9, "an aborted pass closes nothing")
+
+  -- the quantize hook: mdeck owns the loop-pedal, ctx owns which grid
+  local seen
+  ctx.layer_quantize = function(d) seen = d end
+  d1.any = false; d1.phase = 0.1
+  Mdeck.arm_loop(d1); d1.phase = 0.4; Mdeck.close_loop(d1)
+  ok(seen == d1, "closing a pass offers it to the instrument's quantizer")
+  ctx.layer_quantize = nil
+end
+
+-- ---------------------------------------------------------------------------
+-- the two settings that used to be hardcoded
+-- ---------------------------------------------------------------------------
+do
+  defaults()
+  calls = {}
+  P.lay1_fade = 0.004
+  Mdeck.update_fade(d1)
+  near(last("fade_time", 3)[3], 0.004, 1e-9, "the loop seam is a per-deck control")
+  near(last("fade_time", 4)[3], 0.004, 1e-9, "...on both of the deck's voices")
+  calls = {}
+  P.lay2_width = 0.25
+  Mdeck.update_width(d2)
+  near(last("pan", 5)[3], -0.25, 1e-9, "width pulls the left voice in")
+  near(last("pan", 6)[3], 0.25, 1e-9, "...and the right one, symmetrically")
+  calls = {}
+  Mdeck.update_width(d1)                     -- unset: full width
+  near(last("pan", 3)[3], -1, 1e-9, "an unset width is the deck's own hard L/R")
+
+  -- loop_secs is what SNAP measures and what the page prints: one law
+  P.lay1_start, P.lay1_end = 0.25, 0.5
+  near(Mdeck.loop_secs(d1), 15, 1e-9, "loop_secs reads the loop in seconds")
+  P.lay1_start, P.lay1_end = 0.5, 0.25       -- crossed
+  near(Mdeck.loop_secs(d1), 15, 1e-9, "...whichever way round the edges are")
+  P.lay1_start, P.lay1_end = 0, 1
+end
+
+-- ---------------------------------------------------------------------------
+-- the loop-pedal law under the passes that are NOT a loop
+-- ---------------------------------------------------------------------------
+-- Every one of these leaves the deck looping the whole 60-second region if it
+-- goes wrong, which is the exact "a deck, not a looper" failure the law exists
+-- to remove. None of them is a forward pass, which is all the law used to see.
+do
+  defaults()
+
+  -- Tapping REC by mistake. A tap lasts a few frames, and starting a
+  -- recording has already widened the loop by then. What the player set has
+  -- to come back, not the whole 60 seconds.
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0.100, 0.170       -- a hand-set 4.2s loop
+  d1.phase = 0.100
+  Mdeck.arm_loop(d1)
+  near(P.lay1_end, 1, 1e-9, "arming still opens an empty deck's loop")
+  d1.phase = 0.1005                             -- ~30ms later: not a pass
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0.100, 1e-9, "a pass too short to be a loop gives the old one back")
+  near(P.lay1_end, 0.170, 1e-9, "...both edges, not the whole region")
+
+  -- a REVERSE deck records downwards, so its pass runs b..a. Read forwards it
+  -- looked like a negative span and was declined, leaving the region.
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0, 1
+  P.lay1_reverse = 1
+  d1.phase = 0.50
+  Mdeck.arm_loop(d1)
+  d1.phase = 0.42                               -- 4.8s of material, downwards
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0.42, 1e-9, "a reverse pass closes at the LOW end it reached")
+  near(P.lay1_end, 0.50, 1e-9, "...and ends where it was armed")
+  near(Mdeck.loop_secs(d1), 4.8, 1e-6, "...so the loop is what was played")
+
+  -- and a reverse pass that WRAPPED the region end is not a loop either: read
+  -- forwards it gave a tidy-looking span the deck had never recorded.
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0.30, 0.40
+  d1.phase = 0.50
+  Mdeck.arm_loop(d1)
+  d1.phase = 0.80                               -- wrapped past 0 and round
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0.30, 1e-9, "a wrapped reverse pass restores the old loop")
+  near(P.lay1_end, 0.40, 1e-9, "...instead of a span it never recorded")
+  P.lay1_reverse = 0
+
+  -- A preset saved while a deck was recording restores rec = 1, and loading
+  -- sets that before it gets to the loop points. The recording it appears to
+  -- start never happened, and stopping it re-cut the loop the preset had just
+  -- put back.
+  d1.any = false
+  P.lay1_start, P.lay1_end = 0, 1
+  d1.phase = 0.10
+  Mdeck.arm_loop(d1)                            -- what params:read does
+  P.lay1_start, P.lay1_end = 0.25, 0.35         -- ...then the file's own values
+  Mdeck.pset_read(1)                            -- action_read, after the values
+  P.lay1_start, P.lay1_end = 0.25, 0.35         -- (pset_read cleared the region)
+  d1.phase = 0.60
+  Mdeck.close_loop(d1)
+  near(P.lay1_start, 0.25, 1e-9, "a pset load's phantom pass cannot re-cut the loop")
+  near(P.lay1_end, 0.35, 1e-9, "...at either edge")
+end
+
+-- ---------------------------------------------------------------------------
+-- the loop start must never end up past the loop end
+-- ---------------------------------------------------------------------------
+-- Each edge is a separate write, so in between there is a moment holding one
+-- new value and one old one. If that moment has the start past the end,
+-- update_loop reads it as a loop of nothing, forces it to 100ms, and the
+-- playhead jumps. Whichever edge keeps them in order has to move first.
+do
+  defaults()
+  P.lay1_start, P.lay1_end = 0.10, 0.20
+  local seen = {}
+  local realset = params.set
+  params.set = function(self, id, v)
+    realset(self, id, v)
+    if id == "lay1_start" or id == "lay1_end" then
+      seen[#seen + 1] = P.lay1_end - P.lay1_start
+    end
+  end
+  Mdeck.set_loop(d1, 0.60, 0.70)                -- entirely to the RIGHT
+  params.set = realset
+  local crossed = false
+  for _, w in ipairs(seen) do if w < 0 then crossed = true end end
+  ok(not crossed, "moving a loop rightwards never crosses the pair mid-write")
+  near(P.lay1_start, 0.60, 1e-9, "...and lands on the new low edge")
+  near(P.lay1_end, 0.70, 1e-9, "...and the new high edge")
+end
+
+-- ---------------------------------------------------------------------------
+-- the seam cannot be longer than the loop it has to cross
+-- ---------------------------------------------------------------------------
+-- The knob reaches 0.5s and the loop floor is 0.1s, so a scene recall can put
+-- a deck permanently inside its own crossfade: silent, while the page draws
+-- it bright.
+do
+  defaults()
+  calls = {}
+  P.lay1_start, P.lay1_end = 0, 1               -- 60s loop
+  P.lay1_fade = 0.35
+  Mdeck.update_fade(d1)
+  near(last("fade_time", 3)[3], 0.35, 1e-9, "a long seam on a long loop is left alone")
+  P.lay1_start, P.lay1_end = 0, 0.4 / 60        -- a 0.4s loop
+  calls = {}
+  Mdeck.update_fade(d1)
+  near(last("fade_time", 3)[3], 0.1, 1e-9, "...but is capped to a quarter of a short one")
+  calls = {}
+  Mdeck.update_loop(d1)
+  ok(last("fade_time", 3) ~= nil, "and moving the loop re-caps the seam against it")
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then
   print(#fail .. " FAILED:")

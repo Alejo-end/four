@@ -6,7 +6,7 @@ when a stage passes its on-device gate, move the **CURRENT STAGE** marker.
 
 ---
 
-         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63, committed 0b4f045) the **51st change** (texture pass, ENGINE-only, count STILL 63), the **52nd change** (codebase cleanup — dead mparticles module REMOVED (7 libs now), dead scene state/bindings, list-drift fix, engine winRead consolidation), and the **53rd–58th changes** (footer pocket · send-style reverb · DFM1 headroom · quality-recheck batch incl. the 12x-too-weak grain_pitch_spread fix · PRINT + delay_sync + scene_next · doc staleness sweep + **doc/engine-map.md**, the plain-words map of every engine decision) ALL ride the same deploy: ONE rsync + RESTART covers every pending engine change, the reload covers the Lua. The **59th change** (ORBIT page, Lua + EROSION page, ENGINE +2 commands) moves the expected count to **65**.
+         ## CURRENT STAGE: **base is DEVICE-CONFIRMED at `count: 63` (2026-07-16: S21 + S22 Phase A engine + the NU-1..4 nine-station redesign + the 45th/46th/47th changes).** A LARGE UNTESTED BATCH now sits on top (**48th change**), still count 63, PENDING the next rsync + SYSTEM > RESTART + gate: the parked follow-ups now BUILT (per-pad **sound-locks** `pad_voice`/`pad_pitch`/`pad_level`/`seq_level`, async `load_wave`, S22 **Phase B** browsable stereo export, progressive FX mix curves, record-safety Limiter, per-note `amp`); a **Pi-4 perf pass** (allocation-free draw closures + reverb/shimmer moved into a **spawn/free `\mangler_reverb` synth** freed at rev_mix=0, InFeedback send/return); a **DFM1 diode-ladder filter** (guarded → stock biquad; the 3× always-on RLPF/RHPF/BPF is now ONE DFM1, BP = HPF of a resonant LP peak); the **pristine reverts** (cubic interp / tanh drive / transparent record Limiter / stereo shimmer all KEPT); an engine+Lua **comment cleanup**; and a **code-review fix batch**. ENGINE changed → confirm `count: 63` after RESTART (no new command). Grid code is sim-stubbed → any grid change is device-only. ON TOP OF THAT sits the **49th change (S23 Batch A, LUA-ONLY)** — play-test fixes from a voice memo: SPACE split into DELAY+REVERB (9→**10 pages**), delay-feedback range curve, tape record-source (dry/processed), motion loop-length, the blinking-window kill + read/write-head distinction, and the **sequencer REMOVED** (lib/mseq.lua deleted; `seq_slice` id KEPT as the PADS slice selector). No fingerprint change (still 63). **Batch B (true STOP + erase reliability) is ENGINE work, DEFERRED to a device session.** When you next deploy: the 48th batch still needs its RESTART; the 49th just needs a reload. ON TOP: the **50th change** (workflow-review batch — 11 Lua fixes + 8 small engine fixes, NO new command, count STILL 63, committed 0b4f045) the **51st change** (texture pass, ENGINE-only, count STILL 63), the **52nd change** (codebase cleanup — dead mparticles module REMOVED (7 libs now), dead scene state/bindings, list-drift fix, engine winRead consolidation), and the **53rd–58th changes** (footer pocket · send-style reverb · DFM1 headroom · quality-recheck batch incl. the 12x-too-weak grain_pitch_spread fix · PRINT + delay_sync + scene_next · doc staleness sweep + **doc/engine-map.md**, the plain-words map of every engine decision) ALL ride the same deploy: ONE rsync + RESTART covers every pending engine change, the reload covers the Lua. The **59th change** (ORBIT page, Lua + EROSION page, ENGINE +2 commands) moves the expected count to **65**. Everything through the **77th change** (the layers' loop-pedal law + SNAP, the 24-bit sample path, the windowed-sinc resampler, and three no-new-command engine edits) rides that SAME pending RESTART.
 
 Bigger arc in flight (approved plan `~/.claude/plans/bright-shimmying-pearl.md`): grow into
 a **maximally-capable sampler** — full-API **JPverb** (S10) + **MiClouds** granular (S11),
@@ -2430,6 +2430,307 @@ that ezbot would add" — the live dub-techno / resample-looping workflow.
   default), not eared. Lua half: save + reload; the engine RESTART for count
   65 (75th change) is unchanged and still pending.
 
+Seventy-seventh change: **the layers become a looper, and the sample path stops
+throwing bits away (Lua + three ENGINE edits, fingerprint STAYS 65 by parse, 3 of
+the 66 prior render shots changed on purpose, 473 assertions)**. Asked for "a snap
+function for the layers" and "higher quality sound"; the engine was reported
+running well but `count: 65` is still unconfirmed, so the .sc edits are small,
+targeted and add no command.
+* **A FRESH LAYER RECORDED INTO A 60-SECOND LOOP.** `lay*_start`/`end` default
+  to 0/1, so the first thing you played on a layer came back once a minute. The
+  tape has had the loop-pedal law since S3 (arm opens the loop, disarm snaps it
+  around the pass and jumps the head to its start) and the layers, added later
+  in the same shape, never picked it up. `Mdeck.arm_loop`/`close_loop` land it,
+  gated on `d.any` so a deck that already holds audio overdubs into the loop it
+  has instead. That distinction IS the looper: the first pass defines the length,
+  every pass after it stacks. The erase calls `abort_loop` first so wiping a deck
+  cannot snap a loop around material it is about to destroy.
+* **SNAP puts the length on a grid.** A hand-played loop is never the length you
+  meant, and two decks at 3.97s and 4.02s walk apart inside a minute. The
+  reference is the OTHER deck if it holds audio, else the take's window, else a
+  bar of the clock; the ratio is chosen in LOG space (a linear nearest pulls
+  everything upward); only the loop END moves, so it stays undoable by hand like
+  TIGHTEN. Closing a record pass offers the loop to the same code with a **6%
+  tolerance**, so a near miss rounds hands-free and a length you clearly chose is
+  left exactly as played. `lay*_snap` are MOMENTARY params (footswitch, grid row
+  6 pads 4/5, PARAMS) because both LAYERS key slots are taken and **K1+K2/K1+K3
+  are global with zero page claims** (NU-1's law) - the `pad_chop` precedent.
+* The page prints the selected deck's **loop length in seconds** beside its rate,
+  and a snap says what it did over that row for ~1.2s. Needed because a snap that
+  finds the loop already on the grid moves NOTHING on screen, which is the 36th
+  change's lesson exactly. Chip measured at 111px worst case against the 124px
+  limit (`L2 00.00>00.00S 2/3 x TAKE`, brute-forced over every ratio label,
+  reference and two-digit second); the pocket takes the WHOLE row (a pocket cut only behind the words left
+  the seconds and the rate peeking out either side, which read as garbage). NB
+  `ptext`'s y is the TOP row, not a baseline: the 1x font occupies y..y+4, so a
+  pocket for text at y=12 is rows 11..17.
+* **`lay*_fade`** (the loop seam, was hardcoded 20ms) and **`lay*_width`** (0
+  collapses a deck to the centre) are now per-deck controls, moved out of
+  `M.start` into `update_all`. grp_layers 20 -> 26.
+* **THE SAMPLE PATH WAS 16-BIT END TO END, and one link actually lost data**:
+  `convert_sr` wrote 16-bit, so an off-rate 24-bit sample was truncated before it
+  ever reached the buffer. Now `convert_sr` writes 24, `write_take` is `int24`
+  (the buffer is 32-bit float; every pset round trip re-quantised the take), and
+  `interleave_wav` reads the depth from the header and splices whatever it finds
+  instead of demanding 16. An on-rate file was always fine (readChannel takes any
+  depth) - this is specifically the import/persist/export chain.
+* **The resampler is a windowed sinc, not Catmull-Rom cubic.** Cubic has no
+  stopband, so a 96k or 88.2k file folded everything above 24 kHz straight into
+  the audible band. 16 taps at unity cutoff (widening as 1/cutoff when
+  downsampling), 512 phases, Blackman, each phase normalised to unity DC gain (an
+  unnormalised kernel gains differently per phase, which is a whine at the phase
+  rate, not a rounding error). Asserted by VALUE: a 30 kHz tone at 96k converts
+  down to rms 0.0052; real cubic on the same file leaves it at 0.4834. MEASURED
+  attenuation across the band, as the level an alias returns at: 26k -13 dB,
+  30k -40 dB, 36k -75 dB, 40k -85 dB, against cubic's -0.2 dB everywhere. So the
+  deep stopband starts around 1.5x the cutoff and the transition above it is
+  wide; what leaks lands at 22 kHz and up. Cost MEASURED per SOURCE RATE, because
+  the kernel widens as 1/cutoff and so DOWNsampling is the expensive direction:
+  10s of stereo on a dev Mac is 44.1k 0.68s (1.9x cubic), 88.2k 1.17s (2.3x),
+  96k 1.25s (2.5x), 192k 2.34s (3.2x). A Pi will take tens of seconds for a long
+  file, and longer coming down than going up. Imports already yield, and the device library is
+  pre-converted, so this is the off-rate path only.
+* **ENGINE, three edits, no new command:** (a) the record and regen arms now tap
+  the mix **before the master Limiter**. A limiter that looks ahead delays its
+  output by the lookahead, so blending it with the undelayed input at any middle
+  `resample` summed a signal with a 10ms copy of itself and printed that comb
+  into the take permanently. This is the "resample-blend comb" the 50th change
+  parked as needing an on-device delay measurement: the delay is the Limiter's
+  own constant, so there was nothing to measure. The record-safety Limiter at
+  0.99 still bounds the buffer, so regen stays as convex as it was. (b) + (c)
+  `softclip` -> `tanh` in the delay feedback and the shimmer loop: softclip has a
+  derivative kink at its knee and a loop applies it every pass, so breakup builds
+  up harsh. Stated trade: tanh leans in earlier, so a slammed repeat warms rather
+  than fraying, and a hold may sit lower than it used to.
+* **NOT done, and why:** anti-aliasing the `drive` stage. It needs oversampling,
+  which stock SC cannot do inside a graph, and the band-split alternative
+  (saturate below a crossover, pass the top clean) sums an LR4 allpass against
+  the clean arm in the middle of the drive knob - a near-total cancellation at
+  the crossover. Making the clean arm allpassed too fixes the comb but ends the
+  bit-true bypass at drive 0 and runs four filters always. Not worth it for a
+  knob that defaults to 0.
+* TESTS: control 204 -> 220, deck 74 -> 93, wav 62 -> 76 (473 total). Nine
+  mutations, each failing exactly its assertions: the kernel cutoff pinned to 1;
+  `arm_loop` without the `d.any` test; `close_loop` without the head jump; the
+  take outranking the other deck as reference; the ratio compared in linear
+  space; the automatic pass without its tolerance; SNAP moving the start instead
+  of the end; a degenerate deck offered as a reference; a fabricated loop
+  instead of a refusal. The decline case needed an EMPTY deck twice, so the
+  harness drives the real K1+K3 erase between them.
+
+DESIGN-REVIEW PASS on the same change (five fixes, two of them real defects,
+both PROVEN reachable by probe before being fixed and mutation-proven after):
+* **SNAP was a silent no-op when the other deck's loop was collapsed.**
+  `loop_secs` floors at softcut's 100ms, so a deck with its edges together
+  returned exactly 0.1 and satisfied the `ref <= 0.1` guard, which returned
+  without moving anything and without printing. The 36th change's whole lesson.
+  Fixed at the SOURCE, not the symptom: `snap_reference` now skips a degenerate
+  deck, so the invalid reference is never offered rather than coped with.
+* **SNAP fabricated a result and named a grid it was not on.** With the loop
+  parked at the region end, the halve-until-it-fits loop plus a `max(len, 0.1)`
+  floor produced a 100ms loop, and the message reported `already 1/8 x BAR
+  (0.100s)` when 1/8 x BAR is 0.25s. It now REFUSES out loud (`NO ROOM TO
+  SNAP`, with the maiden line naming the room left and what to do), and every
+  other report reads the landed length back out of the params rather than
+  reporting what it asked for.
+* **"snap" meant two things one screen apart.** This codebase has used it for
+  "fit the bounds to the material" for fifteen occurrences (`snap_window`,
+  `snap_mem`, "loop snapped"), so the loop-pedal trio was the one to move:
+  `arm_snap`/`close_snap`/`abort_snap` -> `arm_loop`/`close_loop`/`abort_loop`.
+  Pure rename, docs repointed. That fixed the CODE collision only; the
+  user-facing one is still live and is now stated rather than hidden (see the
+  second review pass).
+* **The message mechanism was a second implementation of mscenes' `say`.**
+  Different state shape (deadline vs timestamp), different liveness expression,
+  different picture. The state shape and liveness now MATCH mscenes so a shared
+  `ctx.say` is a mechanical extraction later; the PICTURE stays separate on
+  purpose, with the reason written where the next reviewer will ask (`chip()` is
+  right for "SAVED 2" and a 111px glare for a sentence). The extraction itself
+  is recorded, not applied: it touches mscenes and body_SCENE, outside this
+  feature.
+* `snap_reference` and `layer_say` were on `ctx` with one caller each, defined
+  in the same file twenty lines away. Now file-locals; `layer_snap` and
+  `layer_quantize` stay on ctx because mdeck and the param actions reach them.
+* Three claims I wrote were untrue and are corrected against measurements
+  (above): the "-74 dB stopband, under the 24-bit floor" comment (-74 dB is
+  nowhere near a -144 dB floor, and 16 taps only reach it at 1.5x the cutoff),
+  the gate's "a minute of audio takes a few seconds", and a test comment citing
+  a cubic number that had never been run with cubic. `doc/layers.md` still
+  called LAYERS "page 13"; it is page 4 since the family regrouping.
+* NOT fixed, recorded as decisions: `lay*_width` has no on-screen tell (a
+  collapsed deck looks identical to a wide one) - `pan` has the same gap, so
+  this matches the sibling rather than breaking the audibility rule; and
+  mpages.lua holds the drawing AND the whole wav layer, a real "and" in one
+  file, but moving it costs a new module plus the harness lift machinery that
+  three tools point at.
+* RENDERS: the SNAP block adds 22 ticks to the scenario, which shifts every
+  downstream shot's animation phase. Padding HEAD's scenario with the same 22
+  ticks collapses all of it: exactly the **3 LAYERS shots** differ (the loop-
+  seconds readout replacing the decorative deck count) plus the new LAYERS_SNAP.
+  67 shots, source == dist, layers.png regenerated.
+* STYLE: the global no-dash rule was applied to every line this change adds,
+  including the code comments. The surrounding files are full of em dashes from
+  earlier sessions; new text does not add more.
+* DEPLOY: **ENGINE change - rsync, SYSTEM > RESTART, confirm `count: 65`**, then
+  `doc/device-gate.md` **stage 11** (added) rides the same walkthrough as
+  everything since the 48th batch.
+
+SECOND DESIGN-REVIEW PASS on the same change (no behaviour changed; three
+measured claims were wrong and are corrected against re-runs, two duplicates
+retired, one duplicate named instead of retired).
+* **The tape's loop-pedal law is a SECOND implementation and is now named as
+  one.** mdeck grew `arm_loop`/`close_loop` for the layers; the tape has run
+  the same law inline in the `tape_rec` action since S3, on a deck that already
+  delegates rate, rec, loop, clear and jump to that module. They have already
+  drifted: the tape gates on `tape_pre == 0` where mdeck gates on `d.any`, its
+  minimum pass is 0.005 normalized (300ms of 60s) where mdeck's is 100ms, and
+  it has no quantize hook. NOT folded, on the 74th change's own rule: this is
+  one of the few paths confirmed on hardware, folding it also means making
+  `TAPE.phase` live (a display stub today), and rewriting a proven path before
+  the device gate is the wrong order. The reason and the three differences are
+  written in lib/mtape.lua beside the delegation list, and mangler.lua's copy
+  points back at it. Change one, change both.
+* **The import budget quoted the path this change is NOT for.** "1.9x cubic"
+  is 44.1k -> 48k, where the kernel is 16 taps at unity cutoff. `half` widens
+  as 1/cutoff, so DOWNsampling costs more, and downsampling is the entire
+  reason the sinc replaced the cubic. Re-measured (10s stereo, dev Mac): 44.1k
+  1.91x / 0.68s, 88.2k 2.28x / 1.17s, 96k 2.49x / 1.25s, 192k 3.19x / 2.34s.
+  Gate row 11.12 and the mpages comment now carry the table, and 11.12 asks for
+  a 96k file specifically, because 11.11 already does.
+* **Two more numbers re-run rather than trusted.** The chip is 111px worst
+  case, not 105 (`L2 00.00>00.00S 2/3 x TAKE`, brute-forced over every ratio
+  label, reference and two-digit second; still inside the 124px limit, so
+  nothing clipped). And the headline said "all 66 prior render shots
+  byte-identical" while this entry's own review-pass bullet said 3 differ: the
+  bullet was right, 3 changed on purpose.
+* **`doc/engine-map.md` still described the softclip this change removed** from
+  the delay feedback loop, two paragraphs from the lines this change edited.
+  It is the plain-words map of every engine decision, so it has to follow the
+  engine. (`doc/spec.md` names softclip twice more, at S15's gate criterion and
+  in the S23 planning text; both are per-stage HISTORY superseded by
+  doc/device-gate.md, so they are left as the record of what was decided then.)
+* **SNAP names two gestures and both are user-facing.** The first review pass
+  renamed the internals and recorded that "the user-facing SNAP key is the
+  quantize". That is backwards: TAKE K3's on-screen word is SNAP and it is
+  `snap_window`, fit the window to the material; the loop quantize has no key
+  at all, by design. The code collision is gone and the product one is not, so
+  README and doc/layers.md now say so where each gesture is introduced. A
+  rename of the new one is a product call, not a review fix.
+* **`body_LAYERS` hand-rolled `ptext_c`** four lines below its own call to it,
+  and dropped the helper's `+ 0.5` rounding on the way. One line now.
+* **Two dead `SHORT` keys**, `lay1_fade`/`lay2_fade`. SHORT is read only for
+  the current page's encoder ids and MOTION lane names; these are neither, and
+  their three siblings on the same MOTION_EXCLUDE line (`tape_fade`,
+  `warp_overlaps`, `grain_shape`) carry no SHORT entry either. The 73rd change
+  deleted 8 stale SHORT keys for exactly this; two grew back in one change.
+* `layer_snap`'s `if ref <= 0.1 or cur <= 0 then return end` was unreachable
+  once the first review pass moved the check into `snap_reference` (which now
+  skips a degenerate deck), and it was a SILENT return, the one shape that
+  bullet had just eliminated. Deleted; `snap_reference`'s header carries the
+  guarantee instead. `d.arm_phase` is now named in `M.new`'s shape comment (a
+  `= nil` field would create no key). A draft comment left standing above its
+  own rewrite in test_control.lua is gone.
+* NOT changed, deliberately: `layer_snap` and `close_loop` both jump the head
+  after a quantized close. It reads as redundant but neither is: SNAP fired
+  from a footswitch must move the head itself, and `close_loop` must move it
+  when the tolerance DECLINES the quantize and `layer_snap` returns early.
+* VERIFIED after the pass: 473 assertions across the five harnesses, `luac -p`
+  clean on every file, engine delimiters balanced, **command count still 65 by
+  parse**, 67 shots source == dist across the 4 variants, dist a faithful
+  `amalgamate.lua` rebuild, gallery current.
+
+WORKFLOW CODE REVIEW on the same change (22 agents, 24 verified findings, 14
+distinct). Eight defects fixed, all eight mutation-proven, all eight invisible
+to the harnesses as they stood. The cluster is the new loop-pedal law meeting
+states no forward-pass test reaches.
+* **THE EXPORT GUARD WAS STILL SIZED FOR THE OLD 16-BIT TAKE.** `write_take`
+  moved to `int24` in this change; `ctx.take_to_wav` kept computing
+  `exp = take_frames() * 2 + 44` and waiting for both temp files to REACH that
+  size. The guard therefore passed at ~two thirds of the file, and its own
+  comment says why it exists ("a slow SD card could stall mid-write and read as
+  stable at a partial size, which would hand back a truncated take"): the
+  change defeated the exact protection it was written for. Export, CHOP and
+  TIGHTEN all share that path, so all three could act on a part-written take,
+  and the `cap` backstop was a third too short as well. The width is now
+  **`ctx.TAKE_BYTES`**, named beside `ctx.BUF_SECS`, the .sc says to change
+  them together, and test_control section 18 parses the format out of the .sc
+  and asserts the two agree. LESSON: a format change is a change to everyone
+  who computes a SIZE from it, not only to the readers.
+* **`arm_loop` destroyed a loop it could not put back.** It opens an empty
+  deck's loop to the whole region, and `close_loop` declined a short pass by
+  returning, leaving the deck on 60 seconds. A mis-tapped REC is a few frames
+  under the punch law, so a hand-set loop on an empty deck was one fumble from
+  gone. The arm now remembers the loop it opens and the decline restores it.
+* **The law only ever understood a FORWARD pass.** `lay*_reverse` is reachable
+  from PARAMS, MIDI and a scene recall (it is in the SWITCH list), and a
+  reversed deck records DOWNWARDS: `b - a` is negative, so a reverse pass was
+  declined and left on the region, and a reverse pass that WRAPPED produced a
+  tidy-looking span the deck had never recorded. `close_loop` now reads the
+  deck's own direction and orders the pass by it.
+* **A PSET saved with a deck armed opened a phantom pass.** `lay*_rec` rides
+  the pset like everything else and `params:read` fires it before it reaches
+  the loop points, so `arm_loop` ran on a deck that still read as empty and
+  left a mark over the session's own restored loop; the next disarm re-cut it.
+  `Mdeck.pset_read` (which runs in `action_read`, after every value is in)
+  now drops any open pass.
+* **SNAP anchored on the raw `start` param.** Every other consumer of the pair
+  sorts it, so a CROSSED loop (reachable by MIDI, PARAMS or a scene) was
+  RELOCATED to a different span of the region while the message said it had
+  not moved. It takes the low edge now.
+* **SNAP re-cued the head even when it moved nothing**, which restarts the
+  phrase mid-performance under a message saying nothing changed, and throws
+  away the phase alignment two decks only hold while both heads keep running.
+  The jump is now on the branch that moved something. Pinned in BOTH
+  directions, because "never jump" passes a one-sided test.
+* **A deck mid-record was offered to SNAP as a reference.** `arm_loop` holds an
+  open deck's loop at the full region and `any` goes true on the first sound,
+  so arming both layers and disarming one quantized it to an eighth of a
+  region boundary, hands-free. Skipped by the open pass now.
+* **The loop pair could be written crossed.** `Mdeck.set_loop` picks whichever
+  order keeps the intermediate state ordered (with both pairs ordered there is
+  always one), and `arm_loop`, `close_loop` and SNAP all go through it. The
+  100ms floor in `update_loop` turns a crossed pair into a head jump.
+* **The seam could be longer than the loop.** `lay*_fade` reaches 0.5s, the
+  loop floor is 0.1s, and it is in the scene TIMBRE list, so a recall could
+  park a voice permanently inside its own crossfade: silent, while the page
+  drew it bright. `update_fade` caps at a quarter of the loop, and
+  `update_loop` re-caps because the loop moved.
+* **The tanh swap costs the INF hold more than the comment claimed.** softclip
+  is EXACTLY unity below 0.5; tanh is not. Measured: at a repeat level of 0.5
+  the loop gain at `delay_fb` 0.98 goes from -0.18 dB per pass to -0.86 dB, so
+  a hold that used to sit still falls about 10 dB over a dozen repeats (quiet
+  repeats are unaffected, unity to within 0.03 dB at 0.1). NOT reverted: the
+  user asked for this and gate row 11.14 already asks the device to judge it.
+  The engine comment now carries the numbers and names the line to put back.
+* **The TAPE's copy of the law shrank its loop on every overdub** (user call:
+  fixed rather than deferred). Its ARM branch always knew overdub must not
+  re-open the loop; its DISARM branch snapped regardless, so each stacked pass
+  re-cut the loop to whatever slice elapsed and a pass that wrapped blew it out
+  to the whole 60s tape, with the stacked audio still in the buffer. Proven by
+  reverting: `[0.10, 0.30]` becomes `[0.15, 0.22]` on the first overdub, then
+  `[0, 1]`. Pre-existing, NOT introduced here. `tape_arm_phase` is now nil
+  unless the arm actually opened a pass, and the disarm branches are guarded on
+  it, which is the same line `Mdeck.arm_loop` draws with `d.any`. The tape also
+  writes its edges through the shared `D.set_loop` now. STILL divergent, and
+  the mtape note says so: the tape's minimum pass is 0.005 of the tape where
+  mdeck uses 100ms of the region, mdeck reads the deck's DIRECTION and the tape
+  does not, and only mdeck offers the closed loop to the quantizer.
+* COMMENT PASS afterwards, on request: every comment this change adds was
+  rewritten in plain words. Out went the house shorthand a newcomer cannot
+  decode ("the punch law", "a crossed pair", "convex", "degenerate", "the alt
+  pair is global", a device-gate row number) and the DSP vocabulary the
+  resampler leaned on ("stopband", "images", "unity DC gain", "aliasing"),
+  each replaced by what actually happens: a tap lasts a few frames, the start
+  ends up past the end, the two record levels add up to one, a tone comes back
+  mirrored into the audible range. Substance kept, including every measured
+  number. Comments only, so nothing was re-verified beyond the parse, the
+  harnesses and the renders.
+* VERIFIED after the pass: **510 assertions** (241/109/76/41/43), `luac -p`
+  clean, delimiters balanced, **count still 65 by parse**, all 67 shots
+  byte-identical to before the fixes AND source == dist, gallery current. Every
+  fix above is mutation-proven, including the tape one against a faithful
+  reconstruction of the pre-fix action rather than a hand-broken line.
+
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace file → verify on-disk with a REPL fingerprint grep
 2. SYSTEM > RESTART (sclang only recompiles at startup — script reload is NOT enough)
@@ -2589,11 +2890,16 @@ python3 tools/uisim/pgm2png.py /tmp/shots/base_01_MIX.pgm mix.png 4 # PGM -> PNG
 lua tools/test_control.lua   # encoders, keys, the master, STOP, the erase
                              # arc, the engine command CONTRACT, and the
                              # CLASSIFICATION checks: every param must be in
-                             # or explicitly out of every curated list (173)
-lua tools/test_deck.lua      # the softcut loop decks: region isolation +
-                             # the pset repaint wiring (46)
-lua tools/test_wav.lua       # resampling, transients, onsets, list drift,
-                             # lying/truncated wav headers, the fill queue (62)
+                             # or explicitly out of every curated list, and
+                             # the layer SNAP (reference order, log-space
+                             # ratio, the automatic tolerance) (220)
+lua tools/test_deck.lua      # the softcut loop decks: region isolation, the
+                             # pset repaint wiring, the loop-pedal law (93)
+lua tools/test_wav.lua       # resampling (incl. the sinc STOPBAND, asserted
+                             # by folding a 30k tone through a 96k->48k
+                             # conversion), 24-bit write + interleave,
+                             # transients, onsets, list drift, lying headers,
+                             # the fill queue (76)
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx (41)
 lua tools/test_purity.lua    # the ◇ mark: every source/hold/writer kills it (43)
 

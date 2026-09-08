@@ -68,15 +68,39 @@ end
 -- softcut command stream over a state matrix (rates, reverse, rec x freeze x
 -- pre, five loop shapes, clear) was captured before and after the fold and
 -- byte-diffed empty.
+--
+-- What is NOT shared, and why. Volume, preset files, playhead position and
+-- drawing stay here, because they really are the tape's own.
+--
+-- The loop-pedal behaviour is a different matter. mdeck has a version of it
+-- (arm_loop / close_loop) and the tape has its own, written out by hand in
+-- the tape_rec action in mangler.lua. That IS a duplicate, left in place on
+-- purpose: the tape is one of the few parts of this instrument confirmed
+-- working on real hardware, and merging it would also mean keeping
+-- TAPE.phase up to date, which nothing does today. It waits for the same
+-- device session as the rest of the merge.
+--
+-- The two now agree that stopping a recording may only re-cut the loop if
+-- starting it opened one, and both move their edges through D.set_loop.
+-- Three things still differ:
+--   * the shortest recording the tape accepts is measured against the whole
+--     tape; mdeck measures 100ms against the deck's own region
+--   * mdeck checks which way the playhead was moving, so a deck playing
+--     backwards closes its loop correctly. The tape does not.
+--   * only mdeck offers the finished loop to SNAP.
+-- If you change one of them, change both.
 function M.update_tape_rate() D.update_rate(TAPE) end
 function M.update_tape_rec() D.update_rec(TAPE) end
 function M.update_tape_loop() D.update_loop(TAPE) end
+-- Move both loop edges, in whichever order avoids leaving the start past the
+-- end in between. See D.set_loop: getting it backwards makes the playhead jump.
+function M.set_loop(lo, hi) D.set_loop(TAPE, lo, hi) end
 
--- jump both heads to a normalized tape position (loop-snap lands the head
--- at the take's start so it plays back tight immediately)
-function M.jump_to(pos)
-  tape_set(function(v) sc.position(v, pos * TAPE_LEN) end)
-end
+-- Put both playheads at a position given as 0 to 1 across the tape. Stopping
+-- a recording uses this to drop the head at the start of what was just
+-- played, so it loops back straight away. Shared with the layer decks: two
+-- copies of "put the head here" is how the loop maths drifted apart before.
+function M.jump_to(pos) D.jump(TAPE, pos) end
 
 function M.set_fade(v)
   tape_set(function(vc) sc.fade_time(vc, v) end)

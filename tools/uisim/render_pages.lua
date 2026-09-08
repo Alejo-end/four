@@ -371,6 +371,17 @@ else
   export(pfx("LAYERS", "_TURN"))
   params:set("lay1_rec", 0)
   params:set("layer_sel", 1)
+  -- SNAP: the loop length lands on a musical ratio of whatever else is
+  -- playing, and SAYS so. A snap that finds the loop already on the grid
+  -- moves nothing on screen, which is exactly why the page has to speak.
+  run_ticks(20)                       -- let the encoder flash expire first
+  params:set("lay1_start", 0.1)
+  params:set("lay1_end", 0.1 + 5.3 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  run_ticks(2)
+  redraw()
+  export(pfx("LAYERS", "_SNAP"))
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
   -- master STOP: the title chip inverts, on every page
   goto_page("MIX")
   params:set("stop_all", 1)

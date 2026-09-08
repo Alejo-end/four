@@ -60,6 +60,12 @@ DC is filtered on the way in and a transparent limiter at 0.99 stops a hot take 
 clipping into the buffer. Punch ins fade over ten milliseconds while the head itself stays
 sample exact.
 
+The record path taps the mix BEFORE the master limiter. A limiter that looks ahead delays
+what it outputs by the lookahead, so blending its output with the undelayed input at a
+middle `resample` setting used to sum a signal with a ten millisecond copy of itself and
+print that comb notch into the take permanently. Tapping ahead of it costs no safety: the
+record limiter still governs everything that reaches the buffer.
+
 `regen` runs the record head continuously and crossfades the output back over the buffer, a
 slow self eating decay. The crossfade coefficients always sum to one and sit behind a
 limiter, so it drifts forever but never runs away. It pauses when the output is stopped,
@@ -75,8 +81,10 @@ Recording, freeze and a silenced deck (STOP) all suspend it, and the Lua layer i
 against `regen`: two write heads never fight, and a stopped instrument never grinds the
 take away with nobody listening.
 
-The take rides the PSET as a left and right WAV pair, written only as far as the take
-actually reaches.
+The take rides the PSET as a left and right WAV pair at 24 bits, written only as far as the
+take actually reaches. The buffer itself is 32 bit float, so writing 16 quantised the take
+again on every save and load; the export is built on the same pair and carries the depth
+with it.
 
 ## Playback
 
@@ -119,8 +127,10 @@ Drive is a linear crossfade to a tanh stage with a true bypass at zero. Linear, 
 power, because both arms are the same signal and the equal power law summed them into a
 three decibel loudness bump at mid knob.
 
-The delay darkens as it repeats: a low pass filter and a soft clip sit inside the feedback
-loop, so repeats decay like tape. The feedback knob's curve lives in Lua and spreads the
+The delay darkens as it repeats: a low pass filter and a tanh saturator sit inside the
+feedback loop, so repeats decay like tape. Tanh rather than a soft clip because the loop
+applies it again on every pass, and a knee with a kink in it builds up harsh over a long
+hold. It leans in a little earlier, so a slammed repeat warms instead of fraying. The feedback knob's curve lives in Lua and spreads the
 useful range across the whole travel. Delay time is interpolated and smoothed, so time and
 tempo changes glide instead of stepping. The mix stays a crossfade (a dub throw wants the
 direct to duck), unlike the reverb's send.

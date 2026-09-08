@@ -945,6 +945,296 @@ do
   engine.rec = nil
 end
 
+-- ============================================================================
+-- 16 · SNAP: a layer's loop length lands on a musical grid
+-- ============================================================================
+-- Two decks at 3.97s and 4.02s walk apart inside a minute; two that are an
+-- exact 1x or 2x of each other stay locked forever. What has to hold: the
+-- reference is picked in the right order, the ratio is chosen in LOG space
+-- (so 1/2 and 2 are equally near), only the loop END moves, and the automatic
+-- pass at the end of a record takes a near miss while leaving a length you
+-- clearly chose exactly as you played it.
+do
+  local li
+  do
+    local i = 0
+    for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
+      i = i + 1
+      if name == "LAYERS" then li = i end
+    end
+  end
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  -- a 6-second take to reference: 0.1 of the 60s buffer
+  params:set("pos_start", 0); params:set("pos_end", 0.1)
+  params:set("lay2_start", 0); params:set("lay2_end", 1)   -- L2 holds nothing
+
+  -- a loop a little over 3 seconds, against a 6-second take, is a half
+  params:set("lay1_start", 0)
+  params:set("lay1_end", 3.2 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near(params:get("lay1_end") * 60, 3.0, 0.01,
+    "SNAP takes a 3.2s loop to half of the 6s take")
+  near(params:get("lay1_start"), 0, 1e-9, "...moving only the END, never the start")
+
+  -- and a little over 12 seconds is a double: the nearest ratio in LOG space,
+  -- not the nearest absolute length (which would pull everything downward)
+  params:set("lay1_end", 12.5 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near(params:get("lay1_end") * 60, 12.0, 0.01, "...and a 12.5s loop to double it")
+
+  -- the loop start is honoured: the snapped length runs from wherever the
+  -- recording began, not from zero
+  params:set("lay1_start", 0.2)
+  params:set("lay1_end", 0.2 + 5.7 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 6.0, 0.01,
+    "a loop that starts late still snaps its LENGTH")
+  near(params:get("lay1_start"), 0.2, 1e-9, "...from where it starts")
+
+  -- a loop parked at the far right cannot GROW past the region, so a ratio
+  -- that would round it up halves until it fits, rather than truncating to a
+  -- length that is on no grid at all. 5.5s of the 5.7s left rounds to 6s.
+  params:set("lay1_start", 0.905)
+  params:set("lay1_end", 0.905 + 5.5 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  ok(params:get("lay1_end") <= 1 + 1e-9, "a snap at the region edge stays inside it")
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 3.0, 0.02,
+    "...by halving to a ratio that fits, not truncating to one on no grid")
+
+  -- the OTHER deck outranks the take once it holds audio. 15.4s reads as 3 x
+  -- L2's 5s loop but 3 x the take's 6s would be 18s, so the two answers are
+  -- distinguishable and this asserts WHICH reference was used.
+  -- arming a layer throws the softcut record source WET (the bounce), so it
+  -- is the OUTPUT meter that decides whether the deck heard anything
+  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
+  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5); _h.run_ticks(1)
+  _h.phase(5, 180)
+  params:set("lay2_rec", 1)
+  for i = 1, 6 do _h.phase(5, 180 + i); _h.run_ticks(1) end
+  params:set("lay2_rec", 0)
+  params:set("lay2_start", 0); params:set("lay2_end", 5 / 60)
+  params:set("lay1_start", 0); params:set("lay1_end", 15.4 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near(params:get("lay1_end") * 60, 15.0, 0.02,
+    "the other deck's loop outranks the take as the reference once it has audio")
+
+  -- the AUTOMATIC pass, through the real record gesture on an EMPTY deck.
+  -- arming opens the loop, disarming closes it around what was played, and a
+  -- near miss rounds onto the grid with no key involved at all.
+  _h.phase(3, 120)
+  params:set("lay1_rec", 1)
+  near(params:get("lay1_end"), 1, 1e-9, "arming an empty layer opens its loop")
+  for i = 1, 10 do _h.phase(3, 120 + i * 0.51); _h.run_ticks(1) end   -- ~5.1s
+  params:set("lay1_rec", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 5.0, 0.02,
+    "a 5.1s pass against a 5s reference rounds onto it, hands-free")
+
+  -- ...but a length you clearly CHOSE is left exactly as you played it. 12s
+  -- against a 5s reference sits midway between 2x and 3x, nowhere near a
+  -- ratio, so the automatic pass declines and the loop stays 12s.
+  goto_page(li)
+  params:set("layer_sel", 1)
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
+  ok(params:get("lay1_end") == 1, "the LAYERS erase empties the deck it is on")
+  _h.phase(3, 120)
+  params:set("lay1_rec", 1)
+  for i = 1, 10 do _h.phase(3, 120 + i * 1.2); _h.run_ticks(1) end    -- 12.0s
+  params:set("lay1_rec", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 12.0, 0.05,
+    "a length that is on no grid is left exactly as played")
+
+  -- and the same length under a FORCED snap does land: it was the tolerance
+  -- that declined, not a snap that cannot reach
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 10.0, 0.05,
+    "a FORCED snap lands where the automatic pass declined")
+
+  -- a deck collapsed to a point is not something to measure against. It used
+  -- to be offered as a reference anyway, whereupon SNAP refused SILENTLY: a
+  -- key that fires, moves nothing and says nothing.
+  params:set("lay2_start", 0.5); params:set("lay2_end", 0.5)
+  params:set("lay1_start", 0); params:set("lay1_end", 3.2 / 60)
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near(params:get("lay1_end") * 60, 3.0, 0.02,
+    "a collapsed deck is skipped as a reference, not answered with silence")
+
+  -- and a loop with no room left refuses OUT LOUD rather than manufacturing a
+  -- 100ms loop and labelling it a ratio it is not on
+  params:set("lay2_start", 0); params:set("lay2_end", 1)
+  params:set("lay1_start", 1); params:set("lay1_end", 1)
+  -- the page chip lives on a ctx local, but the SAME text goes to maiden, so
+  -- capturing print is a test of what the player is actually told
+  local said = {}
+  local real_print = print
+  print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  print = real_print
+  near(params:get("lay1_end"), 1, 1e-9, "a snap with no room left moves nothing")
+  ok(#said > 0 and said[#said]:find("refused") ~= nil,
+    "...and says so, instead of reporting a length it did not produce")
+
+  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  params:set("lay2_start", 0); params:set("lay2_end", 1)
+end
+
+-- ============================================================================
+-- 17 - SNAP under the states the loop pair can actually be in
+-- ============================================================================
+do
+  params:set("orbit_on", 0)
+  params:set("stop_all", 0)
+  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
+  params:set("pos_start", 0); params:set("pos_end", 0.1)      -- a 6s take
+
+  -- a CROSSED pair is a legal loop: update_loop sorts it and loop_secs takes
+  -- the absolute difference. SNAP anchored on the START param alone, so a
+  -- loop already on the grid was RELOCATED to a different span of the region
+  -- while the page reported that nothing had moved.
+  params:set("lay2_start", 0); params:set("lay2_end", 1)      -- L2's loop: 60s
+  params:set("lay1_start", 0.5); params:set("lay1_end", 0.25) -- 15s = 1/4 of it
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  local lo = math.min(params:get("lay1_start"), params:get("lay1_end"))
+  local hi = math.max(params:get("lay1_start"), params:get("lay1_end"))
+  near(lo, 0.25, 1e-9, "SNAP anchors a crossed loop on its LOW edge")
+  near(hi, 0.50, 1e-9, "...so a loop already on the grid stays where it was")
+  near((hi - lo) * 60, 15.0, 0.02, "...at the length it already had")
+
+  -- a snap that moves nothing must not move the HEAD either: two decks hold
+  -- their drift only while both heads keep running, which is the same reason
+  -- MUTE silences a deck instead of stopping it.
+  params:set("lay2_start", 0); params:set("lay2_end", 6 / 60)   -- reference 6s
+  params:set("lay1_start", 0); params:set("lay1_end", 6 / 60)   -- already 1 x L2
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  sc_calls = {}
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 6.0, 0.02,
+    "a loop already on the grid stays where it is")
+  ok(sc_last("position", 3) == nil,
+    "...and a no-op SNAP leaves the head running instead of re-cueing it")
+  -- the other half, or "never jump" would pass this too: a snap that DOES
+  -- move the loop must re-cue, or the head is left outside its own loop.
+  params:set("lay1_end", 7.1 / 60)
+  sc_calls = {}
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 8.0, 0.02,
+    "a snap that moves the loop moves it (7.1s -> 4/3 x the 6s reference)")
+  ok(sc_last("position", 3) ~= nil, "...and re-cues the head to the new start")
+
+  -- a deck whose own record pass is still OPEN is not a reference: arm_loop
+  -- holds its loop at the full region for the length of the pass, and `any`
+  -- goes true as soon as it hears anything, so it reads as 60 seconds of
+  -- material. The reference NAME is what the assertion reads, because that is
+  -- the thing that was wrong: an eighth of a region boundary, called musical.
+  -- an EMPTY deck, because that is when arm_loop opens the loop: erase L2
+  -- through the real K1+K3 arc, then arm it, which is the two-hand looper
+  -- gesture (grid row 5, both decks) this has to survive.
+  local li2
+  do
+    local i = 0
+    for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}")
+        :gmatch('"(%u+)"') do
+      i = i + 1
+      if name == "LAYERS" then li2 = i end
+    end
+  end
+  goto_page(li2)
+  params:set("layer_sel", 2)
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
+  params:set("layer_sel", 1)
+  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
+  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5); _h.run_ticks(1)
+  _h.phase(5, 180)
+  params:set("lay2_rec", 1)
+  for i = 1, 4 do _h.phase(5, 180 + i); _h.run_ticks(1) end    -- L2 mid-pass
+  params:set("lay1_start", 0); params:set("lay1_end", 7.6 / 60)
+  local said = {}
+  local real_print = print
+  print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
+  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
+  print = real_print
+  local msg = said[#said] or ""
+  ok(msg:find("TAKE") ~= nil and msg:find("L2") == nil,
+    "a deck mid-record is skipped, so SNAP falls through to the take")
+  params:set("lay2_rec", 0)
+
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  params:set("lay2_start", 0); params:set("lay2_end", 1)
+end
+
+-- ============================================================================
+-- 18 - the take's on-disk width is one number, shared with the engine
+-- ============================================================================
+-- ctx.take_to_wav waits for the async /b_write to REACH the size it computes
+-- from ctx.TAKE_BYTES. When write_take moved to int24 and that constant did
+-- not, the guard passed at two thirds of the file and the export, the chop
+-- and the tighten all read a part-written take. Nothing fails loudly, so the
+-- contract is asserted instead.
+do
+  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local fmt = sc:match('bufL%.write%(stem %+%+ "_L%.wav", "wav", "(%w+)"')
+  ok(fmt ~= nil, "write_take's sample format is readable from the .sc")
+  local bits = fmt and tonumber(fmt:match("(%d+)$"))
+  local lua = io.open("mangler.lua"):read("a")
+  local declared = tonumber(lua:match("ctx%.TAKE_BYTES = (%d+)"))
+  ok(declared ~= nil, "...and mangler.lua declares the matching byte width")
+  ok(bits and declared and declared == bits // 8,
+    string.format("write_take's %s matches ctx.TAKE_BYTES = %s",
+      tostring(fmt), tostring(declared)))
+  ok(lua:match("take_frames%(%) %* ctx%.TAKE_BYTES") ~= nil,
+    "...and the export's completion guard is sized from that constant")
+end
+
+-- ============================================================================
+-- 19 - the TAPE's own loop-pedal law, under overdub
+-- ============================================================================
+-- The tape keeps its own copy of the law (see lib/mtape.lua for why). Its ARM
+-- branch has always known that overdub must not re-open the loop, but its
+-- DISARM branch snapped regardless: every stacked pass re-cut the loop to
+-- whatever slice elapsed, so an 8s loop became 3s, then 1s, converging on the
+-- 100ms floor with the stacked audio still sitting in the buffer.
+do
+  params:set("stop_all", 0)
+  params:set("tape_rec", 0)
+  params:set("tape_pre", 0)
+
+  -- REPLACE still defines the take: arm opens the loop, disarm closes on it
+  params:set("loop_start", 0.2); params:set("loop_end", 0.3)
+  _h.phase(1, 0.10 * 60)
+  params:set("tape_rec", 1)
+  near(params:get("loop_start"), 0, 1e-9, "a REPLACE arm still opens the tape loop")
+  near(params:get("loop_end"), 1, 1e-9, "...at both ends")
+  _h.phase(1, 0.30 * 60)
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0.10, 1e-6, "...and the take closes the loop around it")
+  near(params:get("loop_end"), 0.30, 1e-6, "...at the head it stopped on")
+
+  -- OVERDUB stacks into the loop it has, and must leave it exactly alone
+  params:set("tape_pre", 1)
+  _h.phase(1, 0.15 * 60)
+  params:set("tape_rec", 1)
+  near(params:get("loop_start"), 0.10, 1e-6, "an OVERDUB arm leaves the loop alone")
+  near(params:get("loop_end"), 0.30, 1e-6, "...as it always did")
+  _h.phase(1, 0.22 * 60)
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0.10, 1e-6, "...and so does the DISARM")
+  near(params:get("loop_end"), 0.30, 1e-6, "...so a stacked pass cannot shrink it")
+
+  -- and the wrap branch cannot blow an overdub loop out to the whole tape
+  _h.phase(1, 0.28 * 60)
+  params:set("tape_rec", 1)
+  _h.phase(1, 0.12 * 60)                    -- wrapped round the loop
+  params:set("tape_rec", 0)
+  near(params:get("loop_end"), 0.30, 1e-6,
+    "a wrapped overdub keeps the loop instead of opening the whole tape")
+
+  params:set("tape_pre", 0)
+  params:set("loop_start", 0); params:set("loop_end", 1)
+end
+
 print(string.format("\n%d assertions passed", ok_count))
 if #fail > 0 then
   print(#fail .. " FAILED:")

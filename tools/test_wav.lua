@@ -22,7 +22,7 @@ local rp = src:match("(local function riff_parse.-\nend)\n")
 local dc = src:match("(local DECODE = .-\n})\n")
 local wd = src:match("(function M%.wav_decoder.-\nend)\n")
 local wr = src:match("(function M%.wav_rate.-\nend)\n")
-local cu = src:match("(local function cubic.-\nend)\n")
+local cu = src:match("(local SINC_TAPS = .-\n  return k, half, taps\nend)\n")
 local os_ = src:match("(local function open_src.-\nend)\n")
 local cl = src:match("(local function close_src[^\n]*)\n")
 local rf = src:match("(local function read_frames.-\nend)\n")
@@ -30,17 +30,19 @@ local blk = src:match("(local SRC_BLOCK = .-\nlocal SRC_PACK = [^\n]*)\n")
 local cs = src:match("(function M%.convert_sr.-\n  return true, written / sr\nend)")
 local tc = src:match("(function M%.transient_cuts.-\n  return cuts\nend)")
 local ob = src:match("(function M%.onset_bounds.-\n  return first / total, %(last %+ 1%) / total\nend)")
-assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc and ob,
-  "lift failed")
+local iw = src:match("(local function open_pcm_mono.-\n  return true\nend)")
+assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc and ob
+  and iw, "lift failed")
 local env = setmetatable({
   floor = math.floor, min = math.min, max = math.max, abs = math.abs,
+  sin = math.sin, cos = math.cos,
   clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
 }, { __index = _G })
 -- wav_decoder must be defined BEFORE open_src closes over it
 local M = load(
   rp .. "\n" .. dc .. "\n" .. cu .. "\n" .. blk .. "\nlocal M={}\n"
   .. wd .. "\n" .. wr .. "\n" .. os_ .. "\n" .. cl .. "\n" .. rf .. "\n"
-  .. cs .. "\n" .. tc .. "\n" .. ob .. "\nreturn M",
+  .. cs .. "\n" .. tc .. "\n" .. ob .. "\n" .. iw .. "\nreturn M",
   "mp", "t", env)()
 
 local TMP = "/tmp/main-srtest/"
@@ -55,14 +57,38 @@ local function ramp(path, secs, sr, ch)
     for _=1,ch do b[#b+1]=string.pack("<i2",v) end end
   f:write(table.concat(b)); f:close(); return n
 end
+-- reads whatever depth the writer chose: convert_sr moved to 24-bit, and a
+-- reader pinned to 16 would have silently decoded every third sample as a
+-- frame boundary rather than failing
 local function read_wav(path)
   local f=io.open(path,"rb"); if not f then return nil end
   local s=f:read("a"); f:close()
   if s:sub(1,4)~="RIFF" then return nil end
   local ch=string.unpack("<I2",s,23); local sr=string.unpack("<I4",s,25)
-  local dl=string.unpack("<I4",s,41)
-  return { ch=ch, sr=sr, frames=dl//(ch*2),
-    sample=function(i,c) return string.unpack("<i2",s,45+(i*ch+(c-1))*2)/32768 end }
+  local bits=string.unpack("<I2",s,35); local dl=string.unpack("<I4",s,41)
+  local bps=bits//8
+  local fmt = (bps==2 and "<i2") or (bps==3 and "<i3") or "<i4"
+  local scale = 2^(bits-1)
+  return { ch=ch, sr=sr, bits=bits, frames=dl//(ch*bps),
+    sample=function(i,c) return string.unpack(fmt,s,45+(i*ch+(c-1))*bps)/scale end }
+end
+-- A tone at a known pitch, for the things a ramp cannot show: whether the
+-- conversion removes what it has to, and leaves alone what it should.
+local function sine(path, secs, sr, hz, amp)
+  local n=math.floor(sr*secs); local f=assert(io.open(path,"wb")); local d=n*2
+  f:write("RIFF", string.pack("<I4",36+d), "WAVE")
+  f:write("fmt ", string.pack("<I4",16), string.pack("<I2",1), string.pack("<I2",1),
+    string.pack("<I4",sr), string.pack("<I4",sr*2), string.pack("<I2",2), string.pack("<I2",16))
+  f:write("data", string.pack("<I4",d))
+  local b={} for i=0,n-1 do
+    b[#b+1]=string.pack("<i2", math.floor(math.sin(2*math.pi*hz*i/sr)*(amp or 0.7)*32000))
+  end
+  f:write(table.concat(b)); f:close()
+end
+local function rms(w, from, to, c)
+  local a=0
+  for i=from,to-1 do local v=w.sample(i,c or 1); a=a+v*v end
+  return math.sqrt(a/(to-from))
 end
 
 ramp(TMP.."a441.wav", 2.0, 44100, 2)
@@ -76,6 +102,7 @@ w = w or { sr=0, frames=0, sample=function() return 0 end }
 ok(w.sr == 48000, "the converted file declares the server rate")
 ok(w.ch == 2, "...and is stereo")
 near(w.frames, 2.0*48000, 4, "...with 2 seconds of 48k frames")
+ok(w.bits == 24, "...written at 24 bits (a 24-bit source no longer loses 8)")
 local TOP = 30000/32768
 for _, t in ipairs({0.25, 0.5, 0.75, 1.5}) do
   near(w.sample(math.floor(t*48000), 1), (t/2.0)*TOP, 0.01,
@@ -132,6 +159,90 @@ do
   local c2, s2 = M.convert_sr(TMP .. "a441.wav", TMP .. "cap.wav", 48000, nil, 0.5)
   ok(c2 == true, "a capped conversion still converts")
   near(s2, 0.5, 0.01, "...but writes only the capped duration")
+end
+
+-- ---- the resampling KERNEL --------------------------------------------------
+-- A ramp cannot tell the two shapes apart: both follow a straight line
+-- perfectly. What separates them is what they REMOVE. Going down to a lower
+-- rate, anything too high to fit has to be taken out first, or it comes back
+-- mirrored into the audible range as a tone that was never in the file. The
+-- old cubic curve filtered nothing at all, so this is the check that the
+-- shape actually changed.
+do
+  -- 30 kHz at 96k is 6 kHz above the 48k Nyquist: it can only survive as an
+  -- alias at 48000 - 30000 = 18 kHz, which is squarely audible.
+  sine(TMP .. "hi96.wav", 0.5, 96000, 30000, 0.7)
+  ok(M.convert_sr(TMP .. "hi96.wav", TMP .. "hi48.wav", 48000, nil) == true,
+    "a 96k file converts DOWN to 48k")
+  local hw = read_wav(TMP .. "hi48.wav")
+  ok(hw ~= nil, "...and wrote a file")
+  local a = hw and rms(hw, 2000, 20000) or 1
+  -- measured: sinc 0.0052, cubic 0.4834 (both run against this same file)
+  ok(a < 0.02, string.format(
+    "...with the above-Nyquist tone REMOVED, not folded back (rms %.4f, "
+    .. "cubic measured 0.4834 on this file)", a))
+
+  -- and it only removes what it has to: 8 kHz fits comfortably in a 48k file
+  -- and must come through at full level
+  sine(TMP .. "lo96.wav", 0.5, 96000, 8000, 0.7)
+  ok(M.convert_sr(TMP .. "lo96.wav", TMP .. "lo48.wav", 48000, nil) == true,
+    "an in-band 96k tone converts too")
+  local lw = read_wav(TMP .. "lo48.wav")
+  local b = lw and rms(lw, 2000, 20000) or 0
+  near(b, 0.7 / math.sqrt(2), 0.05, "...and keeps its level through the passband")
+
+  -- upsampling is where the everyday library lives: the pitch must be right
+  -- and the waveform must still be a clean sine, not a stair
+  sine(TMP .. "t441.wav", 0.5, 44100, 1000, 0.7)
+  ok(M.convert_sr(TMP .. "t441.wav", TMP .. "t48.wav", 48000, nil) == true,
+    "a 44.1k tone converts UP to 48k")
+  local tw = read_wav(TMP .. "t48.wav")
+  local worst = 0
+  if tw then
+    for i = 4800, 19200 do          -- skip the kernel's edge transient
+      local want = math.sin(2 * math.pi * 1000 * i / 48000) * (32000 / 32768) * 0.7
+      worst = math.max(worst, math.abs(tw.sample(i, 1) - want))
+    end
+  end
+  ok(worst < 0.01, string.format(
+    "...landing on the same 1 kHz sine at the same PHASE (worst %.4f)", worst))
+end
+
+-- ---- the export interleaver -------------------------------------------------
+-- write_take dumps a MONO L/R pair and this zips them into the browsable
+-- stereo file. It used to demand 16-bit; the take is written at 24 now, so a
+-- pinned reader would have refused every export.
+do
+  local function mono24(path, n, val)
+    local f = assert(io.open(path, "wb")); local d = n * 3
+    f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
+    f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 1),
+      string.pack("<I4", 48000), string.pack("<I4", 48000 * 3), string.pack("<I2", 3),
+      string.pack("<I2", 24))
+    f:write("data", string.pack("<I4", d))
+    local b = {}
+    for _ = 1, n do b[#b + 1] = string.pack("<i3", math.floor(val * 8388607)) end
+    f:write(table.concat(b)); f:close()
+  end
+  mono24(TMP .. "tl.wav", 1000, 0.5)
+  mono24(TMP .. "tr.wav", 1000, -0.25)
+  ok(M.interleave_wav(TMP .. "tl.wav", TMP .. "tr.wav", TMP .. "stereo24.wav", nil) == true,
+    "a 24-bit L/R pair interleaves")
+  local sw = read_wav(TMP .. "stereo24.wav")
+  ok(sw and sw.bits == 24 and sw.ch == 2, "...into a 24-bit stereo file")
+  ok(sw and sw.frames == 1000, "...of the right length")
+  near(sw and sw.sample(500, 1) or 0, 0.5, 1e-4, "...with L intact")
+  near(sw and sw.sample(500, 2) or 0, -0.25, 1e-4, "...and R intact")
+  -- a pair of two different widths is not a stereo file
+  local f16 = assert(io.open(TMP .. "t16.wav", "wb")); local d = 1000 * 2
+  f16:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
+  f16:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 1),
+    string.pack("<I4", 48000), string.pack("<I4", 96000), string.pack("<I2", 2),
+    string.pack("<I2", 16))
+  f16:write("data", string.pack("<I4", d))
+  f16:write(string.rep(string.pack("<i2", 1000), 1000)); f16:close()
+  ok(M.interleave_wav(TMP .. "tl.wav", TMP .. "t16.wav", TMP .. "mix.wav", nil) == false,
+    "a MISMATCHED pair refuses rather than interleaving two widths into one header")
 end
 
 -- ---- transient detection ---------------------------------------------------

@@ -93,16 +93,30 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 Notes on the less obvious ones.
 
 LAYERS gives you two independent loop decks beside the tape, so you can keep playing while
-you record the next part. Each has its own loop points and speed, so a four-bar part
-against a three-bar part drifts and re-syncs on its own. **Arming a layer records the
-processed engine output by default**: resampling the mangled sound into a loop is just K2,
-and both deck pages say SRC WET while it happens. Turn `layers record the mix` off in
-PARAMS and the decks follow the tape's source switch instead (dry input, or the processed
-output, on TAPE). A wav can also be loaded straight into a deck: PARAMS > layers > load
-file, with the loop snapping to the file. What a deck cannot do is granulate or stretch:
-that is the engine's take, and only the take gets it. MUTE silences a deck without stopping
-its head, so two decks never lose their drift against each other. For a full-mix bounce
-that becomes the new take, use print (below).
+you record the next part. **They work like a loop pedal**: press K2 on an empty deck, play
+a phrase, press it again, and the loop is exactly that phrase, playing from its start.
+Press K2 again and you are overdubbing into it. The length is set by the first pass and
+nothing after that moves it. **Arming a layer records the processed engine output by
+default**: resampling the mangled sound into a loop is just K2, and both deck pages say
+SRC WET while it happens. Turn `layers record the mix` off in PARAMS and the decks follow
+the tape's source switch instead (dry input, or the processed output, on TAPE). A wav can
+also be loaded straight into a deck: PARAMS > layers > load file, with the loop snapping to
+the file. What a deck cannot do is granulate or stretch: that is the engine's take, and
+only the take gets it. MUTE silences a deck without stopping its head, so two decks never
+lose their drift against each other. For a full-mix bounce that becomes the new take, use
+print (below).
+
+Hand-played loops are never quite the length you meant, and two decks at 3.97 and 4.02
+seconds walk apart inside a minute. **SNAP puts a loop's length on a musical grid**: a
+half, a double, a three-to-two of whatever else is playing. The other deck if it holds
+audio, otherwise the take's window, otherwise a bar of the clock. It only moves the loop
+end, so it is undoable by hand. When you close a recording that already landed within a few
+percent of a ratio, it rounds on its own and says so; anything further out is a length you
+chose and is left exactly as played. To force it, map `L1 snap loop` to a footswitch or use
+the grid (LAYERS row 6, pads 4 and 5). Watch the name: TAKE's K3 is also SNAP, and it does
+the other thing, fitting the window to where the sound is. Each deck also has its own loop
+**seam** (a hard edit for a drum loop, a long blend for a pad) and **width**, so two decks
+on related material do not have to be the same wall of stereo.
 
 The orbit lives on SCENE: it picks a stored scene, morphs partway toward it, parks there,
 then picks another, never fully arriving, so it keeps finding sounds between the ones you
@@ -135,10 +149,14 @@ Settings live in PARAMS under keys. The space bar stops and starts everything.
 ## Samples
 
 Load: PARAMS > take > load sample reads WAV in 16, 24 or 32 bit. The window snaps to the
-file. A file at any sample rate loads in tune: off-rate files are resampled on the way in.
-PARAMS > layers > load file does the same into a layer deck.
+file. A file at any sample rate loads in tune: off-rate files are resampled on the way in
+through a windowed-sinc kernel. That matters most coming DOWN from 88.2k or 96k: there,
+everything above the server's own limit has to be removed before resampling or it folds
+back into the audible band as tones that were never in the file. PARAMS > layers > load
+file does the same into a layer deck.
 
-Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo WAV.
+Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo
+24-bit WAV. The take rides PSET save and load at the same depth.
 
 Print: PARAMS > take > print mix records the master output, everything you hear from both
 decks and all effects, then loads that recording back as the take. Length zero means one

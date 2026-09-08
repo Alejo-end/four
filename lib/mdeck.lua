@@ -32,6 +32,10 @@ M.decks = {}
 --   va, vb   the softcut voice pair (lower = left, upper = right)
 --   from     where this deck's region starts, in seconds into the buffer
 --   len      how long the region is, in seconds
+-- One more field exists only while a recording is in progress: `arm_phase`,
+-- where the playhead was when recording started. Its absence is what means
+-- "nothing is being recorded", which is what close_loop checks, so it is
+-- deliberately not set up here.
 function M.new(o)
   local d = {
     id = o.id, name = o.name,
@@ -128,6 +132,46 @@ function M.update_loop(d)
     sc.loop_start(v, lo)
     sc.loop_end(v, hi)
   end)
+  M.update_fade(d)      -- the seam is capped against the loop; the loop moved
+end
+
+-- The JOIN, where the loop ends and starts again. Softcut fades between the
+-- two over this long. Short is a clean cut and a hard downbeat, which is what
+-- a drum loop wants. Long is a blend that hides the join landing in the
+-- middle of a held note, which is what a pad wants. One fixed value cannot
+-- suit both, and this is the number that decides whether a loop sounds tight
+-- or smeared.
+function M.update_fade(d)
+  -- ...but never longer than the loop can absorb. The knob goes to half a
+  -- second and a loop can be as short as a tenth of one, so a scene recall
+  -- can leave the fade longer than the loop it has to cross. The deck then
+  -- spends all its time fading and goes quiet, while the page still draws it
+  -- bright. A quarter of the loop is as long as it can usefully get.
+  local f = math.min(get(d, "fade", 0.02), M.loop_secs(d) * 0.25)
+  both(d, function(v) sc.fade_time(v, f) end)
+end
+
+-- stereo WIDTH. 1 is the deck's own hard L/R, 0 collapses it to the centre.
+-- Two decks stacked on related material, both full-width, are a wall; pulling
+-- one of them in is what leaves room to hear the other around it.
+function M.update_width(d)
+  local w = clamp(get(d, "width", 1), 0, 1)
+  sc.pan(d.va, -w)
+  sc.pan(d.vb, w)
+end
+
+-- drop both heads at a normalized position inside this deck's region
+function M.jump(d, ph)
+  local at = d.from + clamp(ph, 0, 1) * d.len
+  both(d, function(v) sc.position(v, at) end)
+end
+
+-- how long this deck's loop actually is, in seconds. The number SNAP works
+-- on and the page prints. One law, so they cannot disagree.
+function M.loop_secs(d)
+  local a = clamp(get(d, "start", 0), 0, 1)
+  local b = clamp(get(d, "end", 1), 0, 1)
+  return math.max(math.abs(b - a) * d.len, 0.1)
 end
 
 function M.update_all(d)
@@ -135,6 +179,89 @@ function M.update_all(d)
   M.update_rec(d)
   M.update_loop(d)
   M.update_level(d)
+  M.update_fade(d)
+  M.update_width(d)
+end
+
+-- ---------------------------------------------------------------------------
+-- the loop-pedal law
+-- ---------------------------------------------------------------------------
+-- A deck with NO material takes its loop length from the pass you record:
+-- arming opens the loop to the whole region so nothing you play is cut off,
+-- and marks where the head is. Disarming closes the loop around exactly what
+-- you played and drops the head back at its start, so it plays back tight
+-- immediately. Without this a fresh layer loops the WHOLE 60-second region,
+-- which is a deck, not a looper.
+--
+-- A deck that ALREADY holds audio keeps its loop and overdubs into it. That
+-- is the entire difference between defining a loop and adding to one, and it
+-- is why the layers default to overdub while the tape defaults to replace.
+--
+-- How accurately it can catch the moment you pressed the key is limited by
+-- how often softcut reports the playhead position, which is every 25 ms. That
+-- is close, but never exact, and it is why SNAP exists on top of this:
+-- rounding the length to match something else is what puts a hand-played
+-- loop properly in time.
+-- Move both loop edges. The order matters: each one is a separate write, so
+-- in between there is a moment where the new start sits against the OLD end.
+-- If that leaves the start past the end, update_loop reads it as a loop of
+-- nothing, floors it to 100ms, and the playhead jumps. So move whichever edge
+-- keeps start before end at the halfway point. One of the two always does.
+local function set_bounds(d, lo, hi)
+  if lo <= clamp(get(d, "end", 1), 0, 1) then
+    params:set(p(d, "start"), lo); params:set(p(d, "end"), hi)
+  else
+    params:set(p(d, "end"), hi); params:set(p(d, "start"), lo)
+  end
+end
+M.set_loop = set_bounds
+
+function M.arm_loop(d)
+  d.arm_phase, d.arm_was = nil, nil
+  if d.any then return end            -- overdub into the established loop
+  -- Remember the loop we are about to widen. If the recording turns out to be
+  -- too short to be a loop, close_loop puts this back. Widening is only
+  -- preparation, and preparation that comes to nothing must not cost the
+  -- player the loop they had set. Tapping REC by mistake takes a single
+  -- frame, and without this it left the deck looping the whole 60 seconds.
+  d.arm_was = { clamp(get(d, "start", 0), 0, 1), clamp(get(d, "end", 1), 0, 1) }
+  set_bounds(d, 0, 1)
+  d.arm_phase = d.phase
+end
+
+-- forget the mark without closing anything: the erase disarms on its way to
+-- wiping the deck, and closing a loop around material about to be destroyed
+-- is noise. The loop stays as the arm left it, because the erase resets it.
+function M.abort_loop(d) d.arm_phase, d.arm_was = nil, nil end
+
+function M.close_loop(d)
+  local a, was = d.arm_phase, d.arm_was
+  d.arm_phase, d.arm_was = nil, nil
+  if not a then return end
+  local b = d.phase
+  -- Which way the head was moving decides which end of the recording is the
+  -- loop START. Playing backwards, the head counts DOWN, so the recording
+  -- runs from where it stopped to where it started. Assuming it always counts
+  -- up left a reversed deck with either no loop at all, or a loop around the
+  -- one stretch it had just skipped over.
+  local back = get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1) < 0
+  local lo, hi = a, b
+  if back then lo, hi = b, a end
+  -- The head ran off the end and round to the start, or barely moved at all.
+  -- A loop cannot span that join, so there is nothing to close here. Put back
+  -- the loop we widened, rather than leave the deck on the full 60 seconds,
+  -- which is the once-a-minute playback this whole law exists to prevent.
+  if (hi - lo) < (0.1 / d.len) then
+    if was then set_bounds(d, was[1], was[2]) end
+    return
+  end
+  set_bounds(d, lo, hi)
+  -- and then let the instrument round the LENGTH onto the grid, if what you
+  -- played was already close to one. Which grid is a musical question (the
+  -- other deck, the take's window, the clock), so it is not this module's to
+  -- answer; the loop-pedal law lives here and the reference lives in ctx.
+  if C.layer_quantize then C.layer_quantize(d) end
+  M.jump(d, clamp(get(d, "start", 0), 0, 1))
 end
 
 -- wipe THIS deck only. sc.buffer_clear() would take the whole buffer with it —
@@ -183,12 +310,10 @@ function M.start(d)
   sc.enable(d.va, 1); sc.enable(d.vb, 1)
   -- voice -> buffer channel, and the stereo split
   sc.buffer(d.va, 1); sc.buffer(d.vb, 2)
-  sc.pan(d.va, -1);   sc.pan(d.vb, 1)
   both(d, function(v)
     sc.play(v, 1)
     sc.loop(v, 1)
     sc.position(v, d.from)
-    sc.fade_time(v, 0.02)
     sc.level_slew_time(v, 0.05)
     sc.rate_slew_time(v, 0.05)
     -- softcut's filter sections default in a way that can mute a voice; force
@@ -257,6 +382,14 @@ end
 function M.pset_read(number)
   for i = 1, #M.decks do
     local d = M.decks[i]
+    -- Save a preset with a deck armed and it stores rec = 1. Loading it sets
+    -- the params one at a time in file order, and rec comes before the loop
+    -- points, so arm_loop ran on a deck that still looked empty and left a
+    -- recording "open" that never happened. The next time the player stopped
+    -- recording, that ghost was used to re-cut the loop the preset had just
+    -- restored. This runs after every value is in, so it is the place to
+    -- forget it. The deck stays armed; only the ghost goes.
+    M.abort_loop(d)
     local path = path_for(d, number)
     if util.file_exists(path) then
       sc.buffer_read_stereo(path, 0, d.from, d.len)

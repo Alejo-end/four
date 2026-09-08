@@ -208,7 +208,7 @@ Only on the `layers` branch. No engine change, so the count is still 65.
 | 9.4 | **Erase is region-scoped** | K1+K3 on LAYERS | **Only** the selected layer is wiped — the tape and the other layer are untouched | `sc.buffer_clear_region`. This is the one collision that makes layers not purely additive |
 | 9.5 | STOP reaches them | K1+K2 | All four decks silence; START restores the exact mix | `ctx.layers_relevel` |
 | 9.6 | PSET round-trip | Save, reload, load | Both layers' audio returns; an empty layer does not resurrect | |
-| 9.7 | Grid workspace | On LAYERS, rows 3-4 | A two-pad span sets THAT deck's loop; row 5 arms, row 6 mutes; the other deck is untouched | |
+| 9.7 | Grid workspace | On LAYERS, rows 3-4 | A two-pad span sets THAT deck's loop; row 5 arms, row 6 mutes (x1-2) and snaps (x4-5); the other deck is untouched | |
 | 9.8 | **%CPU with everything running** | Four decks plus a granular drone | No xruns | The number that decides whether a third layer is ever worth adding |
 
 ## Stage 10 — The spawn/free delay + true STOP + clear (the engine batch after the fold)
@@ -226,6 +226,29 @@ already checked it; a different number here means a stray command).
 | 10.6 | STOP pauses an armed take | Arm REC mid-phrase, K1+K2, wait, K1+K2 again | The write head freezes and resumes; the take has no gap of silence printed | The `engine.rec` gate in the stop/rec actions |
 | 10.7 | Full tape throw pauses the drone head | MIX K3 (TAPE throw), watch VOICE/TAKE playheads | The engine head freezes while thrown, resumes on release — stated behavior, same law as erosion/regen | If this feels wrong in play, say so: the alternative is a dedicated run flag (a new command) |
 | 10.8 | **Clear is silence** | Echoes + a long reverb tail ringing, then K1+K3 hold on TAKE (erase) | The tails CUT with the take; with `regen` up beforehand, nothing re-records into the cleared buffer | The `\clear` flush; `clear_recording`'s regen zero |
+
+## Stage 11: the snap and quality batch
+
+Engine changes with NO new command, so the count must STILL read **65**. The
+layer work is Lua only.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 11.1 | **A fresh layer loops what you played** | Empty LAYER 1. K2 (REC), play four bars, K2 again | It loops those four bars, NOT the whole 60 second region | `Mdeck.arm_loop` / `close_loop`; the head must land back at the loop start |
+| 11.2 | A layer with audio overdubs | K2 again on the same deck, play over it | The loop length does not change; the new pass stacks | The `d.any` test in `arm_loop` |
+| 11.3 | The automatic snap is quiet when it should be | Play a length nowhere near the take's | The loop stays exactly what you played, no message | The 6% tolerance |
+| 11.4 | ...and lands when it should | Play roughly the take's length, or half it | The loop rounds onto it and the page says `L1 4.31>4.00S 1/2 x TAKE` | `ctx.layer_quantize` |
+| 11.5 | **Two decks stay locked** | Snap LAYER 2 against LAYER 1, leave them running five minutes | They are still in phase | If they walk, the snapped lengths were not an exact ratio |
+| 11.6 | Forced SNAP | MIDI-map `lay1_snap` to a footswitch, or grid row 6 x4/x5 | Stomping it snaps the selected deck; the page names the ratio and the reference | |
+| 11.6b | SNAP refuses out loud | Park a loop hard against the region end (loop start to max), then SNAP | It says `NO ROOM TO SNAP` rather than silently doing nothing or inventing a 100ms loop | `ctx.layer_snap`'s room check |
+| 11.7 | The seam is audible | `lay1_fade` to 0.001 vs 0.2 on a drum loop | Short is a hard downbeat, long is a blend | `sc.fade_time` |
+| 11.8 | Width | `lay2_width` to 0 | The deck collapses to the centre; LAYER 1 stays wide | `sc.pan` |
+| 11.9 | **A 24-bit take round-trips** | Record, PSET save, CLR, PSET load | The take returns; `take-N_L.wav` is 24 bit and roughly 1.5x the old size | `write_take`'s `int24` |
+| 11.10 | Export is 24-bit and browsable | `export_take` | One stereo 24-bit wav in the audio dir; it reloads through LOAD SAMPLE | `interleave_wav` follows the header now |
+| 11.11 | **A 96k or 88.2k sample imports clean** | Load one through LOAD SAMPLE | In tune, and no whistling or gritty top end | The windowed sinc's stopband. Cubic folded everything above 24 kHz into the audible band |
+| 11.12 | Import is not slower than patience | Load a long off-rate file, and separately a 96k one | The screen stays live throughout. Budget, measured on a dev Mac for 10s of stereo: 44.1k 0.68s (1.9x the old cubic), 88.2k 1.17s (2.3x), 96k 1.25s (2.5x), 192k 2.34s (3.2x). **A Pi will take tens of seconds for a minute of audio, and longer coming down than up** | If that is too slow, `SINC_TAPS` is the knob. The kernel widens as 1/cutoff, so DOWNsampling costs the most, which is the case 11.11 is about. Mac numbers only; the Pi is NOT measured |
+| 11.13 | The resample blend is clean | `resample` at 0.5, record, play the take back | No hollow phasey colour on the blend | The pre-limiter tap. This is the comb the notes parked for a device measurement |
+| 11.14 | Delay and shimmer saturate warmer | INF the delay and slam it; shimmer up with a hot source | It thickens rather than fraying | `tanh` replaced `softclip` in both recirculating loops. If a hold now decays where it used to sustain, that is the earlier knee, so say so |
 
 ## When it passes
 

@@ -60,7 +60,9 @@ local MOTION_IDS = {
   "cut_source",
   -- the layer decks (transports excluded, same rule as tape_rec)
   "lay1_level", "lay1_rate", "lay1_reverse", "lay1_start", "lay1_end", "lay1_pre",
+  "lay1_width",
   "lay2_level", "lay2_rate", "lay2_reverse", "lay2_start", "lay2_end", "lay2_pre",
+  "lay2_width",
   -- the scene morph knob. recording THIS records a whole-instrument
   -- sweep in ONE lane — mscenes re-derives every param from it on replay
   -- (and tells us it did, via M.account, so the sweep never punches forty
@@ -82,8 +84,9 @@ local MOTION_EXCLUDE = {
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
   "lay1_file", "lay2_file", "layer_wet",
+  "lay1_snap", "lay2_snap",   -- a gesture that MOVES the loop, like pad_chop
   -- PARAMS-only discretes: no performance surface reaches them
-  "grain_shape", "warp_overlaps", "tape_fade",
+  "grain_shape", "warp_overlaps", "tape_fade", "lay1_fade", "lay2_fade",
   -- routing + structure (see the header: pad_input re-points the keyboard,
   -- the voices cap re-caps the allocator)
   "pad_input", "voices",

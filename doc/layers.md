@@ -96,17 +96,64 @@ Per deck, prefixed `lay1_` / `lay2_` (ids are never renamed once shipped):
 | `reverse` | binary | 0 | latching, like the tape's |
 | `start` / `end` | control 0–1 | 0 / 1 | loop bounds within the deck's region |
 | `pre` | control 0–1 | **1** | overdub survival |
+| `fade` | control 0.001–0.5 exp | 0.02 | the loop SEAM: a hard edit or a long blend |
+| `width` | control 0–1 | 1 | stereo width; 0 collapses the deck to the centre |
+| `snap` | binary momentary | 0 | force the loop length onto the grid (below) |
 
-Plus one `layer_sel` selector. Seventeen new params (78 → 95).
+Plus `layer_sel`, `layer_wet` and a `file` per deck.
 
 **`pre` defaults to 1 (OVERDUB), unlike the tape deck's 0 (REPLACE).** These are
 *layers* — stacking is the job, and it is the loop-pedal gesture people already
 have in their hands. The page names the mode, so it is never hidden, and K1+K3
 erases the selected layer when you want to start over.
 
-**Scenes and motion:** `level`, `rate`, `reverse`, `start`, `end`, `pre` are
-performance state and join the curated lists (TIMBRE / SWITCH for `reverse`).
-`rec` and `play` are transports and stay out, exactly like `tape_rec`.
+**Scenes and motion:** `level`, `rate`, `reverse`, `start`, `end`, `pre`, `fade`
+and `width` are performance state and join the curated lists (TIMBRE / SWITCH for
+`reverse`). `rec` and `play` are transports and stay out, exactly like `tape_rec`,
+and so does `snap`, a gesture that moves the loop, like `pad_chop`. `fade`
+is out of the motion list for the reason `tape_fade` is: no performance surface
+reaches it.
+
+## The loop-pedal law, and SNAP
+
+Two things, deliberately separate.
+
+**Arming an EMPTY deck opens its loop to the whole region and marks where the
+head is; disarming closes the loop around exactly what you played and drops the
+head back at its start.** Without this a fresh layer records into the whole
+sixty-second region, so the first thing you play comes back once a minute: a
+deck, not a looper. A deck that already holds audio keeps its loop and overdubs
+into it, which is the entire difference between defining a loop and adding to
+one, and the reason these default to overdub while the tape defaults to replace.
+The resolution is softcut's phase poll, 25 ms, the same the tape's snap has
+always had.
+
+**SNAP puts the LENGTH on a musical grid.** Not to be confused with TAKE's K3,
+which is also called SNAP and fits the window to the material. Two different
+gestures on two different pages: TAKE's finds where the sound is, this one
+rounds how long a loop runs. Neither has a key on the other's page.
+
+A hand-played loop is never the
+length you meant, and two decks at 3.97 s and 4.02 s walk apart inside a minute
+while two at an exact ratio stay locked forever. The reference is picked in the
+order you are most likely to be playing against: the OTHER deck if it holds
+audio, then the take's window, then a bar of the clock. The ratio is chosen in
+LOG space, so a half and a double are equally near. A linear nearest would pull
+everything upward. It only ever moves the loop END, so recording still decides
+where a loop starts and SNAP stays undoable by hand, like TIGHTEN.
+
+Closing a record pass offers the loop to the same code with a **6% tolerance**:
+a length that was already nearly a ratio rounds onto it hands-free, and anything
+further out is a length you chose and is left exactly as played. `lay1_snap` /
+`lay2_snap` force it regardless.
+
+Where it lives: both LAYERS key slots are taken (REC, MUTE) and the alt pair is
+global with zero page claims, so SNAP is a momentary param: PARAMS, MIDI and the
+grid (row 6, pads 4 and 5), the same honest limit `pad_chop` has. The automatic
+pass needs no surface at all. The page prints the selected deck's loop length in
+seconds beside its rate, and a snap says what it did over that row for about a
+second. A snap that finds the loop already on the grid moves nothing on screen,
+and a page that cannot say so is indistinguishable from a key that did nothing.
 
 **PSET:** each deck writes its own region as a wav beside the pset, gated on
 "has audio" and deleting a stale file when empty — the rule the take and the tape
@@ -114,7 +161,7 @@ already follow, so a cleared layer cannot resurrect.
 
 ## The page
 
-**LAYERS, page 13.** Two strips stacked, one per deck: the recorded waveform
+**LAYERS, page 4.** Two strips stacked, one per deck: the recorded waveform
 across the deck's region, the loop bracket over it, a playhead, a REC lamp and a
 level bar. The selected deck is drawn bright, the other dim — the audibility rule
 this project holds everywhere.
@@ -143,9 +190,12 @@ handles (`min(5, floor(45/(#PAGES-1)))`) and has done before.
 - **Per-deck record source.** Global, by softcut's own routing. See above.
 - **Granulating a layer.** The engine reads its own buffer, not softcut's.
 - **Tape-deck refactor into `mdeck`.** Gated on the device pass.
-- **Sync / quantized loop lengths.** Each deck free-runs. Clock-locked loop
-  capture is a real follow-up, but it is a separate design (what does "one bar"
-  mean when the deck is already mid-loop?) and belongs after this is played.
+- **Clock-locked loop CAPTURE.** SNAP quantises a length after the fact, which is
+  a different thing from arming on the next bar line. Quantised capture is still
+  a separate design (what does "one bar" mean when the deck is already mid-loop?)
+  and belongs after this is played.
+- **Per-deck sync to an external clock.** The decks free-run; the clock is only
+  ever consulted as SNAP's last-resort reference.
 
 ## Two things that are the way they are on purpose
 

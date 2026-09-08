@@ -540,7 +540,7 @@ Engine_Mangler : CroneEngine {
                 // only the mix knobs and the send/return buses
                 delay_mix = 0.0, dly_send = 0, dly_ret = 0,
                 rev_mix = 0.0, rev_send = 0, rev_ret = 0;
-            var inL, inR, wet, dry, sig, recRun, recPhase, recL, recR;
+            var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, pre, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl;
             inL = In.ar(in1, 1);
@@ -635,6 +635,15 @@ Engine_Mangler : CroneEngine {
             dry_wet = dry_wet.lag(0.03);
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
             sig = sig * Lag.kr(level, 0.05);
+            // What gets RECORDED is tapped here, before the master limiter.
+            // The limiter looks 10 ms ahead, which means its output comes out
+            // 10 ms late. `resample` mixes the input with the output, so with
+            // the old tap that mix was the signal plus a 10 ms copy of itself:
+            // a hollow, phasey colour, printed into the buffer for good.
+            // Nothing is less safe for taking it from here. The 0.99 limiter
+            // further down still catches anything hot before it reaches the
+            // buffer, and the two regen record levels still add up to 1.
+            preLim = sig;
             sig = Limiter.ar(sig, 0.92, 0.01);  // DAC headroom
             recRun = rec * (1 - freeze);
             // regen: run the record head continuously and crossfade the OUTPUT
@@ -657,10 +666,10 @@ Engine_Mangler : CroneEngine {
             // resample is lagged because a step in THIS blend gets printed
             // permanently into the take, not just heard once.
             resample = resample.lag(0.02);
-            recL = (LeakDC.ar(inL) * (1 - resample)) + (sig[0] * resample);
-            recR = (LeakDC.ar(inR) * (1 - resample)) + (sig[1] * resample);
-            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(sig[0]) * regenRun);
-            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(sig[1]) * regenRun);
+            recL = (LeakDC.ar(inL) * (1 - resample)) + (preLim[0] * resample);
+            recR = (LeakDC.ar(inR) * (1 - resample)) + (preLim[1] * resample);
+            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(preLim[0]) * regenRun);
+            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(preLim[1]) * regenRun);
             // record-safety limiter: transparent below 0.99, stops a hot take
             // hard-clipping into the buffer.
             srcL = Limiter.ar(srcL, 0.99, 0.002);
@@ -695,7 +704,17 @@ Engine_Mangler : CroneEngine {
             // 2s line: a half-note sync below 120 BPM needs more than 1s,
             // and the extra second costs ~0.75 MB of server memory
             dOut = DelayC.ar(dIn, 2.0, delay_time.clip(0.01, 2.0).lag(0.2));
-            LocalOut.ar(LPF.ar(dOut, 3500).softclip);
+            // tanh, not softclip, for the signal that goes back round the
+            // loop. softclip bends sharply at the point it starts limiting,
+            // and every repeat bends it again, so the distortion piles up
+            // scratchy. tanh curves smoothly and still stops at +-1.
+            // WHAT IT COSTS, measured: softclip leaves anything under 0.5
+            // completely untouched, tanh does not. A repeat at level 0.5 comes
+            // back 0.86 dB quieter each pass instead of 0.18 dB, so a hold
+            // that used to sit still now fades about 10 dB over a dozen
+            // repeats. Quiet repeats are unaffected. If the infinite hold
+            // needs to sustain rather than fade, put softclip back here.
+            LocalOut.ar(LPF.ar(dOut, 3500).tanh);
             Out.ar(out_bus, dOut);
         }).add;
 
@@ -733,8 +752,8 @@ Engine_Mangler : CroneEngine {
             });
             // pitch the tail (semitones -> ratio), band-limit so the octave
             // stack stays a halo (HPF kills DC/rumble build-up, LPF tames the
-            // metallic hiss), softclip bounds runaway. STEREO shimmer — a
-            // PitchShift per channel — for a wide halo.
+            // metallic hiss), the saturator bounds runaway. STEREO shimmer, a
+            // PitchShift per channel, for a wide halo.
             ratio = (shimmer_pitch.round(1) / 12.0);
             ratio = (2 ** ratio).clip(0.25, 4);
             // pitchDispersion 0.02 (was 0): SC's own docs — uniform grain
@@ -742,7 +761,9 @@ Engine_Mangler : CroneEngine {
             // softens the robotic edge at the octave-up default.
             pitched = PitchShift.ar(rv, 0.2, ratio, 0.02, 0.01);
             pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
-            shimOut = (pitched * (shimmer > 0)).softclip;
+            // tanh for the same reason as the delay loop: this recirculates,
+            // and a halo is the last place that wants a hard knee in it.
+            shimOut = (pitched * (shimmer > 0)).tanh;
             LocalOut.ar(shimOut);
             Out.ar(out_bus, rv);
         }).add;
@@ -861,14 +882,23 @@ Engine_Mangler : CroneEngine {
         });
 
         // persist the live take across PSET save/load: write bufL/bufR to a
-        // private L/R pair (16-bit wav, async /b_write, bounded, core UGens).
+        // private L/R pair (24-bit wav, async /b_write, bounded, core UGens).
         // numFrames bounds the write to the take from frame 0; n <= 0 = whole buffer.
+        //
+        // 24, not 16: the buffer itself is 32-bit float, and every save/load
+        // round trip through a 16-bit file quantised the take again. This is
+        // also what the EXPORT is built on, so a bounced wav carries the depth
+        // too. The lua reader already decodes 16/24/32.
+        // IF YOU CHANGE THIS FORMAT, change `ctx.TAKE_BYTES` in mangler.lua
+        // to match. The export works out how big these files should be from
+        // that number and waits for them to get there. Set too low, it stops
+        // waiting early and hands on a file that is still being written.
         this.addCommand(\write_take, "si", { arg msg;
             var stem = msg[1].asString;
             var n = (msg.size > 2).if({ msg[2].asInteger }, { -1 });
             if(n <= 0, { n = -1 });
-            bufL.write(stem ++ "_L.wav", "wav", "int16", n);
-            bufR.write(stem ++ "_R.wav", "wav", "int16", n);
+            bufL.write(stem ++ "_L.wav", "wav", "int24", n);
+            bufR.write(stem ++ "_R.wav", "wav", "int24", n);
             ("mangler: wrote take " ++ stem ++ " ("
                 ++ (n < 0).if("full", { n.asString ++ " frames" }) ++ ")").postln;
         });

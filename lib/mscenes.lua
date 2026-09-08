@@ -89,7 +89,9 @@ local TIMBRE_IDS = {
   -- tape_rec — a scene changes how it sounds, never whether it is running.
   -- layer_sel stays out too: it is a UI cursor, like scene_slot.
   "lay1_level", "lay1_rate", "lay1_start", "lay1_end", "lay1_pre",
+  "lay1_fade", "lay1_width",
   "lay2_level", "lay2_rate", "lay2_start", "lay2_end", "lay2_pre",
+  "lay2_fade", "lay2_width",
   -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
   -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
   -- move your cursor, and a morph must never lerp it across slices.
@@ -199,6 +201,7 @@ local SCENE_EXCLUDE = {
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
   "lay1_file", "lay2_file", "layer_wet",
+  "lay1_snap", "lay2_snap",   -- a gesture, not state: it acts on the loop now
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",

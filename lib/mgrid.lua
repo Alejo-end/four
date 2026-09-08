@@ -408,8 +408,9 @@ local function layers_ws_key(x, y, z)
   if z ~= 1 then return end
   if y == 5 then                      -- rec: x1-2 = deck 1/2
     if x <= 2 then ptoggle(lay(x, "rec")) end
-  elseif y == 6 then                  -- mute: x1-2 = deck 1/2
-    if x <= 2 then ptoggle(lay(x, "play")) end
+  elseif y == 6 then                  -- mute: x1-2 = deck 1/2, snap: x4-5
+    if x <= 2 then ptoggle(lay(x, "play"))
+    elseif x == 4 or x == 5 then C.pulse(lay(x - 3, "snap")) end
   end
 end
 
@@ -603,6 +604,11 @@ local function draw_layers_ws()
     -- rec and mute, one column per deck
     gg:led(n, 5, recing and ((C.frame % 8) < 5 and 15 or 4) or 3, "red")
     gg:led(n, 6, playing and 9 or 3, "green")
+    -- SNAP: round this deck's loop length to match what else is playing.
+    -- LAYERS has no key free for it (K2 and K3 are taken, and holding K1 is
+    -- stop and erase on every page), so the grid and MIDI are where you reach
+    -- it. The automatic snap when a recording ends needs no button at all.
+    gg:led(n + 3, 6, d.any and 6 or 2, "yellow")
   end
 end
 

@@ -297,12 +297,70 @@ function M.cancel_load() cancel_all_fills() end
 --
 -- It is deliberately here in lua and not in the engine: no new SC command, no
 -- fingerprint change, no restart, and it yields so the screen stays live.
--- Catmull-Rom cubic, the same kernel a good sampler uses for varispeed.
-local function cubic(y0, y1, y2, y3, x)
-  local a = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3
-  local b = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
-  local c = -0.5 * y0 + 0.5 * y2
-  return ((a * x + b) * x + c) * x + y1
+-- To change a file's sample rate you have to work out what the signal was
+-- doing BETWEEN the samples you have. The shape used to do that is the whole
+-- quality question. The simple choice is a cubic curve through four
+-- neighbouring samples, which is what a sampler uses for varispeed; it is
+-- cheap and it filters nothing.
+--
+-- Filtering nothing is the problem when converting DOWNWARDS. A 96k file can
+-- hold sound up to 48 kHz, and 48k can only hold up to 24 kHz. Anything above
+-- that has to be REMOVED first, or it does not disappear: it comes back
+-- mirrored into the audible range as a tone that was never in the file. A
+-- cubic curve leaves it all there. This shape removes it.
+--
+-- It is built once per conversion and stored as a table of numbers, so the
+-- inner loop is lookups and multiplies rather than trigonometry. Measured at
+-- 1.9x the cost of the cubic it replaces (ten seconds of 44.1k stereo: 0.68s
+-- against 0.37s on a dev Mac). An import happens once, it already yields to
+-- keep the screen alive, and a library converted ahead of time never gets
+-- here at all.
+local SINC_TAPS = 16          -- samples looked at per output sample; more
+                              -- are used when converting downwards
+local SINC_PHASES = 512       -- how finely we can land between two samples.
+                              -- 1/512 of a sample off is inaudible
+
+-- `cutoff` says how much of the sound has to survive. Converting UP, the
+-- source file is the limit and nothing needs removing, so it is 1. Converting
+-- DOWN, the new rate is the limit, so it is the ratio between them, and
+-- everything above that has to go. Skip this and the mirrored-back tones are
+-- the loudest thing in the converted file.
+local function build_sinc(cutoff)
+  local pi = math.pi
+  local half = max(2, floor(SINC_TAPS / 2 / cutoff + 0.5))
+  local taps = half * 2
+  local k = {}
+  for ph = 0, SINC_PHASES - 1 do
+    local frac = ph / SINC_PHASES
+    local base = ph * taps
+    local sum = 0
+    for t = 0, taps - 1 do
+      local x = (t - half + 1) - frac         -- distance in SOURCE samples
+      local a = pi * cutoff * x
+      local s = (abs(a) < 1e-9) and cutoff or (cutoff * sin(a) / a)
+      -- Taper the ends of the shape smoothly to zero (a Blackman window), or
+      -- chopping it off at 16 samples rings.
+      -- Measured on a 96k to 48k conversion, as how loud a tone comes back
+      -- when it can only get through by being mirrored: 26k -13 dB, 30k
+      -- -40 dB, 36k -75 dB, 40k -85 dB. The cubic left all four at -0.2 dB.
+      -- So it takes until roughly half again above the limit to get really
+      -- quiet, which is what 16 samples buys. What does leak through lands at
+      -- 22 kHz and up, where the cubic was dropping the lot into the middle
+      -- of the music.
+      local u = (x + half) / taps
+      s = s * (0.42 - 0.5 * cos(2 * pi * u) + 0.08 * cos(4 * pi * u))
+      k[base + t + 1] = s
+      sum = sum + s
+    end
+    -- Make each set of numbers add up to exactly 1. Otherwise each one
+    -- amplifies very slightly differently, and since we cycle through them as
+    -- we go, that is a volume wobble at the rate we cycle. It is an audible
+    -- whine, not a rounding error.
+    if sum ~= 0 then
+      for t = 1, taps do k[base + t] = k[base + t] / sum end
+    end
+  end
+  return k, half, taps
 end
 
 -- open a file for random-access frame reads. nil for anything we cannot
@@ -347,8 +405,15 @@ local function read_frames(src, from, n, L, R)
   for i = o + got + 1, b - from do L[i], R[i] = 0, 0 end
 end
 
+-- the converted file is written at 24 BITS. It is the last stop before the
+-- engine buffer, and writing 16 threw away the bottom 8 bits of every 24-bit
+-- source before it ever got there: a conversion that fixed the pitch and
+-- quietly cost the depth.
 local SRC_BLOCK = 4096
-local SRC_PACK = "<" .. string.rep("i2", SRC_BLOCK * 2)
+local SRC_BITS = 24
+local SRC_BYTES = SRC_BITS // 8
+local SRC_PEAK = 8388607
+local SRC_PACK = "<" .. string.rep("i3", SRC_BLOCK * 2)
 
 -- returns true, seconds  — converted and written to out_path
 --         false, seconds — already at `sr`, nothing written
@@ -397,12 +462,15 @@ function M.convert_sr(path, out_path, sr, yield, max_secs)
   if not of then close_src(src); return nil, "cannot write " .. tostring(out_path) end
   -- header with placeholder sizes, backpatched at the end
   of:write("RIFF", string.pack("<I4", 36), "WAVE")
+  local obytes = SRC_BYTES * 2                    -- bytes per stereo frame
   of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
-    string.pack("<I2", 2), string.pack("<I4", sr), string.pack("<I4", sr * 4),
-    string.pack("<I2", 4), string.pack("<I2", 16))
+    string.pack("<I2", 2), string.pack("<I4", sr),
+    string.pack("<I4", sr * obytes),
+    string.pack("<I2", obytes), string.pack("<I2", SRC_BITS))
   of:write("data", string.pack("<I4", 0))
 
   local ratio = in_sr / sr
+  local kern, half, taps = build_sinc(min(1, sr / in_sr))
   local out_n = floor(frames / ratio)
   -- bound the OUTPUT, not just the input: the take buffer only holds max_secs
   -- anyway, and without this a corrupt header declaring a tiny rate expands a
@@ -416,31 +484,39 @@ function M.convert_sr(path, out_path, sr, yield, max_secs)
     local bn = min(SRC_BLOCK, out_n - written)
     local p0 = written * ratio
     local p1 = (written + bn - 1) * ratio
-    local lo = floor(p0) - 1
-    local hi = floor(p1) + 3
+    local lo = floor(p0) - half
+    local hi = floor(p1) + half + 1
     read_frames(src, lo, hi - lo + 1, L, R)
     for k = 0, bn - 1 do
       local pos = (written + k) * ratio
       local ip = floor(pos)
-      local fr = pos - ip
-      local j = ip - lo + 1
-      local vl = cubic(L[j - 1] or 0, L[j] or 0, L[j + 1] or 0, L[j + 2] or 0, fr)
-      local vr = cubic(R[j - 1] or 0, R[j] or 0, R[j + 1] or 0, R[j + 2] or 0, fr)
-      vl = vl * 32767
-      if vl > 32767 then vl = 32767 elseif vl < -32768 then vl = -32768 end
-      vr = vr * 32767
-      if vr > 32767 then vr = 32767 elseif vr < -32768 then vr = -32768 end
+      local ph = floor((pos - ip) * SINC_PHASES)
+      if ph >= SINC_PHASES then ph = SINC_PHASES - 1 end
+      local base = ph * taps
+      -- tap t reads source frame ip + t - half + 1; the kernel is even, so
+      -- the same coefficient serves both sides of the output position
+      local j = ip - lo - half + 2
+      local vl, vr = 0, 0
+      for t = 0, taps - 1 do
+        local c = kern[base + t + 1]
+        vl = vl + c * (L[j + t] or 0)
+        vr = vr + c * (R[j + t] or 0)
+      end
+      vl = vl * SRC_PEAK
+      if vl > SRC_PEAK then vl = SRC_PEAK elseif vl < -SRC_PEAK then vl = -SRC_PEAK end
+      vr = vr * SRC_PEAK
+      if vr > SRC_PEAK then vr = SRC_PEAK elseif vr < -SRC_PEAK then vr = -SRC_PEAK end
       out_v[k * 2 + 1] = floor(vl + 0.5)
       out_v[k * 2 + 2] = floor(vr + 0.5)
     end
-    local fmt = bn == SRC_BLOCK and SRC_PACK or ("<" .. string.rep("i2", bn * 2))
+    local fmt = bn == SRC_BLOCK and SRC_PACK or ("<" .. string.rep("i3", bn * 2))
     of:write(string.pack(fmt, table.unpack(out_v, 1, bn * 2)))
     written = written + bn
     since = since + 1
     if yield and since >= 4 then since = 0; yield() end
   end
 
-  local datalen = written * 4
+  local datalen = written * obytes
   of:seek("set", 4);  of:write(string.pack("<I4", 36 + datalen))
   of:seek("set", 40); of:write(string.pack("<I4", datalen))
   close_src(src); of:close()
@@ -542,40 +618,53 @@ function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
   return cuts
 end
 
--- interleave two 16-bit MONO wavs (the L/R pair write_take dumps)
--- into one stereo 16-bit wav — a browsable export that reloads via load sample,
--- ZERO new load code. Lua-only (no engine interleave). Returns true on success.
-local function open_pcm16_mono(path)
+-- interleave two MONO wavs (the L/R pair write_take dumps) into one stereo
+-- wav. A browsable export that reloads via load sample, ZERO new load code.
+-- Lua-only (no engine interleave). Returns true on success.
+--
+-- The samples are spliced as BYTES and the depth is read from the header, so
+-- this follows whatever the engine wrote rather than pinning the export to a
+-- depth of its own. write_take moved to 24-bit; this needed no other change.
+local function open_pcm_mono(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local _, ch, bits, sr, dpos, dlen = riff_parse(f)
-  if not dpos or bits ~= 16 or ch ~= 1 then f:close(); return nil end
+  local afmt, ch, bits, sr, dpos, dlen = riff_parse(f)
+  if not dpos or afmt ~= 1 or ch ~= 1 or not bits
+      or (bits ~= 16 and bits ~= 24 and bits ~= 32) then
+    f:close(); return nil
+  end
+  local bps = bits // 8
   f:seek("set", dpos)
-  return f, floor(dlen / 2), sr   -- handle, frames, sample rate
+  return f, floor(dlen / bps), sr, bps   -- handle, frames, rate, bytes/sample
 end
 
 function M.interleave_wav(pathL, pathR, out, yield)
-  local fL, nL, sr = open_pcm16_mono(pathL)
+  local fL, nL, sr, bps = open_pcm_mono(pathL)
   if not fL then return false end
-  local fR, nR = open_pcm16_mono(pathR)
+  local fR, nR, _, bpsR = open_pcm_mono(pathR)
   if not fR then fL:close(); return false end
+  -- a mismatched pair is not a stereo file: refuse rather than interleave
+  -- samples of two different widths into a header that can only claim one
+  if bpsR ~= bps then fL:close(); fR:close(); return false end
   local frames = min(nL, nR)
   local of = io.open(out, "wb")
   if not of then fL:close(); fR:close(); return false end
-  local datalen = frames * 4                      -- stereo 16-bit = 4 bytes/frame
+  local fb = bps * 2                              -- bytes per stereo frame
+  local datalen = frames * fb
   of:write("RIFF", string.pack("<I4", 36 + datalen), "WAVE")
   of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
-    string.pack("<I4", sr), string.pack("<I4", sr * 4), string.pack("<I2", 4), string.pack("<I2", 16))
+    string.pack("<I4", sr), string.pack("<I4", sr * fb), string.pack("<I2", fb),
+    string.pack("<I2", bps * 8))
   of:write("data", string.pack("<I4", datalen))
   local CHUNK = 8192                               -- frames per pass
   local i, since = 0, 0
   while i < frames do
     local n = min(CHUNK, frames - i)
-    local lc, rc = fL:read(n * 2), fR:read(n * 2)
-    if not lc or not rc or #lc < n * 2 or #rc < n * 2 then break end
+    local lc, rc = fL:read(n * bps), fR:read(n * bps)
+    if not lc or not rc or #lc < n * bps or #rc < n * bps then break end
     local buf = {}
-    for p = 1, n * 2, 2 do
-      buf[#buf + 1] = lc:sub(p, p + 1); buf[#buf + 1] = rc:sub(p, p + 1)
+    for p = 1, n * bps, bps do
+      buf[#buf + 1] = lc:sub(p, p + bps - 1); buf[#buf + 1] = rc:sub(p, p + bps - 1)
     end
     of:write(table.concat(buf))
     i = i + n
@@ -585,7 +674,7 @@ function M.interleave_wav(pathL, pathR, out, yield)
   -- a short read means the declared header over-states the data; backpatch the
   -- RIFF + data sizes to what we actually wrote so the wav isn't malformed.
   if i < frames then
-    local dl = i * 4
+    local dl = i * fb
     of:seek("set", 4); of:write(string.pack("<I4", 36 + dl))
     of:seek("set", 40); of:write(string.pack("<I4", dl))
   end
@@ -631,8 +720,10 @@ local SHORT = {
   layer_sel = "LAYER",
   lay1_level = "L1 LV", lay1_rate = "L1 RT", lay1_reverse = "L1 REV",
   lay1_start = "L1 ST", lay1_end = "L1 EN", lay1_pre = "L1 DUB",
+  lay1_width = "L1 WIDE",
   lay2_level = "L2 LV", lay2_rate = "L2 RT", lay2_reverse = "L2 REV",
   lay2_start = "L2 ST", lay2_end = "L2 EN", lay2_pre = "L2 DUB",
+  lay2_width = "L2 WIDE",
   ["@lay_level"] = "LVL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
@@ -2044,7 +2135,13 @@ local function body_LAYERS(frame)
   local d = decks[sel] or decks[1]
   local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
   ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
-  ptext(C.twave_any and "TAPE+2" or "2 DECKS", 2, 12, 1, 4)
+  -- the selected deck's LOOP LENGTH. With its rate on the other side these are
+  -- the two numbers that decide whether two decks stay locked or walk apart,
+  -- and this is what makes SNAP visible even in the case where it moves
+  -- nothing because the loop was already on the grid.
+  if C.loop_secs then
+    ptext(string.format("%.2fS", C.loop_secs(d)), 2, 12, 1, 5)
+  end
   -- what the decks RECORD: the EFFECTIVE source (the knob, or the bounce's
   -- WET override while a layer is armed). Flag a processed print, or the
   -- resample rig is a hidden mode. DRY draws nothing, same law as TAPE's.
@@ -2055,6 +2152,17 @@ local function body_LAYERS(frame)
   end
   for i = 1, math.min(#decks, 2) do
     layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
+  end
+  -- what SNAP just did, over the readout row it replaces for a moment. A snap
+  -- that lands on the length you already had moves nothing on screen, and a
+  -- page that cannot say so is indistinguishable from a key that did nothing.
+  if C.lay_msg and (frame - (C.lay_msg_at or -1e9)) < FPS * 1.2 then
+    -- the WHOLE row: a pocket cut only behind the words leaves the loop
+    -- seconds and the rate peeking out either side of the message, which
+    -- reads as garbage. A fresh action is the more urgent news, so it takes
+    -- the row outright and the readouts come back when it expires.
+    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
+    ptext_c(C.lay_msg, 64, 12, 1, 12)
   end
 end
 

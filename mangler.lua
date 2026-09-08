@@ -99,7 +99,7 @@ local PAGES = {
 
 local FPS = 15
 
-local tape_arm_phase = 0   -- head position when tape rec was armed
+local tape_arm_phase      -- head position when tape rec opened a pass; nil = none
 local polls = {}
 local redraw_clock
 
@@ -234,6 +234,11 @@ ctx.wav_info = Mpages.wav_info
 -- take, or every waveform, window bracket and pad slice draws against the
 -- wrong clock with no error anywhere.
 ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler.sc
+-- How many bytes per sample `write_take` puts on disk. MUST match the format
+-- in that command (`int24`, so 3). The export works out how big the file
+-- should be from this and waits for it to get there, so a number that is too
+-- small calls the file finished while a third of it is still being written.
+ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Mangler.sc
 ctx.SERVER_SR = 48000    -- norns' scsynth sample rate
 local BUF_SECS, SERVER_SR = ctx.BUF_SECS, ctx.SERVER_SR
 
@@ -283,6 +288,7 @@ Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 -- the same numbers update_mix sends, so it reads them from here
 ctx.mix_gains = Mtape.gains
 ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
+ctx.loop_secs = Mdeck.loop_secs       -- ...and the page prints the same law
 Mdeck.init(ctx)
 -- TWO more loop decks beside the tape, on softcut voices the script does not
 -- otherwise use. Their buffer regions start at 120s, leaving 60-120 clear:
@@ -315,6 +321,134 @@ end
 function ctx.layers_relevel()
   for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
 end
+
+-- ---------------------------------------------------------------------------
+-- SNAP: put a layer's loop LENGTH on the grid
+-- ---------------------------------------------------------------------------
+-- Recording a layer gives you exactly the length you played, which is never
+-- exactly the length you meant. Two loops of 3.97 and 4.02 seconds drift out
+-- of time with each other within a minute. Two that are an exact double, half
+-- or three-to-two of each other stay together indefinitely. SNAP is what gets
+-- you from the first to the second.
+--
+-- It rounds the length to match whatever you are most likely playing along
+-- with, looking in this order: the other deck if it has anything on it, then
+-- the take, then a bar at the current tempo. It only ever moves the END of
+-- the loop, because where a loop starts was decided by when you hit record
+-- and that is not this code's business to second-guess. It also means you can
+-- always undo it by hand.
+local SNAP_RATIOS = {
+  { 1 / 8, "1/8" }, { 1 / 6, "1/6" }, { 1 / 4, "1/4" }, { 1 / 3, "1/3" },
+  { 1 / 2, "1/2" }, { 2 / 3, "2/3" }, { 3 / 4, "3/4" }, { 1, "1" },
+  { 4 / 3, "4/3" }, { 3 / 2, "3/2" }, { 2, "2" }, { 3, "3" },
+  { 4, "4" }, { 6, "6" }, { 8, "8" },
+}
+-- how close a hand-played length has to be for the automatic snap to take it.
+-- 6% is the slop of someone trying to land on the beat; anything further out
+-- is a length you chose, and it is left exactly as you played it.
+local SNAP_TOL = math.log(1.06)
+
+-- This always hands back a real length. A deck whose loop has been squashed
+-- down to nothing still reads as a tenth of a second, so it is skipped here
+-- instead of being passed on for SNAP to reject; the take is checked the same
+-- way; and four beats is 0.8 seconds even at the fastest tempo the clock
+-- allows. Because of that, layer_snap needs no "there is no reference" case.
+-- A key that fires, changes nothing and says nothing is the one thing this
+-- page must never do.
+local function snap_reference(d)
+  for _, o in ipairs(ctx.layers) do
+    -- ...and not one that is still being recorded. While a deck records its
+    -- first pass its loop is held open at the full 60 seconds, and it counts
+    -- as "has audio" the moment it hears anything, so it would offer 60
+    -- seconds as the length to match. Record both layers at once and stop one
+    -- of them: without this, it snapped to an eighth of 60 seconds, which is
+    -- a number off the buffer and nothing to do with the music.
+    if o ~= d and o.any and not o.arm_phase and Mdeck.loop_secs(o) > 0.1 then
+      return Mdeck.loop_secs(o), o.name
+    end
+  end
+  local _, _, span = window_bounds()
+  if ctx.wave_any and span * BUF_SECS > 0.1 then
+    return span * BUF_SECS, "TAKE"
+  end
+  return 240 / ctx.tempo(), "BAR"            -- four beats of the clock
+end
+
+-- One short line on the LAYERS page, and the full story printed to the log.
+-- A snap that lands on the length you already had changes nothing you can
+-- see, and a page that cannot say so looks exactly like a dead key. The
+-- screen gets the short form because a line has to fit in 124 pixels.
+--
+-- The scene page has its own version of this (mscenes' `say`). Both hold the
+-- same two things, the text and the frame it was set on, so merging them into
+-- one shared helper later is straightforward. Their LOOK stays separate on
+-- purpose: the scene page draws a small inverted box, which suits "SAVED 2"
+-- but would be a 111-pixel slab for a sentence like the ones here.
+local function layer_say(msg, detail)
+  ctx.lay_msg, ctx.lay_msg_at = msg, ctx.frame or 0
+  print("mangler: " .. (detail or msg))
+end
+
+-- tol = nil forces the snap; tol = a log-ratio only takes it when the length
+-- was already that close (the automatic pass at the end of a record).
+function ctx.layer_snap(d, tol)
+  d = d or ctx.layer_sel()
+  local ref, from = snap_reference(d)
+  local cur = Mdeck.loop_secs(d)
+  local best, label, err = 1, "1", math.huge
+  for _, r in ipairs(SNAP_RATIOS) do
+    -- compare in LOG space so 1/2 and 2 are equally near, the way an ear
+    -- hears them: a linear nearest would pull everything toward the top
+    local e = math.abs(math.log(cur / (ref * r[1])))
+    if e < err then err, best, label = e, r[1], r[2] end
+  end
+  if tol and err > tol then return end
+  -- Measure from the LOWER of the two edges, not from "start". The loop
+  -- points can legally be the other way round, and everything else that reads
+  -- them sorts them first. Trusting "start" on a back-to-front loop moved it
+  -- to a completely different stretch of the deck, while the message on
+  -- screen said nothing had changed.
+  local lo = math.min(clamp(pget(Mdeck.p(d, "start"), 0), 0, 1),
+    clamp(pget(Mdeck.p(d, "end"), 1), 0, 1))
+  local want = ref * best
+  local len, room = want, (1 - lo) * d.len
+  -- keep it inside the region by halving, because half of a musical length is
+  -- still one. If not even that fits, REFUSE: manufacturing a 100ms loop and
+  -- labelling it a ratio is worse than saying no, and it puts a grid in the
+  -- message that the loop is not on.
+  while len > room and len / 2 >= 0.1 do len = len / 2 end
+  if len > room then
+    layer_say(d.name .. " NO ROOM TO SNAP",
+      string.format("%s SNAP refused: %.2fs left in the region, and the nearest"
+        .. " %s x %s is %.2fs. Move the loop start back first.",
+        d.name, room, label, from, want))
+    return
+  end
+  Mdeck.set_loop(d, lo, clamp(lo + len / d.len, 0, 1))
+  -- report what LANDED, not what was asked for. The region clamp and softcut's
+  -- own 100ms floor can both move it, and this message is the only proof the
+  -- key did anything, so it is the last thing that may guess.
+  local got = Mdeck.loop_secs(d)
+  local on = math.abs(got - want) < 0.005 and (label .. " x " .. from)
+    or ("FIT " .. from)
+  if math.abs(got - cur) < 0.005 then
+    -- The loop did not move, so the playhead must not either. Sending it back
+    -- to the start would restart the phrase mid-performance under a message
+    -- saying nothing changed, and two decks only keep their timing against
+    -- each other while both heads keep running. It is why MUTE lowers a
+    -- deck's volume instead of stopping it.
+    layer_say(string.format("%s ON GRID %s", d.name, on),
+      string.format("%s SNAP: already %s (%.3fs)", d.name, on, cur))
+  else
+    Mdeck.jump(d, lo)
+    layer_say(string.format("%s %.2f>%.2fS %s", d.name, cur, got, on),
+      string.format("%s SNAP: %.3fs -> %.3fs (%s; %s = %.3fs)",
+        d.name, cur, got, on, from, ref))
+  end
+end
+
+-- the automatic pass, called by the loop-pedal close in lib/mdeck.lua
+function ctx.layer_quantize(d) ctx.layer_snap(d, SNAP_TOL) end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
@@ -570,6 +704,10 @@ local KEYS = {
       poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end },
     erase = function()
       local d = ctx.layer_sel()
+      -- Cancel any recording in progress BEFORE stopping it. Otherwise the
+      -- deck sets a loop around audio we are one line away from erasing, and
+      -- announces it on screen.
+      Mdeck.abort_loop(d)
       params:set(Mdeck.p(d, "rec"), 0)
       Mdeck.clear(d)
       params:set(Mdeck.p(d, "start"), 0)
@@ -1420,12 +1558,15 @@ function ctx.take_to_wav(out, done)
   -- interleaved into the new file.
   os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
   engine.write_take(tmp, take_frames())   -- async dump to tmp_L.wav / tmp_R.wav
-  -- expected bytes per mono 16-bit wav (2 B/frame + 44 B header). we wait for
-  -- BOTH files to REACH that size and stop growing, not just plateau — a slow
-  -- SD card could stall mid-write and read as "stable" at a partial size, which
-  -- would hand back a truncated take. the cap scales with the take so a big
-  -- (regen/60s) dump gets time to finish; it's only a backstop.
-  local exp = take_frames() * 2 + 44
+  -- How big each mono file should end up: one sample per frame, plus a 44
+  -- byte header. We wait for both to REACH that size and then stop changing.
+  -- Waiting for them to merely stop changing is not enough, because a slow SD
+  -- card can pause mid-write and look finished at half a file. That is why
+  -- the byte width has a name of its own: while it was stuck at 2 and the
+  -- engine wrote 3, this check passed at two thirds and exported a cut-off
+  -- take. The time limit scales with the take so a long one gets time to
+  -- finish. It is only there to stop us waiting forever.
+  local exp = take_frames() * ctx.TAKE_BYTES + 44
   local cap = math.max(100, math.ceil(exp / 200000) + 80)
   export_clock = clock.run(function()
     local pL, pR, stable = -1, -1, 0
@@ -1788,7 +1929,7 @@ local function init_params()
   -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
   -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
   -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 20)
+  params:add_group("grp_layers", "layers", 26)
   params:add_number("layer_sel", "layer", 1, 2, 1)
   -- the BOUNCE: while ON (the default), arming a layer records the processed
   -- engine output instead of the raw input — resampling is just K2 on LAYERS.
@@ -1807,10 +1948,17 @@ local function init_params()
     params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
     params:set_action(q("rec"), function(v)
       -- arming: settle the record SOURCE before the head opens (the bounce
-      -- may throw it WET); disarming: close the head before restoring it
-      if v == 1 then ctx.update_cut_source() end
-      Mdeck.update_rec(deck())
-      if v ~= 1 then ctx.update_cut_source() end
+      -- may throw it WET), and open the loop so nothing you play is cut off;
+      -- disarming: close the head, then close the loop around what you played
+      if v == 1 then
+        ctx.update_cut_source()
+        Mdeck.arm_loop(deck())
+        Mdeck.update_rec(deck())
+      else
+        Mdeck.update_rec(deck())
+        Mdeck.close_loop(deck())
+        ctx.update_cut_source()
+      end
     end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
     params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
@@ -1833,30 +1981,65 @@ local function init_params()
     params:add_control(q("pre"), "L" .. n .. " overdub",
       controlspec.new(0, 1, "lin", 0, 1.0, ""))
     params:set_action(q("pre"), function() Mdeck.update_rec(deck()) end)
+    -- The join where the loop starts over. Short is a clean cut and a hard
+    -- downbeat; long is a blend that hides the join landing mid-note.
+    params:add_control(q("fade"), "L" .. n .. " seam",
+      controlspec.new(0.001, 0.5, "exp", 0, 0.02, "s"))
+    params:set_action(q("fade"), function() Mdeck.update_fade(deck()) end)
+    -- Stereo width: 1 is the deck's own full left and right, 0 folds it to
+    -- the middle. Two decks playing related material, both at full width, is
+    -- a wall of sound with no room to hear either one.
+    params:add_control(q("width"), "L" .. n .. " width",
+      controlspec.new(0, 1, "lin", 0, 1.0, ""))
+    params:set_action(q("width"), function() Mdeck.update_width(deck()) end)
+    -- A momentary switch, so a footswitch can reach it. There is no key left
+    -- for this: LAYERS already uses K2 and K3, and holding K1 is reserved for
+    -- stop and erase on every page. So it lives in PARAMS, on MIDI and on the
+    -- grid, the same as pad_chop. The automatic snap when a recording ends
+    -- needs no key at all.
+    params:add_binary(q("snap"), "L" .. n .. " snap loop", "momentary", 0)
+    params:set_action(q("snap"), function(v)
+      if v == 1 then ctx.layer_snap(deck()) end
+    end)
   end
 
   params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
   -- mirror the SC side's workflow: arming with no overdub opens the loop to
   -- the full tape for a fresh take; stopping snaps the loop around the take
-  -- and jumps the head to its start, so it plays back tight immediately
+  -- and jumps the head to its start, so it plays back tight immediately.
+  -- The layer decks do the same thing through Mdeck.arm_loop / close_loop.
+  -- This is the older, hand-written copy, still here on purpose: lib/mtape.lua
+  -- explains why and lists where the two differ. Change one, change both.
   params:set_action("tape_rec", function(v)
     if v == 1 then
-      if pget("tape_pre", 0) == 0
-          and (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
-        params:set("loop_start", 0)
-        params:set("loop_end", 1)
+      -- Replace means "record a new take", overdub means "add to the one you
+      -- already have". Only the first of those is allowed to re-cut the loop
+      -- when you stop. Without this mark, stopping an overdub set the loop to
+      -- whatever stretch happened to go by, so every layer you stacked made
+      -- the loop shorter, down towards a tenth of a second, with all the
+      -- audio still sitting in the buffer. Mdeck.arm_loop draws the same line
+      -- by asking whether the deck already holds anything.
+      tape_arm_phase = nil
+      if pget("tape_pre", 0) == 0 then
+        if (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
+          Mtape.set_loop(0, 1)
+        end
+        tape_arm_phase = ctx.tape_phase
       end
-      tape_arm_phase = ctx.tape_phase
+    elseif not tape_arm_phase then
+      -- an overdub, or a pass this action never opened: leave the loop alone
     elseif ctx.tape_phase > tape_arm_phase + 0.005 then
-      params:set("loop_start", tape_arm_phase)
-      params:set("loop_end", ctx.tape_phase)
+      Mtape.set_loop(tape_arm_phase, ctx.tape_phase)
       Mtape.jump_to(tape_arm_phase)
+      tape_arm_phase = nil
     elseif ctx.tape_phase < tape_arm_phase - 0.005 then
       -- head wrapped past the tape end mid-take: softcut loops can't cross
       -- the seam, so keep the full tape rather than snapping a wrong slice
-      params:set("loop_start", 0)
-      params:set("loop_end", 1)
+      Mtape.set_loop(0, 1)
+      tape_arm_phase = nil
+    else
+      tape_arm_phase = nil
     end
     Mtape.update_tape_rec()
   end)
