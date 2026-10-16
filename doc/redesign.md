@@ -7,10 +7,12 @@ still pending (grid code and key-feel are untestable in the sim). Written
 
 > **Superseded in part by S23** (doc/spec.md, 2026-07-17 play-test fixes): the
 > nine-station SPACE page was split back into separate **DELAY** and **REVERB**
-> pages (**ten stations** now), and the **sequencer was removed** — PADS is a
+> pages, and the **sequencer was removed** — PADS is a
 > pure 8-slice play/sound-lock surface. The `seq_slice` id is KEPT as the slice
 > selector (ids are never renamed), so the "merge into one `slice` param" note
-> below is behavioral only. Read S23 for the current page layout.
+> below is behavioral only. Later changes added LAYERS and folded EROSION into
+> VOICE and ORBIT into SCENE: **eleven stations** today. README.md's Pages
+> table is the current control map.
 **North star:** "make it feel like the S-4" — sleek, immediate, confident,
 fluid, unified, restrained — while staying strictly norns-native
 (128x64 OLED · 3 keys · 3 encoders · optional grid · no color).

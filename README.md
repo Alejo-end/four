@@ -33,8 +33,8 @@ Then SYSTEM > RESTART on the norns and pick mangler in SELECT. Two rules:
 1. `--delete` matters. A stale second copy of `Engine_Mangler.sc` anywhere under
    `dust/code` hangs every norns script on LOADING.
 2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
-   reload. After a restart the maiden log prints the engine command count; the expected
-   number is in CLAUDE.md, and a different number means an old engine is still running.
+   reload. After a restart the maiden log prints the engine command count. It must read
+   `count: 65`; any other number means an old engine is still running.
 
 ## First session
 
@@ -180,8 +180,8 @@ green plays, white is the cursor, purple is destructive. Details in `lib/mgrid.l
 
 1. Every script hangs on LOADING: almost always a duplicate engine class under `dust/code`.
    Redeploy with `rsync --delete`. Errors appear in maiden's SC tab, not matron.
-2. Engine edits do nothing: you skipped SYSTEM > RESTART, or the printed command count does
-   not match the expected one in CLAUDE.md.
+2. Engine edits do nothing: you skipped SYSTEM > RESTART, or the printed command count is
+   not `count: 65`.
 3. Dry playback has reverb on it: check the system reverb under PARAMS, a raised reverb or
    delay mix, or clouds feedback. K1 plus K3 zeros all of them.
 4. Reverb knobs beyond decay, damp and mix do nothing: JPverb is not installed and the

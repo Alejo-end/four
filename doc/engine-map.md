@@ -42,8 +42,9 @@ Every plugin UGen (JPverb, MiClouds, DFM1) is looked up by name so the file comp
 it, and wrapped in `try` so a mismatch degrades to the stock fallback instead of failing to
 load. A missing plugin costs lushness, never the instrument.
 
-The command count printed at load is the deploy truth. If it does not match the number in
-CLAUDE.md, an old engine is running and nothing you test means anything. New args on
+The command count printed at load is the deploy truth: it must read `count: 65`. Any other
+number means an old engine is running and nothing you test means anything
+(tools/test_control.lua parses the command set and fails if it is not 65). New args on
 existing commands are preferred over new commands so the count moves rarely.
 
 The grain envelope buffers are filled before the server sync so the first grain that fires

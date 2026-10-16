@@ -47,8 +47,8 @@ errors land there, not in matron. A duplicate engine class is the classic cause.
 
 | # | Check | Pass | Suspect on failure |
 |---|---|---|---|
-| 1.1 | E1 through all **13** pages (12 on `main`) | Every page draws; no black screen | A black screen is a Lua error in `redraw` — scroll maiden below `<ok>` for the traceback |
-| 1.2 | Page order | TAKE VOICE TAPE · FILTER DELAY REVERB · MIX · PADS MOTION SCENE · ORBIT EROSION · LAYERS | — |
+| 1.1 | E1 through all **11** pages | Every page draws; no black screen | A black screen is a Lua error in `redraw` — scroll maiden below `<ok>` for the traceback |
+| 1.2 | Page order | TAKE VOICE · TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE | — |
 | 1.3 | SC tab clean | No errors after load | The guarded plugins (JPverb, MiClouds, DFM1) fall back silently; a *posted* error means a wrong arg order |
 | 1.4 | Input reaches the meter | TAKE's IN meter moves with your source | Levels / `monitor_level`, not the engine |
 
@@ -64,7 +64,7 @@ window snaps to it and it loops back dry.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 2.1 | **Erosion respects STOP** | EROSION, `erode` ~0.5, window short (~0.5s). K1+K2 STOP. Leave 5 min. START. | The take is *unchanged* | The `level` gate in `\mangler_play` — `level` must be reaching the play synth via `playParams` |
+| 2.1 | **Erosion respects STOP** | VOICE in PLAY, hold K1, E2 = `erode` ~0.5, window short (~0.5s). K1+K2 STOP. Leave 5 min. START. | The take is *unchanged* | The `level` gate in `\mangler_play` — `level` must be reaching the play synth via `playParams` |
 | 2.2 | **Punch-in doesn't truncate the save** | Narrow the window to ~2s. Punch a ~200ms overdub (K2, tap, K2). PSET SAVE. Reload script, PSET LOAD. | The **whole** take is back, not 2s of it | `take_len` must be grow-only on the rec-off edge |
 | 2.3 | **PRINT aborts on STOP** | `print_len` 8s, fire PRINT (PARAMS), hit K1+K2 STOP after ~3s | Maiden says "PRINT aborted by STOP"; **the take is untouched**; no part-silent wav left behind | The abort watch inside `record_pass` |
 
@@ -130,7 +130,7 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 | 4.16 | `erode` ~0.3 | Darkens over passes, no runaway | — |
 | 4.17 | `erode` at speed 2 and speed −1 | Ages at the **same rate** | The constant-rate `eroPhase` head |
 | 4.18 | Raise `regen` while `erode` > 0 | `erode` drops to 0 (and vice versa) | The param-layer interlock |
-| 4.19 | EROSION K2 HEAL / K3 SCAR | Round-trip; **`regen` comes back too** | Both snapshot `regen` |
+| 4.19 | VOICE K2 = HEAL (PLAY mode) | Round-trip; **`regen` comes back too** | The HEAL throw snapshots `regen` |
 
 ---
 
@@ -167,7 +167,7 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 | 6.11 | MOTION with `motion_len` shortened | The **end** of the gesture still plays | `src_of` endpoints |
 | 6.12 | ◇ purity mark | Lights only at full wet on an unmangled take; dark at the 0.5 default, dark while the tape or a layer is audible, dark with pan off center | `purity()` — it is *supposed* to be rare now; tools/test_purity.lua walks every reason offscreen |
 | 6.13 | Grid: hold a note pad, toggle note input off, release | **No stuck voice** | The press-only gate |
-| 6.14 | Grid: two-finger rack/scene pads | One release doesn't kill the other's audition/peek | Per-pad ownership |
+| 6.14 | Grid: two-finger scene pads | One release doesn't kill the other's audition/peek | Per-pad ownership |
 | 6.15 | Launchpad colours | Semantic hues, no flicker | The reused SysEx buffer |
 
 ---
@@ -198,7 +198,7 @@ The one measurement that matters on a Pi 4.
 
 ## Stage 9 — Layers (S25)
 
-Only on the `layers` branch. No engine change, so the count is still 65.
+No engine change, so the count is still 65.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
@@ -249,6 +249,29 @@ layer work is Lua only.
 | 11.12 | Import is not slower than patience | Load a long off-rate file, and separately a 96k one | The screen stays live throughout. Budget, measured on a dev Mac for 10s of stereo: 44.1k 0.68s (1.9x the old cubic), 88.2k 1.17s (2.3x), 96k 1.25s (2.5x), 192k 2.34s (3.2x). **A Pi will take tens of seconds for a minute of audio, and longer coming down than up** | If that is too slow, `SINC_TAPS` is the knob. The kernel widens as 1/cutoff, so DOWNsampling costs the most, which is the case 11.11 is about. Mac numbers only; the Pi is NOT measured |
 | 11.13 | The resample blend is clean | `resample` at 0.5, record, play the take back | No hollow phasey colour on the blend | The pre-limiter tap. This is the comb the notes parked for a device measurement |
 | 11.14 | Delay and shimmer saturate warmer | INF the delay and slam it; shimmer up with a hot source | It thickens rather than fraying | `tanh` replaced `softclip` in both recirculating loops. If a hold now decays where it used to sustain, that is the earlier knee, so say so |
+
+## Stage 12: the full-review batch (Lua only)
+
+No engine change. A save and reload is enough on its own, but this rides the
+same RESTART as everything above. Each row is a bug that was proven offscreen
+and fixed; the device check is that the fix FEELS right.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 12.1 | **A late conversion cannot eat a take** | Load a 44.1k sample (it converts in the background), and record a phrase straight away | When the conversion finishes, the maiden log says it was dropped; your phrase is still the take | `take_gen` in `load_at_rate` |
+| 12.2 | The first take of a session is the take | Fresh boot, record 4s, SNAP on TAKE | SNAP finds the take; a PSET save writes a small file | The `rec_open` edge in the rec action |
+| 12.3 | LAYERS keys stay on their deck | Hold K2 (REC) on L1, turn E2 to L2, let go | L1 stops recording | `LAYER_KEYS` |
+| 12.4 | A saved tape loop survives its first disarm | Save a PSET while the tape records; load it; tap TAPE K2 | The loop stays as saved | `tape_arm_phase` reset in `action_read` |
+| 12.5 | A mis-tapped tape REC keeps the loop | Set a tight tape loop, tap REC twice quickly | The loop is unchanged | `tape_arm_was` |
+| 12.6 | A long tape seam on a short loop | Tape loop 0.3s, `tape_fade` 0.4 | The loop stays audible | `Mtape.set_fade` through `D.update_fade` |
+| 12.7 | **STOP stills the pictures** | K1+K2 on TAPE and on VOICE | The reels stop and the VOICE texture lies flat; the grid playheads dim | `body_TAPE`, `body_VOICE`, `draw_main_ws` |
+| 12.8 | The grid keeps the screen awake | Play only the grid for 3 minutes | The screen does not dim | `ctx.touch_input` |
+| 12.9 | A float WAV from ffmpeg | Load a 32-bit float 96k render | It plays in tune at the right level and draws a real waveform | The extensible SubFormat parse |
+| 12.10 | A right-only stereo loop draws | Load a hard-panned stereo loop of about 5s | The strip shows the hits | The odd preview stride |
+| 12.11 | Scenes and the orbit | Orbit on; hold K1+K3 on SCENE | The slot you pressed on is cleared, not the one the orbit moved to | `ctx.k13_slot` |
+| 12.12 | A recall after a scene captured on an empty layer | Capture, record 4s into L1, recall | L1 loops the 4s, not 60s | `clamp_stored` deck extents |
+| 12.13 | MOTION with long lanes | Record 60s of four knobs, stay on MOTION | The screen and the encoders stay responsive | `body_MOTION`'s per-column drawing |
+| 12.14 | Import keeps the screen live | Load a 96k file | The screen updates smoothly while it converts | `convert_sr` yields every block |
 
 ## When it passes
 

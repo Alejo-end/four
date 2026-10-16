@@ -182,8 +182,8 @@ two-pad span gesture the window and the tape loop already use, showing where the
 loop sits and where the head is. Row 5 arms (one column per deck), row 6 mutes.
 Recording blinks; a muted deck's row dims, so what is lit is what you hear.
 
-Thirteen pages drops the header dot pitch from 4 to 3, which the header already
-handles (`min(5, floor(45/(#PAGES-1)))`) and has done before.
+The header dot pitch adapts to the page count (`min(5, floor(45/(#PAGES-1)))`);
+LAYERS is page 4 of 11 since the family regrouping.
 
 ## What is deliberately NOT in this stage
 

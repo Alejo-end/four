@@ -302,6 +302,13 @@ no clipping, no xruns with a stretch mode + tape + all FX engaged.
 
 ## 10. Page → control map (NU redesign — 9 stations)
 
+> **HISTORY.** This table describes the nine-station redesign as it landed.
+> The instrument has eleven stations now, the sequencer is gone, DELAY and
+> REVERB are separate pages, and STOP truly halts. The current control map is
+> README.md's Pages table, and the source of truth is `ENC_MAP`, `VOICE_FACE`
+> and `KEYS` in mangler.lua. Every per-stage section in this file is history in
+> the same way; doc/device-gate.md is the current acceptance test.
+
 The redesign merged the old 14 pages into 9 stations and replaced per-page alt
 keys with a **global alt layer** — the same three chords on every page:
 
