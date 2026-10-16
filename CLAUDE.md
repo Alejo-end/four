@@ -13,9 +13,10 @@ the status block current, and add a change-log entry for every change.
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 65`**.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 12, top to bottom. When it
+- **The one walkthrough:** doc/device-gate.md, stages 0 to 13, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 78th, the full review (doc/changelog.md). Lua only.
+- **Latest change:** the 79th, the additions after the review (doc/changelog.md). Lua only.
+  Work lives on the `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
@@ -213,7 +214,14 @@ Each line was learned the hard way; the change log has the story.
 ## Workflow
 
 ```sh
-# static check (local luac is 5.5; norns runs 5.3, so this is necessary, not sufficient)
+# EVERYTHING below in one command, with one verdict: syntax, the five harnesses,
+# and source == single-file build across all render variants. With LUA53 set to a
+# Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
+# it runs on 5.3, which is the only check of what the device actually accepts.
+LUA53=/path/to/lua-5.3.6/src/lua lua tools/check.lua
+
+# static check alone (local luac is 5.5; norns runs 5.3, so without LUA53 this is
+# necessary, not sufficient)
 luac -p mangler.lua lib/*.lua
 
 # render every page to PGM with NO hardware (tools/uisim stubs norns and runs the REAL
@@ -237,13 +245,18 @@ lua tools/test_purity.lua    # the ◇ mark: every source, hold and writer kills
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
 lua tools/amalgamate.lua
 
+# the control map: doc/controls.md is GENERATED from ENC_MAP/VOICE_FACE/KEYS; rerun
+# after changing a page's knobs or keys (test_control fails on a stale one)
+lua tools/controls.lua
+
 # deploy (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
 ```
 
 To prove a refactor changes nothing: render all four variants (base, empty, grain,
 filter) before and after and byte-compare the PGMs, then render `dist/mangler_single.lua`
-the same way.
+the same way. Compare renders made by the SAME interpreter: `math.random` differs between
+Lua 5.3 and 5.5, so the orbit's shot differs across them by design.
 
 **Screen rules (hold these on every page):**
 - Brightness encodes audibility: a thing that is not sounding lies flat and dim (mode

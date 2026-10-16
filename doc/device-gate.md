@@ -273,6 +273,24 @@ and fixed; the device check is that the fix FEELS right.
 | 12.13 | MOTION with long lanes | Record 60s of four knobs, stay on MOTION | The screen and the encoders stay responsive | `body_MOTION`'s per-column drawing |
 | 12.14 | Import keeps the screen live | Load a 96k file | The screen updates smoothly while it converts | `convert_sr` yields every block |
 
+## Stage 13: the additions (Lua only)
+
+No engine change. Each row is tested offscreen; the device check is how it
+feels and that the norns calls behave as the stubs assume.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 13.1 | **The motion loop rides the PSET** | Record a gesture, save a PSET, load another, load it back | The loop returns and plays; a saved arm does not start recording | `Mmotion.pset_write` / `pset_read` |
+| 13.2 | GLIDE recall | PARAMS > scenes > recall quantize GLIDE, glide beats 4, recall a slot | The sound sweeps over a bar and lands; the ◄ cell holds where it began | `M.glide`, `glide_tick` |
+| 13.3 | The orbit yields | Orbit on, then ride K1+E1 | The wander stands still under your hand and resumes two seconds after you let go | `orbit_tick`'s `hand_at` |
+| 13.4 | A synced delay stays synced | `delay_sync` 1/4, then recall a scene with a different delay time | The echoes stay on the beat | `sync_delay_time` |
+| 13.5 | A short deck saves small | A 4s layer loop, PSET save | `lay1-N.wav` is about 4s, not 60; loading it back plays the loop with nothing after it | `Mdeck.save_secs`, the clear before the read |
+| 13.6 | The take strip follows erosion | Erode a take for a minute, then erode to 0 | The TAKE strip redraws darker within a few seconds | `ctx.refresh_take_strip` |
+| 13.7 | **Launchpad hot-plug** | Start with no Launchpad, then plug the Mini MK3 in; later unplug it | It lights and plays the moment it is plugged in; unplugged, nothing hangs | `Mgrid.hotplug`, norns' `midi.add` / `midi.remove` |
+| 13.8 | Launchpad arrows | Left/right, then up/down | Left/right step the page (the name pops), up/down step the scene slot | The CC numbers 91 to 94 in Programmer mode |
+| 13.9 | Grid piano in pad mode | Pad input on, play the grid piano | The keys whose pad sounds light orange | `draw_spine`'s `pad_on` |
+| 13.10 | A frame error does not freeze | (only if one happens) | maiden prints `frame error` and the screen keeps moving | The `pcall` around `frame_tick` |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new

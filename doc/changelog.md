@@ -2836,6 +2836,45 @@ fix; 573 assertions).
 * VERIFIED: luac clean, 573 assertions (298/109/82/41/43), all renders
   byte-identical to the previous pass, source == dist.
 
+
+Seventy-ninth change: **the additions after the review (Lua + tooling + docs,
+ENGINE UNTOUCHED, fingerprint STAYS 65, on branch `full-review`)**. The Lua
+items from the plan's Phase 5, each with a test.
+* **Live safety**: the per-frame jobs run under `pcall` (an error is printed
+  at most every 5 seconds and the frames go on); while `delay_sync` is on the
+  clock owns `delay_time` (any other write is put back next frame, with a
+  0.5% tolerance for MIDI clock jitter); background jobs QUEUE instead of
+  refusing, so a PSET with an off-rate take and an off-rate layer converts
+  both.
+* **Scenes and motion**: GLIDE is a fourth `scene_recall_mode` (the morph
+  sweeps to the scene over `scene_glide` beats, then the scene lands; a hand
+  on the morph or the selector stops it); a running orbit stands still while
+  anything else moves the morph and resumes two seconds later; the motion
+  loop saves beside the PSET (motion-N.lua) and comes back playing, while a
+  saved arm does not start a recording; a first motion pass within 6% of a
+  musical length loops on it (`ctx.clock_length`, sharing `nearest_ratio`
+  with the layers' SNAP).
+* **Material**: deck and tape PSET saves stop at the end of their material
+  (`Mdeck.save_secs`) and a restore clears the region before reading;
+  stopping regen or erosion dumps the take and repaints its strip, dropped if
+  the take changed meanwhile; 8-bit WAV decodes, and a frame wider than its
+  stated depth reads the container.
+* **Grid**: in pad mode the piano lights the keys whose pad sounds; a Mini MK3
+  plugged in after load takes over (`midi.add`/`midi.remove`, restored in
+  cleanup), its arrows step the page (`ctx.step_page`, shared with E1) and
+  the scene slot, and unplugging brings the fallback grid back.
+* **Tooling**: a per-page screen-call budget (2500 a frame under a loaded
+  state; MOTION draws about 2100 at the lane cap); `tools/controls.lua`
+  generates doc/controls.md from the script's own tables and test_control
+  fails on a stale one; `tools/check.lua` runs every offline check with one
+  verdict, on Lua 5.3 when `LUA53` points at one. Built lua-5.3.6 from
+  lua.org: the code parses and all five harnesses pass on 5.3. Renders match
+  across 5.3 and 5.5 except SCENE_ORBIT, because `math.random` differs.
+* RENDERS: only base_10_MOTION_PLAY changed (its 1.40s pass now loops at
+  1.33s, two thirds of a bar at 120). Device rows: doc/device-gate.md stage 13.
+* VERIFIED: 611 assertions (330/112/85/41/43), every new behaviour
+  mutation-checked, `tools/check.lua` green on Lua 5.3.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

@@ -25,13 +25,14 @@ Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
 2. Make sure that maiden reads `count: 65`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 12, top to bottom. If a stage
+3. Walk doc/device-gate.md from stage 0 to stage 13, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
 
-Stage 12 is new. It covers the fixes in this review that only hardware can
-judge. For example, a late sample conversion must no longer replace a live take.
+Stages 12 and 13 are new. They cover the review's fixes and the additions
+that only hardware can judge. For example, a late sample conversion must no
+longer replace a live take.
 
 ## Phase 2: the engine batch
 
@@ -112,28 +113,36 @@ paramset dump, test scripts, and byte-identical renders.
 
 ## Phase 5: features worth adding
 
-Ranked by value for cost. Small means an afternoon with tests.
+Most of this phase is built (the 79th change in doc/changelog.md). These need
+no engine change and are tested offscreen:
+
+- The frame loop survives a Lua error, and reports it every 5 seconds at most.
+- The motion loop saves with the PSET and comes back playing.
+- The orbit stands still while anything else moves the morph, and resumes two
+  seconds later.
+- A synced delay stays on the clock, whatever else writes its time.
+- 8-bit WAV files decode, and a frame wider than its stated depth reads the
+  container.
+- Every page stays within 2500 screen calls a frame (a test).
+- A first motion pass close to a musical length loops on it.
+- In pad mode the grid piano lights the keys whose pad sounds.
+- A Mini MK3 plugged in after load takes over, and its arrows step the page
+  and the scene slot.
+- Background jobs queue instead of refusing.
+- GLIDE recall: the morph sweeps to a scene over N beats, then it lands.
+- Deck and tape PSET saves stop at the end of their material.
+- After regen or erosion stops, the take strip repaints.
+- doc/controls.md is generated from the code.
+- `tools/check.lua` runs every offline check. With a Lua 5.3 build set up, it
+  runs them on the norns version.
+
+Only the engine items remain. They wait for Phase 1:
 
 | Feature | Why | Cost |
 |---|---|---|
-| Guard the redraw clock with `pcall` | One Lua error today freezes the screen, the morph, motion and the grid, and every key press then reads as a tap | small |
-| Persist the motion loop in the PSET | Scenes, the take, the tape and the layers all survive a reload. A recorded gesture does not | small |
-| The orbit yields to a hand on the morph knob | The orbit rewrites the morph amount every frame, so a hand or a MIDI fader on it is overridden | small |
-| `delay_sync` owns `delay_time` | While synced, a scene, a morph or a lane can move the delay off the grid until the tempo next changes | small |
-| Decode 8-bit PCM, honour `blockAlign` | 8-bit files play but get no waveform and no rate conversion | small |
-| A screen-call budget per page in the test scripts | Nothing measured draw calls, which is how MOTION reached 7844 calls a frame | small |
-| Snap the motion loop length to the clock | The layers snap. Gesture loops still drift against a synced delay | small |
-| Light the grid piano by pad in pad mode | In pad mode the grid shows the drone pitch, which pads never change | small |
-| Launchpad hot-plug | Unplugging the Mini MK3 leaves a dead grid until a reload | small |
-| A job queue instead of refusing a second job | A PSET with an off-rate take and an off-rate layer converts one of them and loads the other sharp | medium |
-| GLIDE recall mode | Ramp the morph to the slot over N beats, then land: an Octatrack-style crossfade | medium |
-| Bound deck and tape PSET writes | Every save writes 60s per deck even for a 2s loop | medium |
-| Refresh the take strip after regen or erosion | The strip shows audio the buffer no longer holds | medium |
-| Erosion as a spawn/free synth | The PLAY drone is a buffer writer even at `erode` 0 | medium (engine) |
-| Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | medium (engine) |
-| Linked stereo limiting | Two independent limiters shift the stereo image while limiting | medium (engine) |
-| Generate the control map from the source | The spec's control table went stale through two redesigns | small |
-| A one-command test runner and a Lua 5.3 build | Every change repeats the same tests by hand, and the local luac is 5.5 | small |
+| Erosion as a spawn/free synth | The PLAY drone is a buffer writer even at `erode` 0 | medium |
+| Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | medium |
+| Linked stereo limiting | Two independent limiters shift the stereo image while limiting | medium |
 
 ## Phase 6: decisions for you
 
@@ -152,14 +161,16 @@ These are not code questions. Each one needs a yes or no.
 Every change follows the same loop. CLAUDE.md has the details and the rules.
 
 1. Make the change in the smallest step that can be tested.
-2. Run `luac -p` on every changed file. The local luac is 5.5 and norns runs
-   5.3, so do not use 5.4 syntax.
-3. Run the five test scripts. Add a test for any bug you fix. Then revert the
-   fix and make sure that the test fails.
-4. Render the four variants before and after, and compare the PGM files byte
-   for byte. Only the screens you meant to change can differ.
-5. Rebuild the single file with `lua tools/amalgamate.lua`. The control test
-   script fails on a stale build.
+2. Add a test for any bug you fix. Then revert the fix and make sure that the
+   test fails.
+3. Render the four variants before and after, and compare the PGM files byte
+   for byte. Only the screens you meant to change can differ. Compare renders
+   made by the same Lua version.
+4. Rebuild the single file with `lua tools/amalgamate.lua`. If a page's knobs
+   or keys changed, also rebuild the control map with `lua tools/controls.lua`.
+5. Run `lua tools/check.lua` with `LUA53` set to a Lua 5.3 build. It runs the
+   syntax check, the five test scripts and the source-against-build renders on
+   the version norns runs.
 6. Add an entry to doc/changelog.md, and a row to doc/device-gate.md for
    anything only hardware can judge.
 7. Engine changes go one at a time and only after the current device gate

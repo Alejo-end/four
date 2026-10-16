@@ -70,6 +70,9 @@ hold acts while held and releases when you do, and pressing a latched key turns 
 | K1 + K3 | Tap: dry playback. Hold about a second: erase this page's material. |
 | K1 + E1 | Morph toward the selected scene, from any page |
 
+The full map of every page's knobs and keys, generated from the code, is in
+[doc/controls.md](doc/controls.md).
+
 ## Pages
 
 The stations sit in families: the take (TAKE, VOICE), the loop decks (TAPE, LAYERS), the
@@ -123,7 +126,17 @@ then picks another, never fully arriving, so it keeps finding sounds between the
 saved. Hold K1 on SCENE for its two knobs (drift time and reach); start and stop it with
 the `orbit run` parameter (MIDI-map a footswitch) or the grid's scene row, and an ORBIT
 chip blinks on the page while it wanders. CAP during a wander bottles the in-between sound
-into the first empty slot.
+into the first empty slot. Move the morph yourself (K1+E1, a MIDI fader, a peek) and the
+orbit stands still; two seconds after you let go it carries on from where you left it.
+
+The `recall quantize` parameter decides when a recall lands: NOW, on the next BEAT or BAR,
+or GLIDE, where the morph sweeps to the scene over `glide beats` and then the scene lands,
+a crossfade instead of a jump. Turning the morph or the selector mid-glide stops it where
+it stands.
+
+A MOTION loop's first pass, played within a few percent of a musical length of the clock,
+loops exactly on that length (the same rule as the layers' SNAP), so it stays in time with
+the clock, the synced delay and the decks.
 
 Erosion lives on VOICE and works in PLAY mode, the one mode the engine erodes in. With
 erode up (hold K1 for erode and wear), every pass of the loop rewrites the window slightly
@@ -148,8 +161,8 @@ Settings live in PARAMS under keys. The space bar stops and starts everything.
 
 ## Samples
 
-Load: PARAMS > take > load sample reads WAV in 16, 24 or 32 bit. The window snaps to the
-file. A file at any sample rate loads in tune: off-rate files are resampled on the way in
+Load: PARAMS > take > load sample reads WAV in 8, 16, 24 or 32 bit, integer or float. The
+window snaps to the file. A file at any sample rate loads in tune: off-rate files are resampled on the way in
 through a windowed-sinc kernel. That matters most coming DOWN from 88.2k or 96k: there,
 everything above the server's own limit has to be removed before resampling or it folds
 back into the audible band as tones that were never in the file. PARAMS > layers > load
@@ -165,16 +178,20 @@ footswitch and resampling becomes one stomp.
 
 ## Saving
 
-PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape audio,
-the scene bank and the per slice settings. Loading restores the whole session, sound
-included.
+PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape and
+layer audio, the scene bank, the motion loop and the per slice settings. Loading restores
+the whole session, sound included, and the motion loop comes back playing if it was.
+The decks save only as far as they hold material, so a short loop makes a small file.
 
 ## Grid
 
 Optional. Rows one and two are always scenes and transport, rows seven and eight are always
 a piano octave, and the middle rows follow the current page: window and loop spans, slice
 pads, or the morph bar. On a Launchpad Mini MK3 pads are colored by meaning: red records,
-green plays, white is the cursor, purple is destructive. Details in `lib/mgrid.lua`.
+green plays, white is the cursor, purple is destructive. Its left and right arrows step the
+page, up and down step the scene slot, and it can be plugged in after the script has
+loaded. In pad mode the piano rows light the keys whose pad is sounding. Details in
+`lib/mgrid.lua`.
 
 ## Troubleshooting
 
@@ -190,7 +207,8 @@ green plays, white is the cursor, purple is destructive. Details in `lib/mgrid.l
    audible. Clear the tape on TAPE with the erase gesture.
 6. Faint on headphones but fine on the line out: raise headphone gain under PARAMS > LEVELS.
 7. Frozen or black screen after loading: a Lua error inside redraw. Scroll maiden below the
-   ok line for the traceback.
+   ok line for the traceback. Once running, a Lua error inside one frame no longer freezes
+   anything: maiden prints `frame error` and the instrument carries on.
 
 ## Architecture
 
