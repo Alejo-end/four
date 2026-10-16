@@ -1675,4 +1675,114 @@ do
 end
 
 
+-- ============================================================================
+-- 22 · the additions after the review
+-- ============================================================================
+do
+  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_recall_mode", 1)
+
+  -- (a) a Lua error inside one frame does not end the frame loop
+  local real_tick = CTX.motion.tick
+  CTX.motion.tick = function() error("boom") end
+  local real_print = print
+  local said = 0
+  print = function(...) said = said + 1 end
+  local f0 = CTX.frame
+  _h.run_ticks(3)
+  print = real_print
+  CTX.motion.tick = real_tick
+  ok(CTX.frame == f0 + 3, "frames keep running after a frame error")
+  ok(said == 1, "...and the error is reported once, not every frame (" .. said .. ")")
+
+  -- (b) while synced, the clock owns the delay time
+  clock.get_tempo = function() return 120 end
+  params:set("delay_sync", 5)               -- 1/4 at 120 = 0.5s
+  near(params:get("delay_time"), 0.5, 1e-6, "a synced delay lands on the beat")
+  params:set("delay_time", 0.3)             -- a hand, a scene, a lane
+  _h.run_ticks(1)
+  near(params:get("delay_time"), 0.5, 1e-6, "...and an outside write is put back on the grid")
+  params:set("delay_sync", 1)               -- FREE: the knob is the knob
+  params:set("delay_time", 0.3)
+  _h.run_ticks(1)
+  near(params:get("delay_time"), 0.3, 1e-6, "a FREE delay keeps the time it was given")
+  clock.get_tempo = nil
+
+  -- (c) the motion loop rides the PSET
+  local mo = CTX.motion
+  local real_exists = util.file_exists
+  util.file_exists = function(p) local f = io.open(p, "rb"); if f then f:close() end; return f ~= nil end
+  params:set("cutoff", 1000)
+  params:set("motion_rec", 1); _h.run_ticks(2)
+  params:set("cutoff", 400); _h.run_ticks(3)
+  params:set("cutoff", 6000); _h.run_ticks(3)
+  params:set("motion_rec", 0)
+  local lanes, len = #mo.lane_ids, mo.loop_len
+  ok(lanes == 1 and len > 0 and params:get("motion_play") == 1, "a gesture loop is recorded and playing")
+  params.action_write("x", "x", 98767)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  params:set("motion_play", 1)              -- what params:read restores
+  params:set("motion_rec", 1)               -- ...including a saved arm
+  params.action_read("x", false, 98767)
+  ok(#mo.lane_ids == lanes and mo.loop_len == len, "a PSET load brings the gesture loop back")
+  ok(params:get("motion_play") == 1 and params:get("motion_rec") == 0,
+    "...playing, and a saved arm does not start a recording over it")
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  params.action_write("x", "x", 98767)      -- an empty loop deletes the file
+  ok(not util.file_exists(CTX and (norns.state.data .. "motion-98767.lua")),
+    "saving with no loop leaves no motion file")
+  params.action_delete("x", "x", 98767)
+  util.file_exists = real_exists
+  params:set("motion_play", 0)
+  params:set("cutoff", 20000)
+
+  -- (d) the orbit yields to a hand on the morph, then resumes
+  local function fill(slot, cut)
+    params:set("cutoff", cut); params:set("scene_slot", slot); pulse("scene_capture")
+  end
+  fill(1, 500); fill(2, 15000)
+  params:set("cutoff", 2000)
+  params:set("orbit_rate", 2); params:set("orbit_on", 1)
+  _h.run_ticks(5)
+  params:set("scene_morph_amt", 0.33)       -- a hand (K1+E1, a MIDI fader)
+  _h.run_ticks(10)
+  near(params:get("scene_morph_amt"), 0.33, 1e-9, "a running orbit leaves a hand-set morph alone")
+  _h.run_ticks(40)                          -- two seconds of quiet, then more
+  ok(math.abs(params:get("scene_morph_amt") - 0.33) > 1e-6, "...and resumes once the hand has left")
+  params:set("orbit_on", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+
+  -- (e) GLIDE: the morph sweeps there over the glide beats, then it lands
+  clock.get_tempo = function() return 120 end
+  params:set("scene_recall_mode", 4)        -- GLIDE
+  params:set("scene_glide", 2)              -- 1 second at 120 = 15 frames
+  params:set("cutoff", 2000)
+  params:set("scene_slot", 2); pulse("scene_recall")
+  _h.run_ticks(7)
+  local mid = params:get("cutoff")
+  ok(mid > 2000 and mid < 15000, "half way through a glide the sound is between (" .. mid .. ")")
+  ok(params:get("scene_morph_amt") > 0.3, "...because the morph is sweeping")
+  _h.run_ticks(12)
+  near(params:get("cutoff"), 15000, 1e-6, "the glide LANDS the scene")
+  near(params:get("scene_morph_amt"), 0, 1e-9, "...with the morph back at 0")
+  ok(CTX.scene.safe ~= nil and math.abs(CTX.scene.safe.cutoff - 2000) < 1e-6,
+    "...and the way back holds where the glide began")
+  -- a hand on the morph stops a glide where it stands
+  params:set("cutoff", 2000)
+  params:set("scene_slot", 1); pulse("scene_recall")
+  _h.run_ticks(4)
+  params:set("scene_morph_amt", 0.2); _h.run_ticks(20)
+  ok(CTX.scene.glide == nil and math.abs(params:get("cutoff") - 500) > 1,
+    "a hand on the morph stops a glide before it lands")
+  params:set("scene_recall_mode", 1)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  clock.get_tempo = nil
+  for s = 1, 2 do params:set("scene_slot", s); pulse("scene_clear") end
+  params:set("cutoff", 20000)
+end
+
 T.report("control harness OK")

@@ -178,6 +178,29 @@ function M.install(opts)
   }
   keyboard = {}
 
+  -- norns' tab.save / tab.load: a table written as a Lua chunk and read back.
+  -- (the real one handles shared references too; the pset sidecars here are
+  -- plain trees, which this round-trips exactly)
+  local function ser(v)
+    local t = type(v)
+    if t == "number" then return string.format("%.17g", v) end
+    if t == "string" then return string.format("%q", v) end
+    if t == "boolean" or t == "nil" then return tostring(v) end
+    local parts = {}
+    for k, x in pairs(v) do
+      parts[#parts + 1] = "[" .. ser(k) .. "]=" .. ser(x)
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+  end
+  tab = {
+    save = function(t, path)
+      local f = assert(io.open(path, "w"))
+      f:write("return " .. ser(t))
+      f:close()
+    end,
+    load = function(path) return dofile(path) end,
+  }
+
   midi = { vports = {} }
   for i = 1, 16 do midi.vports[i] = { name = "none", device = nil } end
   function midi.connect(i) return midi.vports[i or 1] end

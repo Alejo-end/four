@@ -212,6 +212,7 @@ local SCENE_EXCLUDE = {
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
   "orbit_on", "orbit_rate", "orbit_reach",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
+  "scene_glide",
   "scene_capture",
   "scene_recall", "scene_next", "scene_clear", "scene_safe_capture",
   "scene_safe_restore", "chaos_throw",
@@ -246,6 +247,7 @@ local pending_clock      -- the quantized-recall coroutine (nil = none)
 local morph_from = nil
 
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
+local GLIDE_MODE = 4              -- ...and GLIDE (scene_glide beats, then land)
 
 -- ===========================================================================
 -- param plumbing
@@ -454,9 +456,12 @@ local function apply(tbl, ids)
   return n, moved
 end
 
+-- a recall still on its way (queued for a beat, or gliding) is forgotten by
+-- anything that lands something else: another recall, the way back, a load
 local function cancel_pending()
   if pending_clock then clock.cancel(pending_clock) end
   pending_clock, M.pending = nil, nil
+  M.glide = nil
 end
 
 -- A scene LANDED (a recall, the way back): it IS the new LIVE. ONE place does
@@ -476,7 +481,8 @@ local function land(tbl, ids)
 end
 
 -- the orbit's state (declared here: capture reads it)
-local orbit = { on = false, live = false, leg_start = 0, leg_len = 1 }
+local orbit = { on = false, live = false, leg_start = 0, leg_len = 1,
+                wrote = nil, hand_at = nil }
 local capture_free   -- defined below capture, which it calls
 
 -- ===========================================================================
@@ -535,6 +541,20 @@ function M.recall(slot)
   local mode = floor(pget("scene_recall_mode", 1) + 0.5)
   local beats = QUANT_BEATS[mode] or 0
   cancel_pending()
+  if mode == GLIDE_MODE then
+    -- GLIDE: the morph sweeps there over scene_glide beats, then the scene
+    -- LANDS (the holds, routing and writers a morph never moves included).
+    -- An Octatrack-style crossfade instead of a jump. ◄ marks where it began.
+    local b = pget("scene_glide", 4)
+    if floor(pget("scene_slot", 1) + 0.5) ~= slot then pset("scene_slot", slot) end
+    M.auto_safe()
+    M.glide = { slot = slot, from = C.frame, a0 = pget("scene_morph_amt", 0),
+      frames = math.max(1, floor(b * 60 / (C.tempo and C.tempo() or 120)
+        * (C.FPS or 15) + 0.5)) }
+    say("GLIDE " .. slot, "scene " .. slot .. " gliding in over " .. b
+      .. " beats, then it lands", slot)
+    return true
+  end
   if beats > 0 then
     M.pending = slot
     say("QUEUED " .. slot,
@@ -607,7 +627,9 @@ function M.clear(slot)
   slot = slot_idx(slot)
   local had = M.slots[slot] ~= nil
   M.slots[slot] = nil   -- in place: the grid and the page read this table
-  if M.pending == slot then cancel_pending() end
+  if M.pending == slot or (M.glide and M.glide.slot == slot) then
+    cancel_pending()
+  end
   reset_morph()
   say(had and ("CLEARED " .. slot) or ("SLOT " .. slot .. " EMPTY"),
     had and ("scene " .. slot .. " cleared") or
@@ -847,29 +869,74 @@ end
 
 function M.orbit_set(on)
   orbit.on = on
+  orbit.wrote, orbit.hand_at = nil, nil
   orbit_park()                 -- depart from (or stop on) wherever we stand
   orbit.live = on and orbit_new_leg()
 end
 
+-- the orbit YIELDS to anything else that moves the morph amount: a hand on
+-- K1+E1 or a MIDI fader, the RCL peek, a glide, a landing. It watches for a
+-- value it did not write, stands still while that keeps happening, and two
+-- seconds after it stops parks where the other hand left the sound and
+-- starts a fresh leg from there.
+local ORBIT_YIELD = 2          -- seconds of quiet before the wander resumes
+
 -- `live` = a leg is actually running. With no filled slot to aim at there is
--- no leg, and parking every frame (as this once did) pinned the morph knob to
--- 0 under the performer's hand; now it just looks for a target each frame.
+-- no leg: the orbit looks for a target each frame and touches nothing.
 local function orbit_tick()
   if not orbit.on then return end
+  local amt = pget("scene_morph_amt", 0)
+  if orbit.wrote ~= nil and abs(amt - orbit.wrote) > 1e-9 then
+    orbit.hand_at = C.frame
+  end
+  orbit.wrote = amt
+  if orbit.hand_at then
+    if C.frame - orbit.hand_at < ORBIT_YIELD * (C.FPS or 15) then return end
+    orbit.hand_at = nil
+    orbit_park()
+    orbit.wrote = pget("scene_morph_amt", 0)
+    orbit.live = false
+  end
   local t = (C.frame - orbit.leg_start) / orbit.leg_len
   if t >= 1 or not orbit.live then
     if orbit.live then orbit_park() end
     orbit.live = orbit_new_leg()
+    orbit.wrote = pget("scene_morph_amt", 0)
     if not orbit.live then return end
     t = 0
   end
   pset("scene_morph_amt", pget("orbit_reach", 0.5) * t)
+  orbit.wrote = pget("scene_morph_amt", 0)
+end
+
+-- a GLIDE in progress: ramp the morph from where it stood to 1 over its
+-- frames, then land the scene. A hand on the morph or the selector mid-glide
+-- wins: the glide stops and the sound stays where the hand put it.
+local function glide_tick()
+  local g = M.glide
+  if not g then return end
+  if floor(pget("scene_slot", 1) + 0.5) ~= g.slot
+      or (g.wrote ~= nil and abs(pget("scene_morph_amt", 0) - g.wrote) > 1e-9) then
+    M.glide = nil
+    say("GLIDE STOPPED", "the glide to scene " .. g.slot .. " stopped: the morph"
+      .. " or the selected slot was moved by hand", g.slot)
+    return
+  end
+  local t = (C.frame - g.from) / g.frames
+  if t >= 1 then
+    M.glide = nil
+    say_recall(g.slot, land(M.slots[g.slot], SCENE_RECALL_IDS))
+    return
+  end
+  pset("scene_morph_amt", g.a0 + (1 - g.a0) * t)
+  g.wrote = pget("scene_morph_amt", 0)
 end
 
 -- one per redraw frame, from the existing 15fps clock in mangler.lua.
 -- the target is simply the SELECTED slot — the same one K2 recalls and K3
 -- captures into. one selector, three jobs.
 function M.tick()
+  glide_tick()                 -- a glide moves the morph before the orbit looks
   orbit_tick()                 -- may set the morph params, marking dirty
   if not dirty then return end
   dirty = false

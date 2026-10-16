@@ -97,7 +97,7 @@ local MOTION_EXCLUDE = {
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
-  "scene_slot", "scene_recall_mode", "scene_scope", "scene_capture",
+  "scene_slot", "scene_recall_mode", "scene_scope", "scene_glide", "scene_capture",
   "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
   "chaos_throw", "orbit_on", "orbit_rate", "orbit_reach",
@@ -410,6 +410,72 @@ function M.tick()
       due_ids[k] = nil
     end
   end
+end
+
+-- ===========================================================================
+-- the loop rides the PSET
+-- ===========================================================================
+-- Scenes, the take, the tape and the layers all come back with a session; the
+-- gesture loop does too. The lanes save as a plain table beside the pset
+-- (motion-N.lua). A loop with no lanes deletes the file, and a pset with no
+-- file loads with no loop: the loop belongs to the session being loaded.
+
+local function path_for(number)
+  return norns.state.data .. "motion-" .. number .. ".lua"
+end
+
+function M.pset_write(number)
+  if #M.lane_ids == 0 then os.remove(path_for(number)); return end
+  local t = { v = 1, loop_len = M.loop_len, rec_len = M.rec_len,
+              ids = {}, lanes = {} }
+  for i, id in ipairs(M.lane_ids) do
+    local L = M.lanes[id]
+    local f, v = {}, {}
+    for e = 1, L.n do f[e], v[e] = L.f[e], L.v[e] end
+    t.ids[i], t.lanes[id] = id, { f = f, v = v }
+  end
+  local ok, err = pcall(tab.save, t, path_for(number))
+  if not ok then print("mangler: motion save failed — " .. tostring(err)) end
+end
+
+function M.pset_read(number)
+  -- params:read has already restored the transports. A saved ARM must not
+  -- start recording over the restored loop, and the play state applies to
+  -- the loop loaded here, not to whatever was running before the load.
+  local play = pget("motion_play", 0) == 1
+  if pget("motion_rec", 0) == 1 then params:set("motion_rec", 0) end
+  wipe()
+  local path = path_for(number)
+  if util.file_exists(path) then
+    local ok, t = pcall(tab.load, path)
+    if ok and type(t) == "table" and type(t.ids) == "table"
+        and type(t.lanes) == "table" then
+      for _, id in ipairs(t.ids) do
+        local s = t.lanes[id]
+        if params.lookup[id] and type(s) == "table" and type(s.f) == "table"
+            and type(s.v) == "table" then
+          local L = { f = {}, v = {}, n = 0, cur = 1 }
+          for e = 1, #s.f do L.f[e], L.v[e], L.n = s.f[e], s.v[e], e end
+          M.lanes[id] = L
+          M.lane_ids[#M.lane_ids + 1] = id
+        end
+      end
+      if #M.lane_ids > 0 then
+        M.rec_len = t.rec_len or 0
+        M.loop_len = t.loop_len or M.rec_len
+      end
+    end
+  end
+  play = play and M.loop_len > 0
+  if (pget("motion_play", 0) == 1) ~= play then
+    params:set("motion_play", play and 1 or 0)
+  end
+  M.playhead = 0
+  reset_cursors()
+end
+
+function M.pset_delete(number)
+  os.remove(path_for(number))
 end
 
 -- ===========================================================================

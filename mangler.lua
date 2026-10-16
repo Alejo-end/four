@@ -2284,7 +2284,7 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 11)
+  params:add_group("grp_scene", "scenes", 12)
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
   -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
   -- alt layer, where you couldn't see them. see mscenes' morph_from.)
@@ -2301,8 +2301,11 @@ local function init_params()
   -- CC can't flood the engine).
   params:add_control("scene_morph_amt", "morph amount", unit(0.0))
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)
+  -- when a recall lands: NOW, on the next BEAT or BAR, or GLIDE (the morph
+  -- sweeps there over `scene_glide` beats, then the scene lands)
   params:add_option("scene_recall_mode", "recall quantize",
-    { "NOW", "BEAT", "BAR" }, 1)
+    { "NOW", "BEAT", "BAR", "GLIDE" }, 1)
+  params:add_number("scene_glide", "glide beats", 1, 16, 4)
   -- what CAP stores: the whole mangle, or just the wet path (an FX preset
   -- that lands over whatever material is playing — Octatrack-style)
   params:add_option("scene_scope", "capture scope", { "ALL", "FX" }, 1)
@@ -2369,6 +2372,7 @@ local function init_params()
     { Mtape.pset_write, Mtape.pset_read, Mtape.pset_delete, "tape" },
     { Mdeck.pset_write, Mdeck.pset_read, Mdeck.pset_delete, "layers" },
     { Mscenes.pset_write, Mscenes.pset_read, Mscenes.pset_delete, "scenes" },
+    { Mmotion.pset_write, Mmotion.pset_read, Mmotion.pset_delete, "motion" },
     { ctx.take_pset_write, ctx.take_pset_read, ctx.take_pset_delete, "take" },
     { ctx.padlock_pset_write, ctx.padlock_pset_read, ctx.padlock_pset_delete,
       "pad locks" },
