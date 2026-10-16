@@ -6848,11 +6848,8 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen)
     if ok then
       land(tmp, path)
     else
-      -- a busy runner calls this straight back with "busy": one fallback,
-      -- one load (the caller used to load it a second time on top)
-      print("mangler: resample " .. (err == "busy" and "busy"
-        or ("failed (" .. tostring(err) .. ")"))
-        .. " — loading at the original rate, it will play sharp")
+      print("mangler: resample failed (" .. tostring(err)
+        .. ") — loading at the original rate, it will play sharp")
       land(path)
     end
   end)
@@ -6985,30 +6982,41 @@ end
 -- running through a multi-second job instead of freezing.
 function ctx.task_yield() clock.sleep(0) end
 
--- run a long job as a coroutine that yields.
--- The body runs under pcall and `on_done(ok, err)` ALWAYS runs: without that a
--- throw halfway through (a full card, a bad read) kills the coroutine with the
--- caller's state half-set and its file handles still open. A second job is
--- REFUSED, not substituted — the job already running owns its cleanup and only
--- it can run it.
+-- run long jobs as coroutines that yield, ONE AT A TIME, in the order they
+-- were asked for. A job that arrives while another runs waits its turn: a PSET
+-- can restore an off-rate take and an off-rate layer back to back, and both
+-- have to convert (refusing the second loaded it out of tune). Each body runs
+-- under pcall and its `on_done(ok, err)` ALWAYS runs: without that a throw
+-- halfway through (a full card, a bad read) kills the coroutine with the
+-- caller's state half-set and its file handles still open. A job that waited
+-- while its target changed is dropped by the caller's generation check
+-- (load_at_rate), not here.
 local task_clock
-function ctx.run_task(fn, on_done)
-  if task_clock then
-    print("mangler: a background job is already running")
-    if on_done then on_done(false, "busy") end
-    return false
-  end
+local task_queue = {}
+local function start_next_task()
+  local job = table.remove(task_queue, 1)
+  if not job then return end
   task_clock = clock.run(function()
-    local ok, err = pcall(fn, ctx.task_yield)
+    local ok, err = pcall(job[1], ctx.task_yield)
     task_clock = nil
     if not ok then print("mangler: background job failed — " .. tostring(err)) end
-    if on_done then on_done(ok, err) end
+    if job[2] then job[2](ok, err) end
+    start_next_task()
   end)
-  return true
 end
 
--- teardown only: the job's own completion never runs (cleanup is leaving)
+function ctx.run_task(fn, on_done)
+  task_queue[#task_queue + 1] = { fn, on_done }
+  if task_clock then
+    print("mangler: queued behind the background job already running")
+  else
+    start_next_task()
+  end
+end
+
+-- teardown only: no completion runs (cleanup is leaving), queued jobs included
 function ctx.cancel_task()
+  for k = #task_queue, 1, -1 do task_queue[k] = nil end
   if task_clock then clock.cancel(task_clock); task_clock = nil end
 end
 
@@ -7209,19 +7217,24 @@ end
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
 -- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
 -- tape-style glide, and times beyond the 2s delay line clamp there (2s so
--- a half note fits down to 60 BPM). the
--- redraw tick calls this each frame — it only WRITES when the tempo actually
--- changed (or the division did), so idle frames set nothing.
+-- a half note fits down to 60 BPM).
+-- While synced the clock OWNS the time: anything else that writes it (a hand
+-- on the knob, a scene, the morph, a motion lane) is put back on the grid the
+-- next frame, so the echoes cannot sit off the beat until the tempo happens
+-- to change. The redraw tick calls this each frame and it writes only when
+-- the time is off by more than half a percent, so MIDI clock jitter does not
+-- write every frame.
 local SYNC_BEATS = { 0, 0.25, 0.5, 0.75, 1, 1.5, 2 }  -- FREE 1/16 1/8 1/8. 1/4 1/4. 1/2
-local last_sync_tempo = 0
 local function sync_delay_time(force)
   local s = pget("delay_sync", 1)
   if s <= 1 then return end                          -- FREE
   local t = ctx.tempo()
   if not (t and t > 0) then return end
-  if not force and t == last_sync_tempo then return end
-  last_sync_tempo = t
-  params:set("delay_time", clamp(SYNC_BEATS[s] * 60 / t, 0.01, 2))
+  local want = clamp(SYNC_BEATS[s] * 60 / t, 0.01, 2)
+  if not force and math.abs(pget("delay_time", want) - want) <= want * 0.005 then
+    return
+  end
+  params:set("delay_time", want)
   -- tell the gesture looper this wasn't a hand on the knob (its polling
   -- capture would otherwise punch a delay_time lane on every tempo move)
   if ctx.motion and ctx.motion.account then ctx.motion.account("delay_time") end
@@ -7971,24 +7984,38 @@ function init()
   watch("amp_out_l", function(v) ctx.amp_out[1] = v end)
   watch("amp_out_r", function(v) ctx.amp_out[2] = v end)
 
+  -- one frame of the instrument
+  local function frame_tick()
+    ctx.frame = ctx.frame + 1
+    ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
+    sync_delay_time()    -- keep a synced delay on the clock (writes when off)
+    Mpages.erosion_tick()  -- count loop passes while the take erodes
+    Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
+    Mpages.update_wave()
+    Mpages.update_tape_wave()
+    Mmotion.tick()   -- advance + replay the gesture loop
+    -- apply a pending morph sweep. AFTER motion, which may have just
+    -- replayed a recorded scene_morph_amt move for us to act on.
+    Mscenes.tick()
+    tick_keys()  -- the K1+K3 erase arc fires AT its threshold
+    -- never draw over the system menu; the grid stays live inside it
+    if norns.menu.status() == false then redraw() end
+    Mgrid.redraw()
+  end
+  -- every per-frame job runs in this ONE coroutine, so an error must not end
+  -- it: a dead clock freezes the screen, the morph, motion and the grid
+  -- together, and with the frame counter stopped every key press reads as a
+  -- tap. The frame is caught, reported (at most every 5 seconds, not 15 times
+  -- a second) and the next one runs.
+  local last_err_frame = -1e9
   redraw_clock = clock.run(function()
     while true do
       clock.sleep(1 / FPS)
-      ctx.frame = ctx.frame + 1
-      ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
-      sync_delay_time()    -- tempo-follow the delay (writes only on change)
-      Mpages.erosion_tick()  -- count loop passes while the take erodes
-      Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
-      Mpages.update_wave()
-      Mpages.update_tape_wave()
-      Mmotion.tick()   -- advance + replay the gesture loop
-      -- apply a pending morph sweep. AFTER motion, which may have just
-      -- replayed a recorded scene_morph_amt move for us to act on.
-      Mscenes.tick()
-      tick_keys()  -- the K1+K3 erase arc fires AT its threshold
-      -- never draw over the system menu; the grid stays live inside it
-      if norns.menu.status() == false then redraw() end
-      Mgrid.redraw()
+      local ok, err = pcall(frame_tick)
+      if not ok and ctx.frame - last_err_frame >= FPS * 5 then
+        last_err_frame = ctx.frame
+        print("mangler: frame error, the instrument keeps running — " .. tostring(err))
+      end
     end
   end)
 

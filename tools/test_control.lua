@@ -1378,17 +1378,19 @@ do
   params:set("rec", 1); params:set("rec", 0)
   finish(table.remove(jobs, 1))
   ok(#reads == 0, "a conversion that finishes after a live take is dropped, not loaded over it")
-  -- a busy runner: one fallback load, not two
+  -- a second load while one converts WAITS its turn and converts too; the
+  -- older conversion, finishing after the newer request, is dropped
   reads = {}
   CTX.load_sample(src44)                   -- job 1 in flight
   local src44b = os.tmpname() .. "-44kb.wav"
   wav441(src44b)
-  -- the runner is "busy" only while ITS clock is set; the capture above
-  -- returned a table for it, so a second job is refused
-  CTX.load_sample(src44b)
-  ok(#reads == 1 and reads[1] == src44b, "a busy runner loads the second file ONCE, raw")
-  finish(table.remove(jobs, 1))
-  ok(#reads == 1, "...and the older conversion does not land on top of it")
+  CTX.load_sample(src44b)                  -- job 2 queued behind it
+  ok(#reads == 0, "a second off-rate load queues instead of loading raw")
+  finish(table.remove(jobs, 1))            -- job 1 lands late: dropped
+  ok(#reads == 0, "...the older conversion does not land on top of it")
+  finish(table.remove(jobs, 1))            -- job 2 runs next
+  ok(#reads == 1 and reads[1]:find("srconv", 1, true) ~= nil,
+    "...and the queued file loads CONVERTED, in tune")
   -- the layer decks share the same guard: erase while converting
   local d1 = CTX.layers[1]
   CTX.layer_load(d1, src44)
