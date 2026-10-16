@@ -1672,6 +1672,15 @@ do
   os.remove(tmp)
   ok(okb and built and built == shipped,
     "dist/mangler_single.lua is a fresh build (run: lua tools/amalgamate.lua)")
+
+  -- (e) doc/controls.md is GENERATED from the script's own tables too
+  local ctmp = os.tmpname()
+  local okc = os.execute("lua tools/controls.lua " .. ctmp .. " >/dev/null")
+  local cmap = io.open(ctmp) and io.open(ctmp):read("a")
+  local cdoc = io.open("doc/controls.md") and io.open("doc/controls.md"):read("a")
+  os.remove(ctmp)
+  ok(okc and cmap and cmap == cdoc,
+    "doc/controls.md matches the code (run: lua tools/controls.lua)")
 end
 
 
@@ -1866,6 +1875,44 @@ do
     g.key(3, 8, 0)
     engine.note_on, engine.note_off = nil, nil
     params:set("pad_input", 0)
+  end
+
+  -- (j) a screen-call BUDGET per page, under a loaded state: every strip
+  -- holding audio and four MOTION lanes at their 900-event cap. Nothing used
+  -- to measure draw calls, which is how MOTION reached 7844 a frame unnoticed.
+  do
+    local BUDGET = 2500
+    local count = 0
+    local wrapped = {}
+    for k, f in pairs(screen) do
+      if type(f) == "function" then
+        wrapped[k] = f
+        screen[k] = function(...) count = count + 1; return f(...) end
+      end
+    end
+    local was_wave, was_twave = CTX.wave_any, CTX.twave_any
+    CTX.wave_any, CTX.twave_any = true, true
+    local mo = CTX.motion
+    for _, id in ipairs({ "cutoff", "delay_mix", "scan", "rev_mix" }) do
+      local L = { f = {}, v = {}, n = 900, cur = 1 }
+      local cs = params:lookup_param(id).controlspec
+      for e = 1, 900 do L.f[e] = e - 1; L.v[e] = cs:map(0.5 + 0.45 * math.sin(e * 0.2)) end
+      mo.lanes[id] = L; mo.lane_ids[#mo.lane_ids + 1] = id
+    end
+    mo.loop_len, mo.rec_len = 900, 900
+    local over = {}
+    for i, name in ipairs(T.pages()) do
+      T.goto_page(i)
+      CTX.page_flash = nil
+      count = 0
+      redraw()
+      if count > BUDGET then over[#over + 1] = name .. "=" .. count end
+    end
+    ok(#over == 0, "every page draws within " .. BUDGET .. " screen calls a frame ("
+      .. table.concat(over, ", ") .. ")")
+    for k, f in pairs(wrapped) do screen[k] = f end
+    while #mo.lane_ids > 0 do mo.clear_lane() end
+    CTX.wave_any, CTX.twave_any = was_wave, was_twave
   end
 
   -- (i) a Mini MK3 plugged in after load takes over; its arrows step the page
