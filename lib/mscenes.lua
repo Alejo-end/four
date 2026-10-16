@@ -7,17 +7,17 @@
 --            engine, the tape and the display all follow for free — a scene
 --            is not a second source of truth, it's a photograph of the one
 --            that exists.
---   MORPH    a continuous A -> B sweep over the subset of those params that
---            can be interpolated. one knob (scene_morph_amt) moves the whole
---            instrument along a line between two remembered sounds.
+--   MORPH    a continuous sweep from the sound you have now toward a stored
+--            slot, over the subset of params that can be interpolated. one
+--            knob (scene_morph_amt) moves the whole instrument along that line.
 --   SAFE     one "last known good" snapshot + an instant restore. capture it
 --            before you do something reckless (see the chaos throw below);
 --            restore drops you straight back on your feet.
 --
 -- NOTHING here stores audio. scenes are control state only: a recall does not
 -- bring back the take you have since overdubbed (that's what PSETs + the tape
--- wav are for, see mtape). that's also what makes it cheap — 8 slots is ~350
--- numbers, and a recall is ~60 params:set calls.
+-- wav are for, see mtape). that's also what makes it cheap — 8 slots is ~600
+-- numbers, and a recall is ~80 params:set calls.
 --
 -- WHAT IS AND ISN'T IN A SCENE — the lists are right below and they are
 -- deliberate. in: everything that shapes the sound of the take (window,
@@ -35,7 +35,7 @@
 -- in a second; this caps it at 15 passes/s, and the per-param deadband below
 -- drops the ones that aren't actually moving.
 
-local floor, abs = math.floor, math.abs
+local floor, abs, min, max = math.floor, math.abs, math.min, math.max
 
 local C            -- shared ctx, bound at init
 local pget, clamp
@@ -145,7 +145,7 @@ append(SCENE_RECALL_IDS, SWITCH_IDS)
 --     mid-sweep. structure, not texture: a recall sets it, a morph doesn't.
 -- consequence, worth knowing: morph at amt=1 is NOT the same as recall(B) —
 -- it moves the morph-safe subset only. sweep to 1, then K2 RCL to land the
--- rest. (the SCENE page says so: see M.unlanded + the "RCL B TO LAND" cue.)
+-- rest. (the SCENE page says so: see M.unlanded + the "K2 TO LAND THE REST" cue.)
 local MORPH_EXCLUDE = {
   freeze = true, pv_freeze = true, tape_freeze = true,
   pad_input = true, resample = true, regen = true, erode = true,
@@ -222,15 +222,12 @@ local SCENE_EXCLUDE = {
 -- ===========================================================================
 
 local M = {
-  slots = {},         -- slots[1..8] = { id = value } (nil = empty). ctx.scenes
+  slots = {},         -- slots[1..8] = { id = value } (nil = empty)
   safe = nil,         -- the safe snapshot, same shape
   pending = nil,      -- slot waiting on a quantized recall (nil = none)
   chaos_live = false, -- a chaos throw is currently held
-  NUM_SLOTS = NUM_SLOTS,
-  -- exposed for docs/tests/inspection: the lists, as built above
+  -- exposed for the harness's classification checks
   SCENE_RECALL_IDS = SCENE_RECALL_IDS,
-  SCENE_MORPH_IDS = SCENE_MORPH_IDS,
-  SAFE_SNAPSHOT_IDS = SAFE_SNAPSHOT_IDS,
   SCENE_EXCLUDE = SCENE_EXCLUDE,
 }
 
@@ -278,19 +275,24 @@ local function pset(id, v)
 end
 
 -- the morph's "already sent" memory is only valid while nothing else moves
--- the instrument. any capture/recall/restore/endpoint change clears it, so
--- the next amount move re-asserts the whole sweep from wherever we now are.
-function M.invalidate()
+-- the instrument, and its origin only while the sweep is the thing driving
+-- the sound. reset_morph drops both, so the next amount move departs from
+-- wherever we are by then. A capture or a clear needs only this: it changes
+-- what a slot holds, and moves no param.
+local function reset_morph()
   for k in pairs(last_sent) do last_sent[k] = nil end
-  -- ...and the morph is no longer what's driving the sound: something else
-  -- (a recall, a restore, a throw) just moved it off the line. drop the "from"
-  -- with it — we are somewhere new, so the next sweep starts from HERE.
   M.engaged = false
   morph_from = nil
-  -- the key throws (OPEN / WASH / INF / HEAL / ...) each cache the values they
-  -- displaced, to put back on un-latch. Whatever just moved the instrument
-  -- moved those params too, so those caches are now stale: un-latching would
-  -- write pre-recall values over the recall. Same reasoning as last_sent above.
+end
+
+-- the INSTRUMENT moved (a recall, a restore, a chaos throw, a pset load):
+-- reset the morph, and forget the key throws too. OPEN / WASH / INF / HEAL
+-- each cache the values they displaced, to put back on un-latch; whatever
+-- just moved the instrument moved those params as well, so un-latching would
+-- write pre-recall values over the recall. A capture must NOT do this: it
+-- moves nothing, and latch-OPEN, capture, un-latch is how a variant is built.
+function M.invalidate()
+  reset_morph()
   if C and C.throws_forget then C.throws_forget() end
 end
 
@@ -365,13 +367,47 @@ M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 -- restore, a morph target. Live values stay exact, so the encoder can still
 -- open the window wherever it likes, and a sweep coming home restores the
 -- origin verbatim (morph_from bypasses this).
+--
+-- The LOOP DECKS have the same trap: capture a scene while a layer is empty
+-- (its loop 0..1), record a 4s pass (the loop closes around it), recall, and
+-- the loop reopened over 60 seconds of nothing. A deck's material does not
+-- start at 0, so the decks clamp to the EXTENT that was written (C.material:
+-- lo, hi in the deck's own 0..1), and only when the stored loop is more than
+-- TWICE the material and overlaps it. A loop's LENGTH is musical (SNAP puts
+-- it on a grid), so a loop that is merely a little longer than what was
+-- played into it is left alone; and a stored loop entirely elsewhere points
+-- at something we cannot know about, and stays exactly as stored.
 local WINDOW_IDS = { pos_start = true, pos_end = true }
-local function clamp_stored(id, v)
-  if v == nil or not WINDOW_IDS[id] then return v end
-  local tl = (C and C.wave_any and C.take_len) or 0
-  if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
-  local cap = id == "pos_end" and tl or (tl - 0.002)
-  return v < cap and v or cap
+local EXTENT_OF = {
+  loop_start = "tape", loop_end = "tape",
+  lay1_start = "lay1", lay1_end = "lay1", lay2_start = "lay2", lay2_end = "lay2",
+}
+-- the same pairs, both ways round (shared with motion replay)
+local PARTNER = {}
+for a, b in pairs(EDGE_PAIRS) do PARTNER[a], PARTNER[b] = b, a end
+M.PARTNER = PARTNER
+
+local function clamp_stored(id, v, tbl)
+  if v == nil then return v end
+  if WINDOW_IDS[id] then
+    local tl = (C and C.wave_any and C.take_len) or 0
+    if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
+    local cap = id == "pos_end" and tl or (tl - 0.002)
+    return v < cap and v or cap
+  end
+  local key = EXTENT_OF[id]
+  if not (key and tbl and C and C.material) then return v end
+  local mlo, mhi = C.material(key)
+  if not mlo then return v end                      -- nothing known: exact
+  local is_start = EDGE_PAIRS[id] ~= nil
+  local s, e = v, tbl[PARTNER[id]]
+  if not is_start then s, e = e, v end
+  if s == nil or e == nil or s > e then return v end
+  if not (s < mhi and e > mlo) then return v end    -- elsewhere: exact
+  if e - s < 2 * (mhi - mlo) then return v end       -- near the material: exact
+  local ns, ne = max(s, mlo), min(e, mhi)
+  if ne - ns < 0.002 then return v end
+  return is_start and ns or ne
 end
 
 -- set one param and report whether the value actually MOVED. the count of
@@ -393,10 +429,10 @@ local function apply(tbl, ids)
   local done                      -- edge partners already set (nil until needed)
   for i = 1, #ids do
     local id = ids[i]
-    local v = clamp_stored(id, tbl[id])
+    local v = clamp_stored(id, tbl[id], tbl)
     if v ~= nil and params.lookup[id] and not (done and done[id]) then
       local partner = EDGE_PAIRS[id]
-      local pv = partner and clamp_stored(partner, tbl[partner])
+      local pv = partner and clamp_stored(partner, tbl[partner], tbl)
       if pv ~= nil and params.lookup[partner] then
         -- outward edge first: if the new start moves LEFT it's the widening
         -- one, else the new end is
@@ -423,6 +459,26 @@ local function cancel_pending()
   pending_clock, M.pending = nil, nil
 end
 
+-- A scene LANDED (a recall, the way back): it IS the new LIVE. ONE place does
+-- what every landing needs, because each landing path used to remember a
+-- different subset of it:
+--   the morph amount goes home. apply() has already dropped the sweep's
+--     origin, so writing 0 moves nothing; left up, the rail lied and merely
+--     selecting another slot at rest jumped the sound toward it.
+--   a held chaos throw ENDS. its release restores ◄, and a recall made
+--     mid-hold has just re-marked ◄ with the chaos state, so releasing the
+--     footswitch would drag you back onto the madness over the scene you chose.
+local function land(tbl, ids)
+  local n, moved = apply(tbl, ids)
+  M.chaos_live = false
+  if pget("scene_morph_amt", 0) > 0 then pset("scene_morph_amt", 0) end
+  return n, moved
+end
+
+-- the orbit's state (declared here: capture reads it)
+local orbit = { on = false, live = false, leg_start = 0, leg_len = 1 }
+local capture_free   -- defined below capture, which it calls
+
 -- ===========================================================================
 -- scenes — capture / recall / clear
 -- ===========================================================================
@@ -443,7 +499,7 @@ function M.capture(slot)
   -- capture (SCENE K3, the scene_capture param) would land in whatever
   -- slot the wander just targeted and overwrite a scene it navigates by.
   -- redirect to the first empty slot; an EXPLICIT slot stays explicit.
-  if slot == nil and M.orbit_running then return M.capture_free() end
+  if slot == nil and orbit.on then return capture_free() end
   slot = slot_idx(slot)
   -- capture SCOPE (Octatrack-style): ALL = the whole mangle; FX = just the
   -- wet path (SPACE_IDS: filter, drive, delay, reverb, shimmer), so a slot
@@ -453,7 +509,7 @@ function M.capture(slot)
   local fx_only = floor(pget("scene_scope", 1) + 0.5) == 2
   local t, n = snapshot_ids(fx_only and SPACE_IDS or SCENE_RECALL_IDS)
   M.slots[slot] = t
-  M.invalidate()   -- an endpoint's contents may have just changed under us
+  reset_morph()    -- the target's contents may have just changed under a sweep
   say("SAVED " .. slot .. (fx_only and " FX" or ""),
     "scene " .. slot .. " captured — " .. n .. (fx_only
       and " params (FX only: filter, drive, delay, reverb, shimmer)"
@@ -462,10 +518,10 @@ function M.capture(slot)
   return true
 end
 
--- recall a slot. opts.immediate = true forces NOW even when the page is set
--- to quantize; otherwise scene_recall_mode decides (NOW / next BEAT / next
--- BAR). a queued recall replaces any other queued recall — last press wins.
-function M.recall(slot, opts)
+-- recall a slot. scene_recall_mode decides when it lands (NOW / next BEAT /
+-- next BAR). a queued recall replaces any other queued recall — last press
+-- wins.
+function M.recall(slot)
   if is_back(slot) then return M.safe_restore() end
   slot = slot_idx(slot)
   local scene = M.slots[slot]
@@ -476,11 +532,10 @@ function M.recall(slot, opts)
       .. " current sound into it first.", slot)
     return false
   end
-  opts = opts or {}
   local mode = floor(pget("scene_recall_mode", 1) + 0.5)
   local beats = QUANT_BEATS[mode] or 0
   cancel_pending()
-  if beats > 0 and not opts.immediate then
+  if beats > 0 then
     M.pending = slot
     say("QUEUED " .. slot,
       "scene " .. slot .. " queued — lands on the next "
@@ -491,14 +546,14 @@ function M.recall(slot, opts)
       clock.sync(beats)
       pending_clock, M.pending = nil, nil
       M.auto_safe()   -- ◄ = where you just were, even for a queued landing
-      say_recall(slot, apply(M.slots[slot], SCENE_RECALL_IDS))
+      say_recall(slot, land(M.slots[slot], SCENE_RECALL_IDS))
     end)
     return true
   end
   -- every commit auto-captures the pre-state into the ◄ cell — an
   -- undo that never needed arming. (quiet: the recall is the news here.)
   M.auto_safe()
-  say_recall(slot, apply(scene, SCENE_RECALL_IDS))
+  say_recall(slot, land(scene, SCENE_RECALL_IDS))
   return true
 end
 
@@ -507,7 +562,9 @@ end
 -- the ONE selector so the page/grid/morph all follow, then recalls through
 -- the normal path (BEAT/BAR quantize and auto-safe both apply).
 function M.next()
-  local start = slot_idx()
+  -- from the ◄ cell the next slot is 1 (slot_idx would clamp ◄ to 1 and
+  -- start the search at 2)
+  local start = is_back() and 0 or slot_idx()
   for i = 1, NUM_SLOTS do
     local s = ((start - 1 + i) % NUM_SLOTS) + 1
     if M.slots[s] then
@@ -521,7 +578,7 @@ end
 
 -- capture into the first EMPTY slot (the orbit's CAP: bottling a found
 -- sound must never overwrite a scene the wander is navigating by)
-function M.capture_free()
+capture_free = function()
   for s = 1, NUM_SLOTS do
     if not M.slots[s] then return M.capture(s) end
   end
@@ -539,12 +596,19 @@ function M.clear(slot)
       or "the ◄ cell was already empty")
     return true
   end
+  -- the orbit re-aims the selector every leg, so a no-slot clear (the
+  -- scene_clear footswitch) would erase whatever the wander picked. The key
+  -- path passes the slot it pressed on; an unaddressed clear refuses.
+  if slot == nil and orbit.on then
+    say("ORBIT RUNNING", "the orbit is moving the selector — stop it (orbit run)"
+      .. " before clearing a slot from the footswitch")
+    return false
+  end
   slot = slot_idx(slot)
   local had = M.slots[slot] ~= nil
-  -- mutate in place: ctx.scenes points AT this table
-  M.slots[slot] = nil
+  M.slots[slot] = nil   -- in place: the grid and the page read this table
   if M.pending == slot then cancel_pending() end
-  M.invalidate()
+  reset_morph()
   say(had and ("CLEARED " .. slot) or ("SLOT " .. slot .. " EMPTY"),
     had and ("scene " .. slot .. " cleared") or
     ("scene " .. slot .. " was already empty"), slot)
@@ -552,32 +616,22 @@ function M.clear(slot)
 end
 
 -- ===========================================================================
--- morph — A -> B, one knob
+-- morph — from where you are toward a slot, one knob
 -- ===========================================================================
--- continuous params interpolate in the controlspec's OWN (warped) space:
--- cutoff 20 -> 20000 is exponential, so a raw lerp would sit at "nearly open"
--- for the whole second half of the sweep. unmap -> lerp -> map is linear in
--- the space the encoder moves in, which is the one that sounds even. pass
--- opts.linear for a raw-value lerp instead.
+-- continuous params interpolate in the controlspec's OWN (warped) space
+-- (ctx.warped_lerp): cutoff 20 -> 20000 is exponential, so a raw lerp would
+-- sit at "nearly open" for the whole second half of the sweep.
 -- numbers (voices, warp_overlaps) lerp and land on integers; options and
 -- binaries can't be half-switched, so they flip at the midpoint (amt >= 0.5).
 
-local function morph_value(id, va, vb, amt, linear)
+local function morph_value(id, va, vb, amt)
   local p = lookup(id)
   if not p then return nil end
   local cs = p.controlspec
   if cs then
-    if linear then
-      local v = va + (vb - va) * amt
-      v = clamp(v, cs.minval, cs.maxval)
-      return v, clamp(cs:unmap(v), 0, 1)
-    end
-    local na = clamp(cs:unmap(va), 0, 1)
-    local nb = clamp(cs:unmap(vb), 0, 1)
-    local tn = na + (nb - na) * amt
     -- the normalized target doubles as the deadband key below: if a param is
     -- identical in A and B, tn never moves and it never gets sent at all
-    return cs:map(tn), tn
+    return C.warped_lerp(cs, va, vb, amt)
   end
   if p.count then                                  -- option: midpoint switch
     return amt < 0.5 and va or vb
@@ -593,14 +647,49 @@ end
 -- without being coarse enough to see or hear.
 local MORPH_EPS = 1 / 400
 
+-- the sweep in progress, read by emit(). Module state rather than a closure
+-- per call: the morph runs every frame while a sweep or the orbit moves, and
+-- this is the hot path that is meant to allocate nothing.
+local sw_amt, sw_force = 0, false
+local pair_done = {}       -- edge partners already written this pass (reused)
+
+-- one param's step of the sweep. `vb` arrives already clamped to the
+-- material (clamp_stored).
+--   va nil              the origin never had it (an older capture): skip.
+--   vb nil              the CURRENT aim does not carry it (an FX-only slot,
+--                       a partial preset slot). If this sweep already moved it
+--                       under an earlier aim, its line now runs from the
+--                       origin to itself, so it goes home; otherwise skip.
+--   va == vb            the Octatrack rule: a param identical at both ends is
+--                       not the morph's to move, so a hand riding it stays
+--                       live, even through the forced ends. An id this sweep
+--                       already displaced (last_sent) still tracks the line.
+local function emit(id, va, vb)
+  if va == nil or not params.lookup[id] then return end
+  if vb == nil then
+    if last_sent[id] == nil then return end
+    vb = va
+  end
+  if va == vb and last_sent[id] == nil then return end
+  local v, tn = morph_value(id, va, vb, sw_amt)
+  if v == nil then return end
+  local key = tn or v          -- continuous: compare norms; discrete: values
+  local last = last_sent[id]
+  local fire = sw_force or last == nil
+    or (tn and abs(tn - last) >= MORPH_EPS)
+    or (not tn and v ~= last)
+  if fire then
+    pset(id, v)
+    last_sent[id] = key
+  end
+end
+
 -- morph `amt` (0..1) of the way from where you were toward `slot`.
 --   amt 0   the sound you had when you started sweeping (exactly)
 --   amt 1   that slot's stored sound (exactly, for the morph-safe subset)
---   opts.force   send every param even if it hasn't moved
---   opts.linear  interpolate raw values instead of controlspec space
 -- returns false when the slot is empty, or when there's nothing to do (parked
 -- at 0 with no sweep in progress — at rest the sound is just the sound).
-function M.morph(slot, amt, opts)
+function M.morph(slot, amt)
   if morphing then return false end    -- a param action can never recurse in
   amt = clamp(amt or 0, 0, 1)
   local B = (not is_back(slot)) and M.slots[slot_idx(slot)] or nil
@@ -643,45 +732,20 @@ function M.morph(slot, amt, opts)
     M.invalidate()   -- forget the sweep: we are home
     return true
   end
-  opts = opts or {}
   if amt <= 0 and not morph_from then return false end
   -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
   local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
   morph_from = A
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
-  local force = opts.force or amt <= 0 or amt >= 1
+  sw_amt, sw_force = amt, amt <= 0 or amt >= 1
   morphing = true
   local ids = SCENE_MORPH_IDS
-
-  -- one param's step of the sweep.
-  -- skip anything either side doesn't have (older capture, missing param).
-  -- the Octatrack rule: a param IDENTICAL at both ends is not the morph's to move —
-  -- a hand riding such a knob mid-sweep stays live even through the forced
-  -- ends, instead of being stomped back (a scene only claims what differs).
-  -- an id THIS sweep already displaced (last_sent, e.g. before a re-aim)
-  -- still lands exactly at both ends.
-  local function emit(id, va, vb)
-    if va == nil or vb == nil or not params.lookup[id] then return end
-    vb = clamp_stored(id, vb)   -- a stored window sweeps toward the material
-    if not (va ~= vb or (force and last_sent[id] ~= nil)) then return end
-    local v, tn = morph_value(id, va, vb, amt, opts.linear)
-    if v == nil then return end
-    local key = tn or v          -- continuous: compare norms; discrete: values
-    local last = last_sent[id]
-    local fire = force or last == nil
-      or (tn and abs(tn - last) >= MORPH_EPS)
-      or (not tn and v ~= last)
-    if fire then
-      pset(id, v)
-      last_sent[id] = key
-    end
-  end
-
-  local done                     -- edge partners already written this pass
+  for k in pairs(pair_done) do pair_done[k] = nil end
   for i = 1, #ids do
     local id = ids[i]
-    if not (done and done[id]) then
+    if not pair_done[id] then
       local partner = EDGE_PAIRS[id]
+      local bv = clamp_stored(id, B[id], B)   -- a stored loop aims at material
       if partner and params.lookup[partner]
           and A[id] ~= nil and B[id] ~= nil
           and A[partner] ~= nil and B[partner] ~= nil then
@@ -691,16 +755,16 @@ function M.morph(slot, amt, opts)
         -- hits the 100ms minimum-length floor, which jumps the softcut head.
         -- The morph runs this 15 times a second, so it meets the hazard far
         -- more often than a recall does.
-        local nv = morph_value(id, A[id], clamp_stored(id, B[id]), amt, opts.linear)
+        local pv = clamp_stored(partner, B[partner], B)
+        local nv = morph_value(id, A[id], bv, amt)
         if nv ~= nil and nv < params:get(id) then
-          emit(id, A[id], B[id]); emit(partner, A[partner], B[partner])
+          emit(id, A[id], bv); emit(partner, A[partner], pv)
         else
-          emit(partner, A[partner], B[partner]); emit(id, A[id], B[id])
+          emit(partner, A[partner], pv); emit(id, A[id], bv)
         end
-        done = done or {}
-        done[partner] = true
+        pair_done[partner] = true
       else
-        emit(id, A[id], B[id])
+        emit(id, A[id], bv)
       end
     end
   end
@@ -719,9 +783,11 @@ end
 -- does this slot hold state a MORPH can't carry? (the MORPH_SKIPPED_IDS —
 -- holds, routing, buffer writers, the voice cap.) true = the sweep has
 -- arrived but those are still sitting where you left them, and only a K2
--- recall lands them. drives the SCENE page's "RCL B TO LAND" cue, which
--- exists so `morph(1) ~= recall(B)` is visible instead of mysterious.
+-- recall lands them. drives the SCENE page's "K2 TO LAND THE REST" cue, which
+-- exists so `morph(1) ~= recall(B)` is visible instead of mysterious. The ◄
+-- cell is never "unlanded": K2 there is the way back, not a landing.
 function M.unlanded(slot)
+  if is_back(slot) then return false end
   local scene = M.slots[slot_idx(slot)]
   if not scene then return false end
   for i = 1, #MORPH_SKIPPED_IDS do
@@ -753,15 +819,21 @@ end
 -- with one filled slot each leg halves the remaining distance toward it;
 -- with none the orbit idles. math.random stays out of the draw path.
 
-local orbit = { on = false, leg_start = 0, leg_len = 1 }
+-- (`orbit` itself is declared above capture, which reads it)
 
+-- parking moves no param: it only drops the sweep's origin, so the next leg
+-- departs from wherever this one left the sound. It must not forget the key
+-- throws (it is not the instrument moving), and it writes the morph amount
+-- home silently (with no origin, 0 sends nothing).
 local function orbit_park()
-  M.invalidate()
-  pset("scene_morph_amt", 0)   -- silent: with no sweep origin this writes nothing
+  reset_morph()
+  pset("scene_morph_amt", 0)
 end
 
+local orbit_filled = {}   -- reused: the orbit looks for a target every leg
 local function orbit_new_leg()
-  local filled, cur = {}, slot_idx()
+  local filled, cur = orbit_filled, slot_idx()
+  for k = #filled, 1, -1 do filled[k] = nil end
   for s = 1, NUM_SLOTS do
     if M.slots[s] and s ~= cur then filled[#filled + 1] = s end
   end
@@ -775,21 +847,20 @@ end
 
 function M.orbit_set(on)
   orbit.on = on
-  M.orbit_running = on   -- read by capture(); declared here, order-safe
-  if on then
-    orbit_park()               -- depart from wherever we stand right now
-    orbit_new_leg()
-  else
-    orbit_park()               -- stop and keep the sound the orbit found
-  end
+  orbit_park()                 -- depart from (or stop on) wherever we stand
+  orbit.live = on and orbit_new_leg()
 end
 
+-- `live` = a leg is actually running. With no filled slot to aim at there is
+-- no leg, and parking every frame (as this once did) pinned the morph knob to
+-- 0 under the performer's hand; now it just looks for a target each frame.
 local function orbit_tick()
   if not orbit.on then return end
   local t = (C.frame - orbit.leg_start) / orbit.leg_len
-  if t >= 1 then
-    orbit_park()
-    if not orbit_new_leg() then return end
+  if t >= 1 or not orbit.live then
+    if orbit.live then orbit_park() end
+    orbit.live = orbit_new_leg()
+    if not orbit.live then return end
     t = 0
   end
   pset("scene_morph_amt", pget("orbit_reach", 0.5) * t)
@@ -830,12 +901,12 @@ end
 function M.safe_restore()
   if not M.safe then
     say("NO SAFE STATE",
-      "no safe state marked yet — K1+K3 (SAFE) on the SCENE page marks one")
+      "no safe state marked yet — select the ◄ cell and K3 (CAP) marks one;"
+      .. " every recall and every chaos throw also marks it for you")
     return false
   end
   cancel_pending()   -- a queued recall must not undo the rescue a beat later
-  local n, moved = apply(M.safe, SAFE_SNAPSHOT_IDS)
-  M.chaos_live = false
+  local n, moved = land(M.safe, SAFE_SNAPSHOT_IDS)
   say(moved == 0 and "UNDO - SAME" or "UNDO",
     "safe state restored — " .. moved .. " of " .. n .. " params moved")
   return true
@@ -972,13 +1043,8 @@ end
 function M.init(ctx)
   C = ctx
   pget, clamp = ctx.pget, ctx.clamp
-  ctx.scene = M          -- the module, like ctx.motion
-  ctx.scenes = M.slots   -- the scene table itself (mutated in place, never
-                         -- reassigned, so this ref can't go stale)
-  -- the named helpers the grid's CAP/CLR modifiers call (everything else
-  -- drives the scene_* params directly, so those are the only two exposed)
-  ctx.scene_capture = M.capture
-  ctx.scene_clear = M.clear
+  ctx.scene = M          -- the module, like ctx.motion. its bank is M.slots,
+                         -- mutated in place and never reassigned
 end
 
 function M.cleanup()

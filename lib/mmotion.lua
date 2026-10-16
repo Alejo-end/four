@@ -288,8 +288,10 @@ function M.clear_lane()
   M.lanes[id] = nil
   table.remove(M.lane_ids, sel)
   if #M.lane_ids == 0 then
-    M.loop_len = 0
-    M.playhead = 0
+    -- the loop is empty again: ALL of its timing goes, rec_len included, or
+    -- a later motion_len move builds a phantom loop with no lanes and the
+    -- next arm becomes a fixed-length overdub instead of a free first pass
+    wipe()
     if pget("motion_play", 0) == 1 then params:set("motion_play", 0) end
   else
     reset_cursors()
@@ -299,6 +301,31 @@ end
 -- ===========================================================================
 -- tick — one per redraw frame: capture live moves, then replay the loop
 -- ===========================================================================
+
+-- motion_depth scales a continuous lane toward its first value in the
+-- controlspec's WARPED space, the same space the scene morph blends in
+-- (ctx.warped_lerp), so half depth sits half way up the knob on an
+-- exponential param too. discrete params pass through.
+local function at_depth(id, L, v, depth)
+  local p = params:lookup_param(id)
+  local cs = p and p.controlspec
+  if not cs then return v end
+  return (C.warped_lerp(cs, L.v[1], v, depth))
+end
+
+-- this frame's due values, reused (the replay is on the 15fps hot path)
+local due_ids, due_val = {}, {}
+
+local function write_back(id, v)
+  params:set(id, v)
+  -- account for our own change so the poll skips it. read the value BACK
+  -- rather than storing what we asked for: a Control stores map(unmap(v)),
+  -- which differs from v in the last bit for a large share of values on an
+  -- exponential spec. storing v left the next poll seeing a mismatch, reading
+  -- it as a live hand on the knob, and punch-in REPLACING the very lane an
+  -- overdub was meant to extend. M.account re-reads for the same reason.
+  last_val[id] = params:get(id)
+end
 
 function M.tick()
   local armed = pget("motion_rec", 0) == 1
@@ -332,37 +359,55 @@ function M.tick()
       if armed then params:set("motion_rec", 0) end
     end
     local src = src_of(M.playhead)       -- read the lanes in their own timebase
-    -- motion_depth (0..1) scales continuous lanes toward their first value —
-    -- a global "amount" for the whole loop. discrete params pass through.
+    -- motion_depth (0..1): a global "amount" for the whole loop (at_depth)
     local depth = pget("motion_depth", 1)
     local blend = depth < 0.999
     local ids = M.lane_ids
+    -- 1) what each lane says NOW: the last event due by this frame (a
+    --    retimed loop can pass several in one frame; only the last one is
+    --    the value the param should hold)
+    local nd = 0
     for i = 1, #ids do
       local id = ids[i]
       local L = M.lanes[id]
-      local n = L.n
-      local cur = L.cur
+      local n, cur, v = L.n, L.cur, nil
       while cur <= n and L.f[cur] <= src do
-        local v = L.v[cur]
-        if blend then
-          local p = params:lookup_param(id)
-          if p and p.controlspec then
-            local base = L.v[1]
-            v = base + depth * (v - base)
-          end
-        end
-        params:set(id, v)
-        -- account for our own change so the poll skips it. read the value BACK
-        -- rather than storing what we asked for: a Control stores
-        -- map(unmap(v)), which differs from v in the last bit for a large share
-        -- of values on an exponential spec. storing v left the next poll seeing
-        -- a mismatch, reading it as a live hand on the knob, and punch-in
-        -- REPLACING the very lane an overdub was meant to extend. M.account
-        -- re-reads for the same reason.
-        last_val[id] = params:get(id)
+        v = L.v[cur]
         cur = cur + 1
       end
       L.cur = cur
+      if v ~= nil then
+        nd = nd + 1
+        due_ids[nd] = id
+        due_val[id] = blend and at_depth(id, L, v, depth) or v
+      end
+    end
+    -- 2) write them. A region's two edges due together go through the one
+    --    pair writer (widening edge first): replayed in lane order, a slide
+    --    right crossed the pair for one write every pass, and the deck's
+    --    100ms floor turned that into a jump of the head.
+    -- (the pair maps live in mscenes, which initialises after this module,
+    -- so they are read here rather than bound at init)
+    local sc = C.scene
+    local pm = nd > 1 and sc and sc.PARTNER or nil
+    for k = 1, nd do
+      local id = due_ids[k]
+      local v = due_val[id]
+      if v ~= nil then
+        local partner = pm and pm[id]
+        local pv = partner and due_val[partner] or nil
+        if pv ~= nil then
+          local sid, eid = id, partner
+          if not sc.EDGE_PAIRS[id] then sid, eid = partner, id end
+          C.set_pair(sid, eid, due_val[sid], due_val[eid])
+          last_val[sid], last_val[eid] = params:get(sid), params:get(eid)
+          due_val[partner] = nil
+        else
+          write_back(id, v)
+        end
+        due_val[id] = nil
+      end
+      due_ids[k] = nil
     end
   end
 end
@@ -377,7 +422,5 @@ function M.init(ctx)
   MAX_LEN = 60 * FPS
   MIN_LEN = math.max(4, floor(FPS * 0.5))     -- a settable loop is >= 0.5s
 end
-
-function M.cleanup() end   -- nothing to tear down (no wrapped methods anymore)
 
 return M

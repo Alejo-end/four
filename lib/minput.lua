@@ -1,10 +1,12 @@
--- minput: chromatic note input — midi note-ons and the usb typing keyboard,
--- both retuning `pitch` relative to the root note.
+-- minput: chromatic note input — midi notes and the usb typing keyboard.
 --
--- note-ons set `pitch` = 2^(semitones/12) relative to root_note: middle C
--- (with the default root) plays the sample as recorded, and the 0.25–4 spec
--- covers ±24 st (notes beyond that clamp to the edges). last-note priority,
--- no envelope — a note retunes the running voice rather than gating one.
+-- every note goes through ctx.route_note, which sends it one of two ways:
+--   pad input OFF  the note retunes the drone: `pitch` = 2^(semitones/12)
+--                  relative to root_note (middle C with the default root plays
+--                  the sample as recorded; the 0.25-4 spec covers ±24 st).
+--                  last-note priority, so the release is ignored.
+--   pad input ON   the note gates a polyphonic PADS voice (note mod 8), held
+--                  until its release.
 -- CC mappings (PMAP) are handled by the system and unaffected by this.
 
 local midi_devices = {}
@@ -30,6 +32,9 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
+  -- a mapped CC is a hand on the instrument too (idle dim); notes count
+  -- through route_note. clock and other system messages do not.
+  if msg.type == "cc" then C.touch_input() end
   -- both edges: note-on gates a voice / retunes the drone, note-off releases
   -- a voice (the drone is last-note, so it ignores the release)
   local z, note
@@ -94,11 +99,13 @@ function M.init(ctx)
     -- SPACE = master stop/start, ableton muscle memory. it's transport, not
     -- note input, so it works even with keys_enable off
     if code == "SPACE" then
+      C.touch_input()
       ptoggle("stop_all")
       return
     end
     if pget("keys_enable", 1) == 0 then return end
     if code == "Z" or code == "X" then
+      C.touch_input()
       params:delta("kb_octave", code == "X" and 1 or -1)
     else
       local st = KB_NOTES[code]

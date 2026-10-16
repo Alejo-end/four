@@ -13,8 +13,8 @@
 --
 --   lua tools/test_launchpad.lua        # from the repo root
 
-local ok_count, fail = 0, {}
-local function ok(c, w) if c then ok_count = ok_count + 1 else fail[#fail + 1] = w end end
+local T = dofile("tools/harness.lua")
+local ok, near = T.ok, T.near
 
 -- lift the pure helpers out of mgrid rather than copying them
 local src = io.open("lib/mgrid.lua"):read("a")
@@ -145,10 +145,4 @@ ok(src:find("0xF7", 1, true) ~= nil, "frames are terminated with F7")
 ok(src:find("LP_PROG", 1, true) ~= nil, "Programmer mode is entered on connect")
 ok(src:find("LP_LIVE", 1, true) ~= nil, "...and Live mode restored on cleanup")
 
-print(string.format("\n%d assertions passed", ok_count))
-if #fail > 0 then
-  print(#fail .. " FAILED:")
-  for _, f in ipairs(fail) do print("  x " .. f) end
-  os.exit(1)
-end
-print("launchpad harness OK")
+T.report("launchpad harness OK")

@@ -1,20 +1,20 @@
--- mpages: the screen — wave/twave display models, every page body, header,
--- footer, and the redraw composition. (the bitmap mockups are the bible:
--- same font, same geometry.)
---
--- layout: header y0..10  (title 2x pixel font, ALT chip, page dots, status)
---         body   y12..41 (per-page visualization)
---         footer y44..63 (labels row, then the hardware row mirroring the
---                         panel: E2 dial . K2 pill . K3 pill . E3 dial)
--- values are not parked in the footer: turning an encoder flashes the value
--- top-right for a second (like the mockup readouts), then it gets out of
--- the way.
+-- mpages: the screen — the wave/twave display models, every page body, the
+-- header, the footer, and the redraw composition.
+--   header y0..8   the page title (1x), the purity mark, the write/hold flags,
+--                  the page dots top-right
+--   body   y11..53 one dominant object per page, drawn from real state
+--   footer y56..63 four quiet words: K2 K3 | E2 E3. a turning knob brightens
+--                  its word and swells its value in a framed 2x box just above
+--                  the footer, bottom right, for ~1.2s
+-- The strips are painted from files through lib/mwav.lua (lua cannot read an
+-- SC or softcut buffer); this module owns the strips, mwav reads the files.
 
 local floor, sin, cos = math.floor, math.sin, math.cos
 local abs, sqrt, min, max = math.abs, math.sqrt, math.min, math.max
 local log, exp = math.log, math.exp
 
 local C     -- shared ctx, bound at init
+local W     -- lib/mwav (the file reader), handed in through ctx.wav
 local pget, clamp, window_bounds, FPS, PAGES
 local ptext, ptext_c, ptext_r, chip, text_w
 local amp_in, amp_out
@@ -35,6 +35,12 @@ local twave_bin = 0
 -- so bins skipped between frames at high rates get filled, wrap-around is
 -- seamless, and reverse playback paints in the right direction. entering a
 -- fresh bin, previous content survives by `pre` (the overdub picture).
+-- A JUMP is not a walk: no head travels more than a bin per frame (the
+-- fastest, a layer at 4x, moves about 0.6), so a gap of several bins is a
+-- loop wrapping round or a pass re-armed somewhere else. Walking it painted
+-- the whole loop with one moment's level (every seam of a DUB loop drew a
+-- solid block). Only the landing bin is painted.
+local JUMP_BINS = 3
 local function paint_bins(bins, last, bin, amp, pre)
   if last == 0 or last == bin then
     bins[bin] = max(bins[bin], amp)
@@ -42,6 +48,10 @@ local function paint_bins(bins, last, bin, amp, pre)
   end
   local fwd = (bin - last) % 128
   local bwd = (last - bin) % 128
+  if fwd > JUMP_BINS and bwd > JUMP_BINS then
+    bins[bin] = max(bins[bin] * pre, amp)
+    return bin
+  end
   local step = (fwd <= bwd) and 1 or -1
   local b = last
   repeat
@@ -53,9 +63,13 @@ end
 local M = {}
 M.paint_bins = paint_bins   -- the layer decks paint their own pictures
 
--- track the buffer's contents as the write head passes over it
+-- track the buffer's contents as the write head passes over it. STOP holds
+-- the record head (an arm under STOP waits for START), so it holds the
+-- picture too: painting the live input over a head that writes nothing set
+-- wave_any over an empty buffer, and the next PSET save wrote 60s of silence.
 function M.update_wave()
-  if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
+  if pget("rec", 0) == 1 and pget("freeze", 0) == 0
+      and pget("stop_all", 0) == 0 then
     local bin = floor(clamp(C.rec_phase, 0, 0.999) * 128) + 1
     if C.rec_amp > 0.01 then C.wave_any = true end
     wave_bin = paint_bins(wave, wave_bin, bin, C.rec_amp, pget("pre_level", 0))
@@ -65,7 +79,8 @@ end
 -- track the tape loop's contents as the head records (input amplitude,
 -- since softcut exposes no per-voice output meter); tape_pre sets survival
 function M.update_tape_wave()
-  if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+  if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0
+      and pget("stop_all", 0) == 0 then
     local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
     -- meter what softcut actually records (C.cut_rec_amp — the ADC tap, the
     -- engine output, or the blend): a WET print otherwise painted nothing
@@ -76,30 +91,16 @@ function M.update_tape_wave()
   end
 end
 
--- wipe the tape picture (the CLR gesture starts the loop over)
--- the async fill queue lives up here so the clear functions can cancel their
--- own strip's fill (a CLR must stop the very repaint that would redraw what
--- it just erased — and ONLY that one, not another strip's fill in flight)
-local fills = {}
-local BINS_PER_TICK = 10
-local function cancel_fill(bins)
-  for i = #fills, 1, -1 do
-    if fills[i].bins == bins then
-      pcall(function() fills[i].f:close() end)
-      table.remove(fills, i)
-    end
-  end
-end
-local function cancel_all_fills()
-  for i = #fills, 1, -1 do
-    pcall(function() fills[i].f:close() end)
-    fills[i] = nil
-  end
+-- wipe ANY strip, cancelling its own queued repaint (the layer decks own
+-- their bins and erase through here)
+function M.clear_bins(bins)
+  W.cancel_fill(bins)
+  for i = 1, 128 do bins[i] = 0 end
 end
 
+-- wipe the tape picture (the CLR gesture starts the loop over)
 function M.clear_twave()
-  cancel_fill(twave)
-  for i = 1, 128 do twave[i] = 0 end
+  M.clear_bins(twave)
   twave_bin = 0
   C.twave_any = false
 end
@@ -107,123 +108,9 @@ end
 -- wipe the engine's picture (the engine `clear` command): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
 function M.clear_wave()
-  cancel_fill(wave)   -- stop an in-flight TAKE fill first
-  for i = 1, 128 do wave[i] = 0 end
+  M.clear_bins(wave)  -- stops an in-flight TAKE fill first
   wave_bin = 0
   C.wave_any = false
-end
-
--- paint the wave display straight out of a FILE (the engine `read_file`).
--- lua cannot read the engine's SC buffer, so a loaded sample would otherwise be
--- INVISIBLE on every page that draws the take — REC/WINDOW/PADS would sit there
--- saying "EMPTY - K2 REC" over audio you can hear. so we read the file's peaks
--- ourselves.
--- seek-and-peak: 128 bins, a small window sampled at each (~128KB touched, not
--- the whole 11MB), so a load never stalls the script.
--- 16-bit PCM wav only (what norns records and what dust ships). anything else
--- returns nil and the caller leaves the display alone rather than draw a lie.
--- returns: the seconds the sample occupies IN THE BUFFER, or nil.
--- async waveform read: the FAST part (header → dur, window, wave_any) runs now
--- and RETURNS immediately; the slow per-bin peak read is deferred to load_tick
--- (BINS_PER_TICK bins/frame on the redraw clock) so a long take/sample load
--- draws IN over ~1s instead of freezing the screen. ONE queue serves every
--- strip — the take, the tape, the layer decks — so a pset restore can repaint
--- all of them; a new fill for the SAME bins table supersedes the queued one,
--- and fills for different targets coexist. File handles live on the queue
--- entries until each fill finishes (the queue itself is declared above the
--- clear functions, which cancel per-strip).
-
--- walk a RIFF/WAVE file to its fmt + data chunks, leaving f positioned at the
--- data. returns afmt, ch, bits, sr, dpos, dlen — or nil if not RIFF/WAVE. shared
--- by load_wave (the preview) and open_pcm16_mono (the Phase B export).
-local function riff_parse(f)
-  local hdr = f:read(12)
-  if not hdr or #hdr < 12 or hdr:sub(1, 4) ~= "RIFF" or hdr:sub(9, 12) ~= "WAVE" then
-    return nil
-  end
-  local afmt, ch, bits, sr, dpos, dlen = 1, 1, 16, 48000, nil, 0
-  while true do
-    local c = f:read(8)
-    if not c or #c < 8 then break end
-    local id, sz = c:sub(1, 4), string.unpack("<I4", c, 5)
-    if id == "fmt " then
-      local fmt = f:read(sz)
-      if not fmt or #fmt < 16 then break end
-      afmt = string.unpack("<I2", fmt, 1)     -- 1 = PCM int, 3 = IEEE float
-      ch = string.unpack("<I2", fmt, 3)
-      sr = string.unpack("<I4", fmt, 5)
-      bits = string.unpack("<I2", fmt, 15)
-    elseif id == "data" then
-      dpos, dlen = f:seek(), sz
-      break
-    else
-      f:seek("cur", sz + (sz % 2))            -- riff chunks are word-aligned
-    end
-  end
-  return afmt, ch, bits, sr, dpos, dlen
-end
-
--- one SIGNED sample decoder per (format, bit depth). 16/24/32-bit PCM and
--- 32-bit float are what norns itself can produce — the engine's take dump, the
--- system tape's print, and whatever a performer drops in — so this covers all
--- of it. ONE table: the waveform preview and the sample-rate converter below
--- read the same files, and a second copy would mean a format could draw
--- correctly and convert to noise, or the reverse.
-local DECODE = {
-  [1] = {
-    [16] = function(s, p) return string.unpack("<i2", s, p) / 32768 end,
-    [24] = function(s, p) return string.unpack("<i3", s, p) / 8388608 end,
-    [32] = function(s, p) return string.unpack("<i4", s, p) / 2147483648 end,
-  },
-  [3] = {
-    [32] = function(s, p) return string.unpack("<f", s, p) end,
-  },
-}
-
--- WAVE_FORMAT_EXTENSIBLE is PCM of the stated depth (the common 24-bit case;
--- the rare float-extensible falls through to "unsupported", which callers read
--- as "no preview" / "refuse to convert" rather than drawing or writing a lie).
-function M.wav_decoder(afmt, bits)
-  if afmt == 0xFFFE then afmt = 1 end
-  return DECODE[afmt] and DECODE[afmt][bits]
-end
-
--- open `path` and queue an async fill of `bins`: 128 peak bins spanning
--- `secs` seconds, so a file shorter than the span occupies only its share of
--- the strip (the engine clamps its reads the same way — a longer file only
--- occupies `secs` of the buffer, and drawing more would misalign every
--- playhead and slice). supersedes any queued fill of the SAME bins table.
--- returns the seconds the file occupies, or nil for a format the shared
--- decoders cannot read (the caller leaves the strip alone rather than lie).
-local function queue_fill(path, bins, secs)
-  cancel_fill(bins)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local afmt, ch, bits, _, dpos, dlen = riff_parse(f)
-  if not afmt then f:close(); return nil end
-  local readpeak = M.wav_decoder(afmt, bits)
-  if not dpos or ch < 1 or not readpeak then
-    f:close()
-    return nil
-  end
-  local bps = bits // 8
-  local fbytes = ch * bps
-  local SR = C.SERVER_SR
-  local frames = min(floor(dlen / fbytes), floor(SR * secs))
-  local span = clamp(frames / (SR * secs), 0, 1)
-  local nb = max(1, floor(span * 128 + 0.5))
-  -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
-  -- (not the disk read) so a transient is never skipped — a 40ms drum hit
-  -- vanished when this sampled a few windows per bin instead.
-  local stride = max(1, floor(frames * ch / 200000))
-  if frames > 0 then
-    fills[#fills + 1] = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
-      nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0,
-      bins = bins }
-  else
-    f:close()
-  end
-  return frames / SR
 end
 
 -- the TAKE's preview: clear the strip FIRST, so an unsupported-format /
@@ -233,7 +120,7 @@ end
 function M.load_wave(path, buf_secs)
   for i = 1, 128 do wave[i] = 0 end
   wave_bin = 0
-  local dur = queue_fill(path, wave, buf_secs)
+  local dur = W.queue_fill(path, wave, buf_secs)
   if dur ~= nil then C.wave_any = dur > 0 end
   return dur
 end
@@ -244,7 +131,7 @@ end
 -- this a restored loop played audibly under a blank picture).
 function M.fill_wave_bins(path, bins, secs)
   for i = 1, 128 do bins[i] = 0 end
-  return queue_fill(path, bins, secs)
+  return W.queue_fill(path, bins, secs)
 end
 
 -- the tape strip's version of the same (mpages owns twave)
@@ -253,439 +140,54 @@ function M.repaint_twave(path, secs)
   return M.fill_wave_bins(path, twave, secs)
 end
 
--- fill up to BINS_PER_TICK bins of the queue's HEAD per call (driven by the
--- redraw clock), then close its file and move on. bounded work per frame →
--- the reads never block the UI; each strip draws IN over ~nb/10 frames.
-function M.load_tick()
-  local p = fills[1]
-  if not p then return end
-  local bins = p.bins
-  local last = min(p.i + BINS_PER_TICK, p.nb)
-  for i = p.i + 1, last do
-    local b0 = floor((i - 1) / p.nb * p.frames)
-    local n = floor(i / p.nb * p.frames) - b0
-    local peak = 0
-    if n > 0 then
-      p.f:seek("set", p.dpos + b0 * p.fbytes)
-      local chunk = p.f:read(n * p.fbytes)
-      if chunk then
-        for pp = 1, #chunk - (p.bps - 1), p.step do
-          -- magnitude: the decoder is signed, the strip wants height
-          local v = p.readpeak(chunk, pp)
-          if v < 0 then v = -v end
-          if v > peak then peak = v end
-        end
-      end
-    end
-    bins[i] = peak > 1 and 1 or peak
-  end
-  p.i = last
-  if p.i >= p.nb then p.f:close(); table.remove(fills, 1) end
-end
-
--- cancel EVERY in-flight fill (script cleanup)
-function M.cancel_load() cancel_all_fills() end
-
--- ============================================================================
--- sample-rate conversion
--- ============================================================================
--- scsynth's Buffer:readChannel does NO sample-rate conversion and norns runs
--- its server at 48k, so a 44.1k wav — which is most of dust/audio and nearly
--- everything off a card — lands in the take buffer playing 8.8% fast, a
--- semitone and change sharp, with every pad, slice and window inheriting the
--- error. This converts a file to the server rate first.
---
--- It is deliberately here in lua and not in the engine: no new SC command, no
--- fingerprint change, no restart, and it yields so the screen stays live.
--- To change a file's sample rate you have to work out what the signal was
--- doing BETWEEN the samples you have. The shape used to do that is the whole
--- quality question. The simple choice is a cubic curve through four
--- neighbouring samples, which is what a sampler uses for varispeed; it is
--- cheap and it filters nothing.
---
--- Filtering nothing is the problem when converting DOWNWARDS. A 96k file can
--- hold sound up to 48 kHz, and 48k can only hold up to 24 kHz. Anything above
--- that has to be REMOVED first, or it does not disappear: it comes back
--- mirrored into the audible range as a tone that was never in the file. A
--- cubic curve leaves it all there. This shape removes it.
---
--- It is built once per conversion and stored as a table of numbers, so the
--- inner loop is lookups and multiplies rather than trigonometry. Measured at
--- 1.9x the cost of the cubic it replaces (ten seconds of 44.1k stereo: 0.68s
--- against 0.37s on a dev Mac). An import happens once, it already yields to
--- keep the screen alive, and a library converted ahead of time never gets
--- here at all.
-local SINC_TAPS = 16          -- samples looked at per output sample; more
-                              -- are used when converting downwards
-local SINC_PHASES = 512       -- how finely we can land between two samples.
-                              -- 1/512 of a sample off is inaudible
-
--- `cutoff` says how much of the sound has to survive. Converting UP, the
--- source file is the limit and nothing needs removing, so it is 1. Converting
--- DOWN, the new rate is the limit, so it is the ratio between them, and
--- everything above that has to go. Skip this and the mirrored-back tones are
--- the loudest thing in the converted file.
-local function build_sinc(cutoff)
-  local pi = math.pi
-  local half = max(2, floor(SINC_TAPS / 2 / cutoff + 0.5))
-  local taps = half * 2
-  local k = {}
-  for ph = 0, SINC_PHASES - 1 do
-    local frac = ph / SINC_PHASES
-    local base = ph * taps
-    local sum = 0
-    for t = 0, taps - 1 do
-      local x = (t - half + 1) - frac         -- distance in SOURCE samples
-      local a = pi * cutoff * x
-      local s = (abs(a) < 1e-9) and cutoff or (cutoff * sin(a) / a)
-      -- Taper the ends of the shape smoothly to zero (a Blackman window), or
-      -- chopping it off at 16 samples rings.
-      -- Measured on a 96k to 48k conversion, as how loud a tone comes back
-      -- when it can only get through by being mirrored: 26k -13 dB, 30k
-      -- -40 dB, 36k -75 dB, 40k -85 dB. The cubic left all four at -0.2 dB.
-      -- So it takes until roughly half again above the limit to get really
-      -- quiet, which is what 16 samples buys. What does leak through lands at
-      -- 22 kHz and up, where the cubic was dropping the lot into the middle
-      -- of the music.
-      local u = (x + half) / taps
-      s = s * (0.42 - 0.5 * cos(2 * pi * u) + 0.08 * cos(4 * pi * u))
-      k[base + t + 1] = s
-      sum = sum + s
-    end
-    -- Make each set of numbers add up to exactly 1. Otherwise each one
-    -- amplifies very slightly differently, and since we cycle through them as
-    -- we go, that is a volume wobble at the rate we cycle. It is an audible
-    -- whine, not a rounding error.
-    if sum ~= 0 then
-      for t = 1, taps do k[base + t] = k[base + t] / sum end
-    end
-  end
-  return k, half, taps
-end
-
--- open a file for random-access frame reads. nil for anything we cannot
--- decode, so a caller refuses rather than working on silence.
-local function open_src(path)
-  local f = io.open(path, "rb")
-  if not f then return nil, "cannot open " .. tostring(path) end
-  local afmt, ch, bits, sr, dpos, dlen = riff_parse(f)
-  local dec = afmt and M.wav_decoder(afmt, bits)
-  if not (dec and dpos and ch and ch >= 1 and sr and sr > 0) then
-    f:close(); return nil, "unsupported format"
-  end
-  local bps = bits // 8
-  local fbytes = ch * bps
-  return { f = f, dpos = dpos, ch = ch, bps = bps, fbytes = fbytes, sr = sr,
-           dec = dec, frames = floor(dlen / fbytes), path = path }
-end
-
-local function close_src(s) if s and s.f then s.f:close(); s.f = nil end end
-
--- read n frames from `from` into L/R (1-based), zero-padding outside the file
--- so an interpolator may always ask for a neighbour it cannot have.
-local function read_frames(src, from, n, L, R)
-  local a, b = max(from, 0), min(from + n, src.frames)
-  for i = 1, a - from do L[i], R[i] = 0, 0 end
-  for i = max(1, b - from + 1), n do L[i], R[i] = 0, 0 end
-  if b <= a then return end
-  src.f:seek("set", src.dpos + a * src.fbytes)
-  -- a file can be SHORTER than its header claims (a truncated copy, an
-  -- interrupted write): a short read must still honour the zero-pad contract
-  -- above, or a caller indexes nil exactly where the data chunk lied
-  local chunk = src.f:read((b - a) * src.fbytes) or ""
-  local dec, ch, bps, fb = src.dec, src.ch, src.bps, src.fbytes
-  local o = a - from
-  local got = #chunk // fb
-  for i = 0, got - 1 do
-    local p = i * fb + 1
-    local l = dec(chunk, p)
-    L[o + i + 1] = l
-    R[o + i + 1] = ch > 1 and dec(chunk, p + bps) or l
-  end
-  for i = o + got + 1, b - from do L[i], R[i] = 0, 0 end
-end
-
--- the converted file is written at 24 BITS. It is the last stop before the
--- engine buffer, and writing 16 threw away the bottom 8 bits of every 24-bit
--- source before it ever got there: a conversion that fixed the pitch and
--- quietly cost the depth.
-local SRC_BLOCK = 4096
-local SRC_BITS = 24
-local SRC_BYTES = SRC_BITS // 8
-local SRC_PEAK = 8388607
-local SRC_PACK = "<" .. string.rep("i3", SRC_BLOCK * 2)
-
--- returns true, seconds  — converted and written to out_path
---         false, seconds — already at `sr`, nothing written
---         nil, err       — could not decode (the caller falls back to loading
---                          the file as-is: audible-but-sharp beats silence)
--- the declared sample rate of a wav, without decoding a byte of it. nil for
--- anything that is not a readable RIFF/WAVE.
-function M.wav_rate(path)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local afmt, _, _, sr = riff_parse(f)
-  f:close()
-  if not afmt or not sr or sr <= 0 then return nil end
-  return sr
-end
-
--- channels and duration of a wav, from the header alone. nil for anything that
--- is not a readable RIFF/WAVE; the layer loader then reads it as stereo and
--- leaves the loop at the whole region rather than guessing.
-function M.wav_info(path)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local afmt, ch, bits, sr, _, dlen = riff_parse(f)
-  f:close()
-  if not afmt or not sr or sr <= 0 or not ch or ch < 1 then return nil end
-  local dur = (dlen and dlen > 0 and bits and bits > 0)
-    and dlen / (ch * (bits / 8) * sr) or nil
-  return ch, dur, sr
-end
-
-function M.convert_sr(path, out_path, sr, yield, max_secs)
-  local src, err = open_src(path)
-  if not src then return nil, err end
-  local in_sr, frames = src.sr, src.frames
-  if frames < 2 then close_src(src); return nil, "no audio" end
-  -- refuse an implausible declared rate HERE, not just via the caller's cap:
-  -- a corrupt header claiming 1 Hz turns a 4800-frame file into 230M output
-  -- frames, and an opt-in cap is protection a future caller forgets (the
-  -- caller falls back to loading the file as-is, which is bounded)
-  if in_sr < 4000 or in_sr > 384000 then
-    close_src(src); return nil, "implausible sample rate " .. tostring(in_sr)
-  end
-  if in_sr == sr then close_src(src); return false, frames / sr end
-
-  local of = io.open(out_path, "wb")
-  if not of then close_src(src); return nil, "cannot write " .. tostring(out_path) end
-  -- header with placeholder sizes, backpatched at the end
-  of:write("RIFF", string.pack("<I4", 36), "WAVE")
-  local obytes = SRC_BYTES * 2                    -- bytes per stereo frame
-  of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1),
-    string.pack("<I2", 2), string.pack("<I4", sr),
-    string.pack("<I4", sr * obytes),
-    string.pack("<I2", obytes), string.pack("<I2", SRC_BITS))
-  of:write("data", string.pack("<I4", 0))
-
-  local ratio = in_sr / sr
-  local kern, half, taps = build_sinc(min(1, sr / in_sr))
-  local out_n = floor(frames / ratio)
-  -- bound the OUTPUT, not just the input: the take buffer only holds max_secs
-  -- anyway, and without this a corrupt header declaring a tiny rate expands a
-  -- small file into gigabytes (4800 frames at a claimed 1 Hz = 921 MB out) —
-  -- while a long DJ mix converts minutes of audio the buffer would discard
-  if max_secs then out_n = min(out_n, floor(sr * max_secs)) end
-  local L, R = {}, {}
-  local out_v = {}
-  local written, since = 0, 0
-  while written < out_n do
-    local bn = min(SRC_BLOCK, out_n - written)
-    local p0 = written * ratio
-    local p1 = (written + bn - 1) * ratio
-    local lo = floor(p0) - half
-    local hi = floor(p1) + half + 1
-    read_frames(src, lo, hi - lo + 1, L, R)
-    for k = 0, bn - 1 do
-      local pos = (written + k) * ratio
-      local ip = floor(pos)
-      local ph = floor((pos - ip) * SINC_PHASES)
-      if ph >= SINC_PHASES then ph = SINC_PHASES - 1 end
-      local base = ph * taps
-      -- tap t reads source frame ip + t - half + 1; the kernel is even, so
-      -- the same coefficient serves both sides of the output position
-      local j = ip - lo - half + 2
-      local vl, vr = 0, 0
-      for t = 0, taps - 1 do
-        local c = kern[base + t + 1]
-        vl = vl + c * (L[j + t] or 0)
-        vr = vr + c * (R[j + t] or 0)
-      end
-      vl = vl * SRC_PEAK
-      if vl > SRC_PEAK then vl = SRC_PEAK elseif vl < -SRC_PEAK then vl = -SRC_PEAK end
-      vr = vr * SRC_PEAK
-      if vr > SRC_PEAK then vr = SRC_PEAK elseif vr < -SRC_PEAK then vr = -SRC_PEAK end
-      out_v[k * 2 + 1] = floor(vl + 0.5)
-      out_v[k * 2 + 2] = floor(vr + 0.5)
-    end
-    local fmt = bn == SRC_BLOCK and SRC_PACK or ("<" .. string.rep("i3", bn * 2))
-    of:write(string.pack(fmt, table.unpack(out_v, 1, bn * 2)))
-    written = written + bn
-    since = since + 1
-    if yield and since >= 4 then since = 0; yield() end
-  end
-
-  local datalen = written * obytes
-  of:seek("set", 4);  of:write(string.pack("<I4", 36 + datalen))
-  of:seek("set", 40); of:write(string.pack("<I4", datalen))
-  close_src(src); of:close()
-  return true, written / sr
-end
-
--- WHERE THE SOUND ACTUALLY IS. Returns the first and last positions above a
--- threshold, as fractions of a `buf_secs` buffer — the same units the window
--- uses. nil when the file cannot be read, or when nothing clears the floor
--- (silence), so a caller can tell "nothing there" from "could not look".
---
--- The point: pressing REC and then playing leaves your reaction time at the
--- head of every take, and letting go late leaves room tone at the tail. The
--- rec-stop window snaps to where the HEADS were, not to where the sound is.
-function M.onset_bounds(path, from01, to01, buf_secs, thresh, yield)
-  local src, err = open_src(path)
-  if not src then return nil, err end
-  local total = floor(buf_secs * src.sr)
-  local from = clamp(floor(from01 * total), 0, src.frames)
-  local to = clamp(floor(to01 * total), 0, src.frames)
-  if to - from < 64 then close_src(src); return nil, "range is empty" end
-  thresh = thresh or 0.004                       -- about -48 dBFS
-  local L, R = {}, {}
-  local CH = 8192
-  local first, last = nil, nil
-  local i = from
-  while i < to do
-    local n = min(CH, to - i)
-    read_frames(src, i, n, L, R)
-    for k = 1, n do
-      local a = abs(L[k]); local b = abs(R[k])
-      if a > thresh or b > thresh then
-        if not first then first = i + k - 1 end
-        last = i + k - 1
-      end
-    end
-    i = i + n
-    if yield then yield() end
-  end
-  close_src(src)
-  if not first then return nil, "silence" end
-  return first / total, (last + 1) / total
-end
-
--- TRANSIENT DETECTION: where does the material actually start hitting?
--- A 10ms energy envelope; an onset is where energy jumps against its neighbour
--- and clears a floor. Energy tolerates a strided decode (a transient is
--- milliseconds wide, i.e. hundreds of frames), which is what keeps this
--- affordable on a Pi.
---
--- `from01`/`to01` bound the search as fractions of a `buf_secs` buffer, and the
--- cuts come back in the same units — so a caller works in the window's own
--- coordinates and never has to know the file's rate or length.
--- Returns nil (not an empty list) when the file cannot be read, so a caller can
--- tell "no transients here" from "could not look".
-function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
-  local src, err = open_src(path)
-  if not src then return nil, err end
-  local total = floor(buf_secs * src.sr)
-  local from = clamp(floor(from01 * total), 0, src.frames)
-  local to = clamp(floor(to01 * total), 0, src.frames)
-  if to - from < 64 then close_src(src); return nil, "range is empty" end
-
-  local win = max(64, floor(src.sr * 0.01))
-  local stride = 8
-  local L, R, env = {}, {}, {}
-  local i, k = from, 0
-  while i < to do
-    local n = min(win, to - i)
-    read_frames(src, i, n, L, R)
-    local e = 0
-    for j = 1, n, stride do
-      local a = abs(L[j]) + abs(R[j])
-      if a > e then e = a end
-    end
-    k = k + 1
-    env[k] = e * 0.5
-    i = i + n
-    if yield and (k % 32 == 0) then yield() end
-  end
-  close_src(src)
-
-  -- floor: a fraction of the loudest window, so quiet material still chops and
-  -- room tone does not
-  local peak = 0
-  for j = 1, k do if env[j] > peak then peak = env[j] end end
-  local floorlv = peak * 0.18
-  local cuts = { from01 }          -- the first slice always starts at the edge
-  local last = -99
-  for j = 2, k do
-    local prev = env[j - 1]
-    if env[j] > floorlv and env[j] > prev * 2.2 and (j - last) > 3 then
-      last = j
-      local f = from + (j - 1) * win
-      cuts[#cuts + 1] = f / total
-      if #cuts >= maxn then break end
-    end
-  end
-  return cuts
-end
-
--- interleave two MONO wavs (the L/R pair write_take dumps) into one stereo
--- wav. A browsable export that reloads via load sample, ZERO new load code.
--- Lua-only (no engine interleave). Returns true on success.
---
--- The samples are spliced as BYTES and the depth is read from the header, so
--- this follows whatever the engine wrote rather than pinning the export to a
--- depth of its own. write_take moved to 24-bit; this needed no other change.
-local function open_pcm_mono(path)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local afmt, ch, bits, sr, dpos, dlen = riff_parse(f)
-  if not dpos or afmt ~= 1 or ch ~= 1 or not bits
-      or (bits ~= 16 and bits ~= 24 and bits ~= 32) then
-    f:close(); return nil
-  end
-  local bps = bits // 8
-  f:seek("set", dpos)
-  return f, floor(dlen / bps), sr, bps   -- handle, frames, rate, bytes/sample
-end
-
-function M.interleave_wav(pathL, pathR, out, yield)
-  local fL, nL, sr, bps = open_pcm_mono(pathL)
-  if not fL then return false end
-  local fR, nR, _, bpsR = open_pcm_mono(pathR)
-  if not fR then fL:close(); return false end
-  -- a mismatched pair is not a stereo file: refuse rather than interleave
-  -- samples of two different widths into a header that can only claim one
-  if bpsR ~= bps then fL:close(); fR:close(); return false end
-  local frames = min(nL, nR)
-  local of = io.open(out, "wb")
-  if not of then fL:close(); fR:close(); return false end
-  local fb = bps * 2                              -- bytes per stereo frame
-  local datalen = frames * fb
-  of:write("RIFF", string.pack("<I4", 36 + datalen), "WAVE")
-  of:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
-    string.pack("<I4", sr), string.pack("<I4", sr * fb), string.pack("<I2", fb),
-    string.pack("<I2", bps * 8))
-  of:write("data", string.pack("<I4", datalen))
-  local CHUNK = 8192                               -- frames per pass
-  local i, since = 0, 0
-  while i < frames do
-    local n = min(CHUNK, frames - i)
-    local lc, rc = fL:read(n * bps), fR:read(n * bps)
-    if not lc or not rc or #lc < n * bps or #rc < n * bps then break end
-    local buf = {}
-    for p = 1, n * bps, bps do
-      buf[#buf + 1] = lc:sub(p, p + bps - 1); buf[#buf + 1] = rc:sub(p, p + bps - 1)
-    end
-    of:write(table.concat(buf))
-    i = i + n
-    since = since + 1
-    if yield and since >= 8 then since = 0; yield() end   -- ~64k frames / yield
-  end
-  -- a short read means the declared header over-states the data; backpatch the
-  -- RIFF + data sizes to what we actually wrote so the wav isn't malformed.
-  if i < frames then
-    local dl = i * fb
-    of:seek("set", 4); of:write(string.pack("<I4", 36 + dl))
-    of:seek("set", 40); of:write(string.pack("<I4", dl))
-  end
-  fL:close(); fR:close(); of:close()
-  return true
-end
-
 -- deterministic dither, same trick as the mockups
 local function hash(x, y, sd)
   local f = sin(x * 12.9898 + y * 78.233 + sd * 37.719) * 43758.5453
   return f - floor(f)
+end
+
+-- a waveform LANE: the 128 bins of `bins` stretched across columns x0..x1 as
+-- vertical strokes around the centre row ym. The height law is the one every
+-- strip shares: sqrt so quiet material still reads, times `k`, clamped to
+-- [hmin, hmax]. `lo`/`span` (default the whole strip) zoom it onto a part of
+-- the bins, which is how PADS draws only the window. The caller sets the level.
+local function wave_lane(bins, x0, x1, ym, k, hmin, hmax, lo, span)
+  lo, span = lo or 0, span or 1
+  local w = x1 - x0
+  for x = x0, x1 do
+    local a = bins[floor((lo + (x - x0) / w * span) * 127) + 1] or 0
+    if a > 0.002 then
+      local h = clamp(sqrt(min(a * 2, 1)) * k, hmin, hmax)
+      screen.move(x, ym - h)
+      screen.line(x, ym + h)
+    end
+  end
+  screen.stroke()
+end
+
+-- the record-SOURCE flag: a deck printing PROCESSED audio is never a hidden
+-- mode. DRY (the default) draws nothing. Reads the EFFECTIVE source, so a
+-- layer bounce throwing it WET shows on every page that records it.
+local function src_flag(x, y)
+  local src = C.eff_cut_source()
+  if src > 0.02 then
+    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
+      x, y, 1, 9)
+  end
+end
+
+-- the framed 2x readout: black pocket, level-12 frame, the text at 2x. The
+-- turning knob's value and the page-name pop both use it, so it is legible
+-- over any body.
+local function framed2x(str, bx, y)
+  local w = text_w(str, 2) + 9
+  screen.level(0)
+  screen.rect(bx, y, w + 2, 15)
+  screen.fill()
+  screen.level(12)
+  screen.rect(bx, y, w + 2, 15)
+  screen.stroke()
+  ptext(str, bx + 5, y + 3, 2, 15)
 end
 
 -- footer words per param id: the owning page's own vocabulary — these are
@@ -732,52 +234,45 @@ local SHORT = {
   clouds_mode = "CMOD",
 }
 
--- the FULL word for a footer encoder label. shown at REST (no assumptions —
--- you read "START", not "ST"); the SHORT form above takes over only while the
--- value is up (turning, or a selector), where the digits need the room. a full
--- word that would collide with the key words falls back to SHORT (flabel_r).
+-- the FULL word for a footer encoder label, shown at REST (you read "START",
+-- not "ST"). Only the words that DIFFER from SHORT live here; label_for falls
+-- back to SHORT for the rest. A full word that would collide with the key
+-- words falls back to SHORT too (flabel_r).
 local FULL = {
-  mix = "MIX", out_level = "OUT",
   input_level = "INPUT", monitor_level = "MONITOR",
   dry_wet = "DRY/WET",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
-  scan = "SPEED", pitch = "PITCH",
-  size = "SIZE", density = "DENSITY",
+  density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
-  tape_rate = "RATE", tape_pre = "PRE", loop_end = "LOOP",
   cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
-  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FEEDBACK",
-  delay_sync = "SYNC",
-  rev_size = "SIZE", rev_mix = "REVERB",
-  rev_decay = "DECAY", rev_damp = "DAMP",
+  delay_fb = "FEEDBACK",
+  rev_mix = "REVERB",
+  rev_damp = "DAMP",
   voice_rel = "RELEASE",
-  motion_lane = "LANE", motion_depth = "DEPTH", motion_len = "LENGTH",
-  seq_slice = "SLICE", pad_pitch = "PITCH", pad_voice = "VOICE",
-  scene_slot = "SLOT", scene_morph_amt = "MORPH",
-  orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE", wear = "WEAR",
-  layer_sel = "LAYER",
-  ["@lay_level"] = "LEVEL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
+  motion_depth = "DEPTH", motion_len = "LENGTH",
+  pad_pitch = "PITCH", pad_voice = "VOICE",
+  scene_morph_amt = "MORPH",
+  orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE",
+  ["@lay_level"] = "LEVEL",
 }
 
 -- normalized 0..1 of a value for a param: controlspec unmap, option index,
 -- or number range. plots the MOTION lanes' events at their captured heights.
-local function value_norm(id, v)
-  local p = params.lookup[id] and params:lookup_param(id)
+-- pnorm takes the param OBJECT, so a caller plotting many values of one
+-- param (a MOTION lane) looks it up once, not once per event.
+local function pnorm(p, v)
   if not p then return 0 end
   if p.controlspec then return clamp(p.controlspec:unmap(v), 0, 1)
   elseif p.count then return p.count > 1 and (v - 1) / (p.count - 1) or 0
   elseif p.min and p.max and p.max > p.min then return (v - p.min) / (p.max - p.min) end
   return clamp(v, 0, 1)
 end
-
--- the LIVE value's normalized position (compound "@" targets resolve first)
-local function param_norm(id)
-  if id and C.enc_target then id = C.enc_target(id) end
-  if not (id and params.lookup[id]) then return nil end
-  return value_norm(id, params:get(id))
+local function lookup_p(id)
+  return params.lookup[id] and params:lookup_param(id) or nil
 end
+local function value_norm(id, v) return pnorm(lookup_p(id), v) end
 
 -- footer value text for a param: compact, ALL-CAPS abbreviations. a few
 -- ids get hand-tuned units (cutoff kHz, pitch semitones, rates x, times);
@@ -846,8 +341,8 @@ local function fmt_value(id)
   return string.upper(params:string(id))
 end
 
--- is this param the one currently being turned? (drives the footer knob
--- fill; the window is armed in the encoder handler, ~1.2s)
+-- is this param the one currently being turned? (brightens its footer word and
+-- swells the big value box; the window is armed in the encoder handler, ~1.2s)
 local function is_turning(id)
   return id ~= nil and C.flash_id == id and C.frame < C.flash_until
 end
@@ -888,11 +383,12 @@ local function fkey_draw(n, x)
   return w
 end
 
--- one encoder word, right-anchored: WORD· — the FULL word at rest (no
--- assumptions), the SHORT form only while the value is up (turning, or a
--- selector). the value itself exists only while you're asking (the 1.2s swell),
--- or always on the selector pages. minx is the key words' right edge: a full
--- word that would cross it drops to the abbreviation so the row never overlaps.
+-- one encoder word, right-anchored: WORD· — the FULL word, except on the
+-- selector pages, where the SHORT word carries the selection beside it
+-- (SLICE·3). A turning knob only brightens its word; its value swells in the
+-- big box above the footer (draw_big_value). minx is the key words' right
+-- edge: a full word that would cross it drops to the abbreviation, so the
+-- row never overlaps.
 -- hoisted out of flabel_r so the draw path allocates no per-frame closures
 local function label_for(id, full)
   if not id then return "--" end
@@ -934,15 +430,7 @@ local function draw_big_value()
   elseif is_turning(e3) then tid = e3 end
   if not tid then return end
   local v = fmt_value(tid)
-  local w = text_w(v, 2) + 9
-  local bx = 126 - w
-  screen.level(0)
-  screen.rect(bx, 41, w + 2, 15)
-  screen.fill()
-  screen.level(12)
-  screen.rect(bx, 41, w + 2, 15)
-  screen.stroke()
-  ptext(v, bx + 5, 44, 2, 15)
+  framed2x(v, 126 - (text_w(v, 2) + 9), 41)
 end
 
 -- footer: K2 K3 | E2· E3· — four quiet words that never lie about the keys
@@ -985,15 +473,15 @@ local function draw_footer()
 end
 
 -- ============================================================================
--- the nine dominant objects (doc/redesign.md §6)
+-- the dominant objects, one per page (doc/redesign.md §6)
 -- ============================================================================
 -- one object per page, drawn from REAL state, brightness riding audibility.
 -- statics first: everything the 15fps hot path needs preallocated.
 
 -- FILTER: log-frequency axis 20Hz..20kHz over 128 columns, rail columns at
 -- 100Hz/1k/10k (labeled), the 0dB row, and a reusable response buffer (the
--- curve is the engine's REAL biquad magnitude — constants mirror the engine, keep in sync
--- with Engine_Mangler.sc)
+-- curve approximates the engine's DFM1 build, see body_FILTER; the resonance
+-- law mirrors Engine_Mangler.sc, keep them in sync)
 local FILT_FREQ, FILT_Y = {}, {}
 for x = 0, 127 do
   FILT_FREQ[x + 1] = 20 * (1000 ^ (x / 127))
@@ -1192,7 +680,10 @@ local function body_VOICE(frame)
   local scan = pget("scan", 1)
   local rate = max(abs(scan), 0.05)
   local ph = held_pv and 0 or frame * 0.8 * scan
-  local silent = not C.wave_any
+  -- silent = nothing recorded, OR the engine deck is choked (STOP, or MIX
+  -- thrown fully to tape): the engine halts the read head then, so the
+  -- texture lies flat and the playhead goes, as everywhere else
+  local silent = not C.wave_any or (C.mix_gains()) <= 0.001
   if mode == 1 or silent then
     screen.level(1)
     screen.move(0, 33) screen.line(128, 33)
@@ -1284,8 +775,10 @@ local function body_TAPE(frame)
   local a2, b2 = pget("loop_start", 0), pget("loop_end", 1)
   local lo, hi = min(a2, b2), max(a2, b2)
   local lspan = max(hi - lo, 0.001)
-  -- the reels spin at the effective rate: reverse -> backward, stopped -> still
+  -- the reels spin at the effective rate: reverse -> backward, stopped -> still.
+  -- STOP halts the tape head (the rate law folds it), so it halts the reels
   local r = pget("tape_rate", 1) * (pget("tape_reverse", 0) == 1 and -1 or 1)
+    * (1 - pget("stop_all", 0))
   reel_angle = reel_angle + r * 0.35
   for _, cx in ipairs(REEL_X) do
     screen.level(4)
@@ -1318,20 +811,122 @@ local function body_TAPE(frame)
   local tx = clamp(C.tape_phase, 0, 1) * 127
   screen.move(tx, 37) screen.line(tx, 43)
   screen.stroke()
-  ptext_r(string.format("%.1fS", lspan * C.BUF_SECS), 126, 12, 1, 4)
-  -- record SOURCE: flag when the tape is printing PROCESSED audio (never a
-  -- hidden mode — DRY, the default, draws nothing so classic tape is
-  -- unchanged). the EFFECTIVE source: a layer bounce throws it WET globally,
-  -- and the tape page must say so while it does.
-  local src = C.eff_cut_source()
-  if src > 0.02 then
-    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
-      2, 46, 1, 9)
-  end
+  ptext_r(string.format("%.1fS", lspan * (C.TAPE_LEN or 60)), 126, 12, 1, 4)
+  src_flag(2, 46)
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
     if (frame % FPS) < (FPS / 2) then chip("REC", 2, 12) end
   elseif not C.twave_any then
     ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+  end
+end
+
+-- ============================================================================
+-- 4 · LAYERS - the loop decks beside the tape
+-- ============================================================================
+-- Two strips, one per deck. Each shows what is actually recorded in it, the
+-- loop bracket over that, and the head. The SELECTED deck is bright and the
+-- other dim -- the audibility rule everywhere else in this instrument: if a
+-- thing is not the one you are working on, it does not compete for your eye.
+-- A deck whose level is down, or that is not playing, dims further, so you can
+-- always see which of them you are actually hearing.
+local function layer_strip(d, y, sel, frame)
+  local rec = pget(C.deck_p(d, "rec"), 0) == 1
+  local playing = pget(C.deck_p(d, "play"), 1) == 1
+  local lv = pget(C.deck_p(d, "level"), 0.8)
+  local audible = playing and lv > 0.01 and pget("stop_all", 0) == 0
+  local base = sel and (audible and 10 or 6) or (audible and 5 or 3)
+
+  -- name, and the state in words rather than an icon to decode
+  ptext(d.name, 3, y - 6, 1, sel and 15 or 6)
+  if rec then
+    -- the only fast blink in the instrument means WRITING, here as everywhere
+    if (frame % 8) < 5 then
+      screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
+    end
+    ptext(pget(C.deck_p(d, "pre"), 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
+  elseif not playing then
+    -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
+    -- different rates only stay in their drifting relationship if neither one
+    -- restarts, so silencing a layer must not move it. The word has to say so.
+    ptext("MUTE", 20, y - 6, 1, 5)
+  end
+
+  local x0, x1 = 38, 124
+  local w = x1 - x0
+  -- the material
+  screen.level(base)
+  wave_lane(d.wave, x0, x1, y, 5, 1, 5)
+  -- the loop bracket: where this deck actually reads from
+  local ls = clamp(pget(C.deck_p(d, "start"), 0), 0, 1)
+  local le = clamp(pget(C.deck_p(d, "end"), 1), 0, 1)
+  local bx0 = x0 + floor(min(ls, le) * w)
+  local bx1 = x0 + floor(max(ls, le) * w)
+  screen.level(sel and 12 or 5)
+  screen.rect(bx0, y - 6, 1, 13)
+  screen.rect(bx1, y - 6, 1, 13)
+  screen.rect(bx0, y - 6, bx1 - bx0, 1)
+  screen.fill()
+
+  -- the invitation goes over the bracket (which is drawn across the same
+  -- space), so it knocks out a pocket first — the rule the footer follows when
+  -- a swelling value meets the key words
+  if not d.any then
+    local msg = sel and "EMPTY - K2 REC" or "EMPTY"
+    local tw = text_w(msg, 1)
+    local tx = floor((x0 + x1) / 2 - tw / 2)
+    screen.level(0)
+    screen.rect(tx - 2, y - 2, tw + 4, 9)
+    screen.fill()
+    ptext(msg, tx, y + 3, 1, sel and 6 or 3)
+  end
+
+  -- the head, drawn last so it is never hidden
+  screen.level(audible and 15 or 6)
+  screen.rect(x0 + floor(clamp(d.phase, 0, 1) * w), y - 5, 1, 11)
+  screen.fill()
+
+  -- level, as a short bar under the name
+  screen.level(sel and 8 or 4)
+  screen.rect(3, y + 4, floor(clamp(lv, 0, 1) * 30), 1)
+  screen.fill()
+end
+
+local function body_LAYERS(frame)
+  local sel = floor(pget("layer_sel", 1) + 0.5)
+  local decks = C.layers or {}
+  if #decks == 0 then
+    ptext_c("NO LAYER DECKS", 64, 30, 1, 4)
+    return
+  end
+  -- the rate of the selected deck, top right: the number that makes two decks
+  -- drift against each other, which is the whole reason for having two
+  local d = decks[sel] or decks[1]
+  local r = pget(C.deck_p(d, "rate"), 1) * (pget(C.deck_p(d, "reverse"), 0) == 1 and -1 or 1)
+  ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
+  -- the selected deck's LOOP LENGTH. With its rate on the other side these are
+  -- the two numbers that decide whether two decks stay locked or walk apart,
+  -- and this is what makes SNAP visible even in the case where it moves
+  -- nothing because the loop was already on the grid.
+  if C.loop_secs then
+    ptext(string.format("%.2fS", C.loop_secs(d)), 2, 12, 1, 5)
+  end
+  -- what the decks RECORD: the EFFECTIVE source (the knob, or the bounce's
+  -- WET override while a layer is armed). Flag a processed print, or the
+  -- resample rig is a hidden mode. DRY draws nothing, same law as TAPE's.
+  src_flag(44, 12)
+  for i = 1, math.min(#decks, 2) do
+    layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
+  end
+  -- what SNAP just did, over the readout row it replaces for a moment. A snap
+  -- that lands on the length you already had moves nothing on screen, and a
+  -- page that cannot say so is indistinguishable from a key that did nothing.
+  if C.lay_msg and (frame - (C.lay_msg_at or -1e9)) < FPS * 1.2 then
+    -- the WHOLE row: a pocket cut only behind the words leaves the loop
+    -- seconds and the rate peeking out either side of the message, which
+    -- reads as garbage. A fresh action is the more urgent news, so it takes
+    -- the row outright and the readouts come back when it expires.
+    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
+    ptext_c(C.lay_msg, 64, 12, 1, 12)
   end
 end
 
@@ -1520,7 +1115,7 @@ local function body_REVERB(frame)
   -- shimmer: motes climbing off the tail
   local shim = pget("shimmer", 0)
   if shim > 0.01 then
-    local spd = 0.4 + (param_norm("shimmer_pitch") or 0.5) * 1.4
+    local spd = 0.4 + value_norm("shimmer_pitch", pget("shimmer_pitch", 12)) * 1.4
     local n = 3 + floor(shim * 15)
     screen.level(7)
     for i = 1, n do
@@ -1538,6 +1133,25 @@ end
 --     master VU). the layer decks live on their own page; this console is
 --     the engine <> tape crossfade.
 -- ============================================================================
+-- one console meter: frame, the signal bar (sqrt law), and a peak pip that
+-- decays slowly. `k` picks its peak slot; the pip decays once per frame.
+local function vu(x, sig, k, newframe)
+  screen.level(1)
+  screen.rect(x - 1.5, 18.5, 8, 31)
+  screen.stroke()
+  if sig > 0.01 then
+    screen.level(11)
+    screen.rect(x, 48 - sig * 28, 5, sig * 28)
+    screen.fill()
+  end
+  if newframe then vu_peak[k] = max(sig, vu_peak[k] - 0.0045) end
+  if vu_peak[k] > 0.02 then
+    screen.level(15)
+    screen.rect(x, 48 - vu_peak[k] * 28 - 1, 5, 1)
+    screen.fill()
+  end
+end
+
 local function body_MIX(frame)
   -- each lane's energy is its deck's REAL gain: the ONE law itself
   -- (C.mix_gains — trim x crossfade plateau x master x STOP), not a mirror
@@ -1548,21 +1162,7 @@ local function body_MIX(frame)
   local newframe = C.frame ~= vu_last_frame
   -- input meter, left
   ptext("IN", 3, 12, 1, 5)
-  screen.level(1)
-  screen.rect(3.5, 18.5, 8, 31)
-  screen.stroke()
-  local isig = sqrt(clamp(max(amp_in[1], amp_in[2]), 0, 1))
-  if isig > 0.01 then
-    screen.level(11)
-    screen.rect(5, 48 - isig * 28, 5, isig * 28)
-    screen.fill()
-  end
-  if newframe then vu_peak[1] = max(isig, vu_peak[1] - 0.0045) end
-  if vu_peak[1] > 0.02 then
-    screen.level(15)
-    screen.rect(5, 48 - vu_peak[1] * 28 - 1, 5, 1)
-    screen.fill()
-  end
+  vu(5, sqrt(clamp(max(amp_in[1], amp_in[2]), 0, 1)), 1, newframe)
   -- the engine deck lane (the real take, at the deck's real gain)
   ptext("ENG", 18, 13, 1, 5)
   if not eng_on then
@@ -1570,17 +1170,8 @@ local function body_MIX(frame)
     screen.move(18, 23.5) screen.line(104, 23.5)
     screen.stroke()
   else
-    local g = clamp(eng_g, 0, 1)
     screen.level(12)
-    for x = 18, 104 do
-      local a = wave[floor((x - 18) / 86 * 127) + 1] or 0
-      if a > 0.002 then
-        local h = clamp(sqrt(min(a * 2, 1)) * g * 5, 0.5, 5)
-        screen.move(x, 23.5 - h)
-        screen.line(x, 23.5 + h)
-      end
-    end
-    screen.stroke()
+    wave_lane(wave, 18, 104, 23.5, clamp(eng_g, 0, 1) * 5, 0.5, 5)
     if pget("mode", 5) ~= 1 then
       screen.level(15)
       local phx = 18 + clamp(C.play_phase, 0, 1) * 86
@@ -1601,17 +1192,8 @@ local function body_MIX(frame)
     screen.move(18, 41.5) screen.line(104, 41.5)
     screen.stroke()
   else
-    local g = clamp(tape_g, 0, 1)
     screen.level(10)
-    for x = 18, 104 do
-      local a = twave[floor((x - 18) / 86 * 127) + 1] or 0
-      if a > 0.002 then
-        local h = clamp(sqrt(min(a * 2, 1)) * g * 4, 0.5, 4)
-        screen.move(x, 41.5 - h)
-        screen.line(x, 41.5 + h)
-      end
-    end
-    screen.stroke()
+    wave_lane(twave, 18, 104, 41.5, clamp(tape_g, 0, 1) * 4, 0.5, 4)
   end
   if C.twave_any then
     screen.level(tape_on and 15 or 4)
@@ -1621,24 +1203,8 @@ local function body_MIX(frame)
   end
   ptext("TAPE", 18, 47, 1, 5)
   -- master VU, right
-  screen.level(1)
-  screen.rect(112.5, 18.5, 8, 31)
-  screen.stroke()
-  local osig = sqrt(clamp(max(amp_out[1], amp_out[2]), 0, 1))
-  if osig > 0.01 then
-    screen.level(11)
-    screen.rect(114, 48 - osig * 28, 5, osig * 28)
-    screen.fill()
-  end
-  if newframe then
-    vu_peak[2] = max(osig, vu_peak[2] - 0.0045)
-    vu_last_frame = C.frame
-  end
-  if vu_peak[2] > 0.02 then
-    screen.level(15)
-    screen.rect(114, 48 - vu_peak[2] * 28 - 1, 5, 1)
-    screen.fill()
-  end
+  vu(114, sqrt(clamp(max(amp_out[1], amp_out[2]), 0, 1)), 2, newframe)
+  if newframe then vu_last_frame = C.frame end
   ptext("OUT", 112, 12, 1, 5)
 end
 
@@ -1673,15 +1239,7 @@ local function body_PADS(frame)
   local sw = (bx1 - bx0) / 8
   local wlo, _, wspan = window_bounds()
   screen.level(8)
-  for x = bx0, bx1 do
-    local a = wave[floor((wlo + (x - bx0) / (bx1 - bx0) * wspan) * 127) + 1] or 0
-    if a > 0.002 then
-      local h = clamp(sqrt(min(a * 2, 1)) * 4, 1, 4)
-      screen.move(x, by - h)
-      screen.line(x, by + h)
-    end
-  end
-  screen.stroke()
+  wave_lane(wave, bx0, bx1, by, 4, 1, 4, wlo, wspan)
   -- the slice boundaries, ON the wave. Even eighths when nothing has been
   -- chopped; the REAL cut positions once something has, because the whole
   -- point of a chop is that the slices are not evenly spaced and the picture
@@ -1831,23 +1389,48 @@ local function body_MOTION(frame)
     end
     -- the recorded motion as a STEP CURVE (hold value between events)
     local n = L.n
+    local lp = lookup_p(id)               -- once per lane, not once per event
     if n > 0 then
       screen.level(selected and 11 or 7)
-      local py = yb - value_norm(id, L.v[1]) * 8
+      local py = yb - pnorm(lp, L.v[1]) * 8
       screen.move(gx0, py)
-      for e = 1, n do
-        local ex = gx0 + (L.f[e] / el) * (gx1 - gx0)
-        local ey = yb - value_norm(id, L.v[e]) * 8
-        screen.line(ex, py)
-        screen.line(ex, ey)
-        py = ey
+      if n <= gx1 - gx0 then
+        for e = 1, n do
+          local ex = gx0 + (L.f[e] / el) * (gx1 - gx0)
+          local ey = yb - pnorm(lp, L.v[e]) * 8
+          screen.line(ex, py)
+          screen.line(ex, ey)
+          py = ey
+        end
+      else
+        -- more events than pixel columns (a long continuous gesture: up to
+        -- 900 a lane). Drawing each one sent thousands of segments a frame
+        -- through the screen for the same pixels, so collapse each COLUMN to
+        -- one vertical over the values the curve visits there.
+        local col, ylo, yhi
+        for e = 1, n do
+          local c = floor(gx0 + (L.f[e] / el) * (gx1 - gx0))
+          local ey = yb - pnorm(lp, L.v[e]) * 8
+          if c ~= col then
+            if col then
+              screen.line(col, ylo); screen.line(col, yhi); screen.line(col, py)
+            end
+            screen.line(c, py)            -- the hold, up to this column
+            col, ylo, yhi = c, min(py, ey), max(py, ey)
+          else
+            if ey < ylo then ylo = ey end
+            if ey > yhi then yhi = ey end
+          end
+          py = ey
+        end
+        screen.line(col, ylo); screen.line(col, yhi); screen.line(col, py)
       end
       screen.line(gx1, py)
       screen.stroke()
     end
     -- the value sounding right now, where the playhead crosses
     if ll > 0 then
-      local vy = yb - (value_norm(id, pget(id, 0)) or 0) * 8
+      local vy = yb - pnorm(lp, pget(id, 0)) * 8
       screen.level(15)
       screen.rect(phx - 1, vy - 1, 3, 3)
       screen.fill()
@@ -1888,6 +1471,33 @@ end
 -- 11 · SCENE — states and the way back (the slot row + the morph rail; undo
 --     is the ◄ cell, a slot you can see)
 -- ============================================================================
+-- SCENE slot cells: an empty cell is a dotted box; the selected cell is
+-- bracketed one pixel OUTSIDE its edge on both sides, on the slot row (y 20
+-- and 35)
+local function dotted_box(x0, x1, y0, y1)
+  for xx = x0, x1, 2 do
+    screen.rect(xx, y0, 1, 1)
+    screen.rect(xx, y1, 1, 1)
+  end
+  for yy = y0, y1, 2 do
+    screen.rect(x0, yy, 1, 1)
+    screen.rect(x1, yy, 1, 1)
+  end
+  screen.fill()
+end
+local function slot_brackets(x0, x1)
+  screen.level(15)
+  screen.rect(x0, 20, 4, 1)
+  screen.rect(x1 - 3, 20, 4, 1)
+  screen.rect(x0, 35, 4, 1)
+  screen.rect(x1 - 3, 35, 4, 1)
+  screen.rect(x0, 21, 1, 2)
+  screen.rect(x1, 21, 1, 2)
+  screen.rect(x0, 33, 1, 2)
+  screen.rect(x1, 33, 1, 2)
+  screen.fill()
+end
+
 local function body_SCENE(frame)
   local sc = C.scene
   local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 0, 8)
@@ -1899,7 +1509,7 @@ local function body_SCENE(frame)
   elseif amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
     ptext_c("K2 TO LAND THE REST", 64, 13, 1, 5)
   else
-    ptext_r(string.upper(params:string("scene_recall_mode")), 126, 13, 1, 4)
+    ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 4)
   end
   -- the orbit lives here now (its knobs are this page's alt pair): a blinking
   -- chip while the wander runs — the moving selector and rail are its motion
@@ -1914,29 +1524,10 @@ local function body_SCENE(frame)
     ptext("<", 6, 25, 1, 0)
   else
     screen.level(2)
-    for xx = 3, 11, 2 do
-      screen.rect(xx, 22, 1, 1)
-      screen.rect(xx, 33, 1, 1)
-    end
-    for yy = 22, 33, 2 do
-      screen.rect(3, yy, 1, 1)
-      screen.rect(11, yy, 1, 1)
-    end
-    screen.fill()
+    dotted_box(3, 11, 22, 33)
     ptext("<", 6, 25, 1, 3)
   end
-  if sel == 0 then                       -- the ◄ cell is selected
-    screen.level(15)
-    screen.rect(2, 20, 4, 1)
-    screen.rect(9, 20, 3, 1)
-    screen.rect(2, 35, 4, 1)
-    screen.rect(9, 35, 3, 1)
-    screen.rect(2, 21, 1, 2)
-    screen.rect(11, 21, 1, 2)
-    screen.rect(2, 33, 1, 2)
-    screen.rect(11, 33, 1, 2)
-    screen.fill()
-  end
+  if sel == 0 then slot_brackets(2, 12) end   -- the ◄ cell (x 3..11) is selected
   -- the refusal shake: a no-op action (an empty slot) shakes its cell for a
   -- beat — the instrument never silently ignores you, and needs no words
   local shake = 0
@@ -1959,29 +1550,10 @@ local function body_SCENE(frame)
       screen.fill()
     else
       screen.level(2)
-      for xx = x, x + 11, 2 do
-        screen.rect(xx, 22, 1, 1)
-        screen.rect(xx, 33, 1, 1)
-      end
-      for yy = 22, 33, 2 do
-        screen.rect(x, yy, 1, 1)
-        screen.rect(x + 11, yy, 1, 1)
-      end
-      screen.fill()
+      dotted_box(x, x + 11, 22, 33)
     end
     ptext_c(tostring(i), x + 6, 25, 1, (filled or pending or flash) and 0 or 4)
-    if i == sel then                     -- cursor brackets
-      screen.level(15)
-      screen.rect(x - 1, 20, 4, 1)
-      screen.rect(x + 9, 20, 4, 1)
-      screen.rect(x - 1, 35, 4, 1)
-      screen.rect(x + 9, 35, 4, 1)
-      screen.rect(x - 1, 21, 1, 2)
-      screen.rect(x + 12, 21, 1, 2)
-      screen.rect(x - 1, 33, 1, 2)
-      screen.rect(x + 12, 33, 1, 2)
-      screen.fill()
-    end
+    if i == sel then slot_brackets(x - 1, x + 12) end   -- cursor brackets
   end
   -- a queued recall: the emptying wedge counts down to the sync point
   -- (clock.get_beats is device-side; the sim has no clock, so no wedge)
@@ -2044,128 +1616,6 @@ end
 
 -- each page draws its body through this dispatch table, selected by name;
 -- built ONCE at load, so the redraw stays allocation-free
--- ============================================================================
--- 4 · LAYERS - the loop decks beside the tape
--- ============================================================================
--- Two strips, one per deck. Each shows what is actually recorded in it, the
--- loop bracket over that, and the head. The SELECTED deck is bright and the
--- other dim -- the audibility rule everywhere else in this instrument: if a
--- thing is not the one you are working on, it does not compete for your eye.
--- A deck whose level is down, or that is not playing, dims further, so you can
--- always see which of them you are actually hearing.
-local function layer_strip(d, y, sel, frame)
-  local rec = pget(d.id .. "_rec", 0) == 1
-  local playing = pget(d.id .. "_play", 1) == 1
-  local lv = pget(d.id .. "_level", 0.8)
-  local audible = playing and lv > 0.01 and pget("stop_all", 0) == 0
-  local base = sel and (audible and 10 or 6) or (audible and 5 or 3)
-
-  -- name, and the state in words rather than an icon to decode
-  ptext(d.name, 3, y - 6, 1, sel and 15 or 6)
-  if rec then
-    -- the only fast blink in the instrument means WRITING, here as everywhere
-    if (frame % 8) < 5 then
-      screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
-    end
-    ptext(pget(d.id .. "_pre", 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
-  elseif not playing then
-    -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
-    -- different rates only stay in their drifting relationship if neither one
-    -- restarts, so silencing a layer must not move it. The word has to say so.
-    ptext("MUTE", 20, y - 6, 1, 5)
-  end
-
-  local x0, x1 = 38, 124
-  local w = x1 - x0
-  -- the material
-  screen.level(base)
-  for x = x0, x1 do
-    local a = d.wave[floor((x - x0) / w * 127) + 1] or 0
-    if a > 0.002 then
-      local h = clamp(sqrt(min(a * 2, 1)) * 5, 1, 5)
-      screen.move(x, y - h)
-      screen.line(x, y + h)
-    end
-  end
-  screen.stroke()
-  -- the loop bracket: where this deck actually reads from
-  local ls = clamp(pget(d.id .. "_start", 0), 0, 1)
-  local le = clamp(pget(d.id .. "_end", 1), 0, 1)
-  local bx0 = x0 + floor(min(ls, le) * w)
-  local bx1 = x0 + floor(max(ls, le) * w)
-  screen.level(sel and 12 or 5)
-  screen.rect(bx0, y - 6, 1, 13)
-  screen.rect(bx1, y - 6, 1, 13)
-  screen.rect(bx0, y - 6, bx1 - bx0, 1)
-  screen.fill()
-
-  -- the invitation goes over the bracket (which is drawn across the same
-  -- space), so it knocks out a pocket first — the rule the footer follows when
-  -- a swelling value meets the key words
-  if not d.any then
-    local msg = sel and "EMPTY - K2 REC" or "EMPTY"
-    local tw = text_w(msg, 1)
-    local tx = floor((x0 + x1) / 2 - tw / 2)
-    screen.level(0)
-    screen.rect(tx - 2, y - 2, tw + 4, 9)
-    screen.fill()
-    ptext(msg, tx, y + 3, 1, sel and 6 or 3)
-  end
-
-  -- the head, drawn last so it is never hidden
-  screen.level(audible and 15 or 6)
-  screen.rect(x0 + floor(clamp(d.phase, 0, 1) * w), y - 5, 1, 11)
-  screen.fill()
-
-  -- level, as a short bar under the name
-  screen.level(sel and 8 or 4)
-  screen.rect(3, y + 4, floor(clamp(lv, 0, 1) * 30), 1)
-  screen.fill()
-end
-
-local function body_LAYERS(frame)
-  local sel = floor(pget("layer_sel", 1) + 0.5)
-  local decks = C.layers or {}
-  if #decks == 0 then
-    ptext_c("NO LAYER DECKS", 64, 30, 1, 4)
-    return
-  end
-  -- the rate of the selected deck, top right: the number that makes two decks
-  -- drift against each other, which is the whole reason for having two
-  local d = decks[sel] or decks[1]
-  local r = pget(d.id .. "_rate", 1) * (pget(d.id .. "_reverse", 0) == 1 and -1 or 1)
-  ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
-  -- the selected deck's LOOP LENGTH. With its rate on the other side these are
-  -- the two numbers that decide whether two decks stay locked or walk apart,
-  -- and this is what makes SNAP visible even in the case where it moves
-  -- nothing because the loop was already on the grid.
-  if C.loop_secs then
-    ptext(string.format("%.2fS", C.loop_secs(d)), 2, 12, 1, 5)
-  end
-  -- what the decks RECORD: the EFFECTIVE source (the knob, or the bounce's
-  -- WET override while a layer is armed). Flag a processed print, or the
-  -- resample rig is a hidden mode. DRY draws nothing, same law as TAPE's.
-  local src = C.eff_cut_source()
-  if src > 0.02 then
-    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
-      44, 12, 1, 9)
-  end
-  for i = 1, math.min(#decks, 2) do
-    layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
-  end
-  -- what SNAP just did, over the readout row it replaces for a moment. A snap
-  -- that lands on the length you already had moves nothing on screen, and a
-  -- page that cannot say so is indistinguishable from a key that did nothing.
-  if C.lay_msg and (frame - (C.lay_msg_at or -1e9)) < FPS * 1.2 then
-    -- the WHOLE row: a pocket cut only behind the words leaves the loop
-    -- seconds and the rate peeking out either side of the message, which
-    -- reads as garbage. A fresh action is the more urgent news, so it takes
-    -- the row outright and the readouts come back when it expires.
-    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
-    ptext_c(C.lay_msg, 64, 12, 1, 12)
-  end
-end
-
 local BODY = {
   LAYERS = body_LAYERS,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
@@ -2217,8 +1667,8 @@ local function purity()
   if decks then
     for i = 1, #decks do
       local d = decks[i]
-      if d.any and pget(d.id .. "_play", 1) == 1
-          and pget(d.id .. "_level", 0.8) > 0.01 then return false end
+      if d.any and pget(C.deck_p(d, "play"), 1) == 1
+          and pget(C.deck_p(d, "level"), 0.8) > 0.01 then return false end
     end
   end
   return true
@@ -2304,22 +1754,14 @@ end
 -- restores full brightness. one closure, made once.
 local orig_level, dim_level
 -- the page-name pop: E1 arms C.page_flash while stations scroll past, and the
--- destination's name reads BIG and centered for a beat. Thirteen pages go by
+-- destination's name reads BIG and centered for a beat. Eleven pages go by
 -- faster than the 1x title reads, and finding the page mid-set should not
 -- need squinting. Same framed-box idiom as the footer value swell, so it is
 -- legible over any body; transient chrome, gone by itself.
 local function draw_page_flash()
   if not (C.page_flash and C.frame < C.page_flash) then return end
   local name = PAGES[C.page]
-  local w = text_w(name, 2) + 9
-  local bx = floor(64 - w / 2 + 0.5)
-  screen.level(0)
-  screen.rect(bx, 23, w + 2, 15)
-  screen.fill()
-  screen.level(12)
-  screen.rect(bx, 23, w + 2, 15)
-  screen.stroke()
-  ptext(name, bx + 5, 26, 2, 15)
+  framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
 function M.redraw()
@@ -2341,6 +1783,7 @@ end
 
 function M.init(ctx)
   C = ctx
+  W = ctx.wav
   pget, clamp, window_bounds = ctx.pget, ctx.clamp, ctx.window_bounds
   FPS, PAGES = ctx.FPS, ctx.PAGES
   amp_in, amp_out = ctx.amp_in, ctx.amp_out

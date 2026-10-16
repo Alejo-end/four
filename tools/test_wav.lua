@@ -1,4 +1,5 @@
--- test_wav.lua — offline harness for lib/mpages.lua's wav layer.
+-- test_wav.lua — offline harness for the wav layer (lib/mwav.lua) and the
+-- strips mpages paints through it.
 --
 -- The thing no eye can check: the 44.1k -> 48k conversion that stops a loaded
 -- sample playing a semitone sharp. A rate error IS a pitch error, so these
@@ -6,56 +7,37 @@
 --
 --   lua tools/test_wav.lua        # from the repo root
 --
--- It lifts the real functions out of lib/mpages.lua (no copies) and drives
--- them over real files, with no norns and no hardware.
+-- It loads the real lib/mwav.lua and lib/mpages.lua (no copies) with a stub
+-- ctx and drives them over real files, with no norns and no hardware.
 
--- lift riff_parse + wav_decoder + wav_rate + convert_sr out of mpages and
--- assert the conversion: a rate error IS a pitch error, so check the VALUE at
--- a wall-clock position, not just the frame count.
-local ok_count, fail = 0, {}
-local function ok(c, w) if c then ok_count = ok_count + 1 else fail[#fail+1] = w end end
-local function near(a,b,t,w) ok(math.abs(a-b) <= t,
-  string.format("%s (got %s, want %s +-%s)", w, tostring(a), tostring(b), tostring(t))) end
+local T = dofile("tools/harness.lua")
+local ok, near = T.ok, T.near
 
-local src = io.open("lib/mpages.lua"):read("a")
-local rp = src:match("(local function riff_parse.-\nend)\n")
-local dc = src:match("(local DECODE = .-\n})\n")
-local wd = src:match("(function M%.wav_decoder.-\nend)\n")
-local wr = src:match("(function M%.wav_rate.-\nend)\n")
-local cu = src:match("(local SINC_TAPS = .-\n  return k, half, taps\nend)\n")
-local os_ = src:match("(local function open_src.-\nend)\n")
-local cl = src:match("(local function close_src[^\n]*)\n")
-local rf = src:match("(local function read_frames.-\nend)\n")
-local blk = src:match("(local SRC_BLOCK = .-\nlocal SRC_PACK = [^\n]*)\n")
-local cs = src:match("(function M%.convert_sr.-\n  return true, written / sr\nend)")
-local tc = src:match("(function M%.transient_cuts.-\n  return cuts\nend)")
-local ob = src:match("(function M%.onset_bounds.-\n  return first / total, %(last %+ 1%) / total\nend)")
-local iw = src:match("(local function open_pcm_mono.-\n  return true\nend)")
-assert(rp and dc and wd and wr and cu and os_ and cl and rf and blk and cs and tc and ob
-  and iw, "lift failed")
-local env = setmetatable({
-  floor = math.floor, min = math.min, max = math.max, abs = math.abs,
-  sin = math.sin, cos = math.cos,
+-- the real modules, initialised the way mangler.lua does it, minus the
+-- screen. M answers for both: the file layer first, then the strips.
+local nop = function() end
+local W = dofile("lib/mwav.lua")
+local MP = dofile("lib/mpages.lua")
+local M = setmetatable({}, { __index = function(_, k) return W[k] or MP[k] end })
+local CTX = {
+  wav = W,
+  pget = function(_, d) return d end,
   clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
-}, { __index = _G })
--- wav_decoder must be defined BEFORE open_src closes over it
-local M = load(
-  rp .. "\n" .. dc .. "\n" .. cu .. "\n" .. blk .. "\nlocal M={}\n"
-  .. wd .. "\n" .. wr .. "\n" .. os_ .. "\n" .. cl .. "\n" .. rf .. "\n"
-  .. cs .. "\n" .. tc .. "\n" .. ob .. "\n" .. iw .. "\nreturn M",
-  "mp", "t", env)()
+  window_bounds = function() return 0, 1, 1 end,
+  FPS = 15, PAGES = {}, amp_in = { 0, 0 }, amp_out = { 0, 0 },
+  SERVER_SR = 48000,
+  font = { ptext = nop, ptext_c = nop, ptext_r = nop, chip = nop,
+           text_w = function() return 0 end },
+}
+W.init(CTX)
+MP.init(CTX)
 
-local TMP = "/tmp/main-srtest/"
+local TMP = os.tmpname() .. "-wav/"   -- per run: a fixed dir broke parallel runs
 os.execute("rm -rf "..TMP.."; mkdir -p "..TMP)
 local function ramp(path, secs, sr, ch)
-  local n = math.floor(sr*secs); local f = assert(io.open(path,"wb")); local d = n*ch*2
-  f:write("RIFF", string.pack("<I4",36+d), "WAVE")
-  f:write("fmt ", string.pack("<I4",16), string.pack("<I2",1), string.pack("<I2",ch),
-    string.pack("<I4",sr), string.pack("<I4",sr*ch*2), string.pack("<I2",ch*2), string.pack("<I2",16))
-  f:write("data", string.pack("<I4",d))
-  local b={} for i=0,n-1 do local v=math.floor((i/n)*30000)
-    for _=1,ch do b[#b+1]=string.pack("<i2",v) end end
-  f:write(table.concat(b)); f:close(); return n
+  local n = math.floor(sr*secs)
+  T.write_wav(path, sr, ch, 16, n, function(i) return math.floor((i/n)*30000) end)
+  return n
 end
 -- reads whatever depth the writer chose: convert_sr moved to 24-bit, and a
 -- reader pinned to 16 would have silently decoded every third sample as a
@@ -75,15 +57,9 @@ end
 -- A tone at a known pitch, for the things a ramp cannot show: whether the
 -- conversion removes what it has to, and leaves alone what it should.
 local function sine(path, secs, sr, hz, amp)
-  local n=math.floor(sr*secs); local f=assert(io.open(path,"wb")); local d=n*2
-  f:write("RIFF", string.pack("<I4",36+d), "WAVE")
-  f:write("fmt ", string.pack("<I4",16), string.pack("<I2",1), string.pack("<I2",1),
-    string.pack("<I4",sr), string.pack("<I4",sr*2), string.pack("<I2",2), string.pack("<I2",16))
-  f:write("data", string.pack("<I4",d))
-  local b={} for i=0,n-1 do
-    b[#b+1]=string.pack("<i2", math.floor(math.sin(2*math.pi*hz*i/sr)*(amp or 0.7)*32000))
-  end
-  f:write(table.concat(b)); f:close()
+  T.write_wav(path, sr, 1, 16, math.floor(sr*secs), function(i)
+    return math.floor(math.sin(2*math.pi*hz*i/sr)*(amp or 0.7)*32000)
+  end)
 end
 local function rms(w, from, to, c)
   local a=0
@@ -92,7 +68,7 @@ local function rms(w, from, to, c)
 end
 
 ramp(TMP.."a441.wav", 2.0, 44100, 2)
-ok(M.wav_rate(TMP.."a441.wav") == 44100, "wav_rate reads the declared rate")
+ok(select(3, M.wav_info(TMP.."a441.wav")) == 44100, "wav_info reads the declared rate")
 local conv, secs = M.convert_sr(TMP.."a441.wav", TMP.."a48.wav", 48000, nil)
 ok(conv == true, "a 44.1k file converts")
 near(secs, 2.0, 0.01, "...and keeps its DURATION (same pitch, the whole point)")
@@ -214,15 +190,7 @@ end
 -- pinned reader would have refused every export.
 do
   local function mono24(path, n, val)
-    local f = assert(io.open(path, "wb")); local d = n * 3
-    f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
-    f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 1),
-      string.pack("<I4", 48000), string.pack("<I4", 48000 * 3), string.pack("<I2", 3),
-      string.pack("<I2", 24))
-    f:write("data", string.pack("<I4", d))
-    local b = {}
-    for _ = 1, n do b[#b + 1] = string.pack("<i3", math.floor(val * 8388607)) end
-    f:write(table.concat(b)); f:close()
+    T.write_wav(path, 48000, 1, 24, n, function() return math.floor(val * 8388607) end)
   end
   mono24(TMP .. "tl.wav", 1000, 0.5)
   mono24(TMP .. "tr.wav", 1000, -0.25)
@@ -234,13 +202,7 @@ do
   near(sw and sw.sample(500, 1) or 0, 0.5, 1e-4, "...with L intact")
   near(sw and sw.sample(500, 2) or 0, -0.25, 1e-4, "...and R intact")
   -- a pair of two different widths is not a stereo file
-  local f16 = assert(io.open(TMP .. "t16.wav", "wb")); local d = 1000 * 2
-  f16:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
-  f16:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 1),
-    string.pack("<I4", 48000), string.pack("<I4", 96000), string.pack("<I2", 2),
-    string.pack("<I2", 16))
-  f16:write("data", string.pack("<I4", d))
-  f16:write(string.rep(string.pack("<i2", 1000), 1000)); f16:close()
+  T.write_wav(TMP .. "t16.wav", 48000, 1, 16, 1000, function() return 1000 end)
   ok(M.interleave_wav(TMP .. "tl.wav", TMP .. "t16.wav", TMP .. "mix.wav", nil) == false,
     "a MISMATCHED pair refuses rather than interleaving two widths into one header")
 end
@@ -253,15 +215,7 @@ do
   local SR, SECS, BUF = 48000, 4.0, 60
   local n = math.floor(SR * SECS)
   local HITS = { 0.5, 1.25, 2.0, 3.1 }      -- seconds into the file
-  local f = assert(io.open(TMP .. "hits.wav", "wb"))
-  local d = n * 2 * 2
-  f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
-  f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
-    string.pack("<I4", SR), string.pack("<I4", SR * 4),
-    string.pack("<I2", 4), string.pack("<I2", 16))
-  f:write("data", string.pack("<I4", d))
-  local buf = {}
-  for i = 0, n - 1 do
+  T.write_wav(TMP .. "hits.wav", SR, 2, 16, n, function(i)
     local t = i / SR
     local v = 0
     for _, h in ipairs(HITS) do
@@ -271,10 +225,8 @@ do
         v = v + math.sin(i * 0.3) * 28000 * (1 - dt / 0.06)
       end
     end
-    v = math.max(-32768, math.min(32767, math.floor(v)))
-    buf[#buf + 1] = string.pack("<i2i2", v, v)
-  end
-  f:write(table.concat(buf)); f:close()
+    return math.max(-32768, math.min(32767, math.floor(v)))
+  end)
 
   -- the whole file is 4s of a 60s buffer -> the window is 0 .. 4/60
   local hi = SECS / BUF
@@ -306,21 +258,11 @@ do
   local SR, SECS, BUF = 48000, 4.0, 60
   local n = math.floor(SR * SECS)
   local SOUND_FROM, SOUND_TO = 0.80, 2.60          -- seconds
-  local f = assert(io.open(TMP .. "gap.wav", "wb"))
-  local d = n * 2 * 2
-  f:write("RIFF", string.pack("<I4", 36 + d), "WAVE")
-  f:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
-    string.pack("<I4", SR), string.pack("<I4", SR * 4),
-    string.pack("<I2", 4), string.pack("<I2", 16))
-  f:write("data", string.pack("<I4", d))
-  local buf = {}
-  for i = 0, n - 1 do
+  T.write_wav(TMP .. "gap.wav", SR, 2, 16, n, function(i)
     local t = i / SR
-    local v = 0
-    if t >= SOUND_FROM and t < SOUND_TO then v = math.sin(i * 0.05) * 20000 end
-    buf[#buf + 1] = string.pack("<i2i2", math.floor(v), math.floor(v))
-  end
-  f:write(table.concat(buf)); f:close()
+    if t >= SOUND_FROM and t < SOUND_TO then return math.floor(math.sin(i * 0.05) * 20000) end
+    return 0
+  end)
 
   local hi = SECS / BUF
   local a, b = M.onset_bounds(TMP .. "gap.wav", 0, hi, BUF, nil, nil)
@@ -332,14 +274,7 @@ do
   near((a2 or 0) * BUF, 1.5, 0.02, "a search that starts mid-sound starts there")
   -- pure silence REFUSES rather than returning the whole range, so the caller
   -- leaves the window alone instead of windowing nothing
-  local sil = assert(io.open(TMP .. "sil.wav", "wb"))
-  local dd = 48000 * 4
-  sil:write("RIFF", string.pack("<I4", 36 + dd), "WAVE")
-  sil:write("fmt ", string.pack("<I4", 16), string.pack("<I2", 1), string.pack("<I2", 2),
-    string.pack("<I4", SR), string.pack("<I4", SR * 4),
-    string.pack("<I2", 4), string.pack("<I2", 16))
-  sil:write("data", string.pack("<I4", dd))
-  sil:write(string.rep("\0", dd)); sil:close()
+  T.write_wav(TMP .. "sil.wav", SR, 2, 16, SR, function() return 0 end)
   ok(M.onset_bounds(TMP .. "sil.wav", 0, hi, BUF, nil, nil) == nil,
     "a silent window refuses — TIGHTEN leaves it alone")
 end
@@ -420,17 +355,7 @@ end
 -- one, and each fill spans its own seconds so a short file parks at the left
 -- of a long strip and fills a matching one.
 do
-  local nop = function() end
-  local MP = dofile("lib/mpages.lua")
-  MP.init({
-    pget = function(_, d) return d end,
-    clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
-    window_bounds = function() return 0, 1, 1 end,
-    FPS = 15, PAGES = {}, amp_in = { 0, 0 }, amp_out = { 0, 0 },
-    SERVER_SR = 48000,
-    font = { ptext = nop, ptext_c = nop, ptext_r = nop, chip = nop,
-             text_w = function() return 0 end },
-  })
+  local MP = M
   ramp(TMP .. "fill.wav", 1.0, 48000, 2)
   local binsA, binsB = {}, {}
   local dA = MP.fill_wave_bins(TMP .. "fill.wav", binsA, 60)
@@ -451,6 +376,73 @@ do
     "a new fill for the same target supersedes the queued one")
 end
 
-print(string.format("\n%d assertions passed", ok_count))
-if #fail > 0 then print(#fail.." FAILED:"); for _,f in ipairs(fail) do print("  x "..f) end; os.exit(1) end
-print("main resampler OK")
+-- ---- headers and strides that used to lie ---------------------------------
+do
+  -- WAVE_FORMAT_EXTENSIBLE carrying FLOAT samples (what ffmpeg and SoX write
+  -- for a float render). The outer tag says 0xFFFE; the real format is in the
+  -- SubFormat GUID. Decoded as int32, a 0.25 sine came out near full scale.
+  local SR, n = 44100, 4410
+  local f = assert(io.open(TMP .. "xfloat.wav", "wb"))
+  local d = n * 4
+  f:write("RIFF", string.pack("<I4", 4 + 8 + 40 + 8 + d), "WAVE")
+  f:write("fmt ", string.pack("<I4", 40), string.pack("<I2", 0xFFFE),
+    string.pack("<I2", 1), string.pack("<I4", SR), string.pack("<I4", SR * 4),
+    string.pack("<I2", 4), string.pack("<I2", 32),
+    string.pack("<I2", 22), string.pack("<I2", 32), string.pack("<I4", 4),
+    string.pack("<I2", 3),                                -- SubFormat: FLOAT
+    "\0\0\0\0\16\0\128\0\0\170\0\56\155\113")             -- the GUID's tail
+  f:write("data", string.pack("<I4", d))
+  local b = {}
+  for i = 0, n - 1 do b[#b + 1] = string.pack("<f", math.sin(i * 0.1) * 0.25) end
+  f:write(table.concat(b)); f:close()
+  ok(M.convert_sr(TMP .. "xfloat.wav", TMP .. "xfloat48.wav", 48000, nil) == true,
+    "a float-extensible 44.1k file converts")
+  local xw = read_wav(TMP .. "xfloat48.wav")
+  local peak = 0
+  for i = 200, (xw and xw.frames or 0) - 200 do
+    peak = math.max(peak, math.abs(xw.sample(i, 1)))
+  end
+  near(peak, 0.25, 0.01, "...as FLOAT, at its real level (int32 decode read ~0.67)")
+
+  -- a stereo file whose material is on the RIGHT only, long enough that the
+  -- preview strides: an even stride over interleaved samples read the left
+  -- channel every time and drew an empty strip over audible audio
+  local len = 5.0
+  local fr = math.floor(48000 * len)
+  T.write_wav(TMP .. "right.wav", 48000, 2, 16, fr, function(i, c)
+    return c == 2 and math.floor(math.sin(i * 0.05) * 26000) or 0
+  end)
+  local bins = {}
+  M.fill_wave_bins(TMP .. "right.wav", bins, len)
+  for _ = 1, 40 do M.load_tick() end
+  local top = 0
+  for i = 1, 128 do top = math.max(top, bins[i] or 0) end
+  ok(top > 0.7, string.format("a right-only stereo file previews (peak bin %.2f)", top))
+
+  -- a clear cancels ITS strip's queued repaint, so an erase cannot be redrawn
+  local cb = {}
+  M.fill_wave_bins(TMP .. "right.wav", cb, len)
+  M.clear_bins(cb)
+  for _ = 1, 40 do M.load_tick() end
+  local any = 0
+  for i = 1, 128 do any = math.max(any, cb[i] or 0) end
+  ok(any == 0, "clearing a strip cancels the repaint queued for it")
+end
+
+-- ---- the waveform painter: a jump is not a walk -----------------------------
+-- A loop wrapping round, or a pass re-armed somewhere else, moves the head
+-- many bins in one frame. Walking that gap painted the whole loop with one
+-- moment's level; only the landing bin may be painted.
+do
+  local pb = {}
+  for i = 1, 128 do pb[i] = 0 end
+  local last = M.paint_bins(pb, 0, 40, 0.9, 1)
+  last = M.paint_bins(pb, last, 13, 0.9, 1)          -- the wrap: 40 -> 13
+  local lit = 0
+  for i = 1, 128 do if pb[i] > 0 then lit = lit + 1 end end
+  ok(lit == 2, "a wrap paints the landing bin only (" .. lit .. " lit, want 2)")
+  last = M.paint_bins(pb, last, 15, 0.5, 1)          -- a real two-bin step
+  ok(pb[14] > 0 and pb[15] > 0, "...while a real step still fills the bins between")
+end
+
+T.report("main resampler OK")

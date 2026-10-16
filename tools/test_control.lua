@@ -14,12 +14,8 @@
 --
 --   lua tools/test_control.lua        # from the repo root
 
-local ok_count, fail = 0, {}
-local function ok(c, w) if c then ok_count = ok_count + 1 else fail[#fail + 1] = w end end
-local function near(a, b, t, w)
-  ok(type(a) == "number" and math.abs(a - b) <= t,
-    string.format("%s (got %s, want %s +-%s)", w, tostring(a), tostring(b), tostring(t)))
-end
+local T = dofile("tools/harness.lua")
+local ok, near = T.ok, T.near
 
 -- ---- the offscreen norns, shared with the render suite --------------------
 local env = dofile("tools/uisim/env.lua")
@@ -49,10 +45,43 @@ local plist, lookup = params.list, params.lookup
 dofile("mangler.lua")
 init()
 
+-- the script's own state table, read through an upvalue of key() (ctx is a
+-- local of mangler.lua): what the params cannot show, the tests read here
+local CTX
+for i = 1, 255 do
+  local n, v = debug.getupvalue(key, i)
+  if n == nil then break end
+  if n == "ctx" then CTX = v end
+end
+assert(CTX, "could not reach the script's ctx")
+
+-- 0 · a fresh session holds no take. params:bang() at init fires every
+-- action with its default, and the rec action's rec-stop bookkeeping used to
+-- run on that 0 and mark the whole 60s buffer as the take before anything was
+-- recorded, which disarmed the scene window clamp, TAKE SNAP and the bounded
+-- PSET write for the first take of every session.
+ok(CTX.take_len == 0, "init leaves take_len at 0 (got " .. tostring(CTX.take_len) .. ")")
+
 -- the params MANGLER owns, captured before the system ones are stubbed in —
 -- this is the universe the classification checks (section 9) walk
 local MANGLER_IDS = {}
 for _, p in ipairs(plist) do MANGLER_IDS[#MANGLER_IDS + 1] = p.id end
+
+-- 0b · every add_group count matches the params that follow it. norns trusts
+-- the declared count, and a wrong one (a refused add, a param inserted
+-- mid-group) scrambles the PARAMS menu on device and only there.
+do
+  local G = params.groups
+  ok(#G >= 15, "the param groups were recorded (" .. #G .. ")")
+  local bad = {}
+  for i, g in ipairs(G) do
+    local nxt = G[i + 1] and G[i + 1].at or #MANGLER_IDS
+    if nxt - g.at ~= g.n then
+      bad[#bad + 1] = string.format("%s declares %d, has %d", g.id, g.n, nxt - g.at)
+    end
+  end
+  ok(#bad == 0, "every group count matches its params (" .. table.concat(bad, "; ") .. ")")
+end
 
 -- system params mangler references but norns owns
 params:add_control("input_level", "in", controlspec.new(0, 1, "lin", 0, 0.8, ""))
@@ -107,10 +136,7 @@ end
 -- 2 · turning an encoder actually moves something
 -- ============================================================================
 -- goto_page drives E1 the way the render suite does: hard left, then forward.
-local function goto_page(n)
-  enc(1, -30)
-  if n > 1 then enc(1, n - 1) end
-end
+local goto_page = T.goto_page
 local function snapshot()
   local t = {}
   for _, p in ipairs(plist) do if not p.group then t[p.id] = p.value end end
@@ -125,10 +151,7 @@ local function changed(before)
 end
 
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   ok(#names >= 11, "the page list is readable (" .. #names .. " pages)")
   for i, name in ipairs(names) do
     goto_page(i)
@@ -157,10 +180,7 @@ end
 -- narrows; the layer loop move goes through the same move_pair, and it used
 -- to skip the scaling, so a tight layer loop nudged at full coarseness.
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   local li
   for i, n in ipairs(names) do if n == "LAYERS" then li = i end end
   goto_page(li)
@@ -225,10 +245,7 @@ end
 -- ============================================================================
 -- Tapping a LIT key must cancel it and NOT re-arm. That inversion shipped once.
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   local layers_idx
   for i, n in ipairs(names) do if n == "LAYERS" then layers_idx = i end end
   if layers_idx then
@@ -268,10 +285,7 @@ end
 -- ============================================================================
 -- A key def with a missing half used to be found by pressing it on the device.
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   for i, name in ipairs(names) do
     goto_page(i)
     for _, k in ipairs({ 2, 3 }) do
@@ -292,10 +306,7 @@ end
 -- retargeting, leaking a DRY on the release. Drive the real clock and assert
 -- the landing, the abort zone, and that neither path fires DRY.
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   local ti
   for i, n in ipairs(names) do if n == "TAPE" then ti = i end end
   goto_page(ti)
@@ -341,15 +352,7 @@ do
   local g = _h.grid
   ok(type(g.key) == "function", "the script attached its grid handler")
 
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
-  local function page(n)
-    local i; for k, v in ipairs(names) do if v == n then i = k end end
-    enc(1, -30); if i and i > 1 then enc(1, i - 1) end
-    return i
-  end
+  local page = T.goto_page
 
   -- the page-independent spine: row 2 must reach the same params from anywhere
   page("LAYERS")
@@ -421,14 +424,7 @@ end
 -- in any of them strands a voice or latches a param with no way back.
 do
   local g = _h.grid
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
-  local function page(n)
-    local i; for k, v in ipairs(names) do if v == n then i = k end end
-    enc(1, -30); if i and i > 1 then enc(1, i - 1) end
-  end
+  local page = T.goto_page
 
   -- (a) A RELEASE BELONGS TO THE PRESS THAT OPENED IT. Holding a workspace pad
   -- and changing page used to hand the release to a layout that ignored it, so
@@ -439,7 +435,6 @@ do
   g.key(2, 3, 1)                       -- press on the LAYERS workspace
   page("PADS")                         -- ...navigate away while still held
   g.key(2, 3, 0)                       -- ...and release
-  local held_ok = true
   page("LAYERS")
   g.key(5, 3, 1); g.key(5, 3, 0)       -- a fresh single-pad span
   near(params:get("lay1_start"), 4 / 8, 1e-6,
@@ -450,26 +445,38 @@ do
   params:set("pad_input", 1)
   params:set("keys_enable", 1)
   page("TAKE")
+  local ons, offs = {}, {}
+  engine.note_on = function(id) ons[#ons + 1] = id end
+  engine.note_off = function(id) offs[#offs + 1] = id end
   g.key(1, 8, 1)                       -- a piano pad down
-  local held_before = 0
   params:set("keys_enable", 0)         -- ...input switched off mid-hold
   g.key(1, 8, 0)                       -- ...and released
-  -- the voice must be closed: pressing again and releasing must not accumulate
+  ok(#ons == 1 and #offs == 1 and offs[1] == ons[1],
+    "a note pad released after keys_enable went off closes the voice it opened")
   params:set("keys_enable", 1)
-  g.key(1, 8, 1); g.key(1, 8, 0)
-  ok(true, "a note pad released after keys_enable went off does not error")
+  engine.note_on, engine.note_off = nil, nil
   params:set("pad_input", 0)
 
   -- (c) two fingers on the scene bank: one release must not cancel the other's
   -- peek (row 1 is the bank from any page)
   page("SCENE")
+  for s = 1, 2 do                      -- a peek needs a filled slot under it
+    params:set("scene_slot", s)
+    params:set("scene_capture", 1); params:set("scene_capture", 0)
+  end
   params:set("scene_slot", 1)
   g.key(1, 1, 1)                       -- finger A on slot 1
   g.key(2, 1, 1)                       -- finger B on slot 2
   g.key(1, 1, 0)                       -- A lifts
-  local after_a = params:get("scene_slot")
+  ok(CTX.peek_on == true, "lifting finger A does not end finger B's peek")
   g.key(2, 1, 0)                       -- B lifts
-  ok(type(after_a) == "number", "two fingers on the scene bank do not error")
+  ok(CTX.peek_on == false, "...and B's own release does")
+  CTX.peek_back = false
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  for s = 1, 2 do                      -- leave the bank as found
+    params:set("scene_slot", s)
+    params:set("scene_clear", 1); params:set("scene_clear", 0)
+  end
 
   -- (d) the spine is page-independent: row 2 reaches the same param everywhere
   local seen = {}
@@ -711,7 +718,7 @@ do
     end
   end
   collect("mangler.lua")
-  for _, f in ipairs({ "mtape", "mdeck", "mpages", "mscenes", "mmotion",
+  for _, f in ipairs({ "mtape", "mdeck", "mpages", "mwav", "mscenes", "mmotion",
                        "mgrid", "minput" }) do
     collect("lib/" .. f .. ".lua")
   end
@@ -799,10 +806,7 @@ end
 -- are untouched; what must not regress is the REACH — every control that had
 -- an encoder or key still has one, in the right mode.
 do
-  local names = {}
-  for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-    names[#names + 1] = name
-  end
+  local names = T.pages()
   local has = {}
   for _, n in ipairs(names) do has[n] = true end
   ok(not has.EROSION and not has.ORBIT, "EROSION and ORBIT are no longer pages")
@@ -956,13 +960,7 @@ end
 -- clearly chose exactly as you played it.
 do
   local li
-  do
-    local i = 0
-    for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
-      i = i + 1
-      if name == "LAYERS" then li = i end
-    end
-  end
+  for i, name in ipairs(T.pages()) do if name == "LAYERS" then li = i end end
   params:set("orbit_on", 0)
   params:set("motion_rec", 0); params:set("motion_play", 0)
   params:set("stop_all", 0)
@@ -1133,14 +1131,7 @@ do
   -- through the real K1+K3 arc, then arm it, which is the two-hand looper
   -- gesture (grid row 5, both decks) this has to survive.
   local li2
-  do
-    local i = 0
-    for name in (io.open("mangler.lua"):read("a")):match("local PAGES = %{(.-)%}")
-        :gmatch('"(%u+)"') do
-      i = i + 1
-      if name == "LAYERS" then li2 = i end
-    end
-  end
+  for i, name in ipairs(T.pages()) do if name == "LAYERS" then li2 = i end end
   goto_page(li2)
   params:set("layer_sel", 2)
   key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
@@ -1235,10 +1226,451 @@ do
   params:set("loop_start", 0); params:set("loop_end", 1)
 end
 
-print(string.format("\n%d assertions passed", ok_count))
-if #fail > 0 then
-  print(#fail .. " FAILED:")
-  for _, f in ipairs(fail) do print("  x " .. f) end
-  os.exit(1)
+-- ============================================================================
+-- 20 · the review batch: each defect it fixed, pinned
+-- ============================================================================
+-- Every one of these passed the harness before it was fixed, because nothing
+-- here drove the path. They are written against the failure, not the fix.
+do
+  local page = T.goto_page
+  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  local function fill_slot(s)
+    params:set("scene_slot", s); pulse("scene_capture")
+  end
+  local function clear_bank()
+    params:set("orbit_on", 0)
+    for s = 1, 8 do params:set("scene_slot", s); pulse("scene_clear") end
+  end
+  -- silence the background movers (section 6's key mash latches some of them)
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_recall_mode", 1)
+  params:set("scene_scope", 1)
+  clear_bank()
+
+  -- (a) LAYERS keys resolve their deck at the PRESS. Hold REC on L1, turn E2
+  -- to L2, let go: the release used to go to L2 and leave L1 recording.
+  page("LAYERS")
+  params:set("layer_sel", 1)
+  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
+  key(2, 1); _h.run_ticks(8)               -- held past the tap window: a punch
+  ok(params:get("lay1_rec") == 1, "holding LAYERS K2 records L1")
+  enc(2, 1)                                -- E2 = layer select -> L2
+  key(2, 0)
+  ok(params:get("lay1_rec") == 0, "a punched L1 REC releases on L1 after E2 moved to L2")
+  ok(params:get("lay2_rec") == 0, "...and never arms L2")
+  params:set("layer_sel", 1)
+  params:set("lay1_play", 1)
+  key(3, 1); _h.run_ticks(8)               -- punch MUTE on L1
+  enc(2, 1)
+  key(3, 0)
+  ok(params:get("lay1_play") == 1, "a punched L1 MUTE un-mutes L1 after E2 moved to L2")
+  params:set("layer_sel", 1)
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+
+  -- (b) the pad steal mirror follows the engine on a RE-STRUCK note. The
+  -- engine re-queues a re-struck id as newest; keeping its old place made the
+  -- two steal different voices and stranded the one lua forgot.
+  params:set("pad_input", 1)
+  params:set("voices", 2)
+  local offs = {}
+  engine.note_on = function() end
+  engine.note_off = function(id) offs[#offs + 1] = id end
+  CTX.pad_trigger(901, 0, 1)               -- A
+  CTX.pad_trigger(902, 1, 1)               -- B
+  CTX.pad_trigger(901, 0, 1)               -- A again: now the newest
+  CTX.pad_trigger(903, 2, 1)               -- C: the engine steals the oldest, B
+  ok(CTX.pad_held[902] == nil and CTX.pad_held[901] ~= nil and CTX.pad_held[903] ~= nil,
+    "a re-struck note is the newest voice, so the steal takes B (as the engine does)")
+  offs = {}
+  CTX.pad_trigger(901, 0, 0)
+  ok(offs[1] == 901, "...and releasing A still sends its note_off")
+  CTX.pads_all_off()
+  engine.note_on, engine.note_off = nil, nil
+  params:set("voices", 8)
+  params:set("pad_input", 0)
+
+  -- (c) a PSET saved with the TAPE armed: params:read sets tape_rec before the
+  -- loop points, which opened a pass against the OLD session; its disarm then
+  -- re-cut the loop the pset had just restored.
+  params:set("tape_pre", 0); params:set("tape_rec", 0)
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  _h.phase(1, 0.5 * 60)
+  params:set("tape_rec", 1)                -- the saved arm, read first
+  params:set("loop_start", 0.2); params:set("loop_end", 0.3)   -- then the loop
+  params.action_read("none", false, 98765) -- the restore hook, after the values
+  _h.phase(1, 0.28 * 60)
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0.2, 1e-9, "a PSET-restored tape loop survives the first disarm")
+  near(params:get("loop_end"), 0.3, 1e-9, "...both edges")
+
+  -- (d) a tape pass too short to be a loop gives the loop back (the layers
+  -- have done this since the 77th change; the tape left 60 seconds open)
+  params:set("loop_start", 0.2); params:set("loop_end", 0.4)
+  _h.phase(1, 0.3 * 60)
+  params:set("tape_rec", 1)
+  near(params:get("loop_end"), 1, 1e-9, "a REPLACE arm opens the tape loop")
+  params:set("tape_rec", 0)                -- the head has not moved: a mis-tap
+  near(params:get("loop_start"), 0.2, 1e-9, "a declined tape pass gives back the loop it widened")
+  near(params:get("loop_end"), 0.4, 1e-9, "...both edges")
+
+  -- (e) the tape seam is capped like the layers': a long fade on a short loop
+  params:set("loop_start", 0.1); params:set("loop_end", 0.1 + 0.3 / 60)
+  sc_calls = {}
+  params:set("tape_fade", 0.4)
+  local q = sc_last("fade_time", 1)
+  near(q and q[3] or -1, 0.075, 1e-6, "tape_fade is capped at a quarter of a 0.3s loop")
+  params:set("tape_fade", 0.05)
+  params:set("loop_start", 0); params:set("loop_end", 1)
+
+  -- (f) the TAKE eraser disarms first, like TAPE and LAYERS
+  local had_clear = engine.clear
+  engine.clear = function() end
+  params:set("rec", 1)
+  pulse("clear_rec")
+  ok(params:get("rec") == 0, "erasing the take while armed disarms REC")
+  ok(CTX.take_len == 0 and not CTX.wave_any, "...and leaves an empty take")
+
+  -- (g) arming under STOP paints nothing: the head is held, so a picture of
+  -- the input would mark an empty buffer as a take (and save 60s of silence)
+  params:set("stop_all", 1)
+  params:set("rec", 1)
+  for _ = 1, 3 do _h.push("rec_amp", 0.5); _h.run_ticks(1) end
+  params:set("rec", 0)
+  params:set("stop_all", 0)
+  ok(not CTX.wave_any, "a REC armed and released under STOP leaves the buffer EMPTY")
+  pulse("clear_rec")
+
+  -- (h) a sample-rate conversion that lands after the take changed is DROPPED.
+  -- It takes seconds on a Pi; landing late overwrote a live take recorded in
+  -- the meantime. The job runner is captured here so the test decides when
+  -- it finishes.
+  local real_run, real_exists = clock.run, util.file_exists
+  util.file_exists = function(p) local f = io.open(p, "rb"); if f then f:close() end; return f ~= nil end
+  local jobs = {}
+  clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
+  local function finish(fn)
+    local co = coroutine.create(fn)
+    repeat
+      local okr, err = coroutine.resume(co)
+      if not okr then error(err) end
+    until coroutine.status(co) == "dead"
+  end
+  local function wav441(path)               -- 0.1s of stereo at 44.1k
+    T.write_wav(path, 44100, 2, 16, 4410, function() return 1000 end)
+  end
+  local src44 = os.tmpname() .. "-44k.wav"
+  wav441(src44)
+  local reads = {}
+  engine.read_file = function(p) reads[#reads + 1] = p end
+  -- positive control first: undisturbed, the conversion lands (the test is
+  -- not vacuous)
+  CTX.load_sample(src44)
+  ok(#jobs == 1 and #reads == 0, "an off-rate sample starts a background conversion")
+  finish(table.remove(jobs, 1))
+  ok(#reads == 1 and reads[1]:find("srconv", 1, true) ~= nil,
+    "...which loads the CONVERTED file when nothing changed meanwhile")
+  -- now record a take while it converts
+  reads = {}
+  CTX.load_sample(src44)
+  params:set("rec", 1); params:set("rec", 0)
+  finish(table.remove(jobs, 1))
+  ok(#reads == 0, "a conversion that finishes after a live take is dropped, not loaded over it")
+  -- a busy runner: one fallback load, not two
+  reads = {}
+  CTX.load_sample(src44)                   -- job 1 in flight
+  local src44b = os.tmpname() .. "-44kb.wav"
+  wav441(src44b)
+  -- the runner is "busy" only while ITS clock is set; the capture above
+  -- returned a table for it, so a second job is refused
+  CTX.load_sample(src44b)
+  ok(#reads == 1 and reads[1] == src44b, "a busy runner loads the second file ONCE, raw")
+  finish(table.remove(jobs, 1))
+  ok(#reads == 1, "...and the older conversion does not land on top of it")
+  -- the layer decks share the same guard: erase while converting
+  local d1 = CTX.layers[1]
+  CTX.layer_load(d1, src44)
+  page("LAYERS"); params:set("layer_sel", 1)
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase L1
+  sc_calls = {}
+  finish(table.remove(jobs, 1))
+  ok(sc_last("buffer_read_stereo") == nil and sc_last("buffer_read_mono") == nil,
+    "a layer conversion that finishes after the deck was erased is dropped")
+  os.remove(src44); os.remove(src44b)
+  engine.read_file = nil
+  engine.clear = had_clear
+  clock.run, util.file_exists = real_run, real_exists
+
+  -- (i) the SCENE erase clears the slot under the finger when K1+K3 went down,
+  -- not the one a running orbit re-aimed to a second later
+  for s = 1, 4 do fill_slot(s) end
+  page("SCENE")
+  params:set("scene_slot", 4)
+  key(1, 1); key(3, 1)
+  params:set("scene_slot", 2)              -- the orbit re-aims mid-arc
+  _h.run_ticks(20)
+  key(3, 0); key(1, 0)
+  ok(CTX.scene.slots[4] == nil, "the SCENE erase clears the slot it was pressed on")
+  ok(CTX.scene.slots[2] ~= nil, "...not the one the selector wandered to")
+  -- an unaddressed clear (the footswitch) refuses while the orbit runs
+  params:set("orbit_on", 1)
+  local sel = math.floor(params:get("scene_slot") + 0.5)
+  pulse("scene_clear")
+  ok(CTX.scene.slots[sel] ~= nil, "a scene_clear footswitch refuses while the orbit moves the selector")
+  params:set("orbit_on", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  clear_bank()
+
+  -- (j) re-aiming a sweep at a slot that does not carry a param it displaced
+  -- (an FX-only slot) and sweeping home restores it exactly. It used to be
+  -- stranded at the half-morphed value forever.
+  params:set("size", 0.4); params:set("density", 80)
+  fill_slot(3)                             -- ALL: carries size + density
+  params:set("scene_scope", 2)
+  fill_slot(4)                             -- FX only: no size, no density
+  params:set("scene_scope", 1)
+  params:set("size", 0.1); params:set("density", 20)
+  params:set("scene_slot", 3)
+  params:set("scene_morph_amt", 0.5); _h.run_ticks(2)
+  ok(math.abs(params:get("size") - 0.1) > 0.01, "the sweep toward slot 3 moved size")
+  params:set("scene_slot", 4); _h.run_ticks(2)   -- re-aim mid-sweep
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  near(params:get("size"), 0.1, 1e-6, "sweeping home after a re-aim restores size exactly")
+  near(params:get("density"), 20, 1e-6, "...and density")
+
+  -- (k) every landing zeroes the morph amount, not only the key tap: the ◄
+  -- undo and a footswitch recall left it up, and the rail lied
+  params:set("scene_slot", 3); pulse("scene_recall")   -- marks ◄ (auto-safe)
+  params:set("scene_morph_amt", 0.6); _h.run_ticks(2)
+  pulse("scene_safe_restore")
+  near(params:get("scene_morph_amt"), 0, 1e-9, "the ◄ undo lands with the morph amount at 0")
+  params:set("scene_morph_amt", 0.6); _h.run_ticks(2)
+  pulse("scene_recall")
+  near(params:get("scene_morph_amt"), 0, 1e-9, "...and so does a recall from the footswitch")
+  _h.run_ticks(2)
+
+  -- (l) a capture moves nothing, so it must not forget a latched throw:
+  -- latch OPEN, capture the variant, un-latch, and the carved tone comes back
+  page("FILTER")
+  params:set("filt_type", 1); params:set("cutoff", 1234)
+  key(2, 1); key(2, 0)                     -- tap: OPEN latches
+  near(params:get("cutoff"), 20000, 1e-6, "OPEN throws the filter open")
+  fill_slot(5)
+  page("FILTER")
+  key(2, 1); key(2, 0)                     -- tap again: back
+  near(params:get("cutoff"), 1234, 1e-6, "un-latching OPEN after a capture restores the carved cutoff")
+
+  -- (m) a recall made DURING a held chaos throw ends the hold: the release
+  -- used to restore ◄, which the recall had just re-marked with the chaos
+  params:set("delay_fb", 0.1); params:set("rev_mix", 0)
+  fill_slot(1)
+  params:set("chaos_throw", 1)
+  params:set("scene_slot", 1); pulse("scene_recall")
+  near(params:get("delay_fb"), 0.1, 1e-6, "a recall mid-chaos lands the scene")
+  params:set("chaos_throw", 0)
+  near(params:get("delay_fb"), 0.1, 1e-6, "...and releasing chaos keeps it, not the madness")
+  near(params:get("rev_mix"), 0, 1e-6, "...for every param")
+
+  -- (n) a stored LAYER loop is clamped to the deck's material on recall, the
+  -- way the take window is: capture with an empty deck (loop 0..1), record 4s,
+  -- recall, and the loop used to reopen over 60 seconds of nothing
+  page("LAYERS"); params:set("layer_sel", 1)
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase L1
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  fill_slot(6)
+  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
+  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5)
+  _h.phase(3, 120)
+  params:set("lay1_rec", 1)
+  for i = 1, 16 do _h.phase(3, 120 + i * 0.25) end
+  params:set("lay1_rec", 0)
+  local closed = params:get("lay1_end")
+  ok(closed < 0.2, "the first pass closed the layer loop around 4s (end " .. closed .. ")")
+  params:set("scene_slot", 6); pulse("scene_recall")
+  ok(params:get("lay1_end") < 0.2,
+    "recalling a scene captured on an empty deck keeps the loop on the material (end "
+    .. params:get("lay1_end") .. ")")
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  -- the TAPE keeps its extent the same way, from its own phase events
+  page("TAPE")
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase the tape
+  params:set("tape_pre", 0)
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  fill_slot(7)
+  _h.phase(1, 6)                           -- 6s into the tape
+  params:set("tape_rec", 1)
+  for i = 1, 16 do _h.phase(1, 6 + i * 0.25); _h.run_ticks(1) end
+  params:set("tape_rec", 0)
+  ok(params:get("loop_end") < 0.2, "the tape pass closed its loop (end " .. params:get("loop_end") .. ")")
+  params:set("scene_slot", 7); pulse("scene_recall")
+  ok(params:get("loop_start") > 0.09 and params:get("loop_end") < 0.18,
+    string.format("recalling a scene captured on an empty tape keeps the loop on the material (%.3f..%.3f)",
+      params:get("loop_start"), params:get("loop_end")))
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  _h.push("amp_in_l", 0); _h.push("amp_in_r", 0)
+  _h.push("amp_out_l", 0); _h.push("amp_out_r", 0)
+  clear_bank()
+
+  -- (o) the orbit with an empty bank leaves the morph knob alone (it parked
+  -- every frame, pinning the amount to 0 under the performer's hand)
+  params:set("orbit_on", 1)
+  params:set("scene_morph_amt", 0.2); _h.run_ticks(3)
+  near(params:get("scene_morph_amt"), 0.2, 1e-9, "an idle orbit does not pin the morph knob")
+  params:set("orbit_on", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+
+  -- (p) ◄ edge cases: scene_next from the back cell starts at slot 1
+  for s = 1, 3 do fill_slot(s) end
+  params:set("scene_slot", 0)
+  pulse("scene_next")
+  ok(math.floor(params:get("scene_slot") + 0.5) == 1, "scene_next from ◄ lands on slot 1")
+  ok(CTX.scene.unlanded(0) == false, "the ◄ cell is never 'unlanded'")
+  clear_bank()
+
+  -- (q) motion: every lane is reachable by the selector
+  ok(params:lookup_param("motion_lane").max == #CTX.motion.MOTION_IDS,
+    "motion_lane reaches one lane per recordable param")
+
+  -- (r) motion replay writes a region pair WIDENING edge first: a slide
+  -- right replayed in lane order crossed the pair for one write every pass
+  local mo = CTX.motion
+  local crossed = 0
+  local real_set = params.set
+  params.set = function(self, id, v)
+    real_set(self, id, v)
+    if (id == "lay1_start" or id == "lay1_end")
+        and params:get("lay1_start") > params:get("lay1_end") + 1e-9 then
+      crossed = crossed + 1
+    end
+  end
+  params:set("lay1_start", 0.10); params:set("lay1_end", 0.15)
+  params:set("motion_rec", 1); _h.run_ticks(2)
+  params:set("lay1_end", 0.65); params:set("lay1_start", 0.60)   -- a hand slide right
+  _h.run_ticks(3)
+  params:set("lay1_start", 0.10); params:set("lay1_end", 0.15)   -- and back left
+  _h.run_ticks(3)
+  params:set("motion_rec", 0)
+  crossed = 0
+  _h.run_ticks(40)                         -- several passes of the replay
+  params.set = real_set
+  ok(crossed == 0, "motion replay never crosses a loop pair (" .. crossed .. " crossed writes)")
+  params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  -- (s) clearing the last lane drops ALL the loop timing
+  ok(mo.loop_len == 0 and mo.rec_len == 0, "clearing the last lane empties the loop's timing")
+  params:set("motion_len", 4)
+  ok(mo.loop_len == 0, "...so a later motion_len move builds no phantom loop")
+  params:set("motion_len", 0)
+  params:set("lay1_start", 0); params:set("lay1_end", 1)
+
+  -- (t) motion depth blends in the WARPED space: half depth on an exp
+  -- param lands half way up the knob, not most of the way
+  params:set("cutoff", 1000)
+  params:set("motion_rec", 1); _h.run_ticks(2)
+  params:set("cutoff", 300); _h.run_ticks(2)     -- the lane's first value
+  params:set("cutoff", 20000); _h.run_ticks(2)
+  params:set("motion_rec", 0)
+  params:set("motion_depth", 0.5)
+  params:set("cutoff", 300)
+  local top = 0
+  for _ = 1, 12 do _h.run_ticks(1); top = math.max(top, params:get("cutoff")) end
+  near(top, math.sqrt(300 * 20000), 150, "half depth on cutoff peaks at the knob's half way")
+  params:set("motion_play", 0); params:set("motion_depth", 1)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  params:set("cutoff", 20000)
+
+  -- (u) the grid: presence, the pad-mode pitch swell, the audibility rule
+  local g = _h.grid
+  page("TAKE")
+  CTX.last_input = -1
+  g.key(7, 5, 1); g.key(7, 5, 0)           -- a workspace pad
+  ok(CTX.last_input == CTX.frame, "a grid press counts as presence for the idle dim")
+  params:set("pad_input", 1)
+  engine.note_on, engine.note_off = function() end, function() end
+  CTX.flash_id = nil
+  g.key(1, 8, 1); g.key(1, 8, 0)
+  ok(CTX.flash_id ~= "pitch", "a grid note in pad mode does not swell an unchanged pitch")
+  engine.note_on, engine.note_off = nil, nil
+  params:set("pad_input", 0)
+  params:set("stop_all", 1)
+  g.leds = {}
+  _h.run_ticks(2)
+  local bright = false
+  for _, l in ipairs(g.leds) do
+    if l.y == 4 and l.hue == "white" and (l.z or 0) >= 15 then bright = true end
+  end
+  ok(not bright, "under STOP the grid's tape playhead is not drawn as playing")
+  params:set("stop_all", 0)
 end
-print("control harness OK")
+
+
+-- ============================================================================
+-- 21 · contracts every change used to re-check by hand
+-- ============================================================================
+do
+  -- (a) the deploy FINGERPRINT: the command count maiden prints after a
+  -- RESTART. Section 11 checks every Lua id lands on a command; this checks
+  -- the total, so a stray new command fails here instead of on the device.
+  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local cmds, n = {}, 0
+  local function add(id) if not cmds[id] then cmds[id] = true; n = n + 1 end end
+  for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do add(id) end
+  for _, dict in ipairs({ "playParams", "revParams", "delayParams" }) do
+    for id in (sc:match(dict .. " = Dictionary%[(.-)%]") or "")
+        :gmatch("\\([%w_]+)%s*%->") do add(id) end
+  end
+  for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
+  ok(n == 65, "the engine command count is 65, the expected fingerprint (got " .. n .. ")")
+
+  -- (b) the buffer length lives in two languages; positions drift with no
+  -- error anywhere if only one side changes
+  local secs = tonumber(sc:match("var bufSecs = (%d+)"))
+  ok(secs ~= nil and secs == CTX.BUF_SECS,
+    "the engine's bufSecs matches ctx.BUF_SECS (" .. tostring(secs) .. ")")
+
+  -- (c) the shipped presets hold VALID values, and every momentary is 0: a
+  -- pset line fires its action on load, so a 1 on print_take or chaos_throw
+  -- goes off the moment the preset opens
+  local bad = {}
+  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+    for k = 1, 10 do
+      local path = string.format("%s%s-%02d.pset", dir,
+        dir == "presets/" and "mangler" or "layers", k)
+      local f = io.open(path)
+      if f then
+        for line in f:lines() do
+          local id, raw = line:match('^"([%w_]+)"%s*:%s*(.-)%s*$')
+          local p = id and lookup[id] and params:lookup_param(id)
+          local v = raw and tonumber(raw)
+          if p and v then
+            local cs = p.controlspec
+            local okv = true
+            if cs then okv = v >= cs.minval - 1e-9 and v <= cs.maxval + 1e-9
+            elseif p.count then okv = v >= 1 and v <= p.count
+            elseif p.min then okv = v >= p.min and v <= p.max
+            elseif p.behavior then okv = v == 0 or v == 1 end
+            if p.behavior == "momentary" and v ~= 0 then okv = false end
+            if not okv then bad[#bad + 1] = path:match("[^/]+$") .. ":" .. id .. "=" .. raw end
+          end
+        end
+        f:close()
+      end
+    end
+  end
+  ok(#bad == 0, "every shipped preset value is in range, momentaries at 0 ("
+    .. table.concat(bad, ",") .. ")")
+
+  -- (d) dist/mangler_single.lua is GENERATED; a stale one ships old code
+  local tmp = os.tmpname()
+  local okb = os.execute("lua tools/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
+  local built = io.open(tmp) and io.open(tmp):read("a")
+  local shipped = io.open("dist/mangler_single.lua") and io.open("dist/mangler_single.lua"):read("a")
+  os.remove(tmp)
+  ok(okb and built and built == shipped,
+    "dist/mangler_single.lua is a fresh build (run: lua tools/amalgamate.lua)")
+end
+
+
+T.report("control harness OK")

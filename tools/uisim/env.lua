@@ -247,7 +247,10 @@ function M.install(opts)
     },
   }
 
-  params = { lookup = {}, list = {} }
+  -- groups are RECORDED, not drawn: norns trusts each add_group's declared
+  -- count for the params that follow it, and a wrong count scrambles the
+  -- PARAMS menu on device with no error anywhere. A harness can check them.
+  params = { lookup = {}, list = {}, groups = {} }
   local function padd(p)
     setmetatable(p, PARAM_MT)
     params.list[#params.list + 1] = p
@@ -255,7 +258,10 @@ function M.install(opts)
     return p
   end
   function params:add_separator() end
-  function params:add_group() end
+  function params:add_group(id, name, n)
+    if n == nil then n = name end            -- the 2-arg form: (name, n)
+    params.groups[#params.groups + 1] = { id = id, n = n, at = #params.list }
+  end
   function params:add_control(id, name, spec, fmt)
     padd({ id = id, name = name, controlspec = spec, value = spec.default, fmt = fmt })
   end

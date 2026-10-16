@@ -35,7 +35,7 @@ No pset and no scene slot carries `pos_start`/`pos_end`. They used to (as
 played its loop and then most of a minute of silence, and RCL 1 did the same. The window now comes only from the sample snap, and the harness
 (tools/test_control.lua section 10) fails if the pair ever comes back.
 
-Both folders carry the SAME six presets with the full paramset (layers
+Both folders carry the SAME ten presets with the full paramset (layers
 included). They differ only in filename: `mangler-NN` for the normal deploy,
 `layers/` for the branch build running as its own `layers.lua` script.
 
@@ -51,11 +51,11 @@ file reads a wav straight into a deck, and the path rides your own PSETs.)
 
 ```sh
 # the mangler script
-rsync -av presets/mangler-0*.pset presets/scenes-0*.lua \
+rsync -av presets/mangler-*.pset presets/scenes-*.lua \
   we@norns.local:~/dust/data/mangler/
 
 # the layers build, running as its own script
-rsync -av presets/layers/layers-0*.pset presets/layers/scenes-0*.lua \
+rsync -av presets/layers/layers-*.pset presets/layers/scenes-*.lua \
   we@norns.local:~/dust/data/layers/
 ```
 
@@ -84,11 +84,12 @@ The `sample_file` path in each preset is absolute and points into
 those are not on the card the preset still loads — you get the right settings
 over an empty buffer, and the page says EMPTY.
 
-Sample rate matters more than it looks: norns runs at 48 kHz and does not
-resample on buffer read, so a 44.1 kHz file plays about 8.8% sharp and every
-loop drifts off tempo. The libraries these point at were converted first,
-which is also why loading one of these is instant — `load_sample` skips its
-conversion path when the rates already agree.
+Sample rate matters more than it looks: norns runs at 48 kHz and its buffer
+read does not resample, so a 44.1 kHz file would play about 8.8% fast and
+every loop would drift off tempo. `load_sample` and the layer loader convert
+an off-rate file in the background before loading it. The libraries these
+point at were converted ahead of time, which is why loading one of these is
+instant: the conversion is skipped when the rates already agree.
 
 ## keeping them honest
 

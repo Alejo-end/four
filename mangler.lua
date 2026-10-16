@@ -54,9 +54,10 @@
 --   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
 --   with pad input on they trigger the PADS slices instead. PARAMS > keys.
 --
--- GRID (optional, never required)   a monome grid — or a launchpad-style
---   controller via the midigrid library — adds transport toggles, window/loop
---   slice pads, and two piano octaves. see lib/mgrid.lua.
+-- GRID (optional, never required)   a monome grid, a Launchpad Mini MK3 (its
+--   own colour driver), or another launchpad-style controller via midigrid
+--   adds the scene bank, a transport strip, a workspace that follows the page,
+--   and one piano octave. see lib/mgrid.lua.
 --
 -- BEST SOUND (optional, auto-detected)   JPverb (sc3-plugins) reverb + MiClouds
 --   (mi-UGens) granular are used when installed, else stock FreeVerb / GrainBuf.
@@ -65,9 +66,11 @@
 -- -----------------------------------------------------------------------------
 -- this file is the orchestrator: state + params + key/encoder handlers. the
 -- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
--- font), mtape (softcut tape), minput (midi/keyboard
--- notes), mgrid (grid surface), mpages (the screen). they share one `ctx` table
--- and params are the single source of truth. full design: doc/spec.md.
+-- font), mtape (the softcut tape + the mix law), mdeck (the layer loop decks),
+-- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
+-- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
+-- the wav file reader). they share one `ctx` table and params are the single
+-- source of truth. full design: doc/spec.md.
 
 engine.name = "Mangler"
 
@@ -100,6 +103,8 @@ local PAGES = {
 local FPS = 15
 
 local tape_arm_phase      -- head position when tape rec opened a pass; nil = none
+local tape_arm_was        -- the loop that pass widened, put back if it is declined
+local rec_open = false    -- an engine record pass is open (armed by a real 1)
 local polls = {}
 local redraw_clock
 
@@ -138,6 +143,17 @@ local FINE_IDS = { pos_start = "win", pos_end = "win",
                    lay1_start = "lay1", lay1_end = "lay1",
                    lay2_start = "lay2", lay2_end = "lay2" }
 
+-- interpolate between two values of one param in its controlspec's WARPED
+-- space (unmap, lerp, map): linear in the space the encoder moves in, so an
+-- exponential param (cutoff, pitch) sweeps evenly. Returns the value and the
+-- normalized position. The scene morph and the motion depth both blend
+-- through here.
+local function warped_lerp(cs, a, b, t)
+  local na = clamp(cs:unmap(a), 0, 1)
+  local tn = na + (clamp(cs:unmap(b), 0, 1) - na) * t
+  return cs:map(tn), tn
+end
+
 local function fine_delta(id, d)
   local kind = FINE_IDS[id]
   if not kind then return d end
@@ -161,7 +177,7 @@ end
 local ctx = {
   -- wiring
   pget = pget, ptoggle = ptoggle, clamp = clamp,
-  window_bounds = window_bounds,
+  window_bounds = window_bounds, warped_lerp = warped_lerp,
   PAGES = PAGES, FPS = FPS,
   -- ui state
   page = 1,
@@ -170,7 +186,7 @@ local ctx = {
   idle_dim = false,
   held = {},                 -- held[n] = true while key n is down (page-independent)
   frame = 0,                 -- redraw frame counter (drives the REC blink)
-  flash_id = nil,            -- transient top-right value readout
+  flash_id = nil,            -- the param whose footer word swells (turning)
   flash_until = 0,
   -- engine/system signals
   play_phase = 0,            -- engine poll: normalized playhead in the buffer
@@ -210,9 +226,11 @@ local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
 local Mscenes = include "lib/mscenes"
+local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
 
 ctx.font = Mfont
+ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 -- the tape display model lives in mpages; mtape clears it when a pset restores
@@ -222,7 +240,12 @@ ctx.clear_twave = Mpages.clear_twave
 -- strips, which own their bins and hand them in)
 ctx.repaint_twave = Mpages.repaint_twave
 ctx.wave_from_file = Mpages.fill_wave_bins
-ctx.wav_info = Mpages.wav_info
+ctx.clear_bins = Mpages.clear_bins     -- a deck erase stops its own repaint
+ctx.wav_info = Mwav.wav_info
+
+-- any hand on the instrument counts as presence for the idle dim: keys and
+-- encoders here, the grid and MIDI in their own modules
+function ctx.touch_input() ctx.last_input = ctx.frame end
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
@@ -241,6 +264,7 @@ ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler.sc
 ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Mangler.sc
 ctx.SERVER_SR = 48000    -- norns' scsynth sample rate
 local BUF_SECS, SERVER_SR = ctx.BUF_SECS, ctx.SERVER_SR
+Mwav.init(ctx)
 
 -- THE tempo read. Guarded (the offscreen sim has no clock) and defaulted once,
 -- so every caller agrees about what "the tempo" is.
@@ -261,7 +285,7 @@ end
 function ctx.eff_cut_source()
   if pget("layer_wet", 1) == 1 then
     for _, d in ipairs(ctx.layers or {}) do
-      if pget(d.id .. "_rec", 0) == 1 then return 1 end
+      if pget(Mdeck.p(d, "rec"), 0) == 1 then return 1 end
     end
   end
   return pget("cut_source", 0)
@@ -287,8 +311,11 @@ Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 -- THE deck gain law (eng, tape, master) lives in mtape; the MIX page draws
 -- the same numbers update_mix sends, so it reads them from here
 ctx.mix_gains = Mtape.gains
+ctx.TAPE_LEN = Mtape.TAPE_LEN         -- the tape's own length (not BUF_SECS)
 ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
 ctx.loop_secs = Mdeck.loop_secs       -- ...and the page prints the same law
+ctx.set_pair = Mdeck.set_pair         -- THE way to move a start/end pair
+ctx.deck_p = Mdeck.p                  -- a deck's param id (keymap-aware)
 Mdeck.init(ctx)
 -- TWO more loop decks beside the tape, on softcut voices the script does not
 -- otherwise use. Their buffer regions start at 120s, leaving 60-120 clear:
@@ -298,13 +325,11 @@ ctx.layers = {
   Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 }),
   Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 }),
 }
-ctx.deck_phase = function(v, pos) Mdeck.on_phase(v, pos) end
+ctx.deck_phase = Mdeck.on_phase
 -- which layer the page and its encoders address
 function ctx.layer_sel()
   return ctx.layers[math.floor(pget("layer_sel", 1) + 0.5)] or ctx.layers[1]
 end
--- re-send every deck's level: the master, the transport and the global STOP
--- all fold into it, so anything that moves one of those has to come through here
 -- a compound encoder target ("@...") resolves to a REAL param id: the one the
 -- footer should print and the dial should point at. Pair-movers report their
 -- anchor, the low edge. ONE resolver, because the encoder, the footer value and
@@ -318,8 +343,26 @@ function ctx.enc_target(id)
   return id
 end
 
+-- re-send every deck's level: the master, the transport and the global STOP
+-- all fold into it, so anything that moves one of those has to come through here
 function ctx.layers_relevel()
   for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
+end
+
+-- where a loop deck's MATERIAL is (Mdeck.extent), for the scene clamp:
+-- "tape" or a layer id. nil = no material, which leaves a stored loop exactly
+-- as it was.
+function ctx.material(key)
+  if key == "tape" then
+    if not ctx.twave_any then return nil end
+    return Mdeck.extent(Mtape.deck)
+  end
+  for _, d in ipairs(ctx.layers) do
+    if d.id == key then
+      if not d.any then return nil end
+      return Mdeck.extent(d)   -- (two values: an `and ... or` would keep one)
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -452,9 +495,7 @@ function ctx.layer_quantize(d) ctx.layer_snap(d, SNAP_TOL) end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
--- sets ctx.scene (the module), ctx.scenes (the 8-slot bank) and the
--- ctx.scene_capture/_clear helpers the grid's CAP/CLR modifiers call
-Mscenes.init(ctx)
+Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
 -- ============================================================================
@@ -689,19 +730,11 @@ local KEYS = {
     erase = function() ctx.motion.clear_lane() end,
   },
   LAYERS = {
-    -- REC under the punch law: hold to record while you lean on it, tap to
-    -- latch. PLAY is a plain transport toggle. K1+K3 erases THIS layer only —
-    -- the tape and the other layer are untouched (mdeck clears by region).
-    k2 = { label = "REC",
-      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "rec"), 0) == 1 end,
-      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 1) end,
-      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "rec"), 0) end },
-    -- MUTE rather than a transport stop: the head keeps rolling so the decks
-    -- hold their drift against each other (see lib/mdeck.lua). Lit = audible.
-    k3 = { label = "MUTE",
-      lit = function() return pget(Mdeck.p(ctx.layer_sel(), "play"), 1) == 0 end,
-      pon = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 0) end,
-      poff = function() params:set(Mdeck.p(ctx.layer_sel(), "play"), 1) end },
+    -- K2/K3 are per deck (LAYER_KEYS below): key_def picks the selected
+    -- deck's pair at the PRESS, so the release lands on the same deck. K1+K3
+    -- erases THIS layer only; the tape and the other layer are untouched
+    -- (mdeck clears by region). The erase fires while K1 is held, when E2 is
+    -- the rate knob rather than the layer selector, so it cannot retarget.
     erase = function()
       local d = ctx.layer_sel()
       -- Cancel any recording in progress BEFORE stopping it. Otherwise the
@@ -729,22 +762,22 @@ local KEYS = {
     k2 = { label = "RCL",
       lit = function() return ctx.peek_on == true end,
       pon = function()
+        -- the slot is resolved at the PRESS: a running orbit re-aims the
+        -- selector every leg, and the tap must recall what was under the
+        -- finger, not what the wander picked a moment later
         local sel = math.floor(pget("scene_slot", 1) + 0.5)
-        if sel >= 1 and ctx.scenes[sel] then
+        ctx.rcl_slot = sel
+        if sel >= 1 and ctx.scene.slots[sel] then
           ctx.peek_on, ctx.peek_back = true, false
         end
       end,
       tap = function()
-        local sel = math.floor(pget("scene_slot", 1) + 0.5)
         ctx.peek_on = false
+        if ctx.rcl_slot then params:set("scene_slot", ctx.rcl_slot) end
+        -- the landing zeroes the morph amount itself (mscenes' land), and
+        -- only once the scene has actually landed, so a BEAT/BAR queue
+        -- does not bounce scene -> LIVE -> scene around the sync point
         pulse("scene_recall")
-        -- the scene landed: it IS the new LIVE, so the rail goes home without
-        -- sweeping (recall invalidated the morph's "from"). NOT when the
-        -- recall only QUEUED (BEAT/BAR): zeroing amt then would force-apply
-        -- the old A and audibly bounce scene->LIVE->scene around the sync.
-        if sel >= 1 and not ctx.scene.pending then
-          params:set("scene_morph_amt", 0)
-        end
       end,
       poff = function()   -- punch release: it was borrowed — sweep home
         -- only when the peek actually engaged: pon declines on an empty slot
@@ -756,9 +789,33 @@ local KEYS = {
         end
       end },
     k3 = { label = "CAP", act = function() pulse("scene_capture") end },
-    erase = function() pulse("scene_clear") end,
+    -- the slot selected when K1+K3 went DOWN, not when the arc lands a second
+    -- later: a running orbit re-aims the selector every leg, and clearing the
+    -- slot it wandered to would destroy a scene you did not pick
+    erase = function() Mscenes.clear(ctx.k13_slot) end,
   },
 }
+
+-- LAYERS K2/K3, one fixed pair PER DECK. A shared def that looked the deck up
+-- again at release sent the release to whichever deck was selected by then:
+-- hold REC on L1, turn E2 to L2, let go, and L1 kept recording with no finger
+-- on any key.
+local function layer_keys(n)
+  local d = ctx.layers[n]
+  local play = Mdeck.p(d, "play")
+  return {
+    -- REC under the punch law: hold to record while you lean on it, tap to latch
+    k2 = pk("REC", Mdeck.p(d, "rec")),
+    -- MUTE rather than a transport stop: the head keeps rolling so the decks
+    -- hold their drift against each other (see lib/mdeck.lua). Lit = muted.
+    k3 = { label = "MUTE",
+      lit = function() return pget(play, 1) == 0 end,
+      pon = function() params:set(play, 0) end,
+      poff = function() params:set(play, 1) end },
+  }
+end
+local LAYER_KEYS = {}
+for n = 1, #ctx.layers do LAYER_KEYS[n] = layer_keys(n) end
 
 -- the global alt pair — identical on every page
 local ALT_STOP = pk("STOP", "stop_all")
@@ -783,6 +840,10 @@ local function key_def(n)
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
     return VOICE_HEAL
+  end
+  if page == "LAYERS" then
+    local lk = LAYER_KEYS[math.floor(pget("layer_sel", 1) + 0.5)] or LAYER_KEYS[1]
+    return n == 2 and lk.k2 or lk.k3
   end
   local defs = KEYS[page]
   if not defs then return nil end
@@ -859,11 +920,8 @@ local function enc_param(n)
 end
 
 -- compound encoder gesture: slide a lo/hi pair together, width preserved,
--- with the same span-scaled fine step the edges get.
--- The two writes go in the OUTWARD-EDGE-FIRST order the scenes use for the
--- same pairs: sliding right by more than the current width would otherwise
--- put the low edge past the high one for a single param write, and a crossed
--- pair is a region that is neither the old one nor the new one.
+-- with the same span-scaled fine step the edges get. The two writes go
+-- through Mdeck.set_pair, the one widening-edge-first writer.
 local function move_pair(lo_id, hi_id, d)
   local lo, hi = pget(lo_id, 0), pget(hi_id, 1)
   if hi < lo then lo, hi = hi, lo end
@@ -871,13 +929,7 @@ local function move_pair(lo_id, hi_id, d)
   local q = (p and p.controlspec and p.controlspec.quantum) or 0.01
   local width = hi - lo
   local nlo = clamp(lo + fine_delta(lo_id, d) * q, 0, 1 - width)
-  if nlo < lo then                     -- moving LEFT: the low edge widens first
-    params:set(lo_id, nlo)
-    params:set(hi_id, nlo + width)
-  else                                 -- moving RIGHT: the high edge widens
-    params:set(hi_id, nlo + width)
-    params:set(lo_id, nlo)
-  end
+  Mdeck.set_pair(lo_id, hi_id, nlo, nlo + width)
 end
 
 -- K1+K3 held to the arc: the erase fires AT the threshold (not on the
@@ -982,20 +1034,31 @@ function ctx.pads_uncut() ctx.pad_cuts = nil end
 -- NON-DESTRUCTIVE on purpose: this only moves pos_start/pos_end. It never
 -- rewrites the buffer, so it is always undoable by moving the edges back (and
 -- TAKE K3 SNAP remembers where you were).
-function ctx.take_tighten()
+-- Lua cannot read the engine buffer, so every analysis of the take works on a
+-- dump of it: the empty check, the dump, the failure message and the temp
+-- file live here once. `scan(tmp, lo, hi)` runs inside the dump's own
+-- coroutine (so it can yield) over the CURRENT window; the temp file is
+-- removed after it returns.
+local function scan_take(tag, scan)
   if not ctx.wave_any then
-    print("mangler: TIGHTEN — nothing recorded yet")
+    print("mangler: " .. tag .. " — nothing recorded yet")
     return
   end
-  local tmp = norns.state.data .. "mtight-tmp.wav"
+  local tmp = norns.state.data .. "mscan-tmp.wav"
   ctx.take_to_wav(tmp, function(ok)
     if not ok then
-      print("mangler: TIGHTEN — the take dump did not land")
+      print("mangler: " .. tag .. " — the take dump did not land")
       return
     end
     local lo, hi = window_bounds()
-    local a, b = Mpages.onset_bounds(tmp, lo, hi, BUF_SECS, nil, ctx.task_yield)
+    scan(tmp, lo, hi)
     os.remove(tmp)
+  end)
+end
+
+function ctx.take_tighten()
+  scan_take("TIGHTEN", function(tmp, lo, hi)
+    local a, b = Mwav.onset_bounds(tmp, lo, hi, BUF_SECS, nil, ctx.task_yield)
     if not a then
       print("mangler: TIGHTEN — the window is silent, left alone")
       return
@@ -1008,8 +1071,7 @@ function ctx.take_tighten()
       print("mangler: TIGHTEN — too little sound to window, left alone")
       return
     end
-    -- both edges move INWARD, so the pair can never cross; still, set the one
-    -- that moves first and re-read, the way every other edge pair here does
+    -- both edges move INWARD (a >= lo, b <= hi), so the pair cannot cross
     params:set("pos_start", a)
     params:set("pos_end", b)
     print(string.format("mangler: TIGHTEN — window is %.2fs of sound (was %.2fs)",
@@ -1018,26 +1080,13 @@ function ctx.take_tighten()
 end
 
 -- CHOP: put the pads on the material's own attacks instead of eight arbitrary
--- eighths. Lua cannot read the engine buffer, so the take is dumped to a file
--- and the transients are found in that (Mpages.transient_cuts). The engine
--- already takes a position AND a length per note, so nothing here needs a new
--- command — the slices just stop being uniform.
+-- eighths. The transients are found in the dumped take (Mwav.transient_cuts).
+-- The engine already takes a position AND a length per note, so nothing here
+-- needs a new command — the slices just stop being uniform.
 function ctx.pad_chop()
-  if not ctx.wave_any then
-    print("mangler: CHOP — nothing recorded yet")
-    return
-  end
-  local tmp = norns.state.data .. "mchop-tmp.wav"
-  ctx.take_to_wav(tmp, function(ok)
-    if not ok then
-      print("mangler: CHOP — the take dump did not land")
-      return
-    end
-    -- this callback runs inside the dump's own coroutine, so the scan can yield
-    local lo, hi = window_bounds()
-    local cuts = Mpages.transient_cuts(tmp, lo, hi, ctx.pad_n, BUF_SECS,
+  scan_take("CHOP", function(tmp, lo, hi)
+    local cuts = Mwav.transient_cuts(tmp, lo, hi, ctx.pad_n, BUF_SECS,
       ctx.task_yield)
-    os.remove(tmp)
     if not cuts or #cuts < 2 then
       ctx.pads_uncut()
       print("mangler: CHOP found no transients — pads back to even slices")
@@ -1047,6 +1096,14 @@ function ctx.pad_chop()
     ctx.pad_cuts = cuts
     print(string.format("mangler: CHOP — %d slices, on the attacks", #cuts - 1))
   end)
+end
+
+-- drop a voice id from the pad steal order (it is in there at most once)
+local function pad_order_remove(id)
+  local o = ctx.pad_order
+  for k = 1, #o do
+    if o[k] == id then table.remove(o, k); return end
+  end
 end
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
@@ -1063,9 +1120,12 @@ function ctx.pad_trigger(id, i, z)
         2 ^ ((ctx.pad_pitch[i] or 0) / 12),
         pt, pget("pad_level", 0.3), pad_len(i))
     end
-    if ctx.pad_held[id] == nil then
-      ctx.pad_order[#ctx.pad_order + 1] = id
-    end
+    -- the engine's noteOff + noteOn above moves a re-struck id to the END of
+    -- its steal queue, so this mirror does exactly the same. Keeping the old
+    -- position made the two steal DIFFERENT voices, and the one lua forgot
+    -- kept sounding with nothing left that could release it.
+    pad_order_remove(id)
+    ctx.pad_order[#ctx.pad_order + 1] = id
     ctx.pad_held[id] = i    -- store the pad index (0 is truthy) for the display
     -- MIRROR the engine's voice steal. Over the cap it release-steals the
     -- OLDEST voice and tells lua nothing, so the PADS page went on drawing
@@ -1079,9 +1139,7 @@ function ctx.pad_trigger(id, i, z)
   elseif ctx.pad_held[id] then
     if engine.note_off then engine.note_off(id) end
     ctx.pad_held[id] = nil
-    for k = 1, #ctx.pad_order do
-      if ctx.pad_order[k] == id then table.remove(ctx.pad_order, k); break end
-    end
+    pad_order_remove(id)
   end
 end
 
@@ -1122,26 +1180,54 @@ end
 -- TAPE deck's own CLR is on the TAPE page — that's the softcut loop, a
 -- different deck entirely.)
 
+-- THE TAKE'S GENERATION. Every writer that puts new material in the buffer (a
+-- record pass, a clear, a load, a PSET restore) bumps it. A background
+-- sample-rate conversion notes it when it starts and drops its result if it
+-- moved: a conversion takes seconds on a Pi, and landing late used to
+-- overwrite whatever had happened in the meantime, including a live take that
+-- existed nowhere else.
+local take_gen = 0
+
+-- the one rule for "the buffer now holds different material". The erosion
+-- age, the remembered SNAP window and the chop all belonged to the old
+-- material, and take_len bounds what a PSET save writes: the new material's
+-- length (`dur` seconds), or the whole buffer when the length is unknown.
+-- Every replacer goes through here, so none can forget a part of it.
+local function buffer_replaced(dur)
+  take_gen = take_gen + 1
+  Mpages.erosion_reset()
+  ctx.snap_forget()
+  ctx.pads_uncut()
+  ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
+end
+
+-- ...and a clear is a replacement by nothing: a later save writes nothing
+-- (and deletes the stale pair)
+local function buffer_cleared()
+  buffer_replaced()
+  ctx.take_len = 0
+end
+
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
 -- the window back up, so every page goes back to inviting a take instead of
 -- drawing one that isn't there.
 function ctx.clear_recording()
-  if engine.clear then
-    engine.clear()
-  else
+  if not engine.clear then
     print("mangler: engine has no `clear` — SYSTEM > RESTART for the new engine")
     return
   end
+  -- disarm first, like the TAPE and LAYERS erases: wiping while armed kept
+  -- recording into the freshly cleared buffer, and the rec-stop later built a
+  -- window whose first seconds were the erased silence
+  if pget("rec", 0) == 1 then params:set("rec", 0) end
+  engine.clear()
   -- a clear must be SILENCE (S23 B2): regen would immediately re-record the
   -- OUTPUT — input monitor, ringing tails — into the freshly erased buffer,
   -- resurrecting what you just wiped. the engine's `clear` flushes the
   -- delay/reverb tails on its side; this stops the write head at the params.
   if pget("regen", 0) > 0 then params:set("regen", 0) end
   Mpages.clear_wave()
-  Mpages.erosion_reset()   -- a fresh take starts at generation zero
-  ctx.snap_forget()        -- the old window bounds point at audio that is gone
-  ctx.pads_uncut()         -- ...and so do the chopped slice boundaries
-  ctx.take_len = 0       -- empty: a subsequent save writes nothing (and deletes)
+  buffer_cleared()
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
   -- from `load sample` lives in this path, and a PSET saved after a CLR would
@@ -1153,126 +1239,103 @@ function ctx.clear_recording()
   print("mangler: recording cleared")
 end
 
--- load any wav as the sample (PARAMS > rec > load sample). it lands in the SAME
--- buffer a take does, so the window, drone and pads all work on it
--- identically — there is no "loaded sample" mode, it's just the sample.
--- the window snaps to the file's length, and the display is read from the FILE
--- (lua can't see the SC buffer — see Mpages.load_wave).
--- scsynth's buffer read does no sample-rate conversion, so a file at any rate
--- other than SERVER_SR plays varispeeded: a 44.1k wav is 8.8% fast, over a
--- semitone sharp. Anything not at rate goes through the resampler first.
-local srconv_path
-
--- put a file in the take buffer and make every page agree about it. The tail
--- half of load_sample, split out so the sample-rate conversion can reach it
--- with a different path than the one the performer picked.
-local function read_into_buffer(path, shown, secs)
+-- put a file in the take buffer and make every page agree about it. The
+-- display is read from the FILE: lua cannot see the SC buffer (Mpages.load_wave).
+local function read_into_buffer(path, shown)
   engine.read_file(path)
   ctx.wave_any = true    -- audio is in the buffer now, drawable or not — never
                          -- lie "EMPTY" over an audible sample, even for formats
                          -- the preview can't draw
-  Mpages.erosion_reset()   -- different audio, generation zero: the age counter
-                           -- belongs to the material, not to the session
-  ctx.snap_forget()        -- ...and the remembered window belonged to the old
-  ctx.pads_uncut()         -- ...as did the chop
-  local dur = Mpages.load_wave(path, BUF_SECS) or secs
-  -- the loaded length bounds a PSET save; unknown length (no preview) -> full
-  ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
+  local dur = Mpages.load_wave(path, BUF_SECS)
+  buffer_replaced(dur)   -- the loaded length bounds a PSET save
   if dur then
     params:set("pos_start", 0)
     params:set("pos_end", clamp(dur / BUF_SECS, 0.002, 1))
     print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
       shown or path, dur))
   else
-    -- audible, but no picture for this format (8-bit / aiff / float-extensible):
-    -- leave the window for the performer to set rather than draw a lie
+    -- audible, but no picture for this format (8-bit / aiff): leave the window
+    -- for the performer to set rather than draw a lie
     print("mangler: loaded " .. (shown or path)
       .. " (playing; no waveform preview for this format)")
   end
 end
 
--- load any wav as the sample (PARAMS > rec > load sample). A file that is not
--- at the server rate is RESAMPLED first (in the background, screen live) —
--- otherwise it plays sharp and every slice, pad and window inherits the error.
--- If the conversion cannot run or cannot decode the file, we load it straight
--- anyway: audible-but-sharp beats silence, and the log says which happened.
-function ctx.load_sample(path)
+-- LOAD AT THE SERVER RATE. Neither scsynth's nor softcut's buffer read does any
+-- sample-rate conversion, so a file at any other rate plays varispeeded: a
+-- 44.1k wav is 8.8% fast, over a semitone sharp, and every slice, pad and
+-- window inherits the error. An off-rate file is resampled first, in the
+-- background with the screen live. If the conversion cannot run or cannot
+-- decode the file, it loads as-is: audible-but-sharp beats silence, and the
+-- log says which happened. Shared by the take and the layer decks.
+--   land(file, shown)  puts a file in place (`shown` = the name that was picked)
+--   gen()              the target's generation: a conversion that finishes
+--                      after it moved is dropped rather than landing on top
+local function load_at_rate(path, tmp, cap_secs, what, land, gen)
   if path == nil or path == "" or path == "-" or path == _path.audio then return end
   if not util.file_exists(path) then
     print("mangler: no such file — " .. tostring(path))
     return
   end
-  if not engine.read_file then
+  local okp, _, _, in_sr = pcall(Mwav.wav_info, path)
+  if not (okp and in_sr and in_sr ~= SERVER_SR) then
+    land(path)                     -- already at rate, or a format we can't probe
+    return
+  end
+  print(string.format("mangler: %d Hz file — resampling to %d before the %s load"
+    .. " (it would play at %.2fx otherwise)", in_sr, SERVER_SR, what,
+    SERVER_SR / in_sr))
+  local g = gen()
+  ctx.run_task(function(yield)
+    -- capped at what the target can hold: converting past it is pure waste,
+    -- and a corrupt rate header must never expand into gigabytes
+    local ok, err = Mwav.convert_sr(path, tmp, SERVER_SR, yield, cap_secs)
+    if not ok then error(err or "conversion failed", 0) end
+  end, function(ok, err)
+    if gen() ~= g then
+      print("mangler: " .. path .. " finished converting after the " .. what
+        .. " changed — dropped, the newer material stays")
+      return
+    end
+    if ok then
+      land(tmp, path)
+    else
+      -- a busy runner calls this straight back with "busy": one fallback,
+      -- one load (the caller used to load it a second time on top)
+      print("mangler: resample " .. (err == "busy" and "busy"
+        or ("failed (" .. tostring(err) .. ")"))
+        .. " — loading at the original rate, it will play sharp")
+      land(path)
+    end
+  end)
+end
+
+-- load any wav as the sample (PARAMS > rec > load sample). it lands in the SAME
+-- buffer a take does, so the window, drone and pads all work on it
+-- identically — there is no "loaded sample" mode, it's just the sample. the
+-- window snaps to the file's length.
+local srconv_path
+function ctx.load_sample(path)
+  if path and path ~= "" and path ~= "-" and not engine.read_file then
     print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
     return
   end
-  local okp, in_sr = pcall(Mpages.wav_rate, path)
-  if not (okp and in_sr and in_sr ~= SERVER_SR) then
-    read_into_buffer(path)         -- already at rate, or a format we can't probe
-    return
-  end
+  take_gen = take_gen + 1     -- the newest request wins over one still converting
   srconv_path = srconv_path or (norns.state.data .. "mangler-srconv.wav")
-  print(string.format("mangler: %d Hz sample — resampling to %d before load"
-    .. " (it would play %+.1f%% otherwise)",
-    in_sr, SERVER_SR, (in_sr / SERVER_SR - 1) * 100))
-  local started = ctx.run_task(function(yield)
-    -- capped at what the buffer can hold: converting past BUF_SECS is pure
-    -- waste, and a corrupt rate header must never expand into gigabytes
-    local ok, err = Mpages.convert_sr(path, srconv_path, SERVER_SR, yield,
-      BUF_SECS + 1)
-    if not ok then error(err or "conversion failed", 0) end
-  end, function(ok, err)
-    if ok then
-      read_into_buffer(srconv_path, path)
-    else
-      print("mangler: resample failed (" .. tostring(err)
-        .. ") — loading at the original rate, it will play sharp")
-      read_into_buffer(path)
-    end
-  end)
-  if not started then
-    print("mangler: busy — loading at the original rate, it will play sharp")
-    read_into_buffer(path)
-  end
+  load_at_rate(path, srconv_path, BUF_SECS + 1, "take", read_into_buffer,
+    function() return take_gen end)
 end
 
 -- load a wav into a LAYER deck (PARAMS > layers > L1/L2 load file, the answer
--- to "how do I get material into a layer without playing it in live"). Same
--- rate rule as the take: softcut's buffer read does no sample-rate conversion,
--- so an off-rate file goes through the resampler first; if that cannot run,
--- load as-is and say so (audible-but-sharp beats silence). Each deck gets its
--- own conversion temp so a take load and a layer load can never race over one
--- file the server is still reading.
-function ctx.layer_load(d, path)
-  if path == nil or path == "" or path == "-" or path == _path.audio then return end
-  if not util.file_exists(path) then
-    print("mangler: no such file — " .. tostring(path))
-    return
-  end
-  local okp, in_sr = pcall(Mpages.wav_rate, path)
-  if not (okp and in_sr and in_sr ~= SERVER_SR) then
-    Mdeck.load_file(d, path)
-    return
-  end
-  local conv = norns.state.data .. d.id .. "-srconv.wav"
-  print(string.format("mangler: %d Hz sample — resampling to %d before the %s load",
-    in_sr, SERVER_SR, d.name))
-  local started = ctx.run_task(function(yield)
-    local ok, err = Mpages.convert_sr(path, conv, SERVER_SR, yield, d.len + 1)
-    if not ok then error(err or "conversion failed", 0) end
-  end, function(ok, err)
-    if ok then
-      Mdeck.load_file(d, conv, path)
-    else
-      print("mangler: resample failed (" .. tostring(err)
-        .. ") — loading at the original rate, it will play sharp")
-      Mdeck.load_file(d, path)
-    end
-  end)
-  if not started then
-    print("mangler: busy — loading at the original rate, it will play sharp")
-    Mdeck.load_file(d, path)
-  end
+-- to "how do I get material into a layer without playing it in live"). Each
+-- deck converts into its own temp, so a take load and a layer load can never
+-- race over one file the server is still reading. `keep_loop`: a PSET restore
+-- keeps the loop points it just restored instead of snapping to the file.
+function ctx.layer_load(d, path, keep_loop)
+  d.gen = (d.gen or 0) + 1
+  load_at_rate(path, norns.state.data .. d.id .. "-srconv.wav", d.len + 1, d.name,
+    function(file, shown) Mdeck.load_file(d, file, shown, keep_loop) end,
+    function() return d.gen end)
 end
 
 -- the live take rides the PSET as a private L/R pair beside the
@@ -1323,13 +1386,8 @@ function ctx.take_pset_read(number)
   -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already
   -- restored the saved pos_start/pos_end.
   local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
-  Mpages.erosion_reset()  -- the restored take carries its own age in the audio;
-                          -- the counter is per-material, not per-session
-  ctx.snap_forget()       -- the buffer was replaced: the remembered window
-                          -- pointed at the previous session's material
-  ctx.pads_uncut()        -- padlock_pset_read restores the pset's own cuts next
+  buffer_replaced(dur)  -- padlock_pset_read restores the pset's own cuts next
   ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
-  ctx.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1  -- bounds a re-save
 end
 
 function ctx.take_pset_delete(number)
@@ -1374,10 +1432,6 @@ function ctx.padlock_pset_delete(number)
   os.remove(padlock_path(number))
 end
 
--- browsable stereo EXPORT. write_take dumps the DRY take to a temp
--- L/R pair; we wait for the async /b_write to finish (sizes stop growing), then
--- interleave into a named stereo wav in dust/audio that reloads via `load
--- sample` (zero new load code).
 -- hand back to the scheduler for one tick. Every long scan inside a clock
 -- coroutine takes this, so the 15fps redraw (and motion, and scenes) keeps
 -- running through a multi-second job instead of freezing.
@@ -1405,6 +1459,11 @@ function ctx.run_task(fn, on_done)
   return true
 end
 
+-- teardown only: the job's own completion never runs (cleanup is leaving)
+function ctx.cancel_task()
+  if task_clock then clock.cancel(task_clock); task_clock = nil end
+end
+
 local export_clock
 local function filesize(p)
   local f = io.open(p, "rb"); if not f then return nil end
@@ -1422,12 +1481,8 @@ function ctx.next_free(dir, prefix, ext)
   return nil
 end
 
-local function next_export_name()
-  local stem = ctx.next_free(_path.audio, "mangler", ".wav")
-  return stem and (stem .. ".wav")
-end
-local function next_print_name()
-  local stem = ctx.next_free(_path.audio, "mangler-print", ".wav")
+local function next_audio_name(prefix)
+  local stem = ctx.next_free(_path.audio, prefix, ".wav")
   return stem and (stem .. ".wav")
 end
 
@@ -1507,7 +1562,7 @@ function ctx.print_take(sweep)
     local _, _, span = window_bounds()
     secs = clamp(span * BUF_SECS, 0.5, BUF_SECS)
   end
-  local name = next_print_name()
+  local name = next_audio_name("mangler-print")
   if not name then
     print("mangler: 999 prints in dust/audio — clear some out first")
     return
@@ -1580,7 +1635,7 @@ function ctx.take_to_wav(out, done)
       pL, pR = sL, sR
     end
     -- yield between chunks so a large interleave doesn't freeze the UI thread
-    local ok = Mpages.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
+    local ok = Mwav.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
       ctx.task_yield)
     os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
     export_clock = nil
@@ -1588,9 +1643,10 @@ function ctx.take_to_wav(out, done)
   end)
 end
 
--- the browsable half: the same dump, into dust/audio under a name you can find.
+-- the browsable EXPORT: the same dump, into dust/audio under a name you can
+-- find, as one stereo wav that reloads through `load sample`.
 function ctx.export_take(name)
-  name = name or next_export_name()
+  name = name or next_audio_name("mangler")
   if not name then
     print("mangler: 999 exports in dust/audio — clear some out first")
     return
@@ -1623,7 +1679,7 @@ local function sync_delay_time(force)
   if ctx.motion and ctx.motion.account then ctx.motion.account("delay_time") end
 end
 
--- DRY throw (MIX K1+K3, grid (7,2)): playback becomes the un-effected
+-- DRY throw (K1+K3 tap on any page, grid (7,2)): playback becomes the un-effected
 -- sample — every "on top" color to zero (delay, reverb, shimmer, drive,
 -- clouds feedback — the one wash the REVERB page can't kill) and the
 -- filter thrown open (type-aware, same law as FILTER's OPEN key). the
@@ -1676,14 +1732,41 @@ local function add_eng_binary(id, name)
   end)
 end
 
+-- an option whose engine command wants a 0-based index (norns options count
+-- from 1), sent through the same guard as every other engine command
+local function add_eng_option(id, name, options, default)
+  params:add_option(id, name, options, default)
+  params:set_action(id, function(v)
+    if engine[id] then engine[id](v - 1) end
+  end)
+end
+
+-- a MOMENTARY binary that fires `fn` on the press edge only: a stray 0 (from
+-- params:bang or a pset read) must never do anything. momentary rather than a
+-- trigger because a trigger cannot be MIDI-learned, and the point of most of
+-- these is a footswitch.
+local function add_momentary(id, name, fn)
+  params:add_binary(id, name, "momentary", 0)
+  params:set_action(id, function(v) if v == 1 then fn() end end)
+end
+
+-- a plain 0..1 knob, the commonest spec in the paramset; fine_unit adds the
+-- 0.002 quantum the region edges use (fine_delta then scales it by the span:
+-- the default 0.01 is 600ms of a 60s buffer, far too coarse to set a loop)
+local function unit(default) return controlspec.new(0, 1, "lin", 0, default, "") end
+local function fine_unit(default)
+  local spec = unit(default)
+  spec.quantum = 0.002
+  return spec
+end
+
 local function init_params()
   params:add_separator("mangler")
 
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
   params:add_group("grp_mix", "mix", 5)
-  params:add_control("mix", "eng <> tape",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  params:add_control("mix", "eng <> tape", unit(0.5))
   params:set_action("mix", Mtape.update_mix)
   params:add_control("out_level", "out level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
@@ -1691,18 +1774,15 @@ local function init_params()
     Mtape.update_mix()
     ctx.layers_relevel()   -- the master masters the layer decks too
   end)
-  params:add_control("sc_level", "eng level",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  params:add_control("sc_level", "eng level", unit(1.0))
   params:set_action("sc_level", Mtape.update_mix)
   -- id "tape_level" is RESERVED by the system TAPE deck; "cut_level" avoids it
-  params:add_control("cut_level", "tape level",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  params:add_control("cut_level", "tape level", unit(1.0))
   params:set_action("cut_level", Mtape.update_mix)
-  -- master transport: STOP chokes both decks at the one place their levels
-  -- are computed (update_mix), so START restores the exact mix. everything
-  -- keeps running silently — mode, loops, heads — and held pad voices are
-  -- released. MIDI-map it for a stop pedal; SPACE on a typing keyboard and
-  -- grid (8,2) drive it too.
+  -- master transport: STOP chokes every deck at the one place each level is
+  -- computed and halts their heads (below), so START restores the exact mix
+  -- from the exact spot. held pad voices are released. MIDI-map it for a stop
+  -- pedal; SPACE on a typing keyboard and grid (8,2) drive it too.
   params:add_binary("stop_all", "stop all", "toggle", 0)
   params:set_action("stop_all", function(v)
     if v == 1 then ctx.pads_all_off() end
@@ -1740,8 +1820,19 @@ local function init_params()
       engine.rec(pget("stop_all", 0) == 1 and 0 or v)
     end
     if v == 1 then
+      rec_open = true
+      take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
-    elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
+      return
+    end
+    -- the rec-stop bookkeeping runs only for a pass that was really OPENED.
+    -- params:bang() at init fires this action with 0, and with pos_end at 1
+    -- that set take_len to the whole buffer before anything was recorded, so
+    -- the first take of every session saved, chopped and recalled scenes as
+    -- if it were 60 seconds long.
+    if not rec_open then return end
+    rec_open = false
+    if ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
       params:set("pos_start", ctx.rec_arm_phase)
       params:set("pos_end", ctx.rec_phase)
     elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
@@ -1753,34 +1844,27 @@ local function init_params()
       params:set("pos_start", 0)
       params:set("pos_end", 1)
     end
-    if v == 0 then
-      -- the take bounds what a PSET save writes (the write head runs
-      -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
-      -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
-      -- the region it recorded — everything else is still in the buffer. A
-      -- short punch-in over a narrowed window used to REPLACE the mark with
-      -- that narrow pos_end, so the next PSET save wrote a few seconds and the
-      -- rest of the take was gone on reload, with no error anywhere. Fresh
-      -- material resets the mark on purpose (clear/load/print), never a punch.
-      local bound = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
-      if bound > (ctx.take_len or 0) then ctx.take_len = bound end
-    end
+    -- the take bounds what a PSET save writes (the write head runs
+    -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
+    -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
+    -- the region it recorded — everything else is still in the buffer. A
+    -- short punch-in over a narrowed window used to REPLACE the mark with
+    -- that narrow pos_end, so the next PSET save wrote a few seconds and the
+    -- rest of the take was gone on reload, with no error anywhere. Fresh
+    -- material resets the mark on purpose (clear/load/print), never a punch.
+    local bound = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
+    if bound > (ctx.take_len or 0) then ctx.take_len = bound end
   end)
-  add_eng_control("rec_level", "rec level",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
-  add_eng_control("pre_level", "overdub",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("rec_level", "rec level", unit(1.0))
+  add_eng_control("pre_level", "overdub", unit(0.0))
   add_eng_binary("freeze", "freeze")
-  add_eng_control("dry_wet", "dry/wet",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
-  add_eng_control("resample", "resample (in<>out)",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("dry_wet", "dry/wet", unit(0.5))
+  add_eng_control("resample", "resample (in<>out)", unit(0.0))
   -- self-resampling: continuous feedback of the processed OUTPUT back into
   -- the record buffer (Basinski-style regenerative decay). 0 = off (a fresh
   -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
   -- convex crossfade so it can't run away.
-  add_eng_control("regen", "regen (self-resample)",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_control("regen", "regen (self-resample)", unit(0.0))
   params:set_action("regen", function(v)
     -- the other half of the erode interlock (see grp_erode below)
     if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
@@ -1790,35 +1874,23 @@ local function init_params()
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
     if v > 0 then ctx.take_len = 1 end
   end)
-  -- delete the take (REC K1+K3, mirroring TAPE's CLR) and load one off the
+  -- delete the take (the TAKE page's K1+K3 erase arc) and load one off the
   -- disk. clear is a MOMENTARY binary so a footswitch can wipe between takes;
-  -- both fire on the press edge only, so a stray 0 from bang/pset does nothing.
-  params:add_binary("clear_rec", "clear recording", "momentary", 0)
-  params:set_action("clear_rec", function(v)
-    if v == 1 then ctx.clear_recording() end
-  end)
+  -- it fires on the press edge only, so a stray 0 from bang/pset does nothing.
+  add_momentary("clear_rec", "clear recording", ctx.clear_recording)
   -- add_file opens norns' fileselect in the menu and the path rides the PSET,
   -- so a saved session reloads its sample
   params:add_file("sample_file", "load sample", _path.audio)
   params:set_action("sample_file", function(f) ctx.load_sample(f) end)
   -- export the take as a browsable stereo wav in dust/audio.
   -- momentary so a footswitch/grid can fire it; press edge only.
-  params:add_binary("export_take", "export take (wav)", "momentary", 0)
-  params:set_action("export_take", function(v)
-    if v == 1 then ctx.export_take() end
-  end)
+  add_momentary("export_take", "export take (wav)", ctx.export_take)
   -- pull the window in onto the sound (see ctx.take_tighten). momentary so a
   -- footswitch reaches it; non-destructive — it only moves the window edges.
-  params:add_binary("take_tighten", "tighten window to sound", "momentary", 0)
-  params:set_action("take_tighten", function(v)
-    if v == 1 then ctx.take_tighten() end
-  end)
+  add_momentary("take_tighten", "tighten window to sound", ctx.take_tighten)
   -- PRINT the master mix back into the buffer (see ctx.print_take). momentary
   -- so a footswitch fires the whole bounce; press edge only.
-  params:add_binary("print_take", "print mix -> take", "momentary", 0)
-  params:set_action("print_take", function(v)
-    if v == 1 then ctx.print_take() end
-  end)
+  add_momentary("print_take", "print mix -> take", ctx.print_take)
   params:add_control("print_len", "print length",
     controlspec.new(0, 16, "lin", 0.5, 0, "s"),
     function(p)
@@ -1827,19 +1899,12 @@ local function init_params()
     end)
 
   params:add_group("grp_window", "take - window", 4)
-  -- default controlspec quantum is 0.01 = 1% per click = 600ms of a 60s
-  -- buffer: way too coarse to set a loop. 0.002 base + fine_delta's span
-  -- scaling in enc() gets down to ~10ms nudges on a tight window.
-  local pos_start_spec = controlspec.new(0, 1, "lin", 0, 0.0, "")
-  pos_start_spec.quantum = 0.002
-  add_eng_control("pos_start", "win start", pos_start_spec)
-  local pos_end_spec = controlspec.new(0, 1, "lin", 0, 1.0, "")
-  pos_end_spec.quantum = 0.002
-  add_eng_control("pos_end", "win end", pos_end_spec)
+  -- fine_unit: ~10ms nudges on a tight window once fine_delta scales it
+  add_eng_control("pos_start", "win start", fine_unit(0.0))
+  add_eng_control("pos_end", "win end", fine_unit(1.0))
   add_eng_control("scan", "scan rate",
     controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
-  add_eng_control("pos_jitter", "jitter",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("pos_jitter", "jitter", unit(0.0))
 
   params:add_group("grp_grain", "voice - grain", 9)
   add_eng_control("size", "size",
@@ -1864,8 +1929,7 @@ local function init_params()
     end
     if engine.pitch then engine.pitch(v) end
   end)
-  add_eng_control("spread", "spread",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  add_eng_control("spread", "spread", unit(0.5))
   add_eng_control("pan", "pan",
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
@@ -1874,34 +1938,24 @@ local function init_params()
   -- continuous from 0 = off), and a 3-way grain-envelope shape. shape is
   -- an option (engine wants 0/1/2, norns options are 1-based, so -1 in the
   -- action — same trick as `mode`).
-  add_eng_control("grain_jitter", "grain jitter",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("grain_jitter", "grain jitter", unit(0.0))
   add_eng_control("grain_pitch_spread", "pitch spread",
     controlspec.new(0, 12, "lin", 0, 0.0, "st"))
-  params:add_option("grain_shape", "grain shape", { "HANN", "WELCH", "PERC" }, 1)
-  params:set_action("grain_shape", function(v)
-    if engine.grain_shape then engine.grain_shape(v - 1) end
-  end)
+  add_eng_option("grain_shape", "grain shape", { "HANN", "WELCH", "PERC" }, 1)
 
   -- MiClouds granular controls (GRAIN mode uses the Clouds voice when
   -- mi-UGens are installed; on the GrainBuf fallback these are stored but
   -- ignored — same guarded philosophy as the JPverb-only reverb params). the
   -- shared size/density/spread/pitch already remap to Clouds; these are the
-  -- Clouds-specific attributes. edited on the GRAIN page + PARAMS.
+  -- Clouds-specific attributes. PARAMS (and MIDI) only: VOICE's GRAIN face
+  -- carries size/density.
   params:add_group("grp_clouds", "voice - clouds", 5)
-  add_eng_control("clouds_pos", "grain position",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
-  add_eng_control("clouds_tex", "grain texture",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
-  add_eng_control("clouds_fb", "grain feedback",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
-  params:add_option("clouds_mode", "clouds mode",
+  add_eng_control("clouds_pos", "grain position", unit(0.5))
+  add_eng_control("clouds_tex", "grain texture", unit(0.5))
+  add_eng_control("clouds_fb", "grain feedback", unit(0.0))
+  add_eng_option("clouds_mode", "clouds mode",
     { "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }, 1)
-  params:set_action("clouds_mode", function(v)
-    if engine.clouds_mode then engine.clouds_mode(v - 1) end
-  end)
-  add_eng_control("clouds_lofi", "grain lofi",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("clouds_lofi", "grain lofi", unit(0.0))
 
   params:add_group("grp_stretch", "voice - stretch", 5)
   -- mode swaps the playback synth in the engine: only the active algorithm
@@ -1909,18 +1963,14 @@ local function init_params()
   -- PLAY (clean straight loop = the exact recorded sample) is the
   -- DEFAULT so a fresh take plays back untouched; GRAIN/WARP/PV are switched
   -- on for mangling. appended (not reordered) so 1..4 keep their meaning.
-  params:add_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 5)
-  params:set_action("mode", function(v)
-    if engine.mode then engine.mode(v - 1) end
-  end)
+  add_eng_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 5)
   add_eng_control("warp_window", "warp window",
     controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
   params:add_number("warp_overlaps", "warp overlaps", 1, 8, 4)
   params:set_action("warp_overlaps", function(v)
     if engine.warp_overlaps then engine.warp_overlaps(v) end
   end)
-  add_eng_control("warp_rand", "warp rand",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("warp_rand", "warp rand", unit(0.0))
   add_eng_binary("pv_freeze", "pv freeze")
 
   -- ---- the layer decks ---------------------------------------------------
@@ -1962,24 +2012,18 @@ local function init_params()
     end)
     params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
     params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
-    params:add_control(q("level"), "L" .. n .. " level",
-      controlspec.new(0, 1, "lin", 0, 0.8, ""))
+    params:add_control(q("level"), "L" .. n .. " level", unit(0.8))
     params:set_action(q("level"), function() Mdeck.update_level(deck()) end)
     params:add_control(q("rate"), "L" .. n .. " rate",
       controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
     params:set_action(q("rate"), function() Mdeck.update_rate(deck()) end)
     params:add_binary(q("reverse"), "L" .. n .. " reverse", "toggle", 0)
     params:set_action(q("reverse"), function() Mdeck.update_rate(deck()) end)
-    local ls = controlspec.new(0, 1, "lin", 0, 0.0, "")
-    ls.quantum = 0.002
-    params:add_control(q("start"), "L" .. n .. " loop start", ls)
+    params:add_control(q("start"), "L" .. n .. " loop start", fine_unit(0.0))
     params:set_action(q("start"), function() Mdeck.update_loop(deck()) end)
-    local le = controlspec.new(0, 1, "lin", 0, 1.0, "")
-    le.quantum = 0.002
-    params:add_control(q("end"), "L" .. n .. " loop end", le)
+    params:add_control(q("end"), "L" .. n .. " loop end", fine_unit(1.0))
     params:set_action(q("end"), function() Mdeck.update_loop(deck()) end)
-    params:add_control(q("pre"), "L" .. n .. " overdub",
-      controlspec.new(0, 1, "lin", 0, 1.0, ""))
+    params:add_control(q("pre"), "L" .. n .. " overdub", unit(1.0))
     params:set_action(q("pre"), function() Mdeck.update_rec(deck()) end)
     -- The join where the loop starts over. Short is a clean cut and a hard
     -- downbeat; long is a blend that hides the join landing mid-note.
@@ -1989,18 +2033,15 @@ local function init_params()
     -- Stereo width: 1 is the deck's own full left and right, 0 folds it to
     -- the middle. Two decks playing related material, both at full width, is
     -- a wall of sound with no room to hear either one.
-    params:add_control(q("width"), "L" .. n .. " width",
-      controlspec.new(0, 1, "lin", 0, 1.0, ""))
+    params:add_control(q("width"), "L" .. n .. " width", unit(1.0))
     params:set_action(q("width"), function() Mdeck.update_width(deck()) end)
     -- A momentary switch, so a footswitch can reach it. There is no key left
     -- for this: LAYERS already uses K2 and K3, and holding K1 is reserved for
     -- stop and erase on every page. So it lives in PARAMS, on MIDI and on the
     -- grid, the same as pad_chop. The automatic snap when a recording ends
     -- needs no key at all.
-    params:add_binary(q("snap"), "L" .. n .. " snap loop", "momentary", 0)
-    params:set_action(q("snap"), function(v)
-      if v == 1 then ctx.layer_snap(deck()) end
-    end)
+    add_momentary(q("snap"), "L" .. n .. " snap loop",
+      function() ctx.layer_snap(deck()) end)
   end
 
   params:add_group("grp_tape", "tape", 9)
@@ -2020,8 +2061,11 @@ local function init_params()
       -- the loop shorter, down towards a tenth of a second, with all the
       -- audio still sitting in the buffer. Mdeck.arm_loop draws the same line
       -- by asking whether the deck already holds anything.
-      tape_arm_phase = nil
+      tape_arm_phase, tape_arm_was = nil, nil
       if pget("tape_pre", 0) == 0 then
+        -- remember the loop this pass widens: a pass too short to be a loop
+        -- puts it back (Mdeck.arm_loop does the same with arm_was)
+        tape_arm_was = { pget("loop_start", 0), pget("loop_end", 1) }
         if (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
           Mtape.set_loop(0, 1)
         end
@@ -2032,15 +2076,16 @@ local function init_params()
     elseif ctx.tape_phase > tape_arm_phase + 0.005 then
       Mtape.set_loop(tape_arm_phase, ctx.tape_phase)
       Mtape.jump_to(tape_arm_phase)
-      tape_arm_phase = nil
     elseif ctx.tape_phase < tape_arm_phase - 0.005 then
       -- head wrapped past the tape end mid-take: softcut loops can't cross
       -- the seam, so keep the full tape rather than snapping a wrong slice
       Mtape.set_loop(0, 1)
-      tape_arm_phase = nil
-    else
-      tape_arm_phase = nil
+    elseif tape_arm_was then
+      -- too short to be a loop (a mis-tap): give back the loop it widened
+      -- instead of leaving the whole 60s tape playing
+      Mtape.set_loop(tape_arm_was[1], tape_arm_was[2])
     end
+    if v == 0 then tape_arm_phase, tape_arm_was = nil, nil end
     Mtape.update_tape_rec()
   end)
   params:add_control("tape_rate", "tape rate",
@@ -2049,16 +2094,11 @@ local function init_params()
   params:add_binary("tape_reverse", "tape reverse", "momentary", 0)
   params:set_action("tape_reverse", Mtape.update_tape_rate)
   -- same fine quantum + span-scaled deltas as the window edges
-  local loop_start_spec = controlspec.new(0, 1, "lin", 0, 0.0, "")
-  loop_start_spec.quantum = 0.002
-  params:add_control("loop_start", "loop start", loop_start_spec)
+  params:add_control("loop_start", "loop start", fine_unit(0.0))
   params:set_action("loop_start", Mtape.update_tape_loop)
-  local loop_end_spec = controlspec.new(0, 1, "lin", 0, 1.0, "")
-  loop_end_spec.quantum = 0.002
-  params:add_control("loop_end", "loop end", loop_end_spec)
+  params:add_control("loop_end", "loop end", fine_unit(1.0))
   params:set_action("loop_end", Mtape.update_tape_loop)
-  params:add_control("tape_pre", "tape overdub",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_control("tape_pre", "tape overdub", unit(0.0))
   params:set_action("tape_pre", Mtape.update_tape_rec)
   params:add_binary("tape_freeze", "tape freeze", "toggle", 0)
   params:set_action("tape_freeze", Mtape.update_tape_rec)
@@ -2068,24 +2108,18 @@ local function init_params()
   -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET post-FX
   -- engine output — the tape as a print / resample stage. default DRY = the classic parallel-ADC tap, so nothing changes until
   -- you reach for it.
-  params:add_control("cut_source", "tape source",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_control("cut_source", "tape source", unit(0.0))
   -- through the one source writer: while a layer bounce holds the send WET,
   -- turning the knob re-resolves rather than silently fighting it
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
   params:add_group("grp_filter", "filter", 4)
-  params:add_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
-  params:set_action("filt_type", function(v)
-    if engine.filt_type then engine.filt_type(v - 1) end
-  end)
+  add_eng_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
-  add_eng_control("resonance", "resonance",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("resonance", "resonance", unit(0.0))
   -- post-filter tanh saturation with makeup: louder AND dirtier up
-  add_eng_control("drive", "drive",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("drive", "drive", unit(0.0))
 
   params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
@@ -2097,14 +2131,12 @@ local function init_params()
   params:set_action("delay_sync", function() sync_delay_time(true) end)
   -- 0..1 knob curved to the actual 0..0.98 feedback coefficient (fb_curve):
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
-  add_eng_control("delay_fb", "feedback",
-    controlspec.new(0, 1, "lin", 0, 0.3, ""), fb_curve)
+  add_eng_control("delay_fb", "feedback", unit(0.3), fb_curve)
   -- FX SEND response curve: the engine crossfades the wet with an equal-power
   -- .sqrt (Engine_Mangler.sc), so a raw 3% knob already reads ~17% wet ("way too
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
   -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
-  add_eng_control("delay_mix", "delay mix",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""), square)
+  add_eng_control("delay_mix", "delay mix", unit(0.0), square)
 
   -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing
@@ -2114,31 +2146,24 @@ local function init_params()
   params:add_group("grp_reverb", "reverb", 15)
   add_eng_control("rev_decay", "reverb decay",
     controlspec.new(0.1, 30, "exp", 0, 2.0, "s"))
-  add_eng_control("rev_damp", "reverb damp",
-    controlspec.new(0, 1, "lin", 0, 0.3, ""))
+  add_eng_control("rev_damp", "reverb damp", unit(0.3))
   add_eng_control("rev_size", "reverb size",
     controlspec.new(0.5, 5, "lin", 0, 1.0, ""))
-  add_eng_control("rev_early", "early diffusion",
-    controlspec.new(0, 1, "lin", 0, 0.7, ""))
-  add_eng_control("rev_moddepth", "mod depth",
-    controlspec.new(0, 1, "lin", 0, 0.1, ""))
+  add_eng_control("rev_early", "early diffusion", unit(0.7))
+  add_eng_control("rev_moddepth", "mod depth", unit(0.1))
   add_eng_control("rev_modfreq", "mod freq",
     controlspec.new(0, 10, "lin", 0, 2.0, "hz"))
-  add_eng_control("rev_low", "low decay",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
-  add_eng_control("rev_mid", "mid decay",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
-  add_eng_control("rev_high", "high decay",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  add_eng_control("rev_low", "low decay", unit(1.0))
+  add_eng_control("rev_mid", "mid decay", unit(1.0))
+  add_eng_control("rev_high", "high decay", unit(1.0))
   add_eng_control("rev_lowcut", "low crossover",
     controlspec.new(20, 2000, "exp", 0, 500, "hz"))
   add_eng_control("rev_highcut", "high crossover",
     controlspec.new(200, 20000, "exp", 0, 2000, "hz"))
   add_eng_control("rev_mix", "reverb mix",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""), square)   -- progressive fade (see delay_mix)
+    unit(0.0), square)   -- progressive fade (see delay_mix)
   -- shimmer: pitch-shifted reverb feedback (climbs in octaves into a pad)
-  add_eng_control("shimmer", "shimmer",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  add_eng_control("shimmer", "shimmer", unit(0.0))
   add_eng_control("shimmer_pitch", "shimmer pitch",
     controlspec.new(-12, 24, "lin", 1, 12, "st"))
   add_eng_control("shimmer_tone", "shimmer tone",
@@ -2185,16 +2210,14 @@ local function init_params()
     controlspec.new(0.01, 4, "exp", 0, 0.6, "s"))
   -- pad voice LEVEL (per-note amp): the chord-safe default (0.3, the
   -- level that stops poly stacks slamming the master limiter). read at note-on.
-  params:add_control("pad_level", "pad level",
-    controlspec.new(0, 1, "lin", 0, 0.3, ""))
+  params:add_control("pad_level", "pad level", unit(0.3))
   -- CHOP the pads onto the take's own attacks. momentary (not a trigger) so it
   -- is MIDI-learnable — the whole point is a footswitch. Firing it with no
   -- transients found, or on a fresh buffer, puts the pads back to even slices.
-  params:add_binary("pad_chop", "chop to transients", "momentary", 0)
-  params:set_action("pad_chop", function(v) if v == 1 then ctx.pad_chop() end end)
-  params:add_binary("pad_even", "back to even slices", "momentary", 0)
-  params:set_action("pad_even", function(v)
-    if v == 1 then ctx.pads_uncut(); print("mangler: pads back to even slices") end
+  add_momentary("pad_chop", "chop to transients", ctx.pad_chop)
+  add_momentary("pad_even", "back to even slices", function()
+    ctx.pads_uncut()
+    print("mangler: pads back to even slices")
   end)
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
@@ -2226,7 +2249,8 @@ local function init_params()
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
   params:set_action("motion_play", function(v) ctx.motion.set_playing(v == 1) end)
-  params:add_number("motion_lane", "motion lane", 0, 16, 0,
+  -- one lane per recordable param at most, so the selector reaches them all
+  params:add_number("motion_lane", "motion lane", 0, #ctx.motion.MOTION_IDS, 0,
     function(p)
       local ids = ctx.motion.lane_ids
       local n = #ids
@@ -2234,8 +2258,7 @@ local function init_params()
       if n == 0 or v == 0 then return "-" end
       return ids[v]
     end)
-  params:add_control("motion_depth", "motion depth",
-    controlspec.new(0, 1, "lin", 0, 1.0, ""))
+  params:add_control("motion_depth", "motion depth", unit(1.0))
   -- settable loop length (K1+E2 on MOTION). 0 = AUTO (the recorded length);
   -- >0 retimes the loop's playback SPEED without touching the stored gesture.
   params:add_control("motion_len", "motion length",
@@ -2263,8 +2286,7 @@ local function init_params()
   -- (it's in MOTION_IDS — one lane replays the whole sweep). only this writes
   -- params, and only from the next frame's tick (mscenes coalesces so a fast
   -- CC can't flood the engine).
-  params:add_control("scene_morph_amt", "morph amount",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_control("scene_morph_amt", "morph amount", unit(0.0))
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)
   params:add_option("scene_recall_mode", "recall quantize",
     { "NOW", "BEAT", "BAR" }, 1)
@@ -2272,34 +2294,17 @@ local function init_params()
   -- that lands over whatever material is playing — Octatrack-style)
   params:add_option("scene_scope", "capture scope", { "ALL", "FX" }, 1)
   -- actions on the selected slot (also the SCENE page's K2/K3)
-  params:add_binary("scene_capture", "capture to slot", "momentary", 0)
-  params:set_action("scene_capture", function(v)
-    if v == 1 then Mscenes.capture() end
-  end)
-  params:add_binary("scene_recall", "recall slot", "momentary", 0)
-  params:set_action("scene_recall", function(v)
-    if v == 1 then Mscenes.recall() end
-  end)
+  add_momentary("scene_capture", "capture to slot", Mscenes.capture)
+  add_momentary("scene_recall", "recall slot", Mscenes.recall)
   -- stomp through a set: advance to the next FILLED slot and recall it
   -- (cycling; honors BEAT/BAR quantize). MIDI-map a footswitch.
-  params:add_binary("scene_next", "next scene", "momentary", 0)
-  params:set_action("scene_next", function(v)
-    if v == 1 then Mscenes.next() end
-  end)
-  params:add_binary("scene_clear", "clear slot", "momentary", 0)
-  params:set_action("scene_clear", function(v)
-    if v == 1 then Mscenes.clear() end
-  end)
-  -- the safety net (the SCENE page's alt layer): mark a state, then get back
-  -- to it. control state only — it never touches the buffer or the tape audio.
-  params:add_binary("scene_safe_capture", "mark safe state", "momentary", 0)
-  params:set_action("scene_safe_capture", function(v)
-    if v == 1 then Mscenes.safe_capture() end
-  end)
-  params:add_binary("scene_safe_restore", "restore safe state", "momentary", 0)
-  params:set_action("scene_safe_restore", function(v)
-    if v == 1 then Mscenes.safe_restore() end
-  end)
+  add_momentary("scene_next", "next scene", Mscenes.next)
+  add_momentary("scene_clear", "clear slot", Mscenes.clear)
+  -- the safety net (the ◄ cell's two actions, for a footswitch): mark a
+  -- state, then get back to it. control state only — it never touches the
+  -- buffer or the tape audio.
+  add_momentary("scene_safe_capture", "mark safe state", Mscenes.safe_capture)
+  add_momentary("scene_safe_restore", "restore safe state", Mscenes.safe_restore)
   -- chaos: HOLD it for a bounded random throw, release to land back on the
   -- safe state (it marks one for you if you never did). a footswitch or grid
   -- pad you can lean on — the release is what makes it safe to press.
@@ -2325,8 +2330,7 @@ local function init_params()
   -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
   -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
   params:add_group("grp_erode", "erosion", 2)
-  params:add_control("erode", "erode",
-    controlspec.new(0, 1, "lin", 0, 0.0, ""))
+  params:add_control("erode", "erode", unit(0.0))
   params:set_action("erode", function(v)
     -- interlock: erode and regen are both free-running write heads on the
     -- same buffer. engaging one disengages the other, so the conflict is
@@ -2335,8 +2339,7 @@ local function init_params()
     if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
     if engine.erode then engine.erode(v) end
   end)
-  add_eng_control("wear", "wear",
-    controlspec.new(0, 1, "lin", 0, 0.5, ""))
+  add_eng_control("wear", "wear", unit(0.5))
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
@@ -2344,27 +2347,37 @@ local function init_params()
   -- → engine write_take/read_take). the hooks are SHARED: each module/helper
   -- does its own half (mtape the tape audio, mscenes the scene bank + safe
   -- snapshot as a lua table, the take helpers the engine buffer).
-  params.action_write = function(filename, name, number)
-    Mtape.pset_write(number)
-    Mdeck.pset_write(number)
-    Mscenes.pset_write(number)
-    ctx.take_pset_write(number)   -- the engine take, as an L/R pair
-    ctx.padlock_pset_write(number)  -- per-pad sound-locks
+  -- ONE list of the parts, walked by all three hooks, so a new part cannot be
+  -- added to two of them. Each part runs under pcall: one that throws (a full
+  -- card on the tape wav) must not silently skip the parts after it. ORDER
+  -- matters on read: the take restores before the pad locks, which bring
+  -- back the chop the take restore drops.
+  local PSET_PARTS = {
+    { Mtape.pset_write, Mtape.pset_read, Mtape.pset_delete, "tape" },
+    { Mdeck.pset_write, Mdeck.pset_read, Mdeck.pset_delete, "layers" },
+    { Mscenes.pset_write, Mscenes.pset_read, Mscenes.pset_delete, "scenes" },
+    { ctx.take_pset_write, ctx.take_pset_read, ctx.take_pset_delete, "take" },
+    { ctx.padlock_pset_write, ctx.padlock_pset_read, ctx.padlock_pset_delete,
+      "pad locks" },
+  }
+  local function each_part(k, number)
+    for _, part in ipairs(PSET_PARTS) do
+      local ok, err = pcall(part[k], number)
+      if not ok then
+        print("mangler: pset " .. part[4] .. " failed — " .. tostring(err))
+      end
+    end
   end
+  params.action_write = function(filename, name, number) each_part(1, number) end
   params.action_read = function(filename, silent, number)
-    Mtape.pset_read(number)
-    Mdeck.pset_read(number)
-    Mscenes.pset_read(number)
-    ctx.take_pset_read(number)
-    ctx.padlock_pset_read(number)
+    -- params:read fires tape_rec before the loop points (file order), so a
+    -- PSET saved while the tape recorded opened a pass against the OLD
+    -- session; its disarm then re-cut the loop just restored. The deck twin
+    -- of this is Mdeck.pset_read's abort_loop.
+    tape_arm_phase, tape_arm_was = nil, nil
+    each_part(2, number)
   end
-  params.action_delete = function(filename, name, number)
-    Mtape.pset_delete(number)
-    Mdeck.pset_delete(number)
-    Mscenes.pset_delete(number)
-    ctx.take_pset_delete(number)
-    ctx.padlock_pset_delete(number)
-  end
+  params.action_delete = function(filename, name, number) each_part(3, number) end
 
   params:bang()
 end
@@ -2417,7 +2430,7 @@ function init()
       ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
       sync_delay_time()    -- tempo-follow the delay (writes only on change)
       Mpages.erosion_tick()  -- count loop passes while the take erodes
-      Mpages.load_tick()   -- fill a loaded/restored waveform a batch/frame
+      Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
       Mpages.update_wave()
       Mpages.update_tape_wave()
       Mmotion.tick()   -- advance + replay the gesture loop
@@ -2439,14 +2452,13 @@ function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
   if export_clock then clock.cancel(export_clock) end  -- stop a pending export
+  ctx.cancel_task()     -- ...and a conversion in flight
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
-  Mpages.cancel_load()  -- close any in-flight waveform read
+  Mwav.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   Mgrid.cleanup()
-  Mtape.cleanup()
-  Mdeck.cleanup()
-  Mmotion.cleanup()    -- gesture looper teardown (no-op; polling needs none)
+  Mtape.cleanup()      -- (softcut voices are reset by norns after cleanup)
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
@@ -2525,6 +2537,9 @@ function key(n, z)
     if def then
       if def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
         ctx.k13_frame, ctx.k13_fired = ctx.frame, false
+        -- what the arc will erase is fixed NOW (SCENE: the slot under the
+        -- finger, before a running orbit can re-aim the selector)
+        ctx.k13_slot = math.floor(pget("scene_slot", 1) + 0.5)
       elseif def.pon then           -- punchable
         if def.lit and def.lit() then
           def.poff()                -- already latched: press = off

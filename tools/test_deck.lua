@@ -7,12 +7,8 @@
 --
 --   lua tools/test_deck.lua        # from the repo root
 
-local ok_count, fail = 0, {}
-local function ok(c, w) if c then ok_count = ok_count + 1 else fail[#fail + 1] = w end end
-local function near(a, b, t, w)
-  ok(math.abs(a - b) <= t,
-    string.format("%s (got %s, want %s +-%s)", w, tostring(a), tostring(b), tostring(t)))
-end
+local T = dofile("tools/harness.lua")
+local ok, near = T.ok, T.near
 
 -- ---- a softcut that RECORDS what it was told, instead of making sound -------
 local calls = {}
@@ -565,10 +561,4 @@ do
   ok(last("fade_time", 3) ~= nil, "and moving the loop re-caps the seam against it")
 end
 
-print(string.format("\n%d assertions passed", ok_count))
-if #fail > 0 then
-  print(#fail .. " FAILED:")
-  for _, f in ipairs(fail) do print("  x " .. f) end
-  os.exit(1)
-end
-print("deck harness OK")
+T.report("deck harness OK")

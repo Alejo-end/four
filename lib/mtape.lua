@@ -23,13 +23,16 @@ local TAPE = {
   id = "tape", name = "TAPE", va = 1, vb = 2, from = 0, len = TAPE_LEN,
   pre_default = 0,   -- classic tape: REPLACE unless tape_pre is raised
   keymap = { rec = "tape_rec", rate = "tape_rate", reverse = "tape_reverse",
-             pre = "tape_pre", freeze = "tape_freeze",
+             pre = "tape_pre", freeze = "tape_freeze", fade = "tape_fade",
              start = "loop_start", ["end"] = "loop_end" },
   -- display fields, unused here (the tape picture lives in mpages as twave)
-  wave = {}, wave_bin = 0, any = false, phase = 0,
+  wave = {}, wave_bin = 0, any = false, phase = 0, gen = 0,
 }
 
-local M = { TAPE_LEN = TAPE_LEN }
+-- the descriptor is exported for the parts of the deck law that READ a deck
+-- (its material extent); everything that writes goes through the functions
+-- below
+local M = { TAPE_LEN = TAPE_LEN, deck = TAPE }
 
 function M.init(ctx, deckmod)
   C = ctx
@@ -57,17 +60,11 @@ function M.update_mix()
   sc.level(2, tp_l)
 end
 
--- apply identical settings to both tape voices (1 = L, 2 = R)
-local function tape_set(fn)
-  fn(1)
-  fn(2)
-end
-
--- the deck mechanics, delegated (see the TAPE descriptor above). Proven
--- call-for-call identical to the hand-written versions they replace: the
--- softcut command stream over a state matrix (rates, reverse, rec x freeze x
--- pre, five loop shapes, clear) was captured before and after the fold and
--- byte-diffed empty.
+-- the deck mechanics, delegated (see the TAPE descriptor above). When they
+-- were folded in, the softcut command stream over a state matrix (rates,
+-- reverse, rec x freeze x pre, five loop shapes, clear) was captured before
+-- and after and byte-diffed empty. The seam has gone through the same law
+-- since: one fade writer, capped at a quarter of the loop.
 --
 -- What is NOT shared, and why. Volume, preset files, playhead position and
 -- drawing stay here, because they really are the tape's own.
@@ -81,8 +78,9 @@ end
 -- device session as the rest of the merge.
 --
 -- The two now agree that stopping a recording may only re-cut the loop if
--- starting it opened one, and both move their edges through D.set_loop.
--- Three things still differ:
+-- starting it opened one, that a pass too short to be a loop gives back the
+-- loop it widened, that a PSET load forgets an open pass, and both move their
+-- edges through D.set_loop. Three things still differ:
 --   * the shortest recording the tape accepts is measured against the whole
 --     tape; mdeck measures 100ms against the deck's own region
 --   * mdeck checks which way the playhead was moving, so a deck playing
@@ -102,9 +100,10 @@ function M.set_loop(lo, hi) D.set_loop(TAPE, lo, hi) end
 -- copies of "put the head here" is how the loop maths drifted apart before.
 function M.jump_to(pos) D.jump(TAPE, pos) end
 
-function M.set_fade(v)
-  tape_set(function(vc) sc.fade_time(vc, v) end)
-end
+-- the seam, through the deck law: capped at a quarter of the loop, so a long
+-- fade on a short loop cannot leave the tape spending all its time fading
+-- (a raw write here bypassed the cap the loop updates apply)
+function M.set_fade() D.update_fade(TAPE) end
 
 -- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
 -- audio with it, so once the layer decks share this buffer a TAPE erase would
@@ -137,7 +136,6 @@ function M.init_tape()
     sc.play(v, 1)
     sc.loop(v, 1)
     sc.position(v, 0)
-    sc.fade_time(v, pget("tape_fade", 0.05))
     sc.level_slew_time(v, 0.05)
     sc.rate_slew_time(v, 0.05)
     -- force the filter sections fully open: their defaults can mute the voice
@@ -151,7 +149,7 @@ function M.init_tape()
   end
   M.update_tape_rate()
   M.update_tape_rec()
-  M.update_tape_loop()
+  M.update_tape_loop()     -- also sends the (capped) seam
   M.update_mix()
   -- tape head position events drive the TAPE page needle AND the loop
   -- snap points — 25ms quant keeps snapped loops tight (0.1 was audible)
@@ -160,7 +158,12 @@ function M.init_tape()
   -- the tape's own voice is forwarded, so the layer decks can drive their own
   -- playheads and waveforms off the same poll.
   sc.event_phase(function(v, pos)
-    if v == 1 then C.tape_phase = pos / TAPE_LEN
+    if v == 1 then
+      C.tape_phase = pos / TAPE_LEN
+      -- the written stretch, from the same 25ms events the layers use
+      if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+        D.track_extent(TAPE, C.tape_phase)
+      end
     elseif C.deck_phase then C.deck_phase(v, pos) end
   end)
   sc.poll_start_phase()
@@ -189,6 +192,7 @@ function M.pset_read(number)
   if util.file_exists(path) then
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
+    TAPE.mat_lo, TAPE.mat_hi = 0, 1   -- a whole-tape save: extent unknown
     -- repaint the strip from the wav we just restored: lua cannot read the
     -- softcut buffer, so without this the loop played under a blank picture
     if C.repaint_twave then C.repaint_twave(path, TAPE_LEN) end

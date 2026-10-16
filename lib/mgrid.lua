@@ -221,36 +221,21 @@ local pget, ptoggle, clamp, window_bounds, FPS
 local GRID_WHITE = { 0, 2, 4, 5, 7, 9, 11, 12 }
 local GRID_BLACK = { nil, 1, 3, nil, 6, 8, 10, nil }
 
--- window/loop slice pads: track what's held per row so a second press
--- while the first is down stretches the region between them
-local slice_held = { win = {}, loop = {}, lay1 = {}, lay2 = {} }
-local SLICE_IDS = {
-  win = { "pos_start", "pos_end" },
-  loop = { "loop_start", "loop_end" },
-  -- the layer decks' loops, driven by the same two-pad span gesture
-  lay1 = { "lay1_start", "lay1_end" },
-  lay2 = { "lay2_start", "lay2_end" },
-}
+-- region slice pads: track what's held per row so a second press while the
+-- first is down stretches the region between them. A row is keyed by its
+-- START param id, which also names the pair.
+local slice_held = {}
 
-local function slice_key(kind, x, z)
-  local h = slice_held[kind]
+local function slice_key(sid, eid, x, z)
+  local h = slice_held[sid]
+  if not h then h = {}; slice_held[sid] = h end
   if z == 1 then
     local anchor = h[1] or x   -- first held pad anchors the span
     h[#h + 1] = x
     local lo, hi = min(anchor, x), max(anchor, x)
-    local sid, eid = SLICE_IDS[kind][1], SLICE_IDS[kind][2]
-    local nlo, nhi = (lo - 1) / 8, hi / 8
-    -- widening edge FIRST, the move_pair/EDGE_PAIRS rule. Written start-then-
-    -- end unconditionally, a span to the RIGHT of the old one crossed the pair
-    -- for one write, and a crossed pair is a region that is neither the old
-    -- nor the new one (the tape/layer actions floor it to a 100ms loop).
-    if nlo < pget(sid, 0) then
-      params:set(sid, nlo)
-      params:set(eid, nhi)
-    else
-      params:set(eid, nhi)
-      params:set(sid, nlo)
-    end
+    -- through the one pair writer (widening edge first: a crossed pair is a
+    -- region that is neither the old one nor the new one)
+    C.set_pair(sid, eid, (lo - 1) / 8, hi / 8)
   else
     for i = #h, 1, -1 do
       if h[i] == x then table.remove(h, i) end
@@ -283,7 +268,11 @@ local function grid_note_key(x, y, z)
   -- voice ids distinct from MIDI (1000+) and the screen bank (0..8).
   local oct = pget("kb_octave", 0)
   C.route_note(2000 + (y * 8 + x), 2 ^ ((st + 12 * oct) / 12), st + 12 * oct, z)
-  if z == 1 then C.flash_id, C.flash_until = "pitch", C.frame + FPS end
+  -- in pad mode `pitch` does not move, so do not swell a value that is not
+  -- changing (the typing keyboard learned the same thing)
+  if z == 1 and pget("pad_input", 0) == 0 then
+    C.flash_id, C.flash_until = "pitch", C.frame + FPS
+  end
 end
 
 -- ============================================================================
@@ -301,12 +290,12 @@ local function scene_row_key(x, z)
   if z == 1 then
     params:set("scene_slot", x)              -- the screen follows the finger
     if scene_mod.cap and on_scene then
-      C.scene_capture(x)
+      C.scene.capture(x)
       srow_frame[x] = nil
     elseif scene_mod.clr and on_scene then
-      C.scene_clear(x)
+      C.scene.clear(x)
       srow_frame[x] = nil
-    elseif C.scenes[x] then
+    elseif C.scene.slots[x] then
       -- begin the PEEK: the ramp in mangler's tick drives the morph param.
       -- this pad becomes the owner (a later pad press takes over) so releasing
       -- the FIRST of two held pads can't cancel the second's peek.
@@ -328,11 +317,9 @@ local function scene_row_key(x, z)
       peek_pad = nil
       params:set("scene_slot", x)            -- recall THIS pad's slot
       if C.frame - f < (C.TAP_FRAMES or 5) then
-        -- a tap: COMMIT the recall; the scene is the new LIVE. leave the amt
-        -- alone when the recall only QUEUED (BEAT/BAR) — zeroing it then
-        -- force-applies the old A and bounces the sound around the sync point
+        -- a tap: COMMIT the recall; the scene is the new LIVE (the landing
+        -- zeroes the morph amount itself, once the scene has actually landed)
         C.pulse("scene_recall")
-        if not C.scene.pending then params:set("scene_morph_amt", 0) end
       else
         C.peek_back = true                   -- borrowed: sweep home
       end
@@ -365,14 +352,15 @@ local function is_pads_page() return C.PAGES[C.page] == "PADS" end
 local function is_scene_page() return C.PAGES[C.page] == "SCENE" end
 local function is_layers_page() return C.PAGES[C.page] == "LAYERS" end
 
--- which deck a workspace row addresses: row 3 is layer 1, row 4 is layer 2 —
--- the same order they are drawn in on the screen
-local function layer_of(y) return (y == 3) and 1 or 2 end
-local function lay(n, k) return "lay" .. n .. "_" .. k end
+-- a layer deck's param id, through the deck module's own resolver (row 3 is
+-- layer 1, row 4 layer 2, the same order the screen draws them)
+local function lay(n, k) return C.deck_p(C.layers[n], k) end
 
 local function main_ws_key(x, y, z)
-  if y == 3 or y == 4 then
-    slice_key(y == 3 and "win" or "loop", x, z)
+  if y == 3 then
+    slice_key("pos_start", "pos_end", x, z)
+  elseif y == 4 then
+    slice_key("loop_start", "loop_end", x, z)
   elseif y == 5 and z == 1 then
     if x <= 5 then params:set("mode", x)     -- OFF GRAIN WARP PV PLAY
     elseif x == 7 then
@@ -401,16 +389,16 @@ end
 -- reach the other deck without changing what the screen is showing.
 local function layers_ws_key(x, y, z)
   if y == 3 or y == 4 then
-    local n = layer_of(y)
-    slice_key("lay" .. n, x, z)
+    local n = y - 2
+    if C.layers[n] then slice_key(lay(n, "start"), lay(n, "end"), x, z) end
     return
   end
   if z ~= 1 then return end
   if y == 5 then                      -- rec: x1-2 = deck 1/2
-    if x <= 2 then ptoggle(lay(x, "rec")) end
+    if C.layers[x] then ptoggle(lay(x, "rec")) end
   elseif y == 6 then                  -- mute: x1-2 = deck 1/2, snap: x4-5
-    if x <= 2 then ptoggle(lay(x, "play"))
-    elseif x == 4 or x == 5 then C.pulse(lay(x - 3, "snap")) end
+    if x <= 2 and C.layers[x] then ptoggle(lay(x, "play"))
+    elseif (x == 4 or x == 5) and C.layers[x - 3] then C.pulse(lay(x - 3, "snap")) end
   end
 end
 
@@ -447,6 +435,7 @@ local key_surface = {}
 
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
+  C.touch_input()                    -- the grid counts as presence (idle dim)
   if y == 1 then return scene_row_key(x, z) end
   if y == 2 then return state_row_key(x, z) end
   if y >= 7 then return grid_note_key(x, y, z) end
@@ -546,12 +535,16 @@ local function draw_main_ws()
     gg:led(x, 4, inl and 10 or 1, inl and "teal" or nil)
   end
   -- the write head glows RED while capturing; playheads are WHITE (drawn after,
-  -- so a playhead wins a shared pad)
+  -- so a playhead wins a shared pad), full only while that deck is AUDIBLE:
+  -- the screen's rule, so a stopped or thrown-away deck cannot look playing
   if pget("rec", 0) == 1 and pget("freeze", 0) == 0 then
     gg:led(floor(clamp(C.rec_phase, 0, 0.999) * 8) + 1, 3, 15, "red")
   end
-  gg:led(floor(clamp(C.play_phase, 0, 0.999) * 8) + 1, 3, 15, "white")
-  gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, 15, "white")
+  local eg, tg = C.mix_gains()
+  local eng_on = pget("mode", 5) > 1 and eg > 0.001 and C.wave_any
+  local tape_on = C.twave_any and tg > 0.001
+  gg:led(floor(clamp(C.play_phase, 0, 0.999) * 8) + 1, 3, eng_on and 15 or 4, "white")
+  gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, tape_on and 15 or 4, "white")
   -- row 5: mode radio (selected YELLOW) + pitch utilities
   local mode = pget("mode", 5)
   for x = 1, 5 do gg:led(x, 5, x == mode and 15 or 3, x == mode and "yellow" or nil) end
@@ -586,11 +579,11 @@ local function draw_layers_ws()
   for n = 1, math.min(#decks, 2) do
     local d = decks[n]
     local y = n + 2                       -- deck 1 -> row 3, deck 2 -> row 4
-    local a = clamp(pget(d.id .. "_start", 0), 0, 1)
-    local b = clamp(pget(d.id .. "_end", 1), 0, 1)
+    local a = clamp(pget(C.deck_p(d, "start"), 0), 0, 1)
+    local b = clamp(pget(C.deck_p(d, "end"), 1), 0, 1)
     local lo, hi = min(a, b), max(a, b)
-    local playing = pget(d.id .. "_play", 1) == 1
-    local recing = pget(d.id .. "_rec", 0) == 1
+    local playing = pget(C.deck_p(d, "play"), 1) == 1
+    local recing = pget(C.deck_p(d, "rec"), 0) == 1
     local head = floor(clamp(d.phase, 0, 0.999) * 8) + 1
     for x = 1, 8 do
       -- the OVERLAP law, same as draw_main_ws's window/loop rows: a pad lights

@@ -4,9 +4,9 @@
 -- exports every UI page as a PGM framebuffer (0..15 levels -> 0..255).
 --
 -- usage: lua render_pages.lua <mangler.lua path> <outdir> <prefix> [variant]
---   variant "empty": empty-buffer states (REC + GRAIN)
---   variant "grain": GRAIN page across its param extremes (size/density/
---                    spread/jitter/pan edges, mode OFF)
+--   variant "empty": empty-buffer states (TAKE + VOICE with nothing recorded)
+--   variant "grain": VOICE in GRAIN mode across its param extremes (size/
+--                    density/spread/jitter/pan edges, mode OFF)
 --   variant "filter": FILTER page across its types and resonance extremes
 
 local MANGLER = arg[1] or "mangler.lua"
@@ -26,7 +26,6 @@ local REPO_DIR = (arg[0]:match("(.*)/tools/uisim/") or ".")
 local env = dofile(REPO_DIR .. "/tools/uisim/env.lua")
 local _h = env.install{ dir = OUTDIR, scenario = function() return SCENARIO end }
 local export, run_ticks = _h.export, _h.run_ticks
-local POLL_FNS = _h.poll_fns
 local push = _h.push
 
 -- ============================================================================
@@ -40,8 +39,9 @@ local push = _h.push
 local REPO = MANGLER:match("^(.*)/") or "."
 include = function(p) return dofile(REPO .. "/" .. p .. ".lua") end
 
--- deterministic renders: the particle cloud draws from math.random, and
--- seeding here makes galleries diffable and the dist build byte-checkable
+-- deterministic renders: the scenes' chaos and the orbit draw from
+-- math.random, and seeding here makes galleries diffable and the dist build
+-- byte-checkable
 math.randomseed(1)
 
 dofile(MANGLER)

@@ -13,8 +13,8 @@
 --
 --   lua tools/test_purity.lua        # from the repo root
 
-local ok_count, fail = 0, {}
-local function ok(c, w) if c then ok_count = ok_count + 1 else fail[#fail + 1] = w end end
+local T = dofile("tools/harness.lua")
+local ok, near = T.ok, T.near
 
 local SCENARIO
 local env = dofile("tools/uisim/env.lua")
@@ -139,10 +139,4 @@ for _, m in ipairs(MOVES) do
   ok(lit(), "...and reverting " .. m[2] .. " restores it")
 end
 
-print(string.format("\n%d assertions passed", ok_count))
-if #fail > 0 then
-  print(#fail .. " FAILED:")
-  for _, f in ipairs(fail) do print("  x " .. f) end
-  os.exit(1)
-end
-print("purity harness OK")
+T.report("purity harness OK")

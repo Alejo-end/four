@@ -9,10 +9,10 @@
 -- What a deck CANNOT do is granulate, warp or spectrally stretch. That is the
 -- engine's buffer and the engine's voice. A deck is a loop.
 --
--- lib/mtape.lua is the same shape and predates this. It is deliberately NOT
--- rewritten on top of this module yet: it is one of the few paths confirmed on
--- hardware, and nothing since 2026-07-16 has been. Folding it in is a named
--- follow-up, gated on the device pass. See doc/layers.md.
+-- The tape (lib/mtape.lua) borrows these mechanics through a keymapped
+-- descriptor: rate, rec gating, loop bounds, the seam, clear and jump are
+-- this module's. Its level law, pset files, phase events and its own
+-- loop-pedal law stay in mtape and mangler.lua (see the note there).
 
 local sc = require "softcut"
 
@@ -45,6 +45,10 @@ function M.new(o)
     any = false,        -- has audio been recorded into it?
     wave = {},          -- 128-bin picture, painted as the head passes
     wave_bin = 0,
+    gen = 0,            -- bumped by anything that replaces the material, so a
+                        -- file conversion that lands late can tell (layer_load)
+    -- mat_lo / mat_hi: the stretch of the region that holds material (0..1),
+    -- nil when there is none. Kept by track_extent, read through M.extent.
   }
   for i = 1, 128 do d.wave[i] = 0 end
   M.decks[#M.decks + 1] = d
@@ -177,9 +181,8 @@ end
 function M.update_all(d)
   M.update_rate(d)
   M.update_rec(d)
-  M.update_loop(d)
+  M.update_loop(d)      -- (sends the seam too: update_loop ends in update_fade)
   M.update_level(d)
-  M.update_fade(d)
   M.update_width(d)
 end
 
@@ -202,22 +205,29 @@ end
 -- is close, but never exact, and it is why SNAP exists on top of this:
 -- rounding the length to match something else is what puts a hand-played
 -- loop properly in time.
--- Move both loop edges. The order matters: each one is a separate write, so
--- in between there is a moment where the new start sits against the OLD end.
--- If that leaves the start past the end, update_loop reads it as a loop of
--- nothing, floors it to 100ms, and the playhead jumps. So move whichever edge
--- keeps start before end at the halfway point. One of the two always does.
-local function set_bounds(d, lo, hi)
-  if lo <= clamp(get(d, "end", 1), 0, 1) then
-    params:set(p(d, "start"), lo); params:set(p(d, "end"), hi)
+-- THE way to move a start/end pair (a loop, the take window). Each edge is a
+-- separate write, so in between the new start sits against the OLD end; if
+-- that crosses the pair, every reader sorts it into a region that is neither
+-- the old one nor the new one, and the deck's 100ms floor can jump the head.
+-- So the WIDENING edge goes first: moving left, the start; moving right, the
+-- end. With an ordered pair the halfway state is then always ordered, and on a
+-- slide right it still contains the old region, so the head is not stranded
+-- outside the loop. The take window, the grid spans, the encoder slides and
+-- motion replay all write through here.
+function M.set_pair(sid, eid, lo, hi)
+  if lo < pget(sid, 0) then
+    params:set(sid, lo); params:set(eid, hi)
   else
-    params:set(p(d, "end"), hi); params:set(p(d, "start"), lo)
+    params:set(eid, hi); params:set(sid, lo)
   end
 end
+
+local function set_bounds(d, lo, hi) M.set_pair(p(d, "start"), p(d, "end"), lo, hi) end
 M.set_loop = set_bounds
 
 function M.arm_loop(d)
   d.arm_phase, d.arm_was = nil, nil
+  d.gen = d.gen + 1                   -- a live pass outranks a load in flight
   if d.any then return end            -- overdub into the established loop
   -- Remember the loop we are about to widen. If the recording turns out to be
   -- too short to be a loop, close_loop puts this back. Widening is only
@@ -268,10 +278,16 @@ end
 -- the tape and the other layers included — which is the one collision that
 -- makes adding decks not purely additive.
 function M.clear(d)
+  d.gen = d.gen + 1
   sc.buffer_clear_region(d.from, d.len)
-  for i = 1, 128 do d.wave[i] = 0 end
+  -- through mpages when it is there, so a repaint still queued for this strip
+  -- (a PSET restore fills strips one after another) is cancelled with it and
+  -- cannot draw the old waveform over the silence
+  if C.clear_bins then C.clear_bins(d.wave)
+  else for i = 1, 128 do d.wave[i] = 0 end end
   d.wave_bin = 0
   d.any = false
+  d.mat_lo, d.mat_hi = nil, nil
 end
 
 -- read a wav into this deck's region (the `layN_file` params land here, via
@@ -284,6 +300,7 @@ end
 -- the session's own loop points, and the interactive snap below would stomp
 -- them back to the full file on every load. A hand-picked load keeps snapping.
 function M.load_file(d, path, shown, keep_loop)
+  d.gen = d.gen + 1
   local ch, dur
   if C.wav_info then ch, dur = C.wav_info(path) end
   sc.buffer_clear_region(d.from, d.len)
@@ -296,8 +313,9 @@ function M.load_file(d, path, shown, keep_loop)
   d.any = true
   d.wave_bin = 0
   if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
+  local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
+  d.mat_lo, d.mat_hi = 0, frac        -- a file lands at the region's start
   if not keep_loop then
-    local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
     params:set(p(d, "start"), 0)
     params:set(p(d, "end"), frac)
   end
@@ -335,6 +353,32 @@ function M.start(d)
 end
 
 -- ---------------------------------------------------------------------------
+-- where the material is
+-- ---------------------------------------------------------------------------
+-- The stretch of the region a deck has written, 0..1. A scene recall clamps a
+-- stored loop to it, so a scene captured before the deck was recorded cannot
+-- reopen the loop over 60 seconds of nothing (mscenes' clamp_stored). Grown
+-- from the softcut phase events while the deck records; a load or a PSET
+-- restore sets it, a clear forgets it. The tape keeps one too (lib/mtape.lua).
+function M.track_extent(d, ph)
+  if d.mat_hi then
+    if ph < d.mat_lo then d.mat_lo = ph end
+    if ph > d.mat_hi then d.mat_hi = ph end
+  else
+    d.mat_lo, d.mat_hi = ph, ph
+  end
+end
+
+-- the extent as the clamp should use it, or nil when nothing is known. Widened
+-- by 50ms each side: the phase events that grow it come every 25ms, so the
+-- last one before a pass ends can be that far behind the head.
+function M.extent(d)
+  if not (d.mat_lo and d.mat_hi) then return nil end
+  local pad = 0.05 / d.len
+  return clamp(d.mat_lo - pad, 0, 1), clamp(d.mat_hi + pad, 0, 1)
+end
+
+-- ---------------------------------------------------------------------------
 -- the phase poll
 -- ---------------------------------------------------------------------------
 -- mtape owns the single sc.event_phase handler and forwards anything that is
@@ -347,6 +391,7 @@ function M.on_phase(voice, pos)
     if d.va == voice then
       d.phase = clamp((pos - d.from) / d.len, 0, 1)
       if get(d, "rec", 0) == 1 then
+        M.track_extent(d, d.phase)
         local a = C.cut_rec_amp()   -- what softcut records: the shared law
         if a > 0.01 then d.any = true end
         d.wave_bin = C.paint_bins(d.wave, d.wave_bin,
@@ -382,6 +427,7 @@ end
 function M.pset_read(number)
   for i = 1, #M.decks do
     local d = M.decks[i]
+    d.gen = d.gen + 1      -- a conversion started by params:read must not land
     -- Save a preset with a deck armed and it stores rec = 1. Loading it sets
     -- the params one at a time in file order, and rec comes before the loop
     -- points, so arm_loop ran on a deck that still looked empty and left a
@@ -394,6 +440,7 @@ function M.pset_read(number)
     if util.file_exists(path) then
       sc.buffer_read_stereo(path, 0, d.from, d.len)
       d.any = true
+      d.mat_lo, d.mat_hi = 0, 1        -- a whole-region save: extent unknown
       -- repaint this deck's strip from its wav (same reason as the tape:
       -- the softcut buffer is unreadable from lua, the file is right there)
       d.wave_bin = 0
@@ -407,8 +454,11 @@ function M.pset_read(number)
       if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
           and util.file_exists(fp) then
         -- keep_loop: the pset's loop points are already restored and are
-        -- authoritative — reloading the audio must not re-snap them
-        M.load_file(d, fp, nil, true)
+        -- authoritative — reloading the audio must not re-snap them. Through
+        -- layer_load when it is there, so an off-rate file is converted here
+        -- too instead of coming back a semitone sharp.
+        if C.layer_load then C.layer_load(d, fp, true)
+        else M.load_file(d, fp, nil, true) end
       else
         M.clear(d)
       end
@@ -427,22 +477,6 @@ end
 function M.init(ctx)
   C = ctx
   pget, clamp = ctx.pget, ctx.clamp
-end
-
--- silence every deck. Called from cleanup so a reload does not leave voices
--- playing into the next script.
-function M.cleanup()
-  for i = 1, #M.decks do
-    local d = M.decks[i]
-    both(d, function(v)
-      pcall(function()
-        sc.rec(v, 0)
-        sc.play(v, 0)
-        sc.level(v, 0)
-        sc.enable(v, 0)
-      end)
-    end)
-  end
 end
 
 return M
