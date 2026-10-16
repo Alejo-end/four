@@ -238,7 +238,20 @@ function M.set_armed(on)
       local elapsed = C.frame - rec_start_frame
       if #M.lane_ids > 0 and elapsed >= 2 then
         M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
-        M.loop_len = len_frames(pget("motion_len", 0)) or M.rec_len
+        local fixed = len_frames(pget("motion_len", 0))
+        -- AUTO: a pass played close to a musical length is put ON it (the
+        -- layers' snap law), so the loop stays in time with the clock, the
+        -- synced delay and the decks. The gesture itself is untouched:
+        -- playback reads it through src_of, so this only retimes it.
+        if not fixed and C.clock_length then
+          local s = C.clock_length(M.rec_len / FPS)
+          if s then
+            fixed = clamp(floor(s * FPS + 0.5), MIN_LEN, MAX_LEN)
+            print(string.format("mangler: MOTION loop %.2fs -> %.2fs, on the clock",
+              M.rec_len / FPS, fixed / FPS))
+          end
+        end
+        M.loop_len = fixed or M.rec_len
         M.playhead = 0
         reset_cursors()
         if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end

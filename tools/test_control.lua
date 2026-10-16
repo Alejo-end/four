@@ -1783,6 +1783,123 @@ do
   clock.get_tempo = nil
   for s = 1, 2 do params:set("scene_slot", s); pulse("scene_clear") end
   params:set("cutoff", 20000)
+
+  -- (f) a first motion pass played close to a musical length lands on it
+  clock.get_tempo = function() return 120 end   -- a bar = 2s = 30 frames
+  local function take(frames)
+    params:set("motion_len", 0)
+    params:set("motion_rec", 1)
+    params:set("cutoff", 900); _h.run_ticks(frames - 1)
+    params:set("cutoff", 3000); _h.run_ticks(1)
+    params:set("motion_rec", 0)
+    local got = { rec = mo.rec_len, loop = mo.loop_len }
+    params:set("motion_play", 0)
+    while #mo.lane_ids > 0 do mo.clear_lane() end
+    return got
+  end
+  local near_bar = take(28)                 -- 29 frames: 3% short of a bar
+  ok(near_bar.rec == 29 and near_bar.loop == 30,
+    "a pass 3% short of a bar loops on the bar (" .. near_bar.rec .. " -> " .. near_bar.loop .. ")")
+  local chosen = take(25)                   -- 26 frames: between 3/4 and 1 bar
+  ok(chosen.loop == chosen.rec, "a length clearly between musical lengths stays as played")
+  clock.get_tempo = nil
+  params:set("cutoff", 20000)
+
+  -- (g) when erosion (or regen) stops, the take's strip is repainted from a
+  -- dump of the buffer, unless the take changed while the dump ran
+  do
+    local real_run = clock.run
+    local jobs = {}
+    clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
+    local function finish(fn)
+      local co = coroutine.create(fn)
+      repeat
+        local okr, err = coroutine.resume(co)
+        if not okr then error(err) end
+      until coroutine.status(co) == "dead"
+    end
+    local filled = {}
+    local real_qf = CTX.wav.queue_fill
+    CTX.wav.queue_fill = function(path, bins, secs)
+      filled[#filled + 1] = path
+      return real_qf(path, bins, secs)
+    end
+    engine.write_take = function(stem, frames)
+      for _, side in ipairs({ "_L", "_R" }) do
+        T.write_wav(stem .. side .. ".wav", 48000, 1, 24, frames, function() return 4000000 end)
+      end
+    end
+    CTX.wave_any, CTX.take_len = true, 0.002
+    params:set("erode", 0.3); params:set("erode", 0)
+    ok(#jobs == 1, "stopping erosion starts a dump of the take")
+    finish(table.remove(jobs, 1))
+    ok(#filled == 1 and filled[1]:find("mscan-tmp", 1, true) ~= nil,
+      "...and the strip repaints from it")
+    filled = {}
+    params:set("erode", 0.3); params:set("erode", 0)
+    params:set("rec", 1); params:set("rec", 0)   -- a new pass while it dumps
+    finish(table.remove(jobs, 1))
+    ok(#filled == 0, "a dump that finishes after the take changed paints nothing")
+    CTX.wav.queue_fill = real_qf
+    engine.write_take = nil
+    clock.run = real_run
+    local had_clear = engine.clear
+    engine.clear = function() end
+    pulse("clear_rec")
+    engine.clear = had_clear
+  end
+
+  -- (h) in pad mode the grid piano lights the keys whose pad is sounding
+  do
+    local g = _h.grid
+    T.goto_page("TAKE")
+    params:set("pad_input", 1)
+    engine.note_on, engine.note_off = function() end, function() end
+    g.key(3, 8, 1)                          -- E: semitone 4, pad 4
+    g.leds = {}
+    _h.run_ticks(1)
+    local lit = {}
+    for _, l in ipairs(g.leds) do
+      if l.y == 8 and (l.z or 0) >= 15 and l.hue == "orange" then lit[l.x] = true end
+    end
+    ok(lit[3] and lit[8], "a sounding pad lights every piano key that plays it (E and high C)")
+    g.key(3, 8, 0)
+    engine.note_on, engine.note_off = nil, nil
+    params:set("pad_input", 0)
+  end
+
+  -- (i) a Mini MK3 plugged in after load takes over; its arrows step the page
+  -- and the scene slot; unplugged, the fallback grid comes back. (the last
+  -- test here: it swaps the grid the earlier sections drive)
+  do
+    local real_devices, real_to_msg = midi.devices, midi.to_msg
+    local sent = {}
+    local lp = { name = "Launchpad Mini MK3 LPMiniMK3 MIDI Out" }
+    function lp:send(m) sent[#sent + 1] = m end
+    midi.devices = { [1] = lp }
+    midi.to_msg = function(d) return d end
+    CTX.grid.hotplug()
+    ok(CTX.grid.have_launchpad and CTX.grid.gg ~= _h.grid,
+      "a Mini MK3 plugged in after load takes over the grid")
+    ok(sent[1] and sent[1][7] == 0x0E and sent[1][8] == 0x01,
+      "...and is put in Programmer mode first")
+    T.goto_page("TAKE")
+    local p0 = CTX.page
+    lp.event({ type = "cc", cc = 94, val = 127 })
+    ok(CTX.page == p0 + 1, "the right arrow steps to the next page")
+    lp.event({ type = "cc", cc = 93, val = 127 })
+    ok(CTX.page == p0, "...and the left arrow back")
+    params:set("scene_slot", 3)
+    lp.event({ type = "cc", cc = 91, val = 127 })
+    lp.event({ type = "cc", cc = 91, val = 0 })   -- a release does nothing
+    ok(math.floor(params:get("scene_slot") + 0.5) == 4, "the up arrow steps the scene slot")
+    midi.devices = {}
+    CTX.grid.hotplug()
+    ok(not CTX.grid.have_launchpad and CTX.grid.gg == _h.grid,
+      "unplugged, the fallback grid comes back")
+    midi.devices, midi.to_msg = real_devices, real_to_msg
+    params:set("scene_slot", 1)
+  end
 end
 
 T.report("control harness OK")

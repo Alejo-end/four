@@ -107,6 +107,7 @@ local tape_arm_was        -- the loop that pass widened, put back if it is decli
 local rec_open = false    -- an engine record pass is open (armed by a real 1)
 local polls = {}
 local redraw_clock
+local prev_midi_add, prev_midi_remove   -- norns' hot-plug callbacks, restored
 
 -- ============================================================================
 -- helpers
@@ -391,6 +392,29 @@ local SNAP_RATIOS = {
 -- is a length you chose, and it is left exactly as you played it.
 local SNAP_TOL = math.log(1.06)
 
+-- the musical ratio of `ref` nearest to `cur`, compared in LOG space so 1/2
+-- and 2 are equally near, the way an ear hears them (a linear nearest would
+-- pull everything toward the top). returns the ratio, its label, the error.
+local function nearest_ratio(cur, ref)
+  local best, label, err = 1, "1", math.huge
+  for _, r in ipairs(SNAP_RATIOS) do
+    local e = math.abs(math.log(cur / (ref * r[1])))
+    if e < err then err, best, label = e, r[1], r[2] end
+  end
+  return best, label, err
+end
+
+-- a gesture loop's length on the clock: the nearest musical length to a bar
+-- when what was played is already within the snap tolerance, else nil (a
+-- length you clearly chose stays exactly as played). the motion looper asks
+-- this when a first pass closes, the way the layers snap theirs.
+function ctx.clock_length(secs)
+  local bar = 240 / ctx.tempo()
+  local best, _, err = nearest_ratio(secs, bar)
+  if err > SNAP_TOL then return nil end
+  return bar * best
+end
+
 -- This always hands back a real length. A deck whose loop has been squashed
 -- down to nothing still reads as a tenth of a second, so it is skipped here
 -- instead of being passed on for SNAP to reject; the take is checked the same
@@ -438,13 +462,7 @@ function ctx.layer_snap(d, tol)
   d = d or ctx.layer_sel()
   local ref, from = snap_reference(d)
   local cur = Mdeck.loop_secs(d)
-  local best, label, err = 1, "1", math.huge
-  for _, r in ipairs(SNAP_RATIOS) do
-    -- compare in LOG space so 1/2 and 2 are equally near, the way an ear
-    -- hears them: a linear nearest would pull everything toward the top
-    local e = math.abs(math.log(cur / (ref * r[1])))
-    if e < err then err, best, label = e, r[1], r[2] end
-  end
+  local best, label, err = nearest_ratio(cur, ref)
   if tol and err > tol then return end
   -- Measure from the LOWER of the two edges, not from "start". The loop
   -- points can legally be the other way round, and everything else that reads
@@ -1208,6 +1226,23 @@ local function buffer_cleared()
   ctx.take_len = 0
 end
 
+-- regen and erosion rewrite the buffer on the engine side, where lua cannot
+-- see it, so the take's strip went on showing audio that was no longer there.
+-- When the last of them stops, the take is dumped and the strip repainted
+-- from the dump. Dropped if the take changed meanwhile (a clear, a load, a new
+-- pass), so a late repaint can never draw old audio over new material.
+function ctx.refresh_take_strip()
+  if not ctx.wave_any then return end
+  local g = take_gen
+  scan_take("REPAINT", function(tmp)
+    if g == take_gen then Mpages.repaint_wave(tmp) end
+  end)
+end
+-- a writer stopping, with the other one not running
+local function writer_stopped(v, was, other)
+  if v == 0 and was > 0 and pget(other, 0) == 0 then ctx.refresh_take_strip() end
+end
+
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
 -- the window back up, so every page goes back to inviting a take instead of
 -- drawing one that isn't there.
@@ -1221,13 +1256,15 @@ function ctx.clear_recording()
   -- window whose first seconds were the erased silence
   if pget("rec", 0) == 1 then params:set("rec", 0) end
   engine.clear()
+  Mpages.clear_wave()
+  buffer_cleared()
   -- a clear must be SILENCE (S23 B2): regen would immediately re-record the
   -- OUTPUT — input monitor, ringing tails — into the freshly erased buffer,
   -- resurrecting what you just wiped. the engine's `clear` flushes the
   -- delay/reverb tails on its side; this stops the write head at the params.
+  -- (after the strip is cleared, so stopping regen does not dump and repaint
+  -- a buffer that is now empty)
   if pget("regen", 0) > 0 then params:set("regen", 0) end
-  Mpages.clear_wave()
-  buffer_cleared()
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
   -- from `load sample` lives in this path, and a PSET saved after a CLR would
@@ -1878,10 +1915,13 @@ local function init_params()
   -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
   -- convex crossfade so it can't run away.
   params:add_control("regen", "regen (self-resample)", unit(0.0))
+  local regen_was = 0
   params:set_action("regen", function(v)
     -- the other half of the erode interlock (see grp_erode below)
     if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
     if engine.regen then engine.regen(v) end
+    writer_stopped(v, regen_was, "erode")
+    regen_was = v
     -- regen's record head traverses the WHOLE buffer, so once it runs the take
     -- can be anywhere: force a full-buffer PSET save (sticky until the next
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
@@ -2346,6 +2386,7 @@ local function init_params()
   -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
   -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
   params:add_group("grp_erode", "erosion", 2)
+  local erode_was = 0
   params:add_control("erode", "erode", unit(0.0))
   params:set_action("erode", function(v)
     -- interlock: erode and regen are both free-running write heads on the
@@ -2354,6 +2395,8 @@ local function init_params()
     -- acts when its own value is rising.
     if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
     if engine.erode then engine.erode(v) end
+    writer_stopped(v, erode_was, "regen")
+    erode_was = v
   end)
   add_eng_control("wear", "wear", unit(0.5))
 
@@ -2410,6 +2453,17 @@ function init()
   for _, d in ipairs(ctx.layers) do Mdeck.start(d) end
   Minput.init_midi()
   Mgrid.connect()
+  -- a Launchpad plugged in (or out) after load is picked up: norns calls
+  -- these on MIDI hot-plug. the previous callbacks are kept and restored.
+  prev_midi_add, prev_midi_remove = midi.add, midi.remove
+  midi.add = function(dev)
+    if prev_midi_add then prev_midi_add(dev) end
+    Mgrid.hotplug()
+  end
+  midi.remove = function(dev)
+    if prev_midi_remove then prev_midi_remove(dev) end
+    Mgrid.hotplug()
+  end
   print("mangler: init() done, params built")
 
   -- the norns SYSTEM aux reverb sits after the engine and colors everything;
@@ -2488,6 +2542,7 @@ function cleanup()
   Mwav.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
+  midi.add, midi.remove = prev_midi_add, prev_midi_remove
   Mgrid.cleanup()
   Mtape.cleanup()      -- (softcut voices are reset by norns after cleanup)
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
@@ -2497,6 +2552,15 @@ end
 -- PRESS and the release routes back to it, so an alt released mid-hold can
 -- never hand the release to the wrong action (the grid learned this the hard way)
 local key_state = { [2] = {}, [3] = {} }
+
+-- step through the stations (E1, and the Launchpad's arrows). The page name
+-- pops big for a moment: the stations scroll past faster than the 1x title
+-- reads, and finding the page mid-set should not need squinting (mpages
+-- draws the overlay while this is armed).
+function ctx.step_page(d)
+  ctx.page = clamp(ctx.page + d, 1, #PAGES)
+  ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
+end
 
 function enc(n, d)
   ctx.last_input = ctx.frame
@@ -2510,11 +2574,7 @@ function enc(n, d)
         ctx.flash_until = ctx.frame + math.floor(FPS * 1.2)
       end
     else
-      ctx.page = clamp(ctx.page + d, 1, #PAGES)
-      -- pop the page name big for a moment: the stations scroll past faster
-      -- than the 1x title reads, and finding the page mid-set should not
-      -- need squinting (mpages draws the overlay while this is armed)
-      ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
+      ctx.step_page(d)
     end
   else
     local id = enc_param(n)

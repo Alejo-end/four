@@ -117,6 +117,7 @@ local tape_arm_was        -- the loop that pass widened, put back if it is decli
 local rec_open = false    -- an engine record pass is open (armed by a real 1)
 local polls = {}
 local redraw_clock
+local prev_midi_add, prev_midi_remove   -- norns' hot-plug callbacks, restored
 
 -- ============================================================================
 -- helpers
@@ -537,7 +538,7 @@ function M.pset_write(number)
   -- stereo silence per save, and a cleared one must not resurrect old audio
   -- on load — an empty save deletes the stale wav instead.
   if C.twave_any then
-    sc.buffer_write_stereo(path_for(number), 0, TAPE_LEN)
+    sc.buffer_write_stereo(path_for(number), 0, D.save_secs(TAPE))
   else
     M.pset_delete(number)
   end
@@ -546,9 +547,10 @@ end
 function M.pset_read(number)
   local path = path_for(number)
   if util.file_exists(path) then
+    sc.buffer_clear_region(0, TAPE_LEN)   -- the save may hold only the start
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
-    TAPE.mat_lo, TAPE.mat_hi = 0, 1   -- a whole-tape save: extent unknown
+    D.restored_extent(TAPE, path)
     -- repaint the strip from the wav we just restored: lua cannot read the
     -- softcut buffer, so without this the loop played under a blank picture
     if C.repaint_twave then C.repaint_twave(path, TAPE_LEN) end
@@ -957,6 +959,23 @@ function M.extent(d)
   return clamp(d.mat_lo - pad, 0, 1), clamp(d.mat_hi + pad, 0, 1)
 end
 
+-- how much of the region a PSET save writes: up to the end of the material
+-- (plus the 50ms the extent can lag), or the whole region when the extent is
+-- not known. A 2s loop no longer saves 60 seconds of mostly silence, and a
+-- smaller file is less exposed to a save-then-quit cutting the write short.
+function M.save_secs(d)
+  if not d.mat_hi then return d.len end
+  return math.min(d.len, d.mat_hi * d.len + 0.05)
+end
+
+-- after a PSET wav is read back into the region: the material is what the
+-- file held, from the region's start (the save began there)
+function M.restored_extent(d, path)
+  local dur
+  if C.wav_info then dur = select(2, C.wav_info(path)) end
+  d.mat_lo, d.mat_hi = 0, dur and clamp(dur / d.len, 0, 1) or 1
+end
+
 -- ---------------------------------------------------------------------------
 -- the phase poll
 -- ---------------------------------------------------------------------------
@@ -996,7 +1015,7 @@ function M.pset_write(number)
   for i = 1, #M.decks do
     local d = M.decks[i]
     if d.any then
-      sc.buffer_write_stereo(path_for(d, number), d.from, d.len)
+      sc.buffer_write_stereo(path_for(d, number), d.from, M.save_secs(d))
     else
       os.remove(path_for(d, number))
     end
@@ -1017,9 +1036,12 @@ function M.pset_read(number)
     M.abort_loop(d)
     local path = path_for(d, number)
     if util.file_exists(path) then
+      -- a save may hold only the start of the region: clear the rest, or the
+      -- live buffer's old audio would play on past the restored material
+      sc.buffer_clear_region(d.from, d.len)
       sc.buffer_read_stereo(path, 0, d.from, d.len)
       d.any = true
-      d.mat_lo, d.mat_hi = 0, 1        -- a whole-region save: extent unknown
+      M.restored_extent(d, path)
       -- repaint this deck's strip from its wav (same reason as the tape:
       -- the softcut buffer is unreadable from lua, the file is right there)
       d.wave_bin = 0
@@ -1238,7 +1260,11 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 --     SCENE  row 3 AIM (point the morph without jumping) · row 5 the morph
 --            bar · row 6 [CAP mod][CLR mod] · [CHAOS, hold] · · [◄ back]
 --   rows 7-8  ONE piano octave (black row above white; same shape as the
---          typing keyboard). row 7 gap pads x1/x8 = octave -/+
+--          typing keyboard). row 7 gap pads x1/x8 = octave -/+. lit: the
+--          drone's pitch, or in pad mode the keys whose pad is sounding
+--
+-- On a Launchpad Mini MK3 the arrows step the page (left/right, like E1) and
+-- the scene selector (up/down), and the pad is picked up on hot-plug.
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
@@ -1315,6 +1341,9 @@ local LP_RGB = {              -- brightness-only fallback (uncoloured pads)
   [12] = { 104, 110, 120 }, [13] = { 110, 116, 122 }, [14] = { 116, 118, 124 },
   [15] = { 120, 120, 120 },
 }
+
+-- the Mini MK3's top-row arrows in Programmer mode (CC numbers)
+local LP_UP, LP_DOWN, LP_LEFT, LP_RIGHT = 91, 92, 93, 94
 
 -- triangle wave 0..1 over `p` frames — for the STOP breathing pulse
 local function tri(f, p)
@@ -1418,8 +1447,21 @@ local function lp_make_backend(dev)
         if x and gg.key then
           gg.key(x, y, (msg.type == "note_on" and (msg.vel or 0) > 0) and 1 or 0)
         end
+      elseif msg.type == "cc" and gg.button then
+        -- the top row and the side column arrive as CCs in Programmer mode
+        gg.button(msg.cc, msg.val or 0)
       end
     end
+    -- light the four arrows once: they are fixed controls (page and slot)
+    local m = {}
+    for i = 1, #LP_RGB_HDR do m[i] = LP_RGB_HDR[i] end
+    local w = LP_HUE[LP_HUE_ID.white]
+    for cc = LP_UP, LP_RIGHT do
+      m[#m + 1] = 0x03; m[#m + 1] = cc
+      m[#m + 1] = floor(w[1] * 0.5); m[#m + 1] = floor(w[2] * 0.5); m[#m + 1] = floor(w[3] * 0.5)
+    end
+    m[#m + 1] = 0xF7
+    pcall(function() dev:send(m) end)
     return gg
   end }
 end
@@ -1645,6 +1687,18 @@ end
 -- know the pad, and whatever it was holding LATCHES (learned the hard way on device).
 local key_surface = {}
 
+-- the Mini MK3's arrows (other grids have none): left/right step the page
+-- the way E1 does, so the workspace rows follow without reaching for the
+-- encoder; up/down step the scene selector. Presses only.
+local function lp_button(cc, val)
+  if val == 0 then return end
+  C.touch_input()
+  if cc == LP_LEFT then C.step_page(-1)
+  elseif cc == LP_RIGHT then C.step_page(1)
+  elseif cc == LP_UP then params:delta("scene_slot", 1)
+  elseif cc == LP_DOWN then params:delta("scene_slot", -1) end
+end
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
   C.touch_input()                    -- the grid counts as presence (idle dim)
@@ -1681,6 +1735,8 @@ local function strip_led(x, on, hue, onlvl)
   gg:led(x, 2, on and (onlvl or 12) or 2, on and hue or nil)
 end
 
+local pad_on = {}   -- reused: which of the 8 pads are sounding this frame
+
 local function draw_spine()
   -- row 1: the scene bank. queued blinks YELLOW, selected WHITE, filled a soft
   -- blue, empty barely there.
@@ -1712,21 +1768,30 @@ local function draw_spine()
   local stopped = pget("stop_all", 0) == 1
   gg:led(8, 2, stopped and (5 + floor(9 * tri(C.frame, 22))) or 2,
     stopped and "red" or nil)                            -- STOP: pulsing red
-  -- rows 7-8: one piano octave; current pitch lights WHITE; the block dims
-  -- when note input is off so it's visible why pads are dead
+  -- rows 7-8: one piano octave; the block dims when note input is off so
+  -- it's visible why pads are dead. What lights is what the keys DO: the
+  -- drone's current pitch in WHITE, or in pad mode every key whose pad
+  -- (semitone mod 8) is sounding, in the slice ORANGE
   local en = pget("keys_enable", 1) == 1
   local oct = pget("kb_octave", 0)
+  local padmode = pget("pad_input", 0) == 1
   local st_cur = util.round(12 * log(pget("pitch", 1), 2))
+  if padmode then
+    for k = 0, 7 do pad_on[k] = false end
+    for _, i in pairs(C.pad_held) do pad_on[i] = true end
+  end
   for x = 1, 8 do
     local w = GRID_WHITE[x] + 12 * oct
     if not en then gg:led(x, 8, 1)
-    elseif w == st_cur then gg:led(x, 8, 15, "white")
+    elseif padmode and pad_on[w % 8] then gg:led(x, 8, 15, "orange")
+    elseif not padmode and w == st_cur then gg:led(x, 8, 15, "white")
     elseif x == 1 or x == 8 then gg:led(x, 8, 6)
     else gg:led(x, 8, 4) end
     if GRID_BLACK[x] then
       local b = GRID_BLACK[x] + 12 * oct
       if not en then gg:led(x, 7, 1)
-      elseif b == st_cur then gg:led(x, 7, 15, "white")
+      elseif padmode and pad_on[b % 8] then gg:led(x, 7, 15, "orange")
+      elseif not padmode and b == st_cur then gg:led(x, 7, 15, "white")
       else gg:led(x, 7, 2) end
     end
   end
@@ -1879,7 +1944,23 @@ function M.connect()
   end
   if not gg then gg = grid_mod.connect() end   -- midigrid or native grid
   M.gg = gg
-  if gg then gg.key = grid_key end
+  if gg then
+    gg.key = grid_key
+    gg.button = lp_button
+  end
+end
+
+-- a MIDI device came or went. A Mini MK3 plugged in after the script loaded
+-- takes over from the fallback grid; unplugged, the fallback comes back. A
+-- fresh connect also starts a fresh LED diff, so the pads all repaint.
+function M.hotplug()
+  if not no_monome then return end
+  local lp = lp_find_device()
+  local on_lp = M.have_launchpad and gg and gg.device
+  if (lp and on_lp ~= lp) or (not lp and on_lp) then
+    M.have_launchpad = false
+    M.connect()
+  end
 end
 
 function M.cleanup()
@@ -2138,7 +2219,20 @@ function M.set_armed(on)
       local elapsed = C.frame - rec_start_frame
       if #M.lane_ids > 0 and elapsed >= 2 then
         M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
-        M.loop_len = len_frames(pget("motion_len", 0)) or M.rec_len
+        local fixed = len_frames(pget("motion_len", 0))
+        -- AUTO: a pass played close to a musical length is put ON it (the
+        -- layers' snap law), so the loop stays in time with the clock, the
+        -- synced delay and the decks. The gesture itself is untouched:
+        -- playback reads it through src_of, so this only retimes it.
+        if not fixed and C.clock_length then
+          local s = C.clock_length(M.rec_len / FPS)
+          if s then
+            fixed = clamp(floor(s * FPS + 0.5), MIN_LEN, MAX_LEN)
+            print(string.format("mangler: MOTION loop %.2fs -> %.2fs, on the clock",
+              M.rec_len / FPS, fixed / FPS))
+          end
+        end
+        M.loop_len = fixed or M.rec_len
         M.playhead = 0
         reset_cursors()
         if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
@@ -3598,6 +3692,13 @@ local function riff_parse(f)
       if afmt == 0xFFFE and #fmt >= 26 then
         afmt = string.unpack("<I2", fmt, 25)
       end
+      -- a frame wider than the stated depth (24 valid bits stored in 32):
+      -- read the CONTAINER, whose top bits hold the sample. blockAlign is the
+      -- frame size the file actually uses.
+      local ba = string.unpack("<I2", fmt, 13)
+      if ch > 0 and ba > ch * (bits // 8) and ba % ch == 0 then
+        bits = (ba // ch) * 8
+      end
     elseif id == "data" then
       dpos, dlen = f:seek(), sz
       break
@@ -3608,14 +3709,15 @@ local function riff_parse(f)
   return afmt, ch, bits, sr, dpos, dlen
 end
 
--- one SIGNED sample decoder per (format, bit depth). 16/24/32-bit PCM and
--- 32-bit float are what norns itself can produce — the engine's take dump, the
--- system tape's print, and whatever a performer drops in — so this covers all
--- of it. ONE table: the waveform preview and the sample-rate converter below
+-- one sample decoder per (format, bit depth), each returning -1..1. 16/24/32-bit
+-- PCM and 32-bit float are what norns itself can produce (the engine's take
+-- dump, the system tape's print), and 8-bit is what old sample packs carry. ONE table: the waveform preview and the sample-rate converter below
 -- read the same files, and a second copy would mean a format could draw
 -- correctly and convert to noise, or the reverse.
 local DECODE = {
   [1] = {
+    -- 8-bit WAV is UNSIGNED, centred on 128 (the lo-fi and vintage packs)
+    [8] = function(s, p) return (s:byte(p) - 128) / 128 end,
     [16] = function(s, p) return string.unpack("<i2", s, p) / 32768 end,
     [24] = function(s, p) return string.unpack("<i3", s, p) / 8388608 end,
     [32] = function(s, p) return string.unpack("<i4", s, p) / 2147483648 end,
@@ -4246,6 +4348,14 @@ end
 function M.fill_wave_bins(path, bins, secs)
   for i = 1, 128 do bins[i] = 0 end
   return W.queue_fill(path, bins, secs)
+end
+
+-- repaint the TAKE's strip from a dump of the buffer, leaving the window and
+-- wave_any alone: the material is the same take, changed in place by regen
+-- or erosion
+function M.repaint_wave(path)
+  wave_bin = 0
+  return M.fill_wave_bins(path, wave, C.BUF_SECS)
 end
 
 -- the tape strip's version of the same (mpages owns twave)
@@ -6072,6 +6182,29 @@ local SNAP_RATIOS = {
 -- is a length you chose, and it is left exactly as you played it.
 local SNAP_TOL = math.log(1.06)
 
+-- the musical ratio of `ref` nearest to `cur`, compared in LOG space so 1/2
+-- and 2 are equally near, the way an ear hears them (a linear nearest would
+-- pull everything toward the top). returns the ratio, its label, the error.
+local function nearest_ratio(cur, ref)
+  local best, label, err = 1, "1", math.huge
+  for _, r in ipairs(SNAP_RATIOS) do
+    local e = math.abs(math.log(cur / (ref * r[1])))
+    if e < err then err, best, label = e, r[1], r[2] end
+  end
+  return best, label, err
+end
+
+-- a gesture loop's length on the clock: the nearest musical length to a bar
+-- when what was played is already within the snap tolerance, else nil (a
+-- length you clearly chose stays exactly as played). the motion looper asks
+-- this when a first pass closes, the way the layers snap theirs.
+function ctx.clock_length(secs)
+  local bar = 240 / ctx.tempo()
+  local best, _, err = nearest_ratio(secs, bar)
+  if err > SNAP_TOL then return nil end
+  return bar * best
+end
+
 -- This always hands back a real length. A deck whose loop has been squashed
 -- down to nothing still reads as a tenth of a second, so it is skipped here
 -- instead of being passed on for SNAP to reject; the take is checked the same
@@ -6119,13 +6252,7 @@ function ctx.layer_snap(d, tol)
   d = d or ctx.layer_sel()
   local ref, from = snap_reference(d)
   local cur = Mdeck.loop_secs(d)
-  local best, label, err = 1, "1", math.huge
-  for _, r in ipairs(SNAP_RATIOS) do
-    -- compare in LOG space so 1/2 and 2 are equally near, the way an ear
-    -- hears them: a linear nearest would pull everything toward the top
-    local e = math.abs(math.log(cur / (ref * r[1])))
-    if e < err then err, best, label = e, r[1], r[2] end
-  end
+  local best, label, err = nearest_ratio(cur, ref)
   if tol and err > tol then return end
   -- Measure from the LOWER of the two edges, not from "start". The loop
   -- points can legally be the other way round, and everything else that reads
@@ -6889,6 +7016,23 @@ local function buffer_cleared()
   ctx.take_len = 0
 end
 
+-- regen and erosion rewrite the buffer on the engine side, where lua cannot
+-- see it, so the take's strip went on showing audio that was no longer there.
+-- When the last of them stops, the take is dumped and the strip repainted
+-- from the dump. Dropped if the take changed meanwhile (a clear, a load, a new
+-- pass), so a late repaint can never draw old audio over new material.
+function ctx.refresh_take_strip()
+  if not ctx.wave_any then return end
+  local g = take_gen
+  scan_take("REPAINT", function(tmp)
+    if g == take_gen then Mpages.repaint_wave(tmp) end
+  end)
+end
+-- a writer stopping, with the other one not running
+local function writer_stopped(v, was, other)
+  if v == 0 and was > 0 and pget(other, 0) == 0 then ctx.refresh_take_strip() end
+end
+
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
 -- the window back up, so every page goes back to inviting a take instead of
 -- drawing one that isn't there.
@@ -6902,13 +7046,15 @@ function ctx.clear_recording()
   -- window whose first seconds were the erased silence
   if pget("rec", 0) == 1 then params:set("rec", 0) end
   engine.clear()
+  Mpages.clear_wave()
+  buffer_cleared()
   -- a clear must be SILENCE (S23 B2): regen would immediately re-record the
   -- OUTPUT — input monitor, ringing tails — into the freshly erased buffer,
   -- resurrecting what you just wiped. the engine's `clear` flushes the
   -- delay/reverb tails on its side; this stops the write head at the params.
+  -- (after the strip is cleared, so stopping regen does not dump and repaint
+  -- a buffer that is now empty)
   if pget("regen", 0) > 0 then params:set("regen", 0) end
-  Mpages.clear_wave()
-  buffer_cleared()
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
   -- from `load sample` lives in this path, and a PSET saved after a CLR would
@@ -7559,10 +7705,13 @@ local function init_params()
   -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
   -- convex crossfade so it can't run away.
   params:add_control("regen", "regen (self-resample)", unit(0.0))
+  local regen_was = 0
   params:set_action("regen", function(v)
     -- the other half of the erode interlock (see grp_erode below)
     if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
     if engine.regen then engine.regen(v) end
+    writer_stopped(v, regen_was, "erode")
+    regen_was = v
     -- regen's record head traverses the WHOLE buffer, so once it runs the take
     -- can be anywhere: force a full-buffer PSET save (sticky until the next
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
@@ -8027,6 +8176,7 @@ local function init_params()
   -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
   -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
   params:add_group("grp_erode", "erosion", 2)
+  local erode_was = 0
   params:add_control("erode", "erode", unit(0.0))
   params:set_action("erode", function(v)
     -- interlock: erode and regen are both free-running write heads on the
@@ -8035,6 +8185,8 @@ local function init_params()
     -- acts when its own value is rising.
     if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
     if engine.erode then engine.erode(v) end
+    writer_stopped(v, erode_was, "regen")
+    erode_was = v
   end)
   add_eng_control("wear", "wear", unit(0.5))
 
@@ -8091,6 +8243,17 @@ function init()
   for _, d in ipairs(ctx.layers) do Mdeck.start(d) end
   Minput.init_midi()
   Mgrid.connect()
+  -- a Launchpad plugged in (or out) after load is picked up: norns calls
+  -- these on MIDI hot-plug. the previous callbacks are kept and restored.
+  prev_midi_add, prev_midi_remove = midi.add, midi.remove
+  midi.add = function(dev)
+    if prev_midi_add then prev_midi_add(dev) end
+    Mgrid.hotplug()
+  end
+  midi.remove = function(dev)
+    if prev_midi_remove then prev_midi_remove(dev) end
+    Mgrid.hotplug()
+  end
   print("mangler: init() done, params built")
 
   -- the norns SYSTEM aux reverb sits after the engine and colors everything;
@@ -8169,6 +8332,7 @@ function cleanup()
   Mwav.cancel_load()  -- close any in-flight waveform read
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
+  midi.add, midi.remove = prev_midi_add, prev_midi_remove
   Mgrid.cleanup()
   Mtape.cleanup()      -- (softcut voices are reset by norns after cleanup)
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
@@ -8178,6 +8342,15 @@ end
 -- PRESS and the release routes back to it, so an alt released mid-hold can
 -- never hand the release to the wrong action (the grid learned this the hard way)
 local key_state = { [2] = {}, [3] = {} }
+
+-- step through the stations (E1, and the Launchpad's arrows). The page name
+-- pops big for a moment: the stations scroll past faster than the 1x title
+-- reads, and finding the page mid-set should not need squinting (mpages
+-- draws the overlay while this is armed).
+function ctx.step_page(d)
+  ctx.page = clamp(ctx.page + d, 1, #PAGES)
+  ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
+end
 
 function enc(n, d)
   ctx.last_input = ctx.frame
@@ -8191,11 +8364,7 @@ function enc(n, d)
         ctx.flash_until = ctx.frame + math.floor(FPS * 1.2)
       end
     else
-      ctx.page = clamp(ctx.page + d, 1, #PAGES)
-      -- pop the page name big for a moment: the stations scroll past faster
-      -- than the 1x title reads, and finding the page mid-set should not
-      -- need squinting (mpages draws the overlay while this is armed)
-      ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
+      ctx.step_page(d)
     end
   else
     local id = enc_param(n)

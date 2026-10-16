@@ -197,6 +197,7 @@ defaults()
 
 -- ---- the pset writes per-deck files ---------------------------------------
 d1.any = true; d2.any = false
+d1.mat_lo, d1.mat_hi = nil, nil   -- extent unknown: the whole region
 calls = {}
 Mdeck.pset_write(7)
 local w = last("buffer_write_stereo")
@@ -205,6 +206,13 @@ ok(w ~= nil and w[2]:find("lay1-7.wav", 1, true) ~= nil,
 near(w[3], 120, 0.001, "...from its own region")
 near(w[4], 60, 0.001, "...for its own length")
 ok(count("buffer_write_stereo") == 1, "an EMPTY deck writes nothing")
+-- with its material known, a deck saves only up to the end of it
+d1.mat_lo, d1.mat_hi = 0.02, 0.1
+calls = {}
+Mdeck.pset_write(7)
+near(last("buffer_write_stereo")[4], 6.05, 1e-9,
+  "a deck holding 6s of material saves 6s (plus the extent's 50ms), not 60")
+d1.mat_lo, d1.mat_hi = nil, nil
 
 -- ---- the pset restore repaints the picture --------------------------------
 -- lua cannot read the softcut buffer, so a restored loop used to play under a
@@ -216,7 +224,18 @@ do
   end
   d1.any = false; d2.any = true
   util.file_exists = function(p) return p:find("lay1-9", 1, true) ~= nil end
+  ctx.wav_info = function() return 2, 6 end       -- a bounded save: 6 seconds
+  calls = {}
   Mdeck.pset_read(9)
+  ctx.wav_info = nil
+  local cleared, read_at
+  for i, c in ipairs(calls) do
+    if c[1] == "buffer_clear_region" and c[2] == 120 then cleared = cleared or i end
+    if c[1] == "buffer_read_stereo" and c[4] == 120 then read_at = read_at or i end
+  end
+  ok(cleared and read_at and cleared < read_at,
+    "a restore clears the region before reading a save that may be shorter")
+  near(d1.mat_hi or -1, 0.1, 1e-9, "...and the material is what the file held")
   ok(#painted == 1, "a deck with a wav asks for exactly ONE repaint")
   local cp = painted[1] or {}
   ok(cp.path ~= nil and cp.path:find("lay1-9.wav", 1, true) ~= nil,

@@ -42,7 +42,8 @@ function H.goto_page(page)
 end
 
 -- write a PCM wav. `sample(i, c)` returns the INTEGER sample for frame i
--- (0-based) and channel c (1-based), at the file's bit depth.
+-- (0-based) and channel c (1-based), at the file's bit depth (8-bit WAV is
+-- unsigned, 0..255 centred on 128; every wider depth is signed).
 function H.write_wav(path, sr, ch, bits, frames, sample)
   local bps = bits // 8
   local d = frames * ch * bps
@@ -52,7 +53,7 @@ function H.write_wav(path, sr, ch, bits, frames, sample)
     string.pack("<I4", sr), string.pack("<I4", sr * ch * bps),
     string.pack("<I2", ch * bps), string.pack("<I2", bits))
   f:write("data", string.pack("<I4", d))
-  local code, b = "<i" .. bps, {}
+  local code, b = bps == 1 and "<B" or ("<i" .. bps), {}
   for i = 0, frames - 1 do
     for c = 1, ch do b[#b + 1] = string.pack(code, sample(i, c)) end
   end

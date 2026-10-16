@@ -134,6 +134,14 @@ function M.fill_wave_bins(path, bins, secs)
   return W.queue_fill(path, bins, secs)
 end
 
+-- repaint the TAKE's strip from a dump of the buffer, leaving the window and
+-- wave_any alone: the material is the same take, changed in place by regen
+-- or erosion
+function M.repaint_wave(path)
+  wave_bin = 0
+  return M.fill_wave_bins(path, wave, C.BUF_SECS)
+end
+
 -- the tape strip's version of the same (mpages owns twave)
 function M.repaint_twave(path, secs)
   twave_bin = 0

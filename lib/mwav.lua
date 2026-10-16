@@ -79,6 +79,13 @@ local function riff_parse(f)
       if afmt == 0xFFFE and #fmt >= 26 then
         afmt = string.unpack("<I2", fmt, 25)
       end
+      -- a frame wider than the stated depth (24 valid bits stored in 32):
+      -- read the CONTAINER, whose top bits hold the sample. blockAlign is the
+      -- frame size the file actually uses.
+      local ba = string.unpack("<I2", fmt, 13)
+      if ch > 0 and ba > ch * (bits // 8) and ba % ch == 0 then
+        bits = (ba // ch) * 8
+      end
     elseif id == "data" then
       dpos, dlen = f:seek(), sz
       break
@@ -89,14 +96,15 @@ local function riff_parse(f)
   return afmt, ch, bits, sr, dpos, dlen
 end
 
--- one SIGNED sample decoder per (format, bit depth). 16/24/32-bit PCM and
--- 32-bit float are what norns itself can produce — the engine's take dump, the
--- system tape's print, and whatever a performer drops in — so this covers all
--- of it. ONE table: the waveform preview and the sample-rate converter below
+-- one sample decoder per (format, bit depth), each returning -1..1. 16/24/32-bit
+-- PCM and 32-bit float are what norns itself can produce (the engine's take
+-- dump, the system tape's print), and 8-bit is what old sample packs carry. ONE table: the waveform preview and the sample-rate converter below
 -- read the same files, and a second copy would mean a format could draw
 -- correctly and convert to noise, or the reverse.
 local DECODE = {
   [1] = {
+    -- 8-bit WAV is UNSIGNED, centred on 128 (the lo-fi and vintage packs)
+    [8] = function(s, p) return (s:byte(p) - 128) / 128 end,
     [16] = function(s, p) return string.unpack("<i2", s, p) / 32768 end,
     [24] = function(s, p) return string.unpack("<i3", s, p) / 8388608 end,
     [32] = function(s, p) return string.unpack("<i4", s, p) / 2147483648 end,

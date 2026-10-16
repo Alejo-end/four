@@ -181,7 +181,7 @@ function M.pset_write(number)
   -- stereo silence per save, and a cleared one must not resurrect old audio
   -- on load — an empty save deletes the stale wav instead.
   if C.twave_any then
-    sc.buffer_write_stereo(path_for(number), 0, TAPE_LEN)
+    sc.buffer_write_stereo(path_for(number), 0, D.save_secs(TAPE))
   else
     M.pset_delete(number)
   end
@@ -190,9 +190,10 @@ end
 function M.pset_read(number)
   local path = path_for(number)
   if util.file_exists(path) then
+    sc.buffer_clear_region(0, TAPE_LEN)   -- the save may hold only the start
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
-    TAPE.mat_lo, TAPE.mat_hi = 0, 1   -- a whole-tape save: extent unknown
+    D.restored_extent(TAPE, path)
     -- repaint the strip from the wav we just restored: lua cannot read the
     -- softcut buffer, so without this the loop played under a blank picture
     if C.repaint_twave then C.repaint_twave(path, TAPE_LEN) end

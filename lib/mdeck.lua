@@ -378,6 +378,23 @@ function M.extent(d)
   return clamp(d.mat_lo - pad, 0, 1), clamp(d.mat_hi + pad, 0, 1)
 end
 
+-- how much of the region a PSET save writes: up to the end of the material
+-- (plus the 50ms the extent can lag), or the whole region when the extent is
+-- not known. A 2s loop no longer saves 60 seconds of mostly silence, and a
+-- smaller file is less exposed to a save-then-quit cutting the write short.
+function M.save_secs(d)
+  if not d.mat_hi then return d.len end
+  return math.min(d.len, d.mat_hi * d.len + 0.05)
+end
+
+-- after a PSET wav is read back into the region: the material is what the
+-- file held, from the region's start (the save began there)
+function M.restored_extent(d, path)
+  local dur
+  if C.wav_info then dur = select(2, C.wav_info(path)) end
+  d.mat_lo, d.mat_hi = 0, dur and clamp(dur / d.len, 0, 1) or 1
+end
+
 -- ---------------------------------------------------------------------------
 -- the phase poll
 -- ---------------------------------------------------------------------------
@@ -417,7 +434,7 @@ function M.pset_write(number)
   for i = 1, #M.decks do
     local d = M.decks[i]
     if d.any then
-      sc.buffer_write_stereo(path_for(d, number), d.from, d.len)
+      sc.buffer_write_stereo(path_for(d, number), d.from, M.save_secs(d))
     else
       os.remove(path_for(d, number))
     end
@@ -438,9 +455,12 @@ function M.pset_read(number)
     M.abort_loop(d)
     local path = path_for(d, number)
     if util.file_exists(path) then
+      -- a save may hold only the start of the region: clear the rest, or the
+      -- live buffer's old audio would play on past the restored material
+      sc.buffer_clear_region(d.from, d.len)
       sc.buffer_read_stereo(path, 0, d.from, d.len)
       d.any = true
-      d.mat_lo, d.mat_hi = 0, 1        -- a whole-region save: extent unknown
+      M.restored_extent(d, path)
       -- repaint this deck's strip from its wav (same reason as the tape:
       -- the softcut buffer is unreadable from lua, the file is right there)
       d.wave_bin = 0

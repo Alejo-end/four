@@ -429,6 +429,23 @@ do
   ok(any == 0, "clearing a strip cancels the repaint queued for it")
 end
 
+-- ---- 8-bit PCM: unsigned, centred on 128 -----------------------------------
+do
+  T.write_wav(TMP .. "u8.wav", 44100, 1, 8, 4410, function(i)
+    return math.floor(128 + math.sin(i * 0.1) * 64 + 0.5)
+  end)
+  ok(M.convert_sr(TMP .. "u8.wav", TMP .. "u8_48.wav", 48000, nil) == true,
+    "an 8-bit 44.1k file converts (it used to play sharp, undrawn)")
+  local uw = read_wav(TMP .. "u8_48.wav")
+  local top = 0
+  for i = 200, (uw and uw.frames or 0) - 200 do top = math.max(top, math.abs(uw.sample(i, 1))) end
+  near(top, 0.5, 0.02, "...centred on silence, at its real level")
+  local bins = {}
+  M.fill_wave_bins(TMP .. "u8.wav", bins, 0.1)
+  for _ = 1, 20 do M.load_tick() end
+  ok((bins[64] or 0) > 0.4, "...and it draws")
+end
+
 -- ---- the waveform painter: a jump is not a walk -----------------------------
 -- A loop wrapping round, or a pass re-armed somewhere else, moves the head
 -- many bins in one frame. Walking that gap painted the whole loop with one

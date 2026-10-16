@@ -26,7 +26,11 @@
 --     SCENE  row 3 AIM (point the morph without jumping) · row 5 the morph
 --            bar · row 6 [CAP mod][CLR mod] · [CHAOS, hold] · · [◄ back]
 --   rows 7-8  ONE piano octave (black row above white; same shape as the
---          typing keyboard). row 7 gap pads x1/x8 = octave -/+
+--          typing keyboard). row 7 gap pads x1/x8 = octave -/+. lit: the
+--          drone's pitch, or in pad mode the keys whose pad is sounding
+--
+-- On a Launchpad Mini MK3 the arrows step the page (left/right, like E1) and
+-- the scene selector (up/down), and the pad is picked up on hot-plug.
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
@@ -103,6 +107,9 @@ local LP_RGB = {              -- brightness-only fallback (uncoloured pads)
   [12] = { 104, 110, 120 }, [13] = { 110, 116, 122 }, [14] = { 116, 118, 124 },
   [15] = { 120, 120, 120 },
 }
+
+-- the Mini MK3's top-row arrows in Programmer mode (CC numbers)
+local LP_UP, LP_DOWN, LP_LEFT, LP_RIGHT = 91, 92, 93, 94
 
 -- triangle wave 0..1 over `p` frames — for the STOP breathing pulse
 local function tri(f, p)
@@ -206,8 +213,21 @@ local function lp_make_backend(dev)
         if x and gg.key then
           gg.key(x, y, (msg.type == "note_on" and (msg.vel or 0) > 0) and 1 or 0)
         end
+      elseif msg.type == "cc" and gg.button then
+        -- the top row and the side column arrive as CCs in Programmer mode
+        gg.button(msg.cc, msg.val or 0)
       end
     end
+    -- light the four arrows once: they are fixed controls (page and slot)
+    local m = {}
+    for i = 1, #LP_RGB_HDR do m[i] = LP_RGB_HDR[i] end
+    local w = LP_HUE[LP_HUE_ID.white]
+    for cc = LP_UP, LP_RIGHT do
+      m[#m + 1] = 0x03; m[#m + 1] = cc
+      m[#m + 1] = floor(w[1] * 0.5); m[#m + 1] = floor(w[2] * 0.5); m[#m + 1] = floor(w[3] * 0.5)
+    end
+    m[#m + 1] = 0xF7
+    pcall(function() dev:send(m) end)
     return gg
   end }
 end
@@ -433,6 +453,18 @@ end
 -- know the pad, and whatever it was holding LATCHES (learned the hard way on device).
 local key_surface = {}
 
+-- the Mini MK3's arrows (other grids have none): left/right step the page
+-- the way E1 does, so the workspace rows follow without reaching for the
+-- encoder; up/down step the scene selector. Presses only.
+local function lp_button(cc, val)
+  if val == 0 then return end
+  C.touch_input()
+  if cc == LP_LEFT then C.step_page(-1)
+  elseif cc == LP_RIGHT then C.step_page(1)
+  elseif cc == LP_UP then params:delta("scene_slot", 1)
+  elseif cc == LP_DOWN then params:delta("scene_slot", -1) end
+end
+
 local function grid_key(x, y, z)
   if x > 8 or y > 8 then return end  -- wider/taller grids: top-left 8x8
   C.touch_input()                    -- the grid counts as presence (idle dim)
@@ -469,6 +501,8 @@ local function strip_led(x, on, hue, onlvl)
   gg:led(x, 2, on and (onlvl or 12) or 2, on and hue or nil)
 end
 
+local pad_on = {}   -- reused: which of the 8 pads are sounding this frame
+
 local function draw_spine()
   -- row 1: the scene bank. queued blinks YELLOW, selected WHITE, filled a soft
   -- blue, empty barely there.
@@ -500,21 +534,30 @@ local function draw_spine()
   local stopped = pget("stop_all", 0) == 1
   gg:led(8, 2, stopped and (5 + floor(9 * tri(C.frame, 22))) or 2,
     stopped and "red" or nil)                            -- STOP: pulsing red
-  -- rows 7-8: one piano octave; current pitch lights WHITE; the block dims
-  -- when note input is off so it's visible why pads are dead
+  -- rows 7-8: one piano octave; the block dims when note input is off so
+  -- it's visible why pads are dead. What lights is what the keys DO: the
+  -- drone's current pitch in WHITE, or in pad mode every key whose pad
+  -- (semitone mod 8) is sounding, in the slice ORANGE
   local en = pget("keys_enable", 1) == 1
   local oct = pget("kb_octave", 0)
+  local padmode = pget("pad_input", 0) == 1
   local st_cur = util.round(12 * log(pget("pitch", 1), 2))
+  if padmode then
+    for k = 0, 7 do pad_on[k] = false end
+    for _, i in pairs(C.pad_held) do pad_on[i] = true end
+  end
   for x = 1, 8 do
     local w = GRID_WHITE[x] + 12 * oct
     if not en then gg:led(x, 8, 1)
-    elseif w == st_cur then gg:led(x, 8, 15, "white")
+    elseif padmode and pad_on[w % 8] then gg:led(x, 8, 15, "orange")
+    elseif not padmode and w == st_cur then gg:led(x, 8, 15, "white")
     elseif x == 1 or x == 8 then gg:led(x, 8, 6)
     else gg:led(x, 8, 4) end
     if GRID_BLACK[x] then
       local b = GRID_BLACK[x] + 12 * oct
       if not en then gg:led(x, 7, 1)
-      elseif b == st_cur then gg:led(x, 7, 15, "white")
+      elseif padmode and pad_on[b % 8] then gg:led(x, 7, 15, "orange")
+      elseif not padmode and b == st_cur then gg:led(x, 7, 15, "white")
       else gg:led(x, 7, 2) end
     end
   end
@@ -667,7 +710,23 @@ function M.connect()
   end
   if not gg then gg = grid_mod.connect() end   -- midigrid or native grid
   M.gg = gg
-  if gg then gg.key = grid_key end
+  if gg then
+    gg.key = grid_key
+    gg.button = lp_button
+  end
+end
+
+-- a MIDI device came or went. A Mini MK3 plugged in after the script loaded
+-- takes over from the fallback grid; unplugged, the fallback comes back. A
+-- fresh connect also starts a fresh LED diff, so the pads all repaint.
+function M.hotplug()
+  if not no_monome then return end
+  local lp = lp_find_device()
+  local on_lp = M.have_launchpad and gg and gg.device
+  if (lp and on_lp ~= lp) or (not lp and on_lp) then
+    M.have_launchpad = false
+    M.connect()
+  end
 end
 
 function M.cleanup()
