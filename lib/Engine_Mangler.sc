@@ -8,7 +8,8 @@
 // (OFF/GRAIN/WARP/PV/PLAY, spawned/freed by setMode) + a polyphonic voice layer
 // + TWO spawn/free FX synths: the delay (updateDelay — alive while delay_mix
 // > 0 or the feedback is a near-infinite hold) and the reverb (updateReverb,
-// only while rev_mix > 0). Drone and voices Out.ar additively onto play_bus;
+// only while rev_mix > 0) + the spawn/free erosion head (updateErode, only
+// while erode > 0 in PLAY). Drone and voices Out.ar additively onto play_bus;
 // io reads it. Plugin UGens (JPverb, MiClouds, DFM1) are guarded via .asClass
 // -> stock fallback so a missing plugin never bricks the load.
 //
@@ -32,6 +33,10 @@ Engine_Mangler : CroneEngine {
     // delay spawn/free synth, same shape: its regeneration loop lives inside
     // it, so freeing it is what flushes the line (which is what \clear wants)
     var <delaySynth, <dlySendBus, <dlyRetBus, <delayParams;
+    // erosion spawn/free synth, alive only while erode > 0 in PLAY mode (so
+    // at rest nothing writes the take). it reads eroKeys out of playParams;
+    // modeV is the mode setMode last switched to (4 = PLAY).
+    var <eroSynth, <eroKeys, <modeV;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
     // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
@@ -44,6 +49,7 @@ Engine_Mangler : CroneEngine {
 
     setMode { arg i;
         playSynth.notNil.if({ playSynth.free; playSynth = nil });
+        modeV = i;
         (i > 0).if({
             var def;
             // 1=GRAIN 2=WARP 3=PV 4=PLAY (0=OFF). GRAIN -> MiClouds when
@@ -63,6 +69,7 @@ Engine_Mangler : CroneEngine {
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
             ] ++ playParams.getPairs, playGroup);
         });
+        this.updateErode;
     }
 
     // spawn/free the reverb synth on rev_mix. placed AFTER ioSynth (reads io's
@@ -97,6 +104,22 @@ Engine_Mangler : CroneEngine {
             });
         }, {
             delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
+        });
+    }
+
+    // spawn/release the erosion head: alive only while erode > 0 in PLAY.
+    // a RELEASE, not a free: the synth fades its write out over 50ms and
+    // frees itself, so stopping never prints a step into the take.
+    updateErode {
+        var args;
+        ((modeV == 4) and: { playParams[\erode] > 0 }).if({
+            eroSynth.isNil.if({
+                args = [\buf_l, bufL, \buf_r, bufR];
+                eroKeys.do({ arg k; args = args ++ [k, playParams[k]] });
+                eroSynth = Synth.new(\mangler_erode, args, playGroup, \addToHead);
+            });
+        }, {
+            eroSynth.notNil.if({ eroSynth.set(\gate, 0); eroSynth = nil });
         });
     }
 
@@ -158,7 +181,7 @@ Engine_Mangler : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
-        var winRead;
+        var winBounds, winRead;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -199,7 +222,7 @@ Engine_Mangler : CroneEngine {
             // level/rec/freeze sit in ioKeys too, so ONE command fans out to
             // both synths (no new command, the fingerprint is unchanged). the
             // drone doesn't apply level to its output — io does — it only needs
-            // to know whether the deck is audible, to pause the erosion head.
+            // to know whether the deck is audible, to freeze its read head.
             \level -> 1.0, \rec -> 0, \freeze -> 0,
             \pos_start -> 0.0, \pos_end -> 1.0, \scan -> 1.0, \pos_jitter -> 0.0,
             \size -> 0.1, \density -> 20, \pitch -> 1.0, \spread -> 0.5, \pan -> 0.0,
@@ -209,9 +232,13 @@ Engine_Mangler : CroneEngine {
             // which simply ignore them)
             \clouds_pos -> 0.5, \clouds_tex -> 0.5, \clouds_fb -> 0.0,
             \clouds_mode -> 0, \clouds_lofi -> 0.0,
-            // erosion (PLAY mode only; the other defs take and ignore them)
+            // erosion: read by \mangler_erode (eroKeys below); every drone
+            // def takes and ignores them
             \erode -> 0.0, \wear -> 0.5
         ];
+        // the playParams the erosion head reads: its window, its two knobs,
+        // and the three gates that pause it
+        eroKeys = [\pos_start, \pos_end, \erode, \wear, \level, \rec, \freeze];
         // reverb params live in revParams (routed to \mangler_reverb) and the
         // delay's in delayParams (routed to \mangler_delay); io keeps the two
         // MIX knobs it needs for its own crossfade/add. (ioKeys U revParams U
@@ -252,11 +279,18 @@ Engine_Mangler : CroneEngine {
         // write heads already follow, and like them it also engages when the
         // MIX is thrown fully to tape (level lands at exact 0 there too) —
         // a fully-thrown-away deck pauses rather than spinning unheard.
-        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1;
-            var lo, hi, span, incr, phase, winPos;
+        // winBounds = the window's sorted, smoothed edges as [lo, span],
+        // shared by winRead and the erosion head.
+        winBounds = { arg pos_start, pos_end;
+            var lo, hi, span;
             lo = Lag.kr(pos_start.min(pos_end), 0.02);
             hi = Lag.kr(pos_start.max(pos_end), 0.02);
             span = (hi - lo).max(0.001);
+            [lo, span];
+        };
+        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1;
+            var lo, span, incr, phase, winPos;
+            #lo, span = winBounds.(pos_start, pos_end);
             incr = Lag.kr(scan, 0.02) * pitchMul * (run > 0.001)
                 * SampleDur.ir / (BufDur.kr(buf) * span);
             phase = Phasor.ar(0, incr, 0, 1);
@@ -370,37 +404,10 @@ Engine_Mangler : CroneEngine {
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1;
             var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
-            var eroPhase, eroPos, idx, eff, rawL, rawR, wearF;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch, level);
             bufDur = BufDur.kr(buf_l);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
-            // EROSION: window-synced self-rewrite on its OWN head, running at
-            // a constant one pass per window length regardless of playback
-            // speed or direction — aging is uniform and predictable, no
-            // samples are skipped at high rates, and varispeed does not
-            // change the wear character. a NON-interpolating read fetches
-            // the exact stored sample and a slightly darkened, slightly
-            // quieter copy is written back in its place. at erode 0 the
-            // exact sample is written back unchanged (bit-identical
-            // content); manual rec and freeze suspend it, and so does a
-            // silenced engine deck (STOP / mix thrown fully to tape ->
-            // level ~0) — a stopped instrument left with erode up would
-            // otherwise grind the take away with nobody listening, the
-            // same trap the regen head already guards against. the Lua
-            // layer interlocks erode against regen so two free-running
-            // write heads can never fight over the buffer.
-            eroPhase = Phasor.ar(0, SampleDur.ir / (bufDur * span), 0, 1);
-            eroPos = (winPos - (phase * span)) + (eroPhase * span);
-            idx = eroPos * BufFrames.kr(buf_l);
-            eff = erode.clip(0, 1).lag(0.05) * (1 - rec) * (1 - freeze) * (level > 0.001);
-            wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
-            rawL = BufRd.ar(1, buf_l, idx, 1, 1);
-            rawR = BufRd.ar(1, buf_r, idx, 1, 1);
-            BufWr.ar((rawL * (1 - eff)) + (LPF.ar(rawL, wearF) * 0.996 * eff),
-                buf_l, idx);
-            BufWr.ar((rawR * (1 - eff)) + (LPF.ar(rawR, wearF) * 0.996 * eff),
-                buf_r, idx);
             // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
             // with rate): the rec-stop window almost never lands on a zero
             // crossing, so the bare loop CLICKED every pass — the one blemish
@@ -408,6 +415,43 @@ Engine_Mangler : CroneEngine {
             edge = (phase.min(1 - phase) * span * bufDur / 0.005).clip(0, 1);
             sig = Balance2.ar(sigL, sigR, pan) * edge;
             Out.ar(play_bus, sig);
+        }).add;
+
+        // ---- EROSION: the window rewriting itself, in its own synth
+        // (updateErode spawns it while erode > 0 in PLAY mode). it runs on
+        // its OWN head at a constant one pass per window length regardless
+        // of playback speed or direction: aging is uniform and predictable,
+        // no samples are skipped at high rates, and varispeed does not change
+        // the wear character. a NON-interpolating read fetches the exact
+        // stored sample and a slightly darkened, slightly quieter copy is
+        // written back in its place. manual rec and freeze pause the head,
+        // and so does a silenced engine deck (STOP / mix thrown fully to tape
+        // -> level ~0): a stopped instrument left with erode up would
+        // otherwise grind the take away with nobody listening, the same trap
+        // the regen head guards against. the head HOLDS its place while
+        // paused, so every part of the window ages at the same rate (and the
+        // Lua pass counter, which pauses on the same three, stays true). the
+        // Lua layer interlocks erode against regen so two free-running write
+        // heads never fight over the buffer. `gate` fades the write in and
+        // out over 50ms and frees the synth: a write that began or ended at
+        // full strength would print a step into the take.
+        SynthDef(\mangler_erode, {
+            arg buf_l, buf_r, gate = 1, pos_start = 0, pos_end = 1,
+                erode = 0, wear = 0.5, level = 1, rec = 0, freeze = 0;
+            var lo, span, run, head, idx, env, eff, wearF, rawL, rawR;
+            #lo, span = winBounds.(pos_start, pos_end);
+            run = (1 - rec) * (1 - freeze) * (level > 0.001);
+            head = Phasor.ar(0, run * SampleDur.ir / (BufDur.kr(buf_l) * span), 0, 1);
+            idx = (lo + (head * span)) * BufFrames.kr(buf_l);
+            env = EnvGen.kr(Env.asr(0.05, 1, 0.05), gate, doneAction: 2);
+            eff = erode.clip(0, 1).lag(0.05) * env * run;
+            wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
+            rawL = BufRd.ar(1, buf_l, idx, 1, 1);
+            rawR = BufRd.ar(1, buf_r, idx, 1, 1);
+            BufWr.ar((rawL * (1 - eff)) + (LPF.ar(rawL, wearF) * 0.996 * eff),
+                buf_l, idx);
+            BufWr.ar((rawR * (1 - eff)) + (LPF.ar(rawR, wearF) * 0.996 * eff),
+                buf_r, idx);
         }).add;
 
         // MiClouds granular drone (mi-UGens), guarded two ways: .asClass (no
@@ -791,7 +835,8 @@ Engine_Mangler : CroneEngine {
 
         // every float control as one command; rec/freeze/level fan out to both
         // synths; revParams route to \mangler_reverb and delayParams to
-        // \mangler_delay; the mix/fb knobs also spawn/free their synths.
+        // \mangler_delay; eroKeys also reach \mangler_erode; the mix/fb knobs
+        // and erode also spawn/free their synths.
         allKeys = (ioKeys ++ playParams.keys.asArray ++ revParams.keys.asArray
             ++ delayParams.keys.asArray).asSet;
         allKeys.do({ arg name;
@@ -809,7 +854,11 @@ Engine_Mangler : CroneEngine {
                 playParams.includesKey(name).if({
                     playParams[name] = v;
                     playSynth.notNil.if({ playSynth.set(name, v) });
+                    (eroSynth.notNil and: { eroKeys.includes(name) }).if({
+                        eroSynth.set(name, v);
+                    });
                 });
+                (name == \erode).if({ this.updateErode });
                 ((name == \delay_mix) or: { name == \delay_fb }).if({
                     this.updateDelay;
                 });
@@ -945,6 +994,7 @@ Engine_Mangler : CroneEngine {
         playSynth.notNil.if({ playSynth.free });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
+        eroSynth.notNil.if({ eroSynth.free });
         ioSynth.free;
         playGroup.free;
         bufL.free;

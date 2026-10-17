@@ -33,6 +33,10 @@ line, and `clear` uses exactly that: erasing the take also restarts both FX synt
 nothing rings on with the erased material. Accepted trade: at rest the line is empty, so
 raising the mix reveals echoes of what plays from then on, not of what played before.
 
+The erosion head is the third synth of this shape. It exists only while `erode` is above
+zero in PLAY mode, so at rest nothing writes the take and the PLAY voice only reads it.
+Accepted trade: each time erosion starts, its head starts again at the start of the window.
+
 ## Why it cannot brick
 
 Exactly one `Engine_Mangler` class may exist on the device. A duplicate hangs every norns
@@ -74,13 +78,15 @@ because a muted minute of regen used to overwrite the take with silence. The pol
 position advances with the same signal the record head uses, so the next take's window
 cannot snap to a stale position.
 
-`erode` lives in the PLAY voice and runs on its OWN head, one pass per window length
-regardless of playback speed or direction: it reads the exact stored sample without
-interpolation and writes back a slightly darkened, slightly quieter copy. At zero the exact
-sample is written back unchanged, which is only true because the read is not interpolated.
-Recording, freeze and a silenced deck (STOP) all suspend it, and the Lua layer interlocks it
-against `regen`: two write heads never fight, and a stopped instrument never grinds the
-take away with nobody listening.
+`erode` runs on its OWN head, one pass per window length regardless of playback speed or
+direction. The head reads the exact stored sample without interpolation and writes back a
+slightly darkened, slightly quieter copy. The write fades in and out over fifty
+milliseconds, because a write that starts or stops at full strength prints a step into the
+take. Recording, freeze and a silenced deck (STOP) pause the head where it stands, so every
+part of the window ages at the same rate.
+
+The Lua layer interlocks `erode` against `regen`, so two write heads never fight. A stopped
+instrument never grinds the take away with nobody listening.
 
 The take rides the PSET as a left and right WAV pair at 24 bits, written only as far as the
 take actually reaches. The buffer itself is 32 bit float, so writing 16 quantised the take

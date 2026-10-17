@@ -126,9 +126,9 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 
 | # | Check | Pass | Suspect |
 |---|---|---|---|
-| 4.15 | `erode` 0, leave running | Take **bit-identical** after minutes | The non-interpolating read |
+| 4.15 | `erode` 0, leave running | Take **bit-identical** after minutes | A stray `\mangler_erode` (stage 14) |
 | 4.16 | `erode` ~0.3 | Darkens over passes, no runaway | — |
-| 4.17 | `erode` at speed 2 and speed −1 | Ages at the **same rate** | The constant-rate `eroPhase` head |
+| 4.17 | `erode` at speed 2 and speed −1 | Ages at the **same rate** | The constant-rate head in `\mangler_erode` |
 | 4.18 | Raise `regen` while `erode` > 0 | `erode` drops to 0 (and vice versa) | The param-layer interlock |
 | 4.19 | VOICE K2 = HEAL (PLAY mode) | Round-trip; **`regen` comes back too** | The HEAL throw snapshots `regen` |
 
@@ -290,6 +290,22 @@ feels and that the norns calls behave as the stubs assume.
 | 13.8 | Launchpad arrows | Left/right, then up/down | Left/right step the page (the name pops), up/down step the scene slot | The CC numbers 91 to 94 in Programmer mode |
 | 13.9 | Grid piano in pad mode | Pad input on, play the grid piano | The keys whose pad sounds light orange | `draw_spine`'s `pad_on` |
 | 13.10 | A frame error does not freeze | (only if one happens) | maiden prints `frame error` and the screen keeps moving | The `pcall` around `frame_tick` |
+
+## Stage 14: erosion in its own synth (engine)
+
+One engine change with no new command, so maiden must still read `count: 65`.
+The erosion head moved out of the PLAY voice into `\mangler_erode`, which runs
+only while `erode` is above 0 in PLAY mode. To list the running synths, type
+`Server.default.queryAllNodes` in maiden's SC tab.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 14.1 | **At rest nothing writes** | PLAY, `erode` 0, list the nodes | No `mangler_erode` in the list | `updateErode` |
+| 14.2 | Erosion still erodes | A take in PLAY, VOICE K1+E2 to about 0.5, listen over a few passes | It darkens pass by pass as before, GEN counts, and the node list shows `mangler_erode` | `\mangler_erode`, `winBounds` |
+| 14.3 | **No click in or out** | A loud sustained take, `erode` 1, then VOICE K2 (HEAL) and release, a few times | No click is printed into the take: the next passes play smoothly where the switches happened | The 50ms `gate` fade |
+| 14.4 | Mode switch | `erode` up, VOICE K3 once (GRAIN), then three more times (WARP, PV, PLAY) | The node is gone in GRAIN, WARP and PV and back in PLAY. The other modes do not darken the take | `setMode`'s `updateErode` |
+| 14.5 | STOP holds the head | `erode` up, K1+K2, wait ten seconds, K1+K2 again | GEN and the pass bar hold during the STOP. Later passes age evenly, with no lighter stretch | The head's `run` gate |
+| 14.6 | %CPU at rest | PLAY, `erode` 0, watch %CPU | Equal to or lower than the previous build in the same state | The point of the split |
 
 ## When it passes
 

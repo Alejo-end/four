@@ -2875,6 +2875,42 @@ items from the plan's Phase 5, each with a test.
 * VERIFIED: 611 assertions (330/112/85/41/43), every new behaviour
   mutation-checked, `tools/check.lua` green on Lua 5.3.
 
+
+Eightieth change: **erosion in its own synth (ENGINE, no new command,
+fingerprint STAYS 65, on branch `full-review`)**. Built ahead of the device
+gate because the user asked for it. It is the only engine change since the
+review.
+* **Engine**: the erosion head left `\mangler_play` for a new
+  `\mangler_erode` synth. `updateErode` spawns it while `erode` is above 0 in
+  PLAY mode and releases it otherwise. The erode command and every `setMode`
+  call it. At rest nothing writes the take. Before, the PLAY voice wrote every
+  sample back onto itself even at `erode` 0.
+* The write fades in and out over 50 ms through an `asr` gate that frees the
+  synth. The head holds its place while rec, freeze or a silenced deck pause
+  it, so every part of the window ages at the same rate. Before, it kept
+  moving and skipped what passed under it.
+* `eroKeys` routes seven playParams to the live synth. `winBounds` (the
+  window's sorted, smoothed edges) is shared by `winRead` and the new synth,
+  so the window law still exists once. The drone defs keep their unused
+  `erode` and `wear` args, so the command set and the count do not move.
+* **Lua**: the VOICE pass counter starts a new pass when erosion engages,
+  because the respawned head starts at the start of the window.
+* **Tests**: test_control section 23. Only `\mangler_erode` holds a `BufWr`.
+  `setMode` and the erode command call `updateErode`. The head is released,
+  not cut. The pass counter advances, holds under freeze, and restarts on a
+  new engagement. Three mutations (the old engine, no `updateErode` call in
+  `setMode`, no pass restart) each make it fail.
+* **SC syntax**: there is no compiler here. The new file passed a bracket
+  count and was parsed with the tree-sitter SuperCollider grammar against the
+  old file. Every new line the grammar rejects uses a construct it also
+  rejects in the old, device-proven file (`and:`, `#a, b =`, indexing). A
+  broken copy was caught: the parse found a missing semicolon and the bracket
+  count found an unclosed bracket.
+* RENDERS: all 67 byte-identical. Device rows: doc/device-gate.md stage 14.
+  Rows 4.15 and 4.17 now point at the new synth.
+* VERIFIED: 619 assertions (338/112/85/41/43), `tools/check.lua` green on
+  Lua 5.3.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

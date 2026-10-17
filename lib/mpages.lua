@@ -644,15 +644,19 @@ end
 -- completed loop passes while eroding; drawn inside VOICE's PLAY texture
 -- (PLAY is the only mode the engine erodes in). Declared BEFORE body_VOICE:
 -- referenced from there, and a later local would silently read as a global.
-local eros_gen, eros_acc = 0, 0
+local eros_gen, eros_acc, eros_live = 0, 0, false
 function M.erosion_tick()
+  -- the engine spawns its erosion head at the window's start each time
+  -- erosion engages (erode up in PLAY), so an engagement starts a new pass
+  local live = pget("erode", 0) > 0 and pget("mode", 5) == 5
+  if live and not eros_live then eros_acc = 0 end
+  eros_live = live
   -- the erosion head runs at exactly one pass per window length, so a
   -- generation is span times sixty seconds of eroding time. paused under
-  -- the same conditions the engine pauses (rec, freeze, not in PLAY — and a
-  -- SILENCED deck: the engine gates the write on level > 0.001, so the GEN
+  -- the same conditions the engine pauses its head (rec, freeze, and a
+  -- SILENCED deck: the engine runs the head on level > 0.001, so the GEN
   -- counter must not keep counting through a STOP or a full mix throw).
-  if pget("erode", 0) > 0 and pget("mode", 5) == 5
-      and pget("rec", 0) == 0 and pget("freeze", 0) == 0
+  if live and pget("rec", 0) == 0 and pget("freeze", 0) == 0
       and (C.mix_gains()) > 0.001 then
     local _, _, span = window_bounds()
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)

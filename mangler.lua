@@ -916,9 +916,9 @@ local function enc_param(n)
   end
   -- VOICE's alt pair is mode-contextual too: in PLAY mode the face already IS
   -- scan/pitch, so the alt copy was redundant there — it now carries the
-  -- EROSION controls, which only ever work in PLAY mode (the engine erodes in
-  -- \mangler_play alone). every other mode keeps alt scan/pitch, so pitch
-  -- stays reachable under a GRAIN or WARP face.
+  -- EROSION controls, which only ever work in PLAY mode (the engine runs its
+  -- erosion head in PLAY alone). every other mode keeps alt scan/pitch, so
+  -- pitch stays reachable under a GRAIN or WARP face.
   if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 then
     return n == 2 and "erode" or "wear"
   end

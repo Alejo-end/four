@@ -13,10 +13,10 @@ the status block current, and add a change-log entry for every change.
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 65`**.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 13, top to bottom. When it
+- **The one walkthrough:** doc/device-gate.md, stages 0 to 14, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 79th, the additions after the review (doc/changelog.md). Lua only.
-  Work lives on the `full-review` branch until it is merged.
+- **Latest change:** the 80th, erosion in its own synth (doc/changelog.md). ENGINE, no new
+  command, so the count stays 65. Work lives on the `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**

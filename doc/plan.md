@@ -14,7 +14,7 @@ The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
 then about thirty changes landed without a device test, several of them in the
 engine. After a RESTART the engine must report `count: 65`.
 
-The offscreen tests are strong. Five test scripts run 571 assertions, the
+The offscreen tests are strong. Five test scripts run 619 assertions, the
 render suite compares 67 screens pixel by pixel, and the single-file build is
 tested for freshness. No test script can judge sound and feel. That is why the
 first step is a device session and not more code.
@@ -25,14 +25,14 @@ Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
 2. Make sure that maiden reads `count: 65`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 13, top to bottom. If a stage
+3. Walk doc/device-gate.md from stage 0 to stage 14, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
 
-Stages 12 and 13 are new. They cover the review's fixes and the additions
-that only hardware can judge. For example, a late sample conversion must no
-longer replace a live take.
+Stages 12 to 14 are new. They cover the review's fixes, the additions and
+the erosion synth, where only hardware can judge. For example, a late sample
+conversion must no longer replace a live take.
 
 ## Phase 2: the engine batch
 
@@ -136,11 +136,12 @@ no engine change and are tested offscreen:
 - `tools/check.lua` runs every offline check. With a Lua 5.3 build set up, it
   runs them on the norns version.
 
-Only the engine items remain. They wait for Phase 1:
+Erosion as a spawn/free synth is also built (the 80th change). It went ahead
+of the device session by request, so stage 14 of doc/device-gate.md must pass
+before more engine work lands. The other engine items wait for Phase 1:
 
 | Feature | Why | Cost |
 |---|---|---|
-| Erosion as a spawn/free synth | The PLAY drone is a buffer writer even at `erode` 0 | medium |
 | Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | medium |
 | Linked stereo limiting | Two independent limiters shift the stereo image while limiting | medium |
 

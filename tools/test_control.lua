@@ -1949,4 +1949,64 @@ do
   end
 end
 
+-- ============================================================================
+-- 23 · erosion runs in its own synth
+-- ============================================================================
+-- The erosion head used to live inside the PLAY drone, so the drone wrote the
+-- take back onto itself on every sample even at erode 0. It is now its own
+-- spawn/free synth. The engine cannot run here, so (a) pins the shape in the
+-- source; (b) pins the Lua pass counter to the new head, which starts at the
+-- window's start each time erosion engages.
+do
+  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local writers, defs = {}, 0
+  for name, body in sc:gmatch("SynthDef%(\\mangler_([%w_]+),(.-)}%)%.add;") do
+    defs = defs + 1
+    if body:find("BufWr", 1, true) then writers[#writers + 1] = name end
+  end
+  ok(defs >= 10, "the engine's SynthDefs parse out of the .sc (" .. defs .. ")")
+  ok(#writers == 1 and writers[1] == "erode",
+    "only the erosion synth writes the take with BufWr (" .. table.concat(writers, ",") .. ")")
+  local set_mode = sc:match("setMode { arg i;(.-)\n    }")
+  ok(set_mode and set_mode:find("this.updateErode", 1, true),
+    "a mode switch re-checks the erosion head")
+  ok(sc:find("(name == \\erode).if({ this.updateErode })", 1, true),
+    "...and so does the erode command")
+  ok(sc:find("eroSynth.set(\\gate, 0)", 1, true),
+    "the head is released (a fade), not cut")
+
+  -- (b) the pass counter
+  local Mp
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(redraw, i)
+    if n == nil then break end
+    if n == "Mpages" then Mp = v end
+  end
+  local function acc()
+    for i = 1, 255 do
+      local n, v = debug.getupvalue(Mp.erosion_tick, i)
+      if n == nil then break end
+      if n == "eros_acc" then return v end
+    end
+  end
+  -- an audible engine deck: earlier sections leave the levels anywhere
+  params:set("stop_all", 0); params:set("rec", 0); params:set("freeze", 0)
+  params:set("regen", 0)
+  params:set("mix", 0.5); params:set("out_level", 1); params:set("sc_level", 1)
+  params:set("mode", 5)
+  Mp.erosion_reset()
+  params:set("erode", 0.5)
+  _h.run_ticks(6)
+  local a1 = acc()
+  ok(a1 > 0, "eroding in PLAY advances the pass")
+  params:set("freeze", 1); _h.run_ticks(4)
+  near(acc(), a1, 1e-12, "...holds while the head is paused")
+  params:set("freeze", 0)
+  params:set("erode", 0); _h.run_ticks(1)
+  params:set("erode", 0.5); _h.run_ticks(1)
+  ok(acc() < a1, "...and a new engagement starts a new pass, as the respawned head does")
+  params:set("erode", 0)
+  Mp.erosion_reset()
+end
+
 T.report("control harness OK")
