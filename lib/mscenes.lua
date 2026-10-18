@@ -524,6 +524,12 @@ function M.capture(slot)
   return true
 end
 
+-- does a recall GLIDE? (the peek waits for a hold then, so a tap does not
+-- move the sound before the glide starts from it: tick_keys in mangler.lua)
+function M.recall_glides()
+  return floor(pget("scene_recall_mode", 1) + 0.5) == GLIDE_MODE
+end
+
 -- recall a slot. scene_recall_mode decides when it lands (NOW / next BEAT /
 -- next BAR). a queued recall replaces any other queued recall — last press
 -- wins.
@@ -548,6 +554,10 @@ function M.recall(slot)
     local b = pget("scene_glide", 4)
     if floor(pget("scene_slot", 1) + 0.5) ~= slot then pset("scene_slot", slot) end
     M.auto_safe()
+    -- a held chaos throw ends HERE, as land() ends it for the other modes:
+    -- ◄ now holds the chaos state, and the footswitch's release would restore
+    -- it over the scene this glide is heading for
+    M.chaos_live = false
     M.glide = { slot = slot, from = C.frame, a0 = pget("scene_morph_amt", 0),
       frames = math.max(1, floor(b * 60 / (C.tempo and C.tempo() or 120)
         * (C.FPS or 15) + 0.5)) }
@@ -886,7 +896,11 @@ local ORBIT_YIELD = 2          -- seconds of quiet before the wander resumes
 local function orbit_tick()
   if not orbit.on then return end
   local amt = pget("scene_morph_amt", 0)
-  if orbit.wrote ~= nil and abs(amt - orbit.wrote) > 1e-9 then
+  -- a held RCL peek parks the amount at 1 and stops moving it, but its
+  -- release still needs the sweep's origin to go home: until it is home, the
+  -- peek is a hand on the morph even while the value stands still
+  if (orbit.wrote ~= nil and abs(amt - orbit.wrote) > 1e-9)
+      or C.peek_on or C.peek_back then
     orbit.hand_at = C.frame
   end
   orbit.wrote = amt

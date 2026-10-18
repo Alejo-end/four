@@ -1815,12 +1815,15 @@ do
   params:set("cutoff", 20000)
 
   -- (g) when erosion (or regen) stops, the take's strip is repainted from a
-  -- dump of the buffer, unless the take changed while the dump ran
+  -- dump of the buffer, unless the take changed while the dump ran. It waits
+  -- for a second of quiet, only follows a head that really wrote, and a
+  -- performer's dump that arrives during it waits instead of being refused.
   do
     local real_run = clock.run
     local jobs = {}
     clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
     local function finish(fn)
+      if not fn then return end     -- no dump started: the assertion says so
       local co = coroutine.create(fn)
       repeat
         local okr, err = coroutine.resume(co)
@@ -1833,19 +1836,72 @@ do
       filled[#filled + 1] = path
       return real_qf(path, bins, secs)
     end
+    local writes = 0
     engine.write_take = function(stem, frames)
+      writes = writes + 1
       for _, side in ipairs({ "_L", "_R" }) do
         T.write_wav(stem .. side .. ".wav", 48000, 1, 24, frames, function() return 4000000 end)
       end
     end
+    local Q = CTX.FPS                           -- a second of frames
+    local function erode_stop(m)
+      params:set("erode", 0.3); _h.run_ticks(1); params:set("erode", 0)
+      _h.run_ticks(m or Q + 1)
+    end
+    params:set("mode", 5)                       -- PLAY: the erosion head runs
     CTX.wave_any, CTX.take_len = true, 0.002
-    params:set("erode", 0.3); params:set("erode", 0)
-    ok(#jobs == 1, "stopping erosion starts a dump of the take")
+    erode_stop(Q - 1)
+    ok(#jobs == 0, "stopping erosion does not dump at once")
+    _h.run_ticks(2)
+    ok(#jobs == 1, "...but after a second of quiet")
     finish(table.remove(jobs, 1))
     ok(#filled == 1 and filled[1]:find("mscan-tmp", 1, true) ~= nil,
       "...and the strip repaints from it")
+    -- a HEAL tap: erosion back on inside the second
+    erode_stop(5)
+    params:set("erode", 0.3); _h.run_ticks(Q + 1)
+    ok(#jobs == 0, "a HEAL tap (erosion back within a second) dumps nothing")
+    -- the mode stops the head as surely as the knob does
+    params:set("mode", 2); _h.run_ticks(Q + 1)
+    ok(#jobs == 1, "leaving PLAY with erode up repaints the strip too")
+    finish(table.remove(jobs, 1))
+    params:set("erode", 0)
+    erode_stop()
+    ok(#jobs == 0, "erode moved outside PLAY (no head ran) dumps nothing")
+    params:set("regen", 0.3); CTX.take_len = 0.002
+    _h.run_ticks(1); params:set("regen", 0); _h.run_ticks(Q + 1)
+    ok(#jobs == 1, "regen writes in every mode, and its stop repaints")
+    finish(table.remove(jobs, 1))
+    params:set("mode", 5)
+    -- a CHOP pressed while the repaint dumps waits for it, then runs
+    erode_stop()
+    writes = 0
+    pulse("pad_chop")
+    ok(#jobs == 1 and writes == 0, "a CHOP during the repaint does not start on top of it")
+    finish(table.remove(jobs, 1))
+    ok(#jobs == 1 and writes == 1, "...it waits, and runs once the repaint is done")
+    finish(table.remove(jobs, 1))
+    -- the guard holds until the scan is done: a dump asked for while a scan
+    -- still reads the shared temp file (a second CHOP, an EXPORT) is refused
+    local out1, out2 = os.tmpname(), os.tmpname()
+    local refused
+    CTX.take_to_wav(out1, function()
+      CTX.take_to_wav(out2, function(ok2) refused = ok2 == false end)
+    end)
+    finish(table.remove(jobs, 1))
+    ok(refused == true and #jobs == 0, "a dump asked for during a scan is refused")
+    os.remove(out1); os.remove(out2)
+    -- ...and a repaint that falls due while a performer's dump runs waits
+    -- for it, rather than being refused and lost
+    pulse("pad_chop")
+    erode_stop(Q + 5)
+    ok(#jobs == 1, "a repaint due during a CHOP does not start on top of it")
+    finish(table.remove(jobs, 1))
+    _h.run_ticks(1)
+    ok(#jobs == 1, "...and starts once the CHOP is done")
+    finish(table.remove(jobs, 1))
     filled = {}
-    params:set("erode", 0.3); params:set("erode", 0)
+    erode_stop()
     params:set("rec", 1); params:set("rec", 0)   -- a new pass while it dumps
     finish(table.remove(jobs, 1))
     ok(#filled == 0, "a dump that finishes after the take changed paints nothing")
@@ -1925,9 +1981,11 @@ do
     function lp:send(m) sent[#sent + 1] = m end
     midi.devices = { [1] = lp }
     midi.to_msg = function(d) return d end
-    CTX.grid.hotplug()
+    CTX.grid.midigrid_loaded, CTX.grid.have_midigrid = true, true  -- as on a device with midigrid
+    midi.add(lp)
     ok(CTX.grid.have_launchpad and CTX.grid.gg ~= _h.grid,
       "a Mini MK3 plugged in after load takes over the grid")
+    ok(CTX.grid.have_midigrid == false, "...and midigrid is no longer the grid")
     ok(sent[1] and sent[1][7] == 0x0E and sent[1][8] == 0x01,
       "...and is put in Programmer mode first")
     T.goto_page("TAKE")
@@ -1940,10 +1998,15 @@ do
     lp.event({ type = "cc", cc = 91, val = 127 })
     lp.event({ type = "cc", cc = 91, val = 0 })   -- a release does nothing
     ok(math.floor(params:get("scene_slot") + 0.5) == 4, "the up arrow steps the scene slot")
+    -- norns calls midi.remove while the device is STILL in midi.devices, and
+    -- only deletes it afterwards
+    midi.remove(lp)
     midi.devices = {}
-    CTX.grid.hotplug()
     ok(not CTX.grid.have_launchpad and CTX.grid.gg == _h.grid,
       "unplugged, the fallback grid comes back")
+    ok(CTX.grid.have_midigrid == true,
+      "...and midigrid is the grid again, so its pads stay out of the notes")
+    CTX.grid.midigrid_loaded, CTX.grid.have_midigrid = false, false
     midi.devices, midi.to_msg = real_devices, real_to_msg
     params:set("scene_slot", 1)
   end
@@ -2007,6 +2070,137 @@ do
   ok(acc() < a1, "...and a new engagement starts a new pass, as the respawned head does")
   params:set("erode", 0)
   Mp.erosion_reset()
+end
+
+-- ============================================================================
+-- 24 · the code review of full-review
+-- ============================================================================
+-- The scene and conversion defects the review found. Each assertion failed
+-- before its fix.
+do
+  local page = T.goto_page
+  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  local function fill(slot, cut, fb)
+    params:set("cutoff", cut); params:set("delay_fb", fb)
+    params:set("scene_slot", slot); pulse("scene_capture")
+  end
+  local function clear_bank()
+    for s = 1, 8 do params:set("scene_slot", s); pulse("scene_clear") end
+  end
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_scope", 1)
+  -- a second of frames also lets the strip repaint section 23 left due run
+  -- (no write_take here, so it ends at once)
+  params:set("scene_morph_amt", 0); _h.run_ticks(CTX.FPS + 2)
+  clear_bank()
+  clock.get_tempo = function() return 120 end
+  params:set("scene_recall_mode", 4)          -- GLIDE
+  params:set("scene_glide", 4)                -- 2 seconds at 120 = 30 frames
+
+  -- (a) a GLIDE tapped on K2 crossfades. The peek ramp used to run during
+  -- the tap and the glide then started from wherever it had got to.
+  fill(1, 500, 0.1); fill(2, 15000, 0.2)
+  page("SCENE")
+  params:set("scene_slot", 2); params:set("cutoff", 2000)
+  key(2, 1); _h.run_ticks(3); key(2, 0)
+  _h.run_ticks(1)
+  local amt = params:get("scene_morph_amt")
+  ok(CTX.scene.glide ~= nil and amt < 0.2,
+    "a GLIDE tapped on K2 starts from where the sound stood (" .. amt .. ")")
+  _h.run_ticks(35)
+  near(params:get("cutoff"), 15000, 1e-6, "...and lands the scene")
+  -- the same from a grid scene pad
+  local g = _h.grid
+  g.key(1, 1, 1); _h.run_ticks(2); g.key(1, 1, 0)
+  _h.run_ticks(1)
+  amt = params:get("scene_morph_amt")
+  ok(CTX.scene.glide ~= nil and amt < 0.2,
+    "a GLIDE tapped on a grid scene pad starts from where the sound stood (" .. amt .. ")")
+  _h.run_ticks(35)
+  near(params:get("cutoff"), 500, 1e-6, "...and lands the scene")
+  -- a hold is still a peek, once it is a hold
+  params:set("scene_slot", 2)
+  key(2, 1); _h.run_ticks(8)
+  ok(params:get("scene_morph_amt") > 0.5, "under GLIDE a held K2 still peeks")
+  key(2, 0); _h.run_ticks(5)
+  near(params:get("cutoff"), 500, 1e-6, "...and its release sweeps home")
+
+  -- (b) a GLIDE made while a chaos throw is held ends the throw, as every
+  -- other landing does. Releasing the footswitch mid-glide used to cancel
+  -- the glide and land the chaos state, which the glide had just put in ◄.
+  params:set("delay_fb", 0.1)
+  params:set("chaos_throw", 1)
+  params:set("scene_slot", 2); pulse("scene_recall")
+  _h.run_ticks(5)
+  params:set("chaos_throw", 0)
+  ok(CTX.scene.glide ~= nil, "releasing a chaos throw mid-glide leaves the glide running")
+  _h.run_ticks(30)
+  near(params:get("delay_fb"), 0.2, 1e-6, "...and the glide lands the scene, not the chaos")
+  near(params:get("cutoff"), 15000, 1e-6, "...all of it")
+  params:set("scene_recall_mode", 1)
+
+  -- (c) the orbit counts a held RCL peek as a hand on the morph. A peek parks
+  -- the amount at 1, and after two still seconds the orbit used to park too,
+  -- dropping the origin the peek's release sweeps home to.
+  clear_bank()
+  fill(2, 15000, 0.2)                         -- one slot: the orbit aims at it
+  params:set("cutoff", 500)
+  params:set("orbit_rate", 60); params:set("orbit_on", 1)
+  _h.run_ticks(1)
+  key(2, 1); _h.run_ticks(45); key(2, 0)      -- a three second peek
+  _h.run_ticks(8)
+  local cut = params:get("cutoff")
+  ok(cut < 1000, "a long RCL peek under the orbit still returns home (" .. cut .. ")")
+  params:set("orbit_on", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  clear_bank()
+  clock.get_tempo = nil
+  params:set("cutoff", 20000); params:set("delay_fb", 0.1)
+
+  -- (d) a conversion whose target moved on stops. The queue used to run it to
+  -- the end (tens of seconds for a long file on a Pi) before the newer
+  -- request behind it could start.
+  local real_run, real_exists = clock.run, util.file_exists
+  util.file_exists = function(p) local f = io.open(p, "rb"); if f then f:close() end; return f ~= nil end
+  local jobs = {}
+  clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
+  local function resumes(co)                  -- run a job to its end; how many steps
+    local n = 0
+    repeat
+      local okr, err = coroutine.resume(co)
+      if not okr then error(err) end
+      n = n + 1
+    until coroutine.status(co) == "dead"
+    return n
+  end
+  local src = os.tmpname() .. "-44k.wav"      -- 1s at 44.1k: a dozen blocks
+  T.write_wav(src, 44100, 2, 16, 44100, function() return 1000 end)
+  local reads = {}
+  engine.read_file = function(p) reads[#reads + 1] = p end
+  CTX.load_sample(src)
+  local full = resumes(coroutine.create(table.remove(jobs, 1)))
+  ok(full > 5 and #reads == 1, "an undisturbed conversion runs (" .. full .. " steps) and lands")
+  reads = {}
+  CTX.load_sample(src)                        -- A converts
+  CTX.load_sample(src)                        -- B queues behind it: A is doomed
+  local a = resumes(coroutine.create(table.remove(jobs, 1)))
+  ok(a == 1 and #reads == 0, "a doomed conversion stops before it converts (" .. a .. " steps)")
+  ok(#jobs == 1, "...and the request behind it starts at once")
+  resumes(coroutine.create(table.remove(jobs, 1)))
+  ok(#reads == 1, "...and lands")
+  reads = {}
+  CTX.load_sample(src)
+  local co = coroutine.create(table.remove(jobs, 1))
+  coroutine.resume(co); coroutine.resume(co)  -- two blocks in
+  params:set("rec", 1); params:set("rec", 0)  -- a live pass outranks it
+  local rest = resumes(co)
+  ok(rest == 1 and #reads == 0,
+    "a conversion overtaken mid-way stops at the next block (" .. rest .. " steps)")
+  os.remove(src)
+  engine.read_file = nil
+  clock.run, util.file_exists = real_run, real_exists
 end
 
 T.report("control harness OK")

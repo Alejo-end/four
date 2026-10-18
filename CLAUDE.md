@@ -13,10 +13,12 @@ the status block current, and add a change-log entry for every change.
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 65`**.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 14, top to bottom. When it
+- **The one walkthrough:** doc/device-gate.md, stages 0 to 15, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 80th, erosion in its own synth (doc/changelog.md). ENGINE, no new
-  command, so the count stays 65. Work lives on the `full-review` branch until it is merged.
+- **Latest change:** the 81st, the fixes from the code review of the branch
+  (doc/changelog.md). Lua and tooling only. The 80th moved erosion into its own synth (ENGINE,
+  no new command), so the count stays 65. Work lives on the `full-review` branch until it is
+  merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
@@ -127,6 +129,9 @@ add_text` are **not** mappable.
   script file runs → `engine.load(name, Script.init)` → SC alloc → doneCallback →
   `init()` → `norns.init_done` → screen handoff. A silent break before `init()` is
   almost always the engine failing in alloc.
+- **norns calls `midi.remove(dev)` BEFORE it deletes `dev` from `midi.devices`** (read in
+  lua/core/midi.lua). A search of the devices inside that callback still finds the device
+  that is leaving, so `Mgrid.hotplug` is handed it and skips it.
 - **Editing a `.sc` file requires SYSTEM > RESTART** (sclang must recompile the class
   library); reloading the script is not enough.
 - **midi dispatch is dual-path: norns fires BOTH `midi.devices[id].event` (device
@@ -181,6 +186,9 @@ Each line was learned the hard way; the change log has the story.
 - Capture by POLLING, not by wrapping calls: on the device an encoder goes through
   `paramset:delta`, which never re-enters a wrapped `set` (the sim does not model this).
 - A format change is a change to everyone who computes a SIZE from it (`TAKE_BYTES`).
+- A busy guard covers every reader of what it protects. `take_to_wav` holds `export_clock`
+  until `done` returns, because the scans read the shared dump after it. A background job
+  never refuses a performer's: a dump asked for during the strip repaint waits for it.
 - `include` has no module cache: a module that needs another module's state is handed
   the instance through `init` (mtape receives Mdeck), never includes it again.
 - Moving code into a module turns an assignment to a former upvalue into a write to a

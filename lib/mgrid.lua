@@ -34,7 +34,8 @@
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
-local M = { gg = nil, have_midigrid = false, have_launchpad = false }
+local M = { gg = nil, have_midigrid = false, have_launchpad = false,
+            midigrid_loaded = false }
 
 local grid_mod = grid
 local no_monome = false    -- true when no native monome grid holds grid vport 1
@@ -50,6 +51,7 @@ do
     local ok, mg = pcall(include, "midigrid/lib/midigrid")
     if ok and mg then
       grid_mod = mg
+      M.midigrid_loaded = true
       M.have_midigrid = true
       print("mangler: midigrid loaded — midi grid controllers welcome")
     else
@@ -127,11 +129,13 @@ end
 
 -- find the Mini MK3's MIDI (surface) port, NOT the DAW port. ALSA names vary,
 -- so match "mk3" + a launchpad marker and prefer the MIDI/2nd interface.
-local function lp_find_device()
+-- `gone`: a device being unplugged. norns runs midi.remove BEFORE it deletes
+-- the device from midi.devices, so the search has to skip it by hand.
+local function lp_find_device(gone)
   if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
   local best
   for _, dev in pairs(midi.devices) do
-    local n = (type(dev) == "table" and type(dev.name) == "string")
+    local n = (dev ~= gone and type(dev) == "table" and type(dev.name) == "string")
       and dev.name:lower() or ""
     if n:find("mk3", 1, true)
         and (n:find("mini", 1, true) or n:find("lpmini", 1, true)) then
@@ -319,7 +323,7 @@ local function scene_row_key(x, z)
       -- begin the PEEK: the ramp in mangler's tick drives the morph param.
       -- this pad becomes the owner (a later pad press takes over) so releasing
       -- the FIRST of two held pads can't cancel the second's peek.
-      C.peek_on, C.peek_back = true, false
+      C.peek_on, C.peek_back, C.peek_at = true, false, C.frame
       peek_pad = x
       srow_frame[x] = C.frame
     else
@@ -690,12 +694,16 @@ function M.redraw()
   gg:refresh()
 end
 
-function M.connect()
+function M.connect(gone)
   gg = nil
+  -- the fallback drives unless the LP takes over below. Set on every connect,
+  -- because an LP that leaves hands the grid back to midigrid, and the vport
+  -- filter (minput) needs this flag to keep midigrid's pads out of the notes.
+  M.have_midigrid = M.midigrid_loaded
   -- prefer a native Launchpad Mini MK3 colour driver over midigrid/native when
   -- no monome grid is attached; on ANY failure fall back — can't brick.
   if no_monome then
-    local lp = lp_find_device()
+    local lp = lp_find_device(gone)
     if lp then
       local ok, cand = pcall(function() return lp_make_backend(lp).connect() end)
       if ok and cand then
@@ -719,13 +727,14 @@ end
 -- a MIDI device came or went. A Mini MK3 plugged in after the script loaded
 -- takes over from the fallback grid; unplugged, the fallback comes back. A
 -- fresh connect also starts a fresh LED diff, so the pads all repaint.
-function M.hotplug()
+-- `gone`: the device being removed (midi.remove passes it), still listed.
+function M.hotplug(gone)
   if not no_monome then return end
-  local lp = lp_find_device()
+  local lp = lp_find_device(gone)
   local on_lp = M.have_launchpad and gg and gg.device
   if (lp and on_lp ~= lp) or (not lp and on_lp) then
     M.have_launchpad = false
-    M.connect()
+    M.connect(gone)
   end
 end
 

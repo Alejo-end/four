@@ -2911,6 +2911,47 @@ review.
 * VERIFIED: 619 assertions (338/112/85/41/43), `tools/check.lua` green on
   Lua 5.3.
 
+
+Eighty-first change: **the fixes from the code review of `full-review` (Lua +
+tooling, ENGINE UNTOUCHED, fingerprint STAYS 65, on branch `full-review`)**. A
+multi-agent review of the branch against `main` confirmed ten bugs. Each fix
+has a test that failed before it.
+* **The take dump**: `take_to_wav` holds its guard until `done` returns, under
+  `pcall`. TIGHTEN, CHOP and REPAINT share one temp file, and a dump started
+  during a scan truncated the file under it. CHOP then cut from silence,
+  and its `os.remove` deleted the other job's output.
+* **The strip repaint**: polled each frame (`tick_take_strip`) instead of run
+  from the knobs. It waits for a second of quiet. It follows erosion only in
+  PLAY, the only mode where the head runs, so a switch out of PLAY also
+  counts as a stop. The repaint is a background dump. A performer's CHOP,
+  TIGHTEN or EXPORT that arrives during it waits in one slot. Before, it was
+  refused. A repaint that falls due during a performer's dump waits for that
+  dump. Before, every HEAL tap dumped up to 17 MB and refused CHOP, TIGHTEN
+  and EXPORT for seconds.
+* **Conversions**: a queued conversion whose target moved on stops before it
+  starts, and a running one stops at the next block. If its yield returns
+  false, `Mwav.convert_sr` cancels and removes the part-written file.
+* **Decks**: a PSET that reloads a deck's file through `layer_load` clears the
+  deck first. The deck no longer plays the previous session's audio while the
+  file converts, and an arm in that window opens a fresh loop.
+* **Grid**: norns calls `midi.remove` before it deletes the device (read in
+  the norns source), so the hot-plug search skips the removed device
+  (`lp_find_device(gone)`). Every connect sets `have_midigrid` from
+  `M.midigrid_loaded`, so a Mini MK3 that leaves gives midigrid back its note
+  filter.
+* **Scenes**: at its start, a GLIDE recall ends a held chaos throw, as every
+  other landing does. Under GLIDE the RCL and scene-pad peek ramp waits until
+  the press is a hold, so a tap glides instead of jumping. The orbit counts a
+  held peek and its sweep home as a hand on the morph. It no longer drops the
+  origin that the peek returns to.
+* **Tooling**: `tools/check.lua` builds the single file to a temp file and
+  compares it with dist. It used to rebuild dist in place, so a stale dist
+  always passed.
+* RENDERS: all 67 byte-identical. Device rows: doc/device-gate.md stage 15.
+* VERIFIED: 652 assertions (365/116/87/41/43). Fourteen mutations, each
+  removing one part of a fix, each fail a test. `tools/check.lua` green on
+  Lua 5.3.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

@@ -135,6 +135,13 @@ do
   local c2, s2 = M.convert_sr(TMP .. "a441.wav", TMP .. "cap.wav", 48000, nil, 0.5)
   ok(c2 == true, "a capped conversion still converts")
   near(s2, 0.5, 0.01, "...but writes only the capped duration")
+  -- a yield that returns false cancels: the caller's target moved on
+  local steps = 0
+  local c3, e3 = M.convert_sr(TMP .. "a441.wav", TMP .. "gone.wav", 48000,
+    function() steps = steps + 1; return steps < 2 end)
+  ok(c3 == nil and e3 == "cancelled" and steps == 2,
+    "a yield returning false cancels at that block")
+  ok(io.open(TMP .. "gone.wav", "rb") == nil, "...and the part-written output is removed")
 end
 
 -- ---- the resampling KERNEL --------------------------------------------------

@@ -342,7 +342,8 @@ end
 -- returns true, seconds  — converted and written to out_path
 --         false, seconds — already at `sr`, nothing written
 --         nil, err       — could not decode (the caller falls back to loading
---                          the file as-is: audible-but-sharp beats silence)
+--                          the file as-is: audible-but-sharp beats silence),
+--                          or `yield` returned false ("cancelled")
 function M.convert_sr(path, out_path, sr, yield, max_secs)
   local src, err = open_src(path)
   if not src then return nil, err end
@@ -415,7 +416,12 @@ function M.convert_sr(path, out_path, sr, yield, max_secs)
     -- sample, tens of ms on a Mac and several times that on a Pi, and a yield
     -- (clock.sleep(0)) costs nothing next to it. Every 4 blocks was a cadence
     -- sized for the old 4-tap cubic, and it froze the screen in jerks.
-    if yield then yield() end
+    -- A yield that returns false cancels: the caller no longer wants the
+    -- result, so the files close and the part-written output goes.
+    if yield and yield() == false then
+      close_src(src); of:close(); os.remove(out_path)
+      return nil, "cancelled"
+    end
   end
 
   local datalen = written * obytes

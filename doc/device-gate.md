@@ -307,6 +307,22 @@ only while `erode` is above 0 in PLAY mode. To list the running synths, type
 | 14.5 | STOP holds the head | `erode` up, K1+K2, wait ten seconds, K1+K2 again | GEN and the pass bar hold during the STOP. Later passes age evenly, with no lighter stretch | The head's `run` gate |
 | 14.6 | %CPU at rest | PLAY, `erode` 0, watch %CPU | Equal to or lower than the previous build in the same state | The point of the split |
 
+## Stage 15: the review fixes (Lua only)
+
+No engine change. Each row is tested offscreen. The device check is that the
+norns calls behave as the stubs assume, and how it feels.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 15.1 | **CHOP right after erosion** | Erode a take in PLAY, set `erode` to 0, and fire CHOP about two seconds later | maiden prints `take dump queued behind the strip repaint`, then the CHOP result. The pads land on the attacks | `take_to_wav`'s `export_next` |
+| 15.2 | A short HEAL dumps nothing | Erode in PLAY, hold VOICE K2 (HEAL) for half a second and release, then fire CHOP at once | maiden prints the CHOP result with no `queued` line | `tick_take_strip`'s second of quiet |
+| 15.3 | **Launchpad unplug** | With the Mini MK3 driving, unplug it. With midigrid and a second controller, try it with that controller attached too | maiden shows no error. The second controller takes over, and its pads do not move `pitch` | `Mgrid.hotplug(gone)`, `have_midigrid` |
+| 15.4 | GLIDE tap | Recall quantize GLIDE, glide beats 4, tap K2 on a filled slot | The sound crossfades over a bar. Nothing jumps at the tap | `tick_keys`' wait under GLIDE |
+| 15.5 | GLIDE through chaos | Hold the chaos throw, recall a slot under GLIDE, release the throw mid-glide | The glide goes on and lands the scene | The GLIDE branch of `M.recall` |
+| 15.6 | A long peek under the orbit | Orbit on, hold K2 on a filled slot for three seconds, release | The sound sweeps back to where it was before the peek | `orbit_tick` |
+| 15.7 | An off-rate deck file in a PSET | Delete `lay1-N.wav` beside a PSET whose L1 came from a 44.1k file, then load the PSET | L1 is silent for a moment, then plays the file in tune | `Mdeck.pset_read`'s clear |
+| 15.8 | Two off-rate loads in a row | Load a long 44.1k sample, then another a few seconds later | The second one loads soon after it is picked. maiden says the first was dropped | `load_at_rate`'s generation check |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new

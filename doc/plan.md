@@ -14,7 +14,7 @@ The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
 then about thirty changes landed without a device test, several of them in the
 engine. After a RESTART the engine must report `count: 65`.
 
-The offscreen tests are strong. Five test scripts run 619 assertions, the
+The offscreen tests are strong. Five test scripts run 652 assertions, the
 render suite compares 67 screens pixel by pixel, and the single-file build is
 tested for freshness. No test script can judge sound and feel. That is why the
 first step is a device session and not more code.
@@ -25,7 +25,7 @@ Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
 2. Make sure that maiden reads `count: 65`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 14, top to bottom. If a stage
+3. Walk doc/device-gate.md from stage 0 to stage 15, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
@@ -138,7 +138,10 @@ no engine change and are tested offscreen:
 
 Erosion as a spawn/free synth is also built (the 80th change). It went ahead
 of the device session by request, so stage 14 of doc/device-gate.md must pass
-before more engine work lands. The other engine items wait for Phase 1:
+before more engine work lands. A code review of the branch then found ten
+bugs in this work. The 81st change fixes them, and stage 15 of
+doc/device-gate.md checks them on the device. The other engine items wait for
+Phase 1:
 
 | Feature | Why | Cost |
 |---|---|---|

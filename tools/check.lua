@@ -45,9 +45,14 @@ print(is53 and ("checking with Lua 5.3 (" .. LUA .. ")")
 -- 1. syntax
 step("syntax: mangler.lua, lib/*.lua",
   sh(LUAC .. " -p mangler.lua lib/*.lua"))
+-- built to a temp file and compared: building over dist/ itself would make a
+-- stale build pass, and leave the fix uncommitted in the working tree
+local fresh = os.tmpname()
 step("single-file build is fresh and parses",
-  sh(LUA .. " tools/amalgamate.lua >/dev/null") and
+  sh(LUA .. " tools/amalgamate.lua mangler.lua " .. fresh .. " >/dev/null") and
+  sh("cmp -s " .. fresh .. " dist/mangler_single.lua") and
   sh(LUAC .. " -p dist/mangler_single.lua"))
+os.remove(fresh)
 
 -- 2. the harnesses
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",

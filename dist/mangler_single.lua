@@ -1057,7 +1057,11 @@ function M.pset_read(number)
         -- keep_loop: the pset's loop points are already restored and are
         -- authoritative — reloading the audio must not re-snap them. Through
         -- layer_load when it is there, so an off-rate file is converted here
-        -- too instead of coming back a semitone sharp.
+        -- too instead of coming back a semitone sharp. That conversion runs
+        -- in the background, so the deck is cleared first: until the file
+        -- lands it is silent and empty, not the previous session's audio
+        -- (which an arm would otherwise overdub into).
+        M.clear(d)
         if C.layer_load then C.layer_load(d, fp, true)
         else M.load_file(d, fp, nil, true) end
       else
@@ -1268,7 +1272,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
-local M = { gg = nil, have_midigrid = false, have_launchpad = false }
+local M = { gg = nil, have_midigrid = false, have_launchpad = false,
+            midigrid_loaded = false }
 
 local grid_mod = grid
 local no_monome = false    -- true when no native monome grid holds grid vport 1
@@ -1284,6 +1289,7 @@ do
     local ok, mg = pcall(include, "midigrid/lib/midigrid")
     if ok and mg then
       grid_mod = mg
+      M.midigrid_loaded = true
       M.have_midigrid = true
       print("mangler: midigrid loaded — midi grid controllers welcome")
     else
@@ -1361,11 +1367,13 @@ end
 
 -- find the Mini MK3's MIDI (surface) port, NOT the DAW port. ALSA names vary,
 -- so match "mk3" + a launchpad marker and prefer the MIDI/2nd interface.
-local function lp_find_device()
+-- `gone`: a device being unplugged. norns runs midi.remove BEFORE it deletes
+-- the device from midi.devices, so the search has to skip it by hand.
+local function lp_find_device(gone)
   if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
   local best
   for _, dev in pairs(midi.devices) do
-    local n = (type(dev) == "table" and type(dev.name) == "string")
+    local n = (dev ~= gone and type(dev) == "table" and type(dev.name) == "string")
       and dev.name:lower() or ""
     if n:find("mk3", 1, true)
         and (n:find("mini", 1, true) or n:find("lpmini", 1, true)) then
@@ -1553,7 +1561,7 @@ local function scene_row_key(x, z)
       -- begin the PEEK: the ramp in mangler's tick drives the morph param.
       -- this pad becomes the owner (a later pad press takes over) so releasing
       -- the FIRST of two held pads can't cancel the second's peek.
-      C.peek_on, C.peek_back = true, false
+      C.peek_on, C.peek_back, C.peek_at = true, false, C.frame
       peek_pad = x
       srow_frame[x] = C.frame
     else
@@ -1924,12 +1932,16 @@ function M.redraw()
   gg:refresh()
 end
 
-function M.connect()
+function M.connect(gone)
   gg = nil
+  -- the fallback drives unless the LP takes over below. Set on every connect,
+  -- because an LP that leaves hands the grid back to midigrid, and the vport
+  -- filter (minput) needs this flag to keep midigrid's pads out of the notes.
+  M.have_midigrid = M.midigrid_loaded
   -- prefer a native Launchpad Mini MK3 colour driver over midigrid/native when
   -- no monome grid is attached; on ANY failure fall back — can't brick.
   if no_monome then
-    local lp = lp_find_device()
+    local lp = lp_find_device(gone)
     if lp then
       local ok, cand = pcall(function() return lp_make_backend(lp).connect() end)
       if ok and cand then
@@ -1953,13 +1965,14 @@ end
 -- a MIDI device came or went. A Mini MK3 plugged in after the script loaded
 -- takes over from the fallback grid; unplugged, the fallback comes back. A
 -- fresh connect also starts a fresh LED diff, so the pads all repaint.
-function M.hotplug()
+-- `gone`: the device being removed (midi.remove passes it), still listed.
+function M.hotplug(gone)
   if not no_monome then return end
-  local lp = lp_find_device()
+  local lp = lp_find_device(gone)
   local on_lp = M.have_launchpad and gg and gg.device
   if (lp and on_lp ~= lp) or (not lp and on_lp) then
     M.have_launchpad = false
-    M.connect()
+    M.connect(gone)
   end
 end
 
@@ -3013,6 +3026,12 @@ function M.capture(slot)
   return true
 end
 
+-- does a recall GLIDE? (the peek waits for a hold then, so a tap does not
+-- move the sound before the glide starts from it: tick_keys in mangler.lua)
+function M.recall_glides()
+  return floor(pget("scene_recall_mode", 1) + 0.5) == GLIDE_MODE
+end
+
 -- recall a slot. scene_recall_mode decides when it lands (NOW / next BEAT /
 -- next BAR). a queued recall replaces any other queued recall — last press
 -- wins.
@@ -3037,6 +3056,10 @@ function M.recall(slot)
     local b = pget("scene_glide", 4)
     if floor(pget("scene_slot", 1) + 0.5) ~= slot then pset("scene_slot", slot) end
     M.auto_safe()
+    -- a held chaos throw ends HERE, as land() ends it for the other modes:
+    -- ◄ now holds the chaos state, and the footswitch's release would restore
+    -- it over the scene this glide is heading for
+    M.chaos_live = false
     M.glide = { slot = slot, from = C.frame, a0 = pget("scene_morph_amt", 0),
       frames = math.max(1, floor(b * 60 / (C.tempo and C.tempo() or 120)
         * (C.FPS or 15) + 0.5)) }
@@ -3375,7 +3398,11 @@ local ORBIT_YIELD = 2          -- seconds of quiet before the wander resumes
 local function orbit_tick()
   if not orbit.on then return end
   local amt = pget("scene_morph_amt", 0)
-  if orbit.wrote ~= nil and abs(amt - orbit.wrote) > 1e-9 then
+  -- a held RCL peek parks the amount at 1 and stops moving it, but its
+  -- release still needs the sweep's origin to go home: until it is home, the
+  -- peek is a hand on the morph even while the value stands still
+  if (orbit.wrote ~= nil and abs(amt - orbit.wrote) > 1e-9)
+      or C.peek_on or C.peek_back then
     orbit.hand_at = C.frame
   end
   orbit.wrote = amt
@@ -3955,7 +3982,8 @@ end
 -- returns true, seconds  — converted and written to out_path
 --         false, seconds — already at `sr`, nothing written
 --         nil, err       — could not decode (the caller falls back to loading
---                          the file as-is: audible-but-sharp beats silence)
+--                          the file as-is: audible-but-sharp beats silence),
+--                          or `yield` returned false ("cancelled")
 function M.convert_sr(path, out_path, sr, yield, max_secs)
   local src, err = open_src(path)
   if not src then return nil, err end
@@ -4028,7 +4056,12 @@ function M.convert_sr(path, out_path, sr, yield, max_secs)
     -- sample, tens of ms on a Mac and several times that on a Pi, and a yield
     -- (clock.sleep(0)) costs nothing next to it. Every 4 blocks was a cadence
     -- sized for the old 4-tap cubic, and it froze the screen in jerks.
-    if yield then yield() end
+    -- A yield that returns false cancels: the caller no longer wants the
+    -- result, so the files close and the part-written output goes.
+    if yield and yield() == false then
+      close_src(src); of:close(); os.remove(out_path)
+      return nil, "cancelled"
+    end
   end
 
   local datalen = written * obytes
@@ -6580,7 +6613,7 @@ local KEYS = {
         local sel = math.floor(pget("scene_slot", 1) + 0.5)
         ctx.rcl_slot = sel
         if sel >= 1 and ctx.scene.slots[sel] then
-          ctx.peek_on, ctx.peek_back = true, false
+          ctx.peek_on, ctx.peek_back, ctx.peek_at = true, false, ctx.frame
         end
       end,
       tap = function()
@@ -6749,6 +6782,9 @@ end
 -- the same tick animates the scene PEEK ramp: holding RCL drives the morph
 -- amount toward the slot (~4 frames in), releasing sweeps it home — all
 -- through the scene_morph_amt param, so motion capture and MIDI stay true.
+-- Under a GLIDE recall the ramp waits until the press is a hold: a tap
+-- glides from where the sound stands, and a ramp that had already run would
+-- turn the glide into a jump.
 local function tick_keys()
   if ctx.k13_frame and not ctx.k13_fired
       and ctx.frame - ctx.k13_frame >= ERASE_FRAMES then
@@ -6757,8 +6793,11 @@ local function tick_keys()
     ctx.k13_fired = true
   end
   if ctx.peek_on then
-    local a = pget("scene_morph_amt", 0)
-    if a < 1 then params:set("scene_morph_amt", clamp(a + 0.34, 0, 1)) end
+    if not (ctx.frame - (ctx.peek_at or 0) < TAP_FRAMES
+        and Mscenes.recall_glides()) then
+      local a = pget("scene_morph_amt", 0)
+      if a < 1 then params:set("scene_morph_amt", clamp(a + 0.34, 0, 1)) end
+    end
   elseif ctx.peek_back then
     local a = pget("scene_morph_amt", 0)
     if a > 0 then
@@ -6850,8 +6889,10 @@ function ctx.pads_uncut() ctx.pad_cuts = nil end
 -- dump of it: the empty check, the dump, the failure message and the temp
 -- file live here once. `scan(tmp, lo, hi)` runs inside the dump's own
 -- coroutine (so it can yield) over the CURRENT window; the temp file is
--- removed after it returns.
-local function scan_take(tag, scan)
+-- removed after it returns. Every scan shares the one temp file: take_to_wav
+-- holds its guard until `scan` returns, so no second dump can overwrite the
+-- file under a scan still reading it. `background`: see take_to_wav.
+local function scan_take(tag, scan, background)
   if not ctx.wave_any then
     print("mangler: " .. tag .. " — nothing recorded yet")
     return
@@ -6865,7 +6906,7 @@ local function scan_take(tag, scan)
     local lo, hi = window_bounds()
     scan(tmp, lo, hi)
     os.remove(tmp)
-  end)
+  end, background)
 end
 
 function ctx.take_tighten()
@@ -7000,6 +7041,15 @@ end
 -- existed nowhere else.
 local take_gen = 0
 
+-- the strip needs a repaint once regen or erosion stops writing (see
+-- tick_take_strip below). Declared here so a replacement can drop it.
+local strip_stale, strip_quiet = false, 0
+-- the take dump (ctx.take_to_wav, further down), declared here because
+-- tick_take_strip waits for it
+local export_clock
+local export_bg = false   -- the running dump is a background one
+local export_next         -- { out, done }: the dump waiting behind it
+
 -- the one rule for "the buffer now holds different material". The erosion
 -- age, the remembered SNAP window and the chop all belonged to the old
 -- material, and take_len bounds what a PSET save writes: the new material's
@@ -7007,6 +7057,7 @@ local take_gen = 0
 -- Every replacer goes through here, so none can forget a part of it.
 local function buffer_replaced(dur)
   take_gen = take_gen + 1
+  strip_stale = false   -- the new material's strip is drawn from its own file
   Mpages.erosion_reset()
   ctx.snap_forget()
   ctx.pads_uncut()
@@ -7022,19 +7073,38 @@ end
 
 -- regen and erosion rewrite the buffer on the engine side, where lua cannot
 -- see it, so the take's strip went on showing audio that was no longer there.
--- When the last of them stops, the take is dumped and the strip repainted
--- from the dump. Dropped if the take changed meanwhile (a clear, a load, a new
--- pass), so a late repaint can never draw old audio over new material.
+-- Once neither has written for a second, the take is dumped and the strip
+-- repainted from the dump. Dropped if the take changed meanwhile (a clear, a
+-- load, a new pass), so a late repaint can never draw old audio over new
+-- material. It runs in the background: a performer's CHOP, TIGHTEN or EXPORT
+-- that arrives during it waits for it instead of being refused.
 function ctx.refresh_take_strip()
   if not ctx.wave_any then return end
   local g = take_gen
   scan_take("REPAINT", function(tmp)
     if g == take_gen then Mpages.repaint_wave(tmp) end
-  end)
+  end, true)
 end
--- a writer stopping, with the other one not running
-local function writer_stopped(v, was, other)
-  if v == 0 and was > 0 and pget(other, 0) == 0 then ctx.refresh_take_strip() end
+
+-- POLLED each frame rather than run from the knobs' actions. The mode stops
+-- erosion as surely as its knob does, because the erosion head only runs in
+-- PLAY. The second of quiet means that a HEAL tap, a scene recall or a motion
+-- lane crossing 0 does not dump the whole take (17 MB at full length) each
+-- time it happens.
+local function take_writing()
+  return pget("regen", 0) > 0 or (pget("erode", 0) > 0 and pget("mode", 5) == 5)
+end
+local function tick_take_strip()
+  if take_writing() then
+    strip_stale, strip_quiet = true, 0
+  elseif strip_stale then
+    strip_quiet = strip_quiet + 1
+    -- a performer's dump still running would refuse the repaint: wait it out
+    if strip_quiet >= FPS and not export_clock then
+      strip_stale = false
+      ctx.refresh_take_strip()
+    end
+  end
 end
 
 -- wipe it. the engine zeroes the buffer; we clear the PICTURE with it and open
@@ -7056,8 +7126,8 @@ function ctx.clear_recording()
   -- OUTPUT — input monitor, ringing tails — into the freshly erased buffer,
   -- resurrecting what you just wiped. the engine's `clear` flushes the
   -- delay/reverb tails on its side; this stops the write head at the params.
-  -- (after the strip is cleared, so stopping regen does not dump and repaint
-  -- a buffer that is now empty)
+  -- (buffer_cleared above dropped any pending strip repaint, so stopping
+  -- regen here does not dump and repaint a buffer that is now empty)
   if pget("regen", 0) > 0 then params:set("regen", 0) end
   -- forget the loaded sample too. The take half already refuses to resurrect
   -- audio you cleared (take_pset_write deletes the pair), but a take that came
@@ -7118,14 +7188,21 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen)
     SERVER_SR / in_sr))
   local g = gen()
   ctx.run_task(function(yield)
+    -- a job whose target moved on (while it waited in the queue, or between
+    -- two blocks) stops here: converting tens of seconds of audio that will
+    -- be dropped only delays the newer request queued behind it
+    if gen() ~= g then return end
     -- capped at what the target can hold: converting past it is pure waste,
     -- and a corrupt rate header must never expand into gigabytes
-    local ok, err = Mwav.convert_sr(path, tmp, SERVER_SR, yield, cap_secs)
-    if not ok then error(err or "conversion failed", 0) end
+    local ok, err = Mwav.convert_sr(path, tmp, SERVER_SR, function()
+      yield()
+      return gen() == g
+    end, cap_secs)
+    if not ok and gen() == g then error(err or "conversion failed", 0) end
   end, function(ok, err)
     if gen() ~= g then
-      print("mangler: " .. path .. " finished converting after the " .. what
-        .. " changed — dropped, the newer material stays")
+      print("mangler: " .. path .. " dropped before it landed: the " .. what
+        .. " changed meanwhile, the newer material stays")
       return
     end
     if ok then
@@ -7271,9 +7348,9 @@ function ctx.task_yield() clock.sleep(0) end
 -- have to convert (refusing the second loaded it out of tune). Each body runs
 -- under pcall and its `on_done(ok, err)` ALWAYS runs: without that a throw
 -- halfway through (a full card, a bad read) kills the coroutine with the
--- caller's state half-set and its file handles still open. A job that waited
--- while its target changed is dropped by the caller's generation check
--- (load_at_rate), not here.
+-- caller's state half-set and its file handles still open. A job whose
+-- target changed stops itself and is dropped by the caller's generation
+-- check (load_at_rate), not here.
 local task_clock
 local task_queue = {}
 local function start_next_task()
@@ -7303,7 +7380,6 @@ function ctx.cancel_task()
   if task_clock then clock.cancel(task_clock); task_clock = nil end
 end
 
-local export_clock
 local function filesize(p)
   local f = io.open(p, "rb"); if not f then return nil end
   local s = f:seek("end"); f:close(); return s
@@ -7426,7 +7502,9 @@ end
 -- we wait out the async /b_write, then zip them. `done(ok, path)` when the file
 -- is there. Lua cannot read an SC buffer, so this file IS the API — the export
 -- and the pad chopper are both built on it.
-function ctx.take_to_wav(out, done)
+-- `background`: nobody waits on this dump (the strip repaint). A performer's
+-- dump that arrives while a background one runs waits for it, in one slot.
+function ctx.take_to_wav(out, done, background)
   if not engine.write_take then
     print("mangler: engine has no write_take — SYSTEM > RESTART")
     if done then done(false) end
@@ -7441,11 +7519,18 @@ function ctx.take_to_wav(out, done)
   -- this one clock and one tmp stem; cancelling killed the coroutine
   -- mid-interleave, leaving a TRUNCATED wav that looks finished in the browser,
   -- and the new dump would overwrite the files the cancelled one was reading.
+  -- A dump queued behind the background repaint is not refused: it waits.
   if export_clock then
+    if export_bg and not background and not export_next then
+      export_next = { out, done }
+      print("mangler: take dump queued behind the strip repaint")
+      return
+    end
     print("mangler: a take dump is already running")
     if done then done(false) end
     return
   end
+  export_bg = background == true
   local tmp = norns.state.data .. "mexport-tmp"
   -- clear any leftover temp pair first: the names are fixed, so a stale half of
   -- an interrupted dump can satisfy the size-stability wait below and get
@@ -7477,8 +7562,17 @@ function ctx.take_to_wav(out, done)
     local ok = Mwav.interleave_wav(tmp .. "_L.wav", tmp .. "_R.wav", out,
       ctx.task_yield)
     os.remove(tmp .. "_L.wav"); os.remove(tmp .. "_R.wav")
-    export_clock = nil
-    if done then done(ok, out) end
+    -- the guard holds until `done` returns. A scan reads `out` in there for
+    -- seconds, and a second dump started meanwhile would truncate the file
+    -- under it. Under pcall, so a throw cannot leave the guard set forever.
+    if done then
+      local okd, err = pcall(done, ok, out)
+      if not okd then print("mangler: the step after the take dump failed: " .. tostring(err)) end
+    end
+    export_clock, export_bg = nil, false
+    local nxt = export_next
+    export_next = nil
+    if nxt then ctx.take_to_wav(nxt[1], nxt[2]) end
   end)
 end
 
@@ -7709,13 +7803,10 @@ local function init_params()
   -- take stays dry). manual rec + freeze suspend it; engine-side it's a bounded
   -- convex crossfade so it can't run away.
   params:add_control("regen", "regen (self-resample)", unit(0.0))
-  local regen_was = 0
   params:set_action("regen", function(v)
     -- the other half of the erode interlock (see grp_erode below)
     if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
     if engine.regen then engine.regen(v) end
-    writer_stopped(v, regen_was, "erode")
-    regen_was = v
     -- regen's record head traverses the WHOLE buffer, so once it runs the take
     -- can be anywhere: force a full-buffer PSET save (sticky until the next
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
@@ -8180,7 +8271,6 @@ local function init_params()
   -- EROSION: window-synced decay in PLAY mode. `erode` is how much of each
   -- loop pass is rewritten aged; `wear` is how dark the aging filter sits.
   params:add_group("grp_erode", "erosion", 2)
-  local erode_was = 0
   params:add_control("erode", "erode", unit(0.0))
   params:set_action("erode", function(v)
     -- interlock: erode and regen are both free-running write heads on the
@@ -8189,8 +8279,6 @@ local function init_params()
     -- acts when its own value is rising.
     if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
     if engine.erode then engine.erode(v) end
-    writer_stopped(v, erode_was, "regen")
-    erode_was = v
   end)
   add_eng_control("wear", "wear", unit(0.5))
 
@@ -8256,7 +8344,7 @@ function init()
   end
   midi.remove = function(dev)
     if prev_midi_remove then prev_midi_remove(dev) end
-    Mgrid.hotplug()
+    Mgrid.hotplug(dev)   -- still in midi.devices while this runs
   end
   print("mangler: init() done, params built")
 
@@ -8294,6 +8382,7 @@ function init()
     ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
     sync_delay_time()    -- keep a synced delay on the clock (writes when off)
     Mpages.erosion_tick()  -- count loop passes while the take erodes
+    tick_take_strip()      -- repaint the strip once regen and erosion stop
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
     Mpages.update_wave()
     Mpages.update_tape_wave()
@@ -8331,6 +8420,7 @@ function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
   if export_clock then clock.cancel(export_clock) end  -- stop a pending export
+  export_clock, export_next = nil, nil
   ctx.cancel_task()     -- ...and a conversion in flight
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
