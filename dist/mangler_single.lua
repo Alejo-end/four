@@ -204,7 +204,7 @@ local ctx = {
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
-  rec_waiting = false,       -- armed with `rec_wait` on, no sound crossed yet
+  rec_waiting = false,       -- armed to start on sound, none heard yet (TAKE: WAIT)
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
@@ -2101,6 +2101,10 @@ local MOTION_EXCLUDE = {
   "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
   "chaos_throw", "orbit_on", "orbit_rate", "orbit_reach",
+  -- the sequencer: a second machine on the clock. A loop replaying its knobs
+  -- would fight it, so they are left to the hand, like the orbit's
+  "step_run", "step_div", "step_len", "step_fill", "step_order",
+  "step_chance", "step_gate",
 }
 
 local M = {
@@ -2505,6 +2509,148 @@ end
 return M
 
 end)()
+local Mseq = (function()  -- inlined lib/mseq.lua
+-- mseq: the pad sequencer. A pattern on the clock plays the pads through the
+-- same voice path a hand does (ctx.pad_trigger), so the sound-locks, the
+-- voice cap and the PADS picture all apply to it.
+--
+-- An earlier, percussive step sequencer was removed in the 49th change: the
+-- least used part, "not a percussive idea but a way to sequence the different
+-- kinds of pad sounds / drones" (doc/ux-feedback.md §28). This one starts
+-- from that note. By default it steps through four pads a bar each, legato,
+-- so the pads' own voices and pitches become a slow drone progression. The
+-- short divisions are there for rhythm when you want it.
+--
+-- The pattern is GENERATED, not drawn, so the keys, the encoders and MIDI
+-- reach all of it through the params (no grid needed): `step_fill` hits
+-- spread as evenly as they go over `step_len` steps (a euclidean rhythm), and
+-- each hit plays the next slice in `step_order`. `step_chance` skips hits at
+-- random, and `step_gate` is how much of a step a hit holds.
+--
+-- ONE voice id (VOICE_ID). Every step boundary releases it before anything
+-- else, so a pattern can never strand a voice, whatever is cancelled when.
+-- The step is read off the clock's beat count, so a start, a tempo change or
+-- MIDI clock keeps the pattern on the bar. One clock coroutine, cancelled on
+-- stop and in cleanup (the norns clock-race gotcha in CLAUDE.md).
+
+local floor = math.floor
+local C, pget
+
+local VOICE_ID = 3000
+-- beats per step, matching the step_div option names
+local DIVS = { 8, 4, 2, 1, 0.5, 0.25 }   -- 2 BAR, 1 BAR, 1/2, 1/4, 1/8, 1/16
+local ORDERS = { "UP", "DOWN", "BOUNCE", "RANDOM" }
+local NSTEP = 16
+
+local M = {
+  step = -1,      -- the step that last fired (0-based), -1 = stopped
+  hits = {},      -- hits[1..16]: true = a hit (the PADS page draws it)
+  slices = {},    -- slices[1..16]: the pad a hit plays (nil on a rest)
+  VOICE_ID = VOICE_ID, DIVS = DIVS, ORDERS = ORDERS,
+}
+local co          -- the running clock coroutine, nil when stopped
+
+-- k hits over n steps, as evenly as they go, the first step always a hit
+-- (the Bresenham form of a euclidean rhythm). Writes M.hits in place.
+local function build_hits(k, n)
+  for i = 1, NSTEP do M.hits[i] = false end
+  if k > n then k = n end
+  if k <= 0 then return end
+  for i = 0, n - 1 do
+    M.hits[i + 1] = floor(i * k / n) ~= floor((i - 1) * k / n)
+  end
+end
+
+-- which pad the h-th hit of a pass plays (h from 0). RANDOM is drawn when
+-- the hit fires, not here, so it differs pass to pass.
+local function slice_for(h, order)
+  if order == 1 then return h % 8 end
+  if order == 2 then return 7 - h % 8 end
+  if order == 3 then
+    local p = h % 14
+    return p < 8 and p or 14 - p
+  end
+  return nil
+end
+
+-- rebuild the pattern from the params. Run by their actions, never per frame.
+function M.rebuild()
+  local n = floor(pget("step_len", 4) + 0.5)
+  build_hits(floor(pget("step_fill", 4) + 0.5), n)
+  local order = floor(pget("step_order", 1) + 0.5)
+  local h = 0
+  for i = 1, NSTEP do
+    if M.hits[i] and i <= n then
+      M.slices[i] = slice_for(h, order)
+      h = h + 1
+    else
+      M.slices[i] = nil
+    end
+  end
+end
+
+local function div_beats()
+  return DIVS[floor(pget("step_div", 2) + 0.5)] or 4
+end
+
+local function release()
+  if C.pad_held[VOICE_ID] then C.pad_trigger(VOICE_ID, 0, 0) end
+end
+
+-- one step boundary, at clock beat `beats`. Returns the seconds the hit
+-- should hold before its release, or nil when the next boundary releases it.
+function M.fire(beats)
+  release()
+  local div = div_beats()
+  local n = floor(pget("step_len", 4) + 0.5)
+  local step = floor(beats / div + 0.5) % n
+  M.step = step
+  if not M.hits[step + 1] then return nil end
+  -- a STOP silences everything and an empty take has nothing to slice
+  if pget("stop_all", 0) == 1 or not C.wave_any then return nil end
+  if math.random() >= pget("step_chance", 1) then return nil end
+  local pad = M.slices[step + 1] or math.random(0, 7)
+  C.pad_trigger(VOICE_ID, pad, 1)
+  local gate = pget("step_gate", 1)
+  if gate >= 0.999 then return nil end
+  local tempo = (C.tempo and C.tempo()) or 120
+  return div * gate * 60 / tempo
+end
+
+local function run()
+  while true do
+    clock.sync(div_beats())
+    local hold = M.fire(clock.get_beats())
+    if hold then
+      clock.sleep(hold)
+      release()
+    end
+  end
+end
+
+function M.start()
+  if co then return end
+  M.rebuild()
+  co = clock.run(run)
+end
+
+function M.stop()
+  if co then clock.cancel(co) end
+  co = nil
+  M.step = -1
+  release()
+end
+
+function M.running() return co ~= nil end
+
+function M.init(ctx)
+  C = ctx
+  pget = ctx.pget
+end
+
+return M
+
+end)()
 local Mscenes = (function()  -- inlined lib/mscenes.lua
 -- mscenes: scenes, scene morphing, and the safe-state snapshot — the
 -- "remember this / go back to that" layer.
@@ -2720,6 +2866,10 @@ local SCENE_EXCLUDE = {
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
   "orbit_on", "orbit_rate", "orbit_reach",
+  -- the sequencer is a machine like the orbit: its run, and the pattern it
+  -- generates, are left where they are by a scene
+  "step_run", "step_div", "step_len", "step_fill", "step_order",
+  "step_chance", "step_gate",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",
@@ -5576,7 +5726,28 @@ local function body_PADS(frame)
   -- encoders (82px, well under the 124 limit); once a CHOP is in force that
   -- row says so instead — what the pads now mean outranks a hint you have
   -- already read, and the two together overran the line.
-  if C.pad_cuts then
+  -- the sequencer, while it runs, outranks both: its steps under the pads,
+  -- the hits as bars, the rests as dots, and the step the clock is on
+  -- bright (a tall bar while its pad sounds, a bright dot on a rest)
+  local seq = C.seq
+  if seq and pget("step_run", 0) == 1 then
+    local n = floor(pget("step_len", 4) + 0.5)
+    local sw2 = floor(112 / n)
+    local x0 = 64 - floor(sw2 * n / 2)
+    for s = 0, n - 1 do
+      local x = x0 + s * sw2
+      local now = s == seq.step
+      if seq.hits[s + 1] then
+        screen.level(now and 15 or 6)
+        if now then screen.rect(x + 1, 44, sw2 - 2, 5)
+        else screen.rect(x + 1, 45, sw2 - 2, 3) end
+      else
+        screen.level(now and 15 or 3)
+        screen.rect(x + floor(sw2 / 2), 46, 1, 1)
+      end
+      screen.fill()
+    end
+  elseif C.pad_cuts then
     local n = #C.pad_cuts - 1
     ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 4)
   else
@@ -5921,6 +6092,9 @@ local function purity()
       -- the take away underneath it
       or pget("erode", 0) > 0.001 then return false end
   if pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1 then return false end
+  -- a pad voice sounds on top of the take, and so does the sequencer that
+  -- plays them (between its hits too: the voices release with a tail)
+  if next(C.pad_held) ~= nil or pget("step_run", 0) == 1 then return false end
   -- the take must be ALL of what you hear. dry_wet blends the live INPUT
   -- against the playback path, so anything short of full wet means the monitor
   -- is mixed in on top of the recording — and at 0 the take is not audible at
@@ -6072,6 +6246,7 @@ ctx.font = Mfont
 ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
 ctx.grid = Mgrid
 ctx.motion = Mmotion
+ctx.seq = Mseq
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -6351,6 +6526,7 @@ function ctx.layer_quantize(d) ctx.layer_snap(d, SNAP_TOL) end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
+Mseq.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -7096,26 +7272,42 @@ function ctx.refresh_take_strip()
   end, true)
 end
 
--- START ON SOUND. An arm with `rec_wait` on records at once, as always, and
--- this marks where the sound first crosses `rec_thresh`: the take starts
--- there, less a pre-roll that covers the two polls' lag (rec_phase and
--- rec_amp each arrive once a frame). Recording from the arm, not from the
--- crossing, is what keeps the attack: a head started a frame late cuts it.
--- The arm phase is only ever moved FORWARD within the pass, and a pass that
--- wrapped past the buffer end before the sound came starts at the buffer.
-local REC_PREROLL = 2 / FPS
+-- START ON SOUND. An arm records at once, as always, and this watches for
+-- the first frame where what is written crosses `rec_thresh`. With `rec_wait`
+-- on at that moment, the take starts there: from where the head stood on the
+-- last QUIET frame, less one more frame. The onset came after that quiet
+-- frame, and the extra frame covers rec_phase arriving a frame late. That
+-- margin grows with a late frame, where a fixed pre-roll would not.
+-- Recording from the arm, not from the crossing, is what keeps the attack.
+-- The start only moves forward within the pass. A pass that wrapped past the
+-- buffer end before the sound came starts at the buffer's start.
+-- An overdub never waits: the old material under the new is the take too.
+-- `rec_wait` is read every frame, not latched at the arm, so turning it on or
+-- off while WAIT shows takes effect at once.
+local REC_PREROLL = 1 / FPS
+local rec_heard, rec_quiet = false, 0   -- this pass: sound seen, last quiet head
+local rec_moved = false                 -- this pass's start moved to the sound
+local function waits()
+  return pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001
+end
 local function tick_rec_wait()
-  if not ctx.rec_waiting then return end
-  if pget("rec", 0) ~= 1 then ctx.rec_waiting = false; return end
+  if pget("rec", 0) ~= 1 or rec_heard then ctx.rec_waiting = false; return end
+  ctx.rec_waiting = waits()
+  -- a STOP or a freeze writes nothing, so a level then is not the take
   if pget("stop_all", 0) == 1 or pget("freeze", 0) == 1 then return end
-  if ctx.rec_amp < pget("rec_thresh", 0.02) then return end
+  if ctx.rec_amp < pget("rec_thresh", 0.02) then
+    rec_quiet = ctx.rec_phase
+    return
+  end
+  rec_heard = true
+  if not ctx.rec_waiting then return end
   ctx.rec_waiting = false
-  local at, arm = ctx.rec_phase, ctx.rec_arm_phase
-  local from = at - REC_PREROLL / BUF_SECS
-  from = at >= arm and max(from, arm) or max(from, 0)
-  ctx.rec_arm_phase = from
+  local arm = ctx.rec_arm_phase
+  local from = rec_quiet - REC_PREROLL / BUF_SECS
+  from = rec_quiet >= arm and max(from, arm) or max(from, 0)
+  ctx.rec_arm_phase, rec_moved = from, true
   print(string.format("mangler: sound at %.2fs into the pass, the take starts there",
-    ((at - arm) % 1) * BUF_SECS))
+    ((ctx.rec_phase - arm) % 1) * BUF_SECS))
 end
 
 -- POLLED each frame rather than run from the knobs' actions. The mode stops
@@ -7804,7 +7996,9 @@ local function init_params()
       rec_open = true
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
-      ctx.rec_waiting = pget("rec_wait", 0) == 1   -- see tick_rec_wait
+      -- a fresh pass for start on sound (see tick_rec_wait)
+      rec_heard, rec_quiet, rec_moved = false, ctx.rec_phase, false
+      ctx.rec_waiting = waits()
       return
     end
     -- the rec-stop bookkeeping runs only for a pass that was really OPENED.
@@ -7818,18 +8012,24 @@ local function init_params()
       ctx.rec_waiting = false
       print("mangler: no sound crossed the threshold — the take is the whole pass")
     end
-    if ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
-      params:set("pos_start", ctx.rec_arm_phase)
-      params:set("pos_end", ctx.rec_phase)
+    -- the window writes go through set_pair, widening edge first: a take
+    -- laid down past the old window's end used to cross the pair for a moment
+    if rec_moved and ctx.rec_phase >= ctx.rec_arm_phase then
+      -- started on sound: a hit stopped soon after is still a take (at least
+      -- the 0.3s floor below), not the previous take's window over silence
+      local a = ctx.rec_arm_phase
+      Mdeck.set_pair("pos_start", "pos_end", a, max(ctx.rec_phase, min(1, a + 0.005)))
+    elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
+      Mdeck.set_pair("pos_start", "pos_end", ctx.rec_arm_phase, ctx.rec_phase)
     elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
       -- the write head wrapped past the buffer end mid-take. a wrapped
       -- window (start > end) would be SORTED into the wrong slice by
       -- window_bounds, so fall back to the whole buffer — the take is in
       -- there, just split across the seam. (proper wrap-around windows
       -- need engine support.)
-      params:set("pos_start", 0)
-      params:set("pos_end", 1)
+      Mdeck.set_pair("pos_start", "pos_end", 0, 1)
     end
+    rec_moved = false
     -- the take bounds what a PSET save writes (the write head runs
     -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
     -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
@@ -8214,6 +8414,36 @@ local function init_params()
     print("mangler: pads back to even slices")
   end)
 
+  -- the pad SEQUENCER (lib/mseq.lua): a generated pattern on the clock that
+  -- plays the pads. Every knob rebuilds the pattern in its action, so the
+  -- PADS page reads it at rest and no frame computes it.
+  params:add_group("grp_steps", "pads - sequencer", 7)
+  params:add_binary("step_run", "sequencer run", "toggle", 0)
+  params:set_action("step_run", function(v)
+    if v == 1 then
+      Mseq.start()
+      print("mangler: sequencer running — " .. math.floor(pget("step_fill", 4) + 0.5)
+        .. " of " .. math.floor(pget("step_len", 4) + 0.5) .. " steps play the pads")
+    else
+      Mseq.stop()
+    end
+  end)
+  params:add_option("step_div", "step length",
+    { "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16" }, 2)
+  params:add_number("step_len", "steps", 1, 16, 4)
+  params:set_action("step_len", function() Mseq.rebuild() end)
+  params:add_number("step_fill", "steps that play", 0, 16, 4)
+  params:set_action("step_fill", function() Mseq.rebuild() end)
+  params:add_option("step_order", "pad order", Mseq.ORDERS, 1)
+  params:set_action("step_order", function() Mseq.rebuild() end)
+  params:add_control("step_chance", "step chance", unit(1.0))
+  params:add_control("step_gate", "step gate",
+    controlspec.new(0.05, 1, "lin", 0, 1, ""),
+    function(p)
+      local v = p:get()
+      return v >= 0.999 and "LEGATO" or string.format("%d%%", floor(v * 100 + 0.5))
+    end)
+
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
   params:add_group("grp_keys", "keys", 5)
@@ -8482,6 +8712,7 @@ function cleanup()
   ctx.cancel_task()     -- ...and a conversion in flight
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
+  Mseq.stop()          -- the sequencer's clock, and its voice
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   midi.add, midi.remove = prev_midi_add, prev_midi_remove

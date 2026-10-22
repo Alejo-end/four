@@ -159,13 +159,20 @@ Turn on PARAMS > take - record > start on sound, and an armed take starts where 
 does. K2 arms as usual and TAKE shows WAIT until what is being recorded crosses the sound
 threshold. The take then starts there, with a short pre-roll that keeps the attack. The
 recording itself runs from the arm, so nothing is lost while the level is read. A pass with
-no sound over the threshold keeps the whole pass.
+no sound over the threshold keeps the whole pass, and an overdub never waits.
 
 ## Notes and pads
 
 A MIDI keyboard or a USB typing keyboard (letters as keys, Z and X for octave) retunes the
 sample chromatically. With pad routing on they play the eight slices polyphonically instead.
 Settings live in PARAMS under keys. The space bar stops and starts everything.
+
+The pad sequencer (PARAMS > pads - sequencer) plays the pads on the clock, so their own
+voices and pitches become a progression. By default it steps through four pads a bar each,
+legato: a slow drone sequence. `steps that play` spreads that many hits evenly over
+`steps`, `pad order` walks the pads up, down, back and forth or at random, `step chance`
+skips hits, and `step gate` shortens each hit. While it runs, PADS draws its steps under
+the pads. Map `sequencer run` to a footswitch to start and stop it.
 
 ## Samples
 

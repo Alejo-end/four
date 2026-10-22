@@ -56,6 +56,7 @@ local PURE = {
   mix = 0,           -- the tape holds audio: thrown fully away in the base
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
   stop_all = 0,
+  step_run = 0,      -- the pad sequencer
 }
 for id, v in pairs(PURE) do params:set(id, v) end
 
@@ -131,12 +132,30 @@ local MOVES = {
   { "the tape deck audible", "mix", 0.5 },
   { "layer 1 audible", "lay1_play", 1 },
   { "the master STOP", "stop_all", 1 },
+  { "the pad sequencer running", "step_run", 1 },
 }
+-- the sequencer's clock is not run here: env's clock.run would replace the
+-- frame loop that lit() renders through
+local real_run = clock.run
+clock.run = function() return {} end
 for _, m in ipairs(MOVES) do
   params:set(m[2], m[3])
   ok(not lit(), m[1] .. " kills the mark")
   params:set(m[2], PURE[m[2]])
   ok(lit(), "...and reverting " .. m[2] .. " restores it")
 end
+clock.run = real_run
+
+-- a pad voice sounds on top of the take: a held one kills the mark
+local ctx
+for i = 1, 255 do
+  local n, v = debug.getupvalue(key, i)
+  if n == nil then break end
+  if n == "ctx" then ctx = v end
+end
+ctx.pad_trigger(77, 0, 1)
+ok(not lit(), "a held pad voice kills the mark")
+ctx.pad_trigger(77, 0, 0)
+ok(lit(), "...and its release restores it")
 
 T.report("purity harness OK")

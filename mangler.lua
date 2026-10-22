@@ -194,7 +194,7 @@ local ctx = {
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
-  rec_waiting = false,       -- armed with `rec_wait` on, no sound crossed yet
+  rec_waiting = false,       -- armed to start on sound, none heard yet (TAKE: WAIT)
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
@@ -227,6 +227,7 @@ local Mdeck = include "lib/mdeck"
 local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
+local Mseq = include "lib/mseq"
 local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
@@ -235,6 +236,7 @@ ctx.font = Mfont
 ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
 ctx.grid = Mgrid
 ctx.motion = Mmotion
+ctx.seq = Mseq
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -514,6 +516,7 @@ function ctx.layer_quantize(d) ctx.layer_snap(d, SNAP_TOL) end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
+Mseq.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -1259,26 +1262,42 @@ function ctx.refresh_take_strip()
   end, true)
 end
 
--- START ON SOUND. An arm with `rec_wait` on records at once, as always, and
--- this marks where the sound first crosses `rec_thresh`: the take starts
--- there, less a pre-roll that covers the two polls' lag (rec_phase and
--- rec_amp each arrive once a frame). Recording from the arm, not from the
--- crossing, is what keeps the attack: a head started a frame late cuts it.
--- The arm phase is only ever moved FORWARD within the pass, and a pass that
--- wrapped past the buffer end before the sound came starts at the buffer.
-local REC_PREROLL = 2 / FPS
+-- START ON SOUND. An arm records at once, as always, and this watches for
+-- the first frame where what is written crosses `rec_thresh`. With `rec_wait`
+-- on at that moment, the take starts there: from where the head stood on the
+-- last QUIET frame, less one more frame. The onset came after that quiet
+-- frame, and the extra frame covers rec_phase arriving a frame late. That
+-- margin grows with a late frame, where a fixed pre-roll would not.
+-- Recording from the arm, not from the crossing, is what keeps the attack.
+-- The start only moves forward within the pass. A pass that wrapped past the
+-- buffer end before the sound came starts at the buffer's start.
+-- An overdub never waits: the old material under the new is the take too.
+-- `rec_wait` is read every frame, not latched at the arm, so turning it on or
+-- off while WAIT shows takes effect at once.
+local REC_PREROLL = 1 / FPS
+local rec_heard, rec_quiet = false, 0   -- this pass: sound seen, last quiet head
+local rec_moved = false                 -- this pass's start moved to the sound
+local function waits()
+  return pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001
+end
 local function tick_rec_wait()
-  if not ctx.rec_waiting then return end
-  if pget("rec", 0) ~= 1 then ctx.rec_waiting = false; return end
+  if pget("rec", 0) ~= 1 or rec_heard then ctx.rec_waiting = false; return end
+  ctx.rec_waiting = waits()
+  -- a STOP or a freeze writes nothing, so a level then is not the take
   if pget("stop_all", 0) == 1 or pget("freeze", 0) == 1 then return end
-  if ctx.rec_amp < pget("rec_thresh", 0.02) then return end
+  if ctx.rec_amp < pget("rec_thresh", 0.02) then
+    rec_quiet = ctx.rec_phase
+    return
+  end
+  rec_heard = true
+  if not ctx.rec_waiting then return end
   ctx.rec_waiting = false
-  local at, arm = ctx.rec_phase, ctx.rec_arm_phase
-  local from = at - REC_PREROLL / BUF_SECS
-  from = at >= arm and max(from, arm) or max(from, 0)
-  ctx.rec_arm_phase = from
+  local arm = ctx.rec_arm_phase
+  local from = rec_quiet - REC_PREROLL / BUF_SECS
+  from = rec_quiet >= arm and max(from, arm) or max(from, 0)
+  ctx.rec_arm_phase, rec_moved = from, true
   print(string.format("mangler: sound at %.2fs into the pass, the take starts there",
-    ((at - arm) % 1) * BUF_SECS))
+    ((ctx.rec_phase - arm) % 1) * BUF_SECS))
 end
 
 -- POLLED each frame rather than run from the knobs' actions. The mode stops
@@ -1967,7 +1986,9 @@ local function init_params()
       rec_open = true
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
-      ctx.rec_waiting = pget("rec_wait", 0) == 1   -- see tick_rec_wait
+      -- a fresh pass for start on sound (see tick_rec_wait)
+      rec_heard, rec_quiet, rec_moved = false, ctx.rec_phase, false
+      ctx.rec_waiting = waits()
       return
     end
     -- the rec-stop bookkeeping runs only for a pass that was really OPENED.
@@ -1981,18 +2002,24 @@ local function init_params()
       ctx.rec_waiting = false
       print("mangler: no sound crossed the threshold — the take is the whole pass")
     end
-    if ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
-      params:set("pos_start", ctx.rec_arm_phase)
-      params:set("pos_end", ctx.rec_phase)
+    -- the window writes go through set_pair, widening edge first: a take
+    -- laid down past the old window's end used to cross the pair for a moment
+    if rec_moved and ctx.rec_phase >= ctx.rec_arm_phase then
+      -- started on sound: a hit stopped soon after is still a take (at least
+      -- the 0.3s floor below), not the previous take's window over silence
+      local a = ctx.rec_arm_phase
+      Mdeck.set_pair("pos_start", "pos_end", a, max(ctx.rec_phase, min(1, a + 0.005)))
+    elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
+      Mdeck.set_pair("pos_start", "pos_end", ctx.rec_arm_phase, ctx.rec_phase)
     elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
       -- the write head wrapped past the buffer end mid-take. a wrapped
       -- window (start > end) would be SORTED into the wrong slice by
       -- window_bounds, so fall back to the whole buffer — the take is in
       -- there, just split across the seam. (proper wrap-around windows
       -- need engine support.)
-      params:set("pos_start", 0)
-      params:set("pos_end", 1)
+      Mdeck.set_pair("pos_start", "pos_end", 0, 1)
     end
+    rec_moved = false
     -- the take bounds what a PSET save writes (the write head runs
     -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
     -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
@@ -2377,6 +2404,36 @@ local function init_params()
     print("mangler: pads back to even slices")
   end)
 
+  -- the pad SEQUENCER (lib/mseq.lua): a generated pattern on the clock that
+  -- plays the pads. Every knob rebuilds the pattern in its action, so the
+  -- PADS page reads it at rest and no frame computes it.
+  params:add_group("grp_steps", "pads - sequencer", 7)
+  params:add_binary("step_run", "sequencer run", "toggle", 0)
+  params:set_action("step_run", function(v)
+    if v == 1 then
+      Mseq.start()
+      print("mangler: sequencer running — " .. math.floor(pget("step_fill", 4) + 0.5)
+        .. " of " .. math.floor(pget("step_len", 4) + 0.5) .. " steps play the pads")
+    else
+      Mseq.stop()
+    end
+  end)
+  params:add_option("step_div", "step length",
+    { "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16" }, 2)
+  params:add_number("step_len", "steps", 1, 16, 4)
+  params:set_action("step_len", function() Mseq.rebuild() end)
+  params:add_number("step_fill", "steps that play", 0, 16, 4)
+  params:set_action("step_fill", function() Mseq.rebuild() end)
+  params:add_option("step_order", "pad order", Mseq.ORDERS, 1)
+  params:set_action("step_order", function() Mseq.rebuild() end)
+  params:add_control("step_chance", "step chance", unit(1.0))
+  params:add_control("step_gate", "step gate",
+    controlspec.new(0.05, 1, "lin", 0, 1, ""),
+    function(p)
+      local v = p:get()
+      return v >= 0.999 and "LEGATO" or string.format("%d%%", floor(v * 100 + 0.5))
+    end)
+
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
   params:add_group("grp_keys", "keys", 5)
@@ -2645,6 +2702,7 @@ function cleanup()
   ctx.cancel_task()     -- ...and a conversion in flight
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
+  Mseq.stop()          -- the sequencer's clock, and its voice
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   midi.add, midi.remove = prev_midi_add, prev_midi_remove

@@ -2237,9 +2237,9 @@ end
 -- 25 · start on sound
 -- ============================================================================
 -- An arm with rec_wait on records at once, and the take starts where the
--- sound first crosses rec_thresh, less a two-frame pre-roll.
+-- head stood on the last quiet frame before the sound, less one frame.
 do
-  local PRE = (2 / CTX.FPS) / CTX.BUF_SECS
+  local PRE = (1 / CTX.FPS) / CTX.BUF_SECS
   local function pass(arm, quiet_to, sound_at, stop_at)
     _h.push("rec_amp", 0); _h.push("rec_phase", arm); _h.run_ticks(1)
     params:set("rec", 1)
@@ -2262,17 +2262,54 @@ do
   local waited, still = pass(0.10, 0.12, 0.13, 0.20)
   ok(waited and still, "an arm with start-on-sound waits, through input under the threshold")
   ok(not CTX.rec_waiting, "...and a sound over it ends the wait")
-  near(params:get("pos_start"), 0.13 - PRE, 1e-4, "...the take starts at the sound, less the pre-roll")
+  near(params:get("pos_start"), 0.12 - PRE, 1e-4,
+    "...the take starts at the last quiet frame, less one more")
   near(params:get("pos_end"), 0.20, 1e-4, "...and ends where the pass stopped")
   pass(0.50, 0.50, 0.501, 0.55)
   near(params:get("pos_start"), 0.50, 1e-4, "the pre-roll never reaches back before the arm")
   pass(0.30, 0.35, nil, 0.36)
   near(params:get("pos_start"), 0.30, 1e-4, "a pass with no sound is the whole pass")
   ok(not CTX.rec_waiting, "...and ends its wait")
-  pass(0.95, 0.99, 0.02, 0.05)                -- the head wrapped while it waited
-  near(params:get("pos_start"), 0.02 - PRE, 1e-4,
+  pass(0.95, 1.03, 0.04, 0.07)                -- the head wrapped while it waited
+  near(params:get("pos_start"), 0.03 - PRE, 1e-4,
     "a wait that wrapped the buffer starts the take at the sound")
-  near(params:get("pos_end"), 0.05, 1e-4, "...a window, not the whole buffer")
+  near(params:get("pos_end"), 0.07, 1e-4, "...a window, not the whole buffer")
+  -- a hit stopped a moment later is still a take (the 0.3s floor), not the
+  -- previous take's window left over the silence this pass wrote
+  pass(0.20, 0.30, 0.302, 0.303)
+  near(params:get("pos_start"), 0.30 - PRE, 1e-4, "a short hit after a long wait is the take")
+  near(params:get("pos_end"), 0.30 - PRE + 0.005, 1e-4, "...at least the 0.3s floor long")
+  -- an overdub keeps the old material under the new, so it never waits
+  params:set("pre_level", 0.7)
+  pass(0.60, 0.65, 0.66, 0.70)
+  near(params:get("pos_start"), 0.60, 1e-4, "an overdub does not wait: the take starts at the arm")
+  params:set("pre_level", 0)
+  -- read live: turned off while WAIT shows, the start stays at the arm
+  _h.push("rec_amp", 0); _h.push("rec_phase", 0.40); _h.run_ticks(1)
+  params:set("rec", 1)
+  _h.push("rec_phase", 0.42); _h.run_ticks(1)
+  ok(CTX.rec_waiting, "armed to start on sound, WAIT shows")
+  params:set("rec_wait", 0); _h.run_ticks(1)
+  ok(not CTX.rec_waiting, "...turned off, it stops waiting at once")
+  _h.push("rec_phase", 0.43); _h.push("rec_amp", 0.3); _h.run_ticks(1)
+  _h.push("rec_phase", 0.48); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0.40, 1e-4, "...and the take starts at the arm")
+  params:set("rec_wait", 1)
+  -- a take laid past the old window's end: the pair never crosses on the way
+  params:set("rec_wait", 0)
+  local crossed = false
+  local real_set = params.set
+  params.set = function(self, id, v, ...)
+    real_set(self, id, v, ...)
+    if params:get("pos_start") > params:get("pos_end") then crossed = true end
+  end
+  pass(0.10, 0.10, nil, 0.20)                 -- window 0.10..0.20
+  pass(0.70, 0.70, nil, 0.80)                 -- the next take, past its end
+  params.set = real_set
+  ok(not crossed and math.abs(params:get("pos_start") - 0.70) < 1e-4,
+    "a new take past the old window's end moves the window without crossing it")
+  params:set("rec_wait", 1)
   -- a STOP holds the wait: the head writes nothing, so a level then is not sound
   _h.push("rec_amp", 0); _h.push("rec_phase", 0.6); _h.run_ticks(1)
   params:set("rec", 1)
@@ -2286,6 +2323,80 @@ do
   pass(0.40, 0.42, 0.43, 0.48)
   near(params:get("pos_start"), 0.40, 1e-4, "with start-on-sound off, the take starts at the arm")
   _h.push("rec_amp", 0)
+end
+
+-- ============================================================================
+-- 26 · the pad sequencer
+-- ============================================================================
+-- A generated pattern on the clock plays the pads through pad_trigger, one
+-- voice id, released at every step boundary. The clock is driven by hand
+-- here: fire(beats) is one boundary.
+do
+  local seq = CTX.seq
+  local real_run, real_on, real_off = clock.run, engine.note_on, engine.note_off
+  local ons, offs = {}, 0
+  engine.note_on = function(id, pos, rate, typ, amp, len) ons[#ons + 1] = { id = id, pos = pos } end
+  engine.note_off = function() offs = offs + 1 end
+  clock.run = function() return {} end
+  local cancelled = 0
+  local real_cancel = clock.cancel
+  clock.cancel = function() cancelled = cancelled + 1 end
+  CTX.wave_any = true
+  params:set("stop_all", 0)
+  local function hits()
+    local t = {}
+    for i = 1, math.floor(params:get("step_len") + 0.5) do t[i] = seq.hits[i] and "x" or "." end
+    return table.concat(t)
+  end
+  params:set("step_len", 8); params:set("step_fill", 3)
+  ok(hits() == "x..x..x.", "3 of 8 steps spread evenly (" .. hits() .. ")")
+  params:set("step_fill", 0)
+  ok(hits() == "........", "no steps that play is silence")
+  params:set("step_fill", 12)
+  ok(hits() == "xxxxxxxx", "more hits than steps fills them all")
+  params:set("step_len", 4); params:set("step_fill", 4); params:set("step_order", 1)
+  ok(seq.slices[1] == 0 and seq.slices[4] == 3, "UP plays the pads in turn")
+  params:set("step_order", 2)
+  ok(seq.slices[1] == 7 and seq.slices[4] == 4, "DOWN plays them from the top")
+  params:set("step_len", 16); params:set("step_fill", 16); params:set("step_order", 3)
+  ok(seq.slices[8] == 7 and seq.slices[9] == 6 and seq.slices[15] == 0,
+    "BOUNCE turns at the ends")
+  params:set("step_len", 4); params:set("step_fill", 4); params:set("step_order", 1)
+  params:set("step_div", 2); params:set("step_gate", 1); params:set("step_chance", 1)
+  params:set("step_run", 1)
+  ok(seq.running(), "sequencer run starts its clock")
+  ok(seq.fire(0) == nil and #ons == 1 and ons[1].id == seq.VOICE_ID,
+    "a hit plays a pad voice, held to the next step when legato")
+  ok(CTX.pad_held[seq.VOICE_ID] == 0, "...the first step's pad")
+  seq.fire(4)                                 -- one bar later: step 2
+  ok(offs == 1 and #ons == 2 and CTX.pad_held[seq.VOICE_ID] == 1,
+    "the next step releases the voice and plays the next pad")
+  ok(seq.step == 1, "...and the page reads which step fired")
+  seq.fire(16)                                -- four bars: round to step 1
+  ok(seq.step == 0 and CTX.pad_held[seq.VOICE_ID] == 0, "the step is read off the beat count")
+  params:set("step_gate", 0.5)
+  local hold = seq.fire(4)
+  near(hold, 4 * 0.5 * 60 / CTX.tempo(), 1e-9, "a gate under a step holds that part of it")
+  params:set("step_gate", 1)
+  params:set("step_chance", 0)
+  local n = #ons
+  seq.fire(8)
+  ok(#ons == n and CTX.pad_held[seq.VOICE_ID] == nil, "chance 0 plays nothing, and releases")
+  params:set("step_chance", 1)
+  params:set("stop_all", 1)
+  seq.fire(12)
+  ok(#ons == n and CTX.pad_held[seq.VOICE_ID] == nil, "under a STOP it plays nothing")
+  params:set("stop_all", 0)
+  CTX.wave_any = false
+  seq.fire(12)
+  ok(#ons == n, "an empty take plays nothing")
+  CTX.wave_any = true
+  seq.fire(0)
+  params:set("step_run", 0)
+  ok(not seq.running() and cancelled >= 1 and CTX.pad_held[seq.VOICE_ID] == nil,
+    "stopped, the clock is cancelled and the voice released")
+  clock.run, clock.cancel = real_run, real_cancel
+  engine.note_on, engine.note_off = real_on, real_off
 end
 
 T.report("control harness OK")

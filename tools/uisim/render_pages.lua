@@ -145,6 +145,15 @@ local function goto_page(name)
   -- settled page, not the navigation chrome on top of it
   run_ticks(12)
 end
+-- the script's own state table (a local of mangler.lua, reached through an
+-- upvalue of key()), for a state the params cannot set
+local function script_ctx()
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(key, i)
+    if n == nil then break end
+    if n == "ctx" then return v end
+  end
+end
 local function pfx(name, suffix)
   return string.format("%s_%02d_%s%s", PREFIX, PAGE_IDX[name], name, suffix or "")
 end
@@ -304,12 +313,7 @@ else
   export(pfx("TAKE", "_REC"))
   -- armed to start on sound and none yet: WAIT where the seconds were. Set on
   -- the script's state directly, so the pass and every later shot are as before
-  local ctx
-  for i = 1, 255 do
-    local n, v = debug.getupvalue(key, i)
-    if n == nil then break end
-    if n == "ctx" then ctx = v end
-  end
+  local ctx = script_ctx()
   ctx.rec_waiting = true
   redraw()
   export(pfx("TAKE", "_WAIT"))
@@ -362,6 +366,20 @@ else
   export(pfx("PADS", "_LIVE"))
   key(2, 0)
   params:set("pad_input", 0)
+  -- the sequencer running: its steps under the pads, the third one fired.
+  -- Its clock is not run (env's clock.run would replace the frame loop), and
+  -- the step is fired by hand, then released
+  local real_run = clock.run
+  clock.run = function() return {} end
+  params:set("step_len", 8); params:set("step_fill", 5)
+  params:set("step_run", 1)
+  local seq = script_ctx().seq
+  seq.fire(8)
+  redraw()
+  export(pfx("PADS", "_SEQ"))
+  params:set("step_run", 0)
+  params:set("step_len", 4); params:set("step_fill", 4)
+  clock.run = real_run
   -- LAYERS with material: L1 recording (blinking write flag, DUB), L2 looping
   -- a shorter region at a different rate — the drift that makes two decks worth
   -- having

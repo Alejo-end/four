@@ -1326,7 +1326,28 @@ local function body_PADS(frame)
   -- encoders (82px, well under the 124 limit); once a CHOP is in force that
   -- row says so instead — what the pads now mean outranks a hint you have
   -- already read, and the two together overran the line.
-  if C.pad_cuts then
+  -- the sequencer, while it runs, outranks both: its steps under the pads,
+  -- the hits as bars, the rests as dots, and the step the clock is on
+  -- bright (a tall bar while its pad sounds, a bright dot on a rest)
+  local seq = C.seq
+  if seq and pget("step_run", 0) == 1 then
+    local n = floor(pget("step_len", 4) + 0.5)
+    local sw2 = floor(112 / n)
+    local x0 = 64 - floor(sw2 * n / 2)
+    for s = 0, n - 1 do
+      local x = x0 + s * sw2
+      local now = s == seq.step
+      if seq.hits[s + 1] then
+        screen.level(now and 15 or 6)
+        if now then screen.rect(x + 1, 44, sw2 - 2, 5)
+        else screen.rect(x + 1, 45, sw2 - 2, 3) end
+      else
+        screen.level(now and 15 or 3)
+        screen.rect(x + floor(sw2 / 2), 46, 1, 1)
+      end
+      screen.fill()
+    end
+  elseif C.pad_cuts then
     local n = #C.pad_cuts - 1
     ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 4)
   else
@@ -1671,6 +1692,9 @@ local function purity()
       -- the take away underneath it
       or pget("erode", 0) > 0.001 then return false end
   if pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1 then return false end
+  -- a pad voice sounds on top of the take, and so does the sequencer that
+  -- plays them (between its hits too: the voices release with a tail)
+  if next(C.pad_held) ~= nil or pget("step_run", 0) == 1 then return false end
   -- the take must be ALL of what you hear. dry_wet blends the live INPUT
   -- against the playback path, so anything short of full wet means the monitor
   -- is mixed in on top of the recording — and at 0 the take is not audible at

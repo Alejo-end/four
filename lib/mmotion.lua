@@ -102,6 +102,10 @@ local MOTION_EXCLUDE = {
   "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
   "chaos_throw", "orbit_on", "orbit_rate", "orbit_reach",
+  -- the sequencer: a second machine on the clock. A loop replaying its knobs
+  -- would fight it, so they are left to the hand, like the orbit's
+  "step_run", "step_div", "step_len", "step_fill", "step_order",
+  "step_chance", "step_gate",
 }
 
 local M = {

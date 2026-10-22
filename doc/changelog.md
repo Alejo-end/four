@@ -3004,6 +3004,44 @@ fingerprint STAYS 65, on branch `full-review`)**. The first of the additions.
 * VERIFIED: 669 assertions (384/114/87/41/43). `tools/check.lua` green on
   Lua 5.3.6.
 
+Eighty-fourth change: **start on sound, the review fixes (Lua + tooling,
+ENGINE UNTOUCHED, fingerprint STAYS 65)**. A reviewer agent read the 83rd.
+* **The pre-roll** is now taken from the head on the last quiet frame, less
+  one frame, so a late frame widens it. The fixed two frames could cut a soft
+  attack.
+* **A hit stopped a moment after the crossing** set no window, so the loop
+  stayed on the previous take over the silence this pass wrote. A take that
+  started on sound now gets at least the 0.3 s floor.
+* **An overdub never waits**: `rec_amp` does not hear the old material that
+  `pre_level` keeps, and trimming it out of the loop was wrong.
+* **`rec_wait` is read every frame**, not latched at the arm.
+* **The rec stop's window writes go through `Mdeck.set_pair`.** A take laid
+  past the old window's end crossed the pair for a moment. This bug is older
+  than start on sound.
+
+Eighty-fifth change: **the pad sequencer (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65)**. New module lib/mseq.lua (amalgamate 9 to 10).
+* **Why a sequencer again**: the 49th change removed a percussive one. The
+  feedback then was "not a percussive idea but a way to sequence the
+  different kinds of pad sounds / drones" (doc/ux-feedback.md §28). This one
+  starts there: by default four pads a bar each, legato.
+* **The pattern is generated**: `step_fill` hits spread evenly over
+  `step_len` (a euclidean rhythm), and `step_order` picks the pad per hit
+  (UP, DOWN, BOUNCE, RANDOM). `step_chance` and `step_gate` shape it. Every
+  knob rebuilds the pattern in its action. No grid is needed.
+* **One voice id (3000)**, released at every step boundary before anything
+  else, so nothing can strand a voice. The step is read off the clock's beat
+  count. One clock coroutine, cancelled on stop and in cleanup.
+* **PADS** draws the steps under the pads while it runs.
+* **Purity**: a held pad voice and a running sequencer now kill the ◇ mark.
+  Pad voices never did, which is older than the sequencer.
+* **Classified**: all seven params in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`,
+  as the orbit's are.
+* RENDERS: identical, plus PADS_SEQ (69 shots). Device rows 16.3 to 16.6.
+* VERIFIED: 697 assertions (408/114/87/41/47). Each fix and guard of the
+  84th was removed once, and its test failed. `tools/check.lua` green on Lua
+  5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

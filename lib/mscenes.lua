@@ -212,6 +212,10 @@ local SCENE_EXCLUDE = {
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
   "orbit_on", "orbit_rate", "orbit_reach",
+  -- the sequencer is a machine like the orbit: its run, and the pattern it
+  -- generates, are left where they are by a scene
+  "step_run", "step_div", "step_len", "step_fill", "step_order",
+  "step_chance", "step_gate",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",

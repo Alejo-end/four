@@ -335,6 +335,10 @@ and that the engine polls behave as the stubs assume.
 |---|---|---|---|---|
 | 16.1 | **Start on sound** | PARAMS > take - record > start on sound on. K2, wait three seconds in silence, play a hard attack, K2 | TAKE shows WAIT until you play. The loop starts on the attack, with the attack whole, and maiden prints `sound at` | `tick_rec_wait`, `REC_PREROLL` |
 | 16.2 | The threshold | Raise `sound threshold` until a quiet note no longer starts the take | The quiet note keeps WAIT; a louder one starts it | `rec_thresh`, the `rec_amp` poll |
+| 16.3 | A short hit | Start on sound on, K2, wait, one drum hit, K2 straight after | The loop is the hit, not the previous take | The `rec_moved` branch of the rec stop |
+| 16.4 | **Sequencer drone** | Set four pads to different pitches (PADS E3), GRAIN voice, `voice release` about 2s, then `sequencer run` on | A pad a bar, overlapping into a slow progression. PADS shows the steps, the current one bright | `Mseq.fire`, `clock.sync` |
+| 16.5 | Sequencer on the clock | Run it with 1/16 steps and 5 of 8, change the tempo, then stop and start it | It stays on the beat through the tempo change, and starts again on the bar | The beat count in `Mseq.fire` |
+| 16.6 | Sequencer stop | While it plays, K1+K2 (STOP), then `sequencer run` off | Silence at once, no voice left hanging after the stop or the run off | `release()`, `Mseq.stop` |
 
 ## When it passes
 
