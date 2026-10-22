@@ -153,6 +153,14 @@ sixty seconds of mostly silence. The `capture scope` parameter switches CAP to F
 scenes: a slot that stores just filter, drive, delay, reverb and shimmer, and lands or
 morphs over whatever material is playing.
 
+## Recording
+
+Turn on PARAMS > take - record > start on sound, and an armed take starts where the sound
+does. K2 arms as usual and TAKE shows WAIT until what is being recorded crosses the sound
+threshold. The take then starts there, with a short pre-roll that keeps the attack. The
+recording itself runs from the arm, so nothing is lost while the level is read. A pass with
+no sound over the threshold keeps the whole pass.
+
 ## Notes and pads
 
 A MIDI keyboard or a USB typing keyboard (letters as keys, Z and X for octave) retunes the

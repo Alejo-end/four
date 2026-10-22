@@ -197,6 +197,7 @@ local SCENE_EXCLUDE = {
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
+  "rec_wait", "rec_thresh",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",

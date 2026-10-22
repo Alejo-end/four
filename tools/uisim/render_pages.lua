@@ -302,6 +302,18 @@ else
   push("amp_in_r", 0.6)
   redraw()
   export(pfx("TAKE", "_REC"))
+  -- armed to start on sound and none yet: WAIT where the seconds were. Set on
+  -- the script's state directly, so the pass and every later shot are as before
+  local ctx
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(key, i)
+    if n == nil then break end
+    if n == "ctx" then ctx = v end
+  end
+  ctx.rec_waiting = true
+  redraw()
+  export(pfx("TAKE", "_WAIT"))
+  ctx.rec_waiting = false
   params:set("rec", 0)
   -- S17 self-resampling badges
   params:set("resample", 0.4)

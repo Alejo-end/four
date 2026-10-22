@@ -595,8 +595,13 @@ local function body_TAKE(frame)
     screen.line(wx, TK_MID + TK_HALF + 2)
     screen.stroke()
     -- elapsed seconds: the one number a performer needs
-    local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
-    ptext(string.format("%.1fS", el), 88, 46, 2, 15)
+    -- ...or, armed to start on sound and none yet, WAIT
+    if C.rec_waiting then
+      ptext("WAIT", 88, 46, 2, (frame % FPS) < (FPS / 2) and 15 or 6)
+    else
+      local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
+      ptext(string.format("%.1fS", el), 88, 46, 2, 15)
+    end
     -- input meter with the record-ready bracket (peak inside = clean take)
     ptext("IN", 2, 47, 1, 5)
     local sig = sqrt(clamp(max(amp_in[1], amp_in[2]), 0, 1))

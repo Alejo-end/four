@@ -2233,4 +2233,59 @@ do
   clock.run, util.file_exists = real_run, real_exists
 end
 
+-- ============================================================================
+-- 25 · start on sound
+-- ============================================================================
+-- An arm with rec_wait on records at once, and the take starts where the
+-- sound first crosses rec_thresh, less a two-frame pre-roll.
+do
+  local PRE = (2 / CTX.FPS) / CTX.BUF_SECS
+  local function pass(arm, quiet_to, sound_at, stop_at)
+    _h.push("rec_amp", 0); _h.push("rec_phase", arm); _h.run_ticks(1)
+    params:set("rec", 1)
+    local waited = CTX.rec_waiting
+    local ph = arm
+    while ph < quiet_to - 1e-9 do
+      ph = ph + 0.002
+      _h.push("rec_phase", ph % 1); _h.push("rec_amp", 0.01); _h.run_ticks(1)
+    end
+    local still = CTX.rec_waiting
+    if sound_at then
+      _h.push("rec_phase", sound_at); _h.push("rec_amp", 0.3); _h.run_ticks(1)
+    end
+    _h.push("rec_phase", stop_at); _h.run_ticks(1)
+    params:set("rec", 0)
+    return waited, still
+  end
+  params:set("stop_all", 0); params:set("freeze", 0)
+  params:set("rec_wait", 1); params:set("rec_thresh", 0.05)
+  local waited, still = pass(0.10, 0.12, 0.13, 0.20)
+  ok(waited and still, "an arm with start-on-sound waits, through input under the threshold")
+  ok(not CTX.rec_waiting, "...and a sound over it ends the wait")
+  near(params:get("pos_start"), 0.13 - PRE, 1e-4, "...the take starts at the sound, less the pre-roll")
+  near(params:get("pos_end"), 0.20, 1e-4, "...and ends where the pass stopped")
+  pass(0.50, 0.50, 0.501, 0.55)
+  near(params:get("pos_start"), 0.50, 1e-4, "the pre-roll never reaches back before the arm")
+  pass(0.30, 0.35, nil, 0.36)
+  near(params:get("pos_start"), 0.30, 1e-4, "a pass with no sound is the whole pass")
+  ok(not CTX.rec_waiting, "...and ends its wait")
+  pass(0.95, 0.99, 0.02, 0.05)                -- the head wrapped while it waited
+  near(params:get("pos_start"), 0.02 - PRE, 1e-4,
+    "a wait that wrapped the buffer starts the take at the sound")
+  near(params:get("pos_end"), 0.05, 1e-4, "...a window, not the whole buffer")
+  -- a STOP holds the wait: the head writes nothing, so a level then is not sound
+  _h.push("rec_amp", 0); _h.push("rec_phase", 0.6); _h.run_ticks(1)
+  params:set("rec", 1)
+  params:set("stop_all", 1)
+  _h.push("rec_amp", 0.3); _h.run_ticks(2)
+  ok(CTX.rec_waiting, "under a STOP a sound does not end the wait")
+  params:set("stop_all", 0); _h.push("rec_phase", 0.62); _h.run_ticks(1)
+  ok(not CTX.rec_waiting, "...and on START it does")
+  params:set("rec", 0)
+  params:set("rec_wait", 0)
+  pass(0.40, 0.42, 0.43, 0.48)
+  near(params:get("pos_start"), 0.40, 1e-4, "with start-on-sound off, the take starts at the arm")
+  _h.push("rec_amp", 0)
+end
+
 T.report("control harness OK")

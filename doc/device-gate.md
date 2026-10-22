@@ -326,6 +326,16 @@ norns calls behave as the stubs assume, and how it feels.
 | 15.10 | A regen flick | MIDI-map `regen`, flick the CC up and straight back to 0 on a long take | About a second later maiden shows no error and the take strip redraws | `strip_wrote` in the regen action |
 | 15.11 | An off-rate layer file by hand | L1 playing, then PARAMS > layers > L1 load file, a 44.1k wav | L1 goes silent at once, then plays the new file in tune | `ctx.layer_load`'s clear |
 
+## Stage 16: the additions (Lua only)
+
+No engine change. Each row is tested offscreen. The device check is the feel,
+and that the engine polls behave as the stubs assume.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 16.1 | **Start on sound** | PARAMS > take - record > start on sound on. K2, wait three seconds in silence, play a hard attack, K2 | TAKE shows WAIT until you play. The loop starts on the attack, with the attack whole, and maiden prints `sound at` | `tick_rec_wait`, `REC_PREROLL` |
+| 16.2 | The threshold | Raise `sound threshold` until a quiet note no longer starts the take | The quiet note keeps WAIT; a louder one starts it | `rec_thresh`, the `rec_amp` poll |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new

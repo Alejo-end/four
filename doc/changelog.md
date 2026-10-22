@@ -2987,6 +2987,23 @@ cleanups. Nine are done. Each behaviour fix has a test that failed before it.
   removed once, and its test failed. `tools/check.lua` green on Lua 5.3.6
   and on 5.5.
 
+Eighty-third change: **start on sound (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65, on branch `full-review`)**. The first of the additions.
+* **What it does**: with `rec_wait` on, an armed take starts where the sound
+  first crosses `rec_thresh`. The head records from the arm, as always, and
+  `tick_rec_wait` moves the arm phase to the crossing less a two-frame
+  pre-roll. Starting the head at the crossing would cut the attack, because
+  the level arrives once a frame.
+* **The level** is the engine's `rec_amp`, what is being written, so a
+  resample counts too. A STOP holds the wait. A pass with no sound keeps the
+  whole pass. A wait that wrapped the buffer starts at the sound.
+* **The screen**: TAKE shows WAIT in place of the elapsed seconds.
+* **Classified**: both params in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`. The
+  record group is 15.
+* RENDERS: identical, plus TAKE_WAIT (68 shots). Device rows: stage 16.
+* VERIFIED: 669 assertions (384/114/87/41/43). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

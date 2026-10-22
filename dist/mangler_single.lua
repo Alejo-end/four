@@ -204,6 +204,7 @@ local ctx = {
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
+  rec_waiting = false,       -- armed with `rec_wait` on, no sound crossed yet
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
@@ -2078,6 +2079,7 @@ local MOTION_EXCLUDE = {
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
+  "rec_wait", "rec_thresh",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
@@ -2703,6 +2705,7 @@ local SCENE_EXCLUDE = {
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
+  "rec_wait", "rec_thresh",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
@@ -4842,8 +4845,13 @@ local function body_TAKE(frame)
     screen.line(wx, TK_MID + TK_HALF + 2)
     screen.stroke()
     -- elapsed seconds: the one number a performer needs
-    local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
-    ptext(string.format("%.1fS", el), 88, 46, 2, 15)
+    -- ...or, armed to start on sound and none yet, WAIT
+    if C.rec_waiting then
+      ptext("WAIT", 88, 46, 2, (frame % FPS) < (FPS / 2) and 15 or 6)
+    else
+      local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
+      ptext(string.format("%.1fS", el), 88, 46, 2, 15)
+    end
     -- input meter with the record-ready bracket (peak inside = clean take)
     ptext("IN", 2, 47, 1, 5)
     local sig = sqrt(clamp(max(amp_in[1], amp_in[2]), 0, 1))
@@ -7088,6 +7096,28 @@ function ctx.refresh_take_strip()
   end, true)
 end
 
+-- START ON SOUND. An arm with `rec_wait` on records at once, as always, and
+-- this marks where the sound first crosses `rec_thresh`: the take starts
+-- there, less a pre-roll that covers the two polls' lag (rec_phase and
+-- rec_amp each arrive once a frame). Recording from the arm, not from the
+-- crossing, is what keeps the attack: a head started a frame late cuts it.
+-- The arm phase is only ever moved FORWARD within the pass, and a pass that
+-- wrapped past the buffer end before the sound came starts at the buffer.
+local REC_PREROLL = 2 / FPS
+local function tick_rec_wait()
+  if not ctx.rec_waiting then return end
+  if pget("rec", 0) ~= 1 then ctx.rec_waiting = false; return end
+  if pget("stop_all", 0) == 1 or pget("freeze", 0) == 1 then return end
+  if ctx.rec_amp < pget("rec_thresh", 0.02) then return end
+  ctx.rec_waiting = false
+  local at, arm = ctx.rec_phase, ctx.rec_arm_phase
+  local from = at - REC_PREROLL / BUF_SECS
+  from = at >= arm and max(from, arm) or max(from, 0)
+  ctx.rec_arm_phase = from
+  print(string.format("mangler: sound at %.2fs into the pass, the take starts there",
+    ((at - arm) % 1) * BUF_SECS))
+end
+
 -- POLLED each frame rather than run from the knobs' actions. The mode stops
 -- erosion as surely as its knob does, because the erosion head only runs in
 -- PLAY. The second of quiet means that a HEAL tap, a scene recall or a motion
@@ -7758,7 +7788,7 @@ local function init_params()
     if engine.rec then engine.rec(v == 1 and 0 or pget("rec", 0)) end
   end)
 
-  params:add_group("grp_rec", "take - record", 13)
+  params:add_group("grp_rec", "take - record", 15)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -7774,6 +7804,7 @@ local function init_params()
       rec_open = true
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
+      ctx.rec_waiting = pget("rec_wait", 0) == 1   -- see tick_rec_wait
       return
     end
     -- the rec-stop bookkeeping runs only for a pass that was really OPENED.
@@ -7783,6 +7814,10 @@ local function init_params()
     -- if it were 60 seconds long.
     if not rec_open then return end
     rec_open = false
+    if ctx.rec_waiting then
+      ctx.rec_waiting = false
+      print("mangler: no sound crossed the threshold — the take is the whole pass")
+    end
     if ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
       params:set("pos_start", ctx.rec_arm_phase)
       params:set("pos_end", ctx.rec_phase)
@@ -7806,6 +7841,13 @@ local function init_params()
     local bound = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
     if bound > (ctx.take_len or 0) then ctx.take_len = bound end
   end)
+  -- START ON SOUND: an arm records at once, and the take starts where the
+  -- sound first crosses the threshold (see tick_rec_wait). The level is
+  -- what is being written (the engine's rec_amp), so a resample counts too.
+  params:add_binary("rec_wait", "start on sound", "toggle", 0)
+  params:add_control("rec_thresh", "sound threshold",
+    controlspec.new(0.002, 0.5, "exp", 0, 0.02, ""),
+    function(p) return string.format("%.0f dB", 20 * math.log(p:get(), 10)) end)
   add_eng_control("rec_level", "rec level", unit(1.0))
   add_eng_control("pre_level", "overdub", unit(0.0))
   add_eng_binary("freeze", "freeze")
@@ -8396,6 +8438,7 @@ function init()
     ctx.frame = ctx.frame + 1
     ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
     sync_delay_time()    -- keep a synced delay on the clock (writes when off)
+    tick_rec_wait()        -- a start-on-sound take begins at the sound
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
