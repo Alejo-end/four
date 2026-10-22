@@ -2377,7 +2377,25 @@ do
   params:set("step_gate", 0.5)
   local hold = seq.fire(4)
   near(hold, 4 * 0.5 * 60 / CTX.tempo(), 1e-9, "a gate under a step holds that part of it")
+  params:set("step_gate", 0.998)
+  local step_s = 4 * 60 / CTX.tempo()
+  near(seq.fire(4), step_s - 0.03, 1e-9,
+    "a gate close to legato still releases before the next boundary")
   params:set("step_gate", 1)
+  local fired = seq.step
+  ok(seq.fire(5) == nil and seq.step == fired,
+    "a beat off the step grid (a sync left from another step length) is not a step")
+  local last = CTX.last_input
+  CTX.frame = CTX.frame + 100
+  seq.fire(8)
+  ok(CTX.last_input == last, "the sequencer is not a hand: the idle dim still comes")
+  ok(seq.VOICE_ID < 1000 and seq.VOICE_ID > 8 or seq.VOICE_ID >= 3200,
+    "its voice id is clear of the typing keyboard's 3000+ and every other range")
+  local c0 = cancelled
+  params:set("step_div", 6)
+  ok(cancelled == c0 + 1 and seq.running(),
+    "a new step length restarts the clock on it at once")
+  params:set("step_div", 2)
   params:set("step_chance", 0)
   local n = #ons
   seq.fire(8)
@@ -2397,6 +2415,98 @@ do
     "stopped, the clock is cancelled and the voice released")
   clock.run, clock.cancel = real_run, real_cancel
   engine.note_on, engine.note_off = real_on, real_off
+end
+
+-- ============================================================================
+-- 27 · the modulators
+-- ============================================================================
+-- An LFO writes base + depth x wave into its target every frame, in the
+-- param's unmapped space. A move from anything else is a new base. The
+-- motion looper is told each write was not a hand.
+do
+  local lfo = CTX.lfo
+  local function tindex(id)
+    for k, t in ipairs(lfo.TARGETS) do if t == id then return k + 1 end end
+  end
+  local cs = params:lookup_param("cutoff").controlspec
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("orbit_on", 0); params:set("scene_morph_amt", 0)
+  params:set("cutoff", 2000)
+  params:set("lfo1_target", tindex("cutoff"))
+  params:set("lfo1_shape", 1); params:set("lfo1_period", 1)
+  params:set("lfo1_rate", 1); params:set("lfo1_depth", 0.4)
+  local lo, hi = 1e9, -1e9
+  for _ = 1, CTX.FPS do
+    _h.run_ticks(1)
+    local v = params:get("cutoff")
+    lo, hi = math.min(lo, v), math.max(hi, v)
+  end
+  local base_raw = cs:unmap(2000)
+  near(cs:unmap(hi), base_raw + 0.2, 0.02, "a sine at depth 0.4 swings the knob 0.2 up...")
+  near(cs:unmap(lo), base_raw - 0.2, 0.02, "...and 0.2 down, in the knob's own space")
+  ok(lfo.active(), "...and says it is moving a knob")
+  -- a hand on the knob is the new base
+  params:set("cutoff", 4000)
+  lo, hi = 1e9, -1e9
+  for _ = 1, CTX.FPS do
+    _h.run_ticks(1)
+    local v = params:get("cutoff")
+    lo, hi = math.min(lo, v), math.max(hi, v)
+  end
+  near((cs:unmap(lo) + cs:unmap(hi)) / 2, cs:unmap(4000), 0.03,
+    "a hand on the knob moves the centre the wave swings around")
+  -- the motion looper never records a modulator
+  params:set("motion_rec", 1)
+  _h.run_ticks(10)
+  params:set("motion_rec", 0)
+  ok(CTX.motion.lanes["cutoff"] == nil, "a gesture loop does not record the modulator")
+  -- depth 0 puts the knob back
+  params:set("lfo1_depth", 0); _h.run_ticks(1)
+  near(params:get("cutoff"), 4000, 1e-6, "depth 0 puts the knob back where it stands")
+  ok(not lfo.active(), "...and nothing is modulated")
+  -- on the clock: the phase is the beat count
+  local real_beats = clock.get_beats
+  local beats = 0
+  clock.get_beats = function() return beats end
+  params:set("lfo1_period", 4)                -- 1 BAR
+  params:set("lfo1_shape", 4)                 -- RAMP
+  params:set("lfo1_depth", 1)
+  beats = 0; _h.run_ticks(1)
+  near(cs:unmap(params:get("cutoff")), cs:unmap(4000) - 0.5, 0.01, "a ramp on the bar starts low on the one")
+  beats = 2; _h.run_ticks(1)
+  near(cs:unmap(params:get("cutoff")), cs:unmap(4000), 0.01, "...and is at the centre half a bar later")
+  clock.get_beats = real_beats
+  -- the input envelope: up with the input, and a negative depth ducks
+  params:set("lfo1_shape", 6); params:set("lfo1_period", 1)
+  params:set("lfo1_depth", 0.5)
+  _h.push("amp_in_l", 0); _h.push("amp_in_r", 0); _h.run_ticks(20)
+  local quiet = params:get("cutoff")
+  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5); _h.run_ticks(6)
+  ok(params:get("cutoff") > quiet * 1.5, "ENV opens the knob as the input plays")
+  params:set("lfo1_depth", -0.5); _h.run_ticks(2)
+  ok(params:get("cutoff") < 4000, "...and a negative depth ducks it")
+  _h.push("amp_in_l", 0); _h.push("amp_in_r", 0)
+  -- a PSET saved mid-sweep stores the base, not the wave
+  local f = os.tmpname()
+  local h = io.open(f, "w")
+  h:write('-- pset\n"cutoff": 123\n"resonance": 0.1\n'); h:close()
+  lfo.pset_patch(f)
+  local txt = io.open(f):read("a")
+  os.remove(f)
+  ok(txt:find('"cutoff": 4000', 1, true) and txt:find('"resonance": 0.1', 1, true),
+    "a PSET saved while it moves stores the knob's base")
+  -- two modulators, two knobs, and cleanup restores both
+  params:set("lfo2_target", tindex("rev_mix")); params:set("rev_mix", 0.3)
+  params:set("lfo2_shape", 3); params:set("lfo2_depth", 0.5)
+  _h.run_ticks(2)
+  ok(math.abs(params:get("rev_mix") - 0.3) > 0.1, "the second modulator moves its own knob")
+  lfo.restore_all()
+  near(params:get("rev_mix"), 0.3, 1e-6, "restoring puts every knob back")
+  near(params:get("cutoff"), 4000, 1e-6, "...both of them")
+  params:set("lfo1_depth", 0); params:set("lfo2_depth", 0)
+  params:set("lfo1_target", 1); params:set("lfo2_target", 1)
+  _h.run_ticks(1)
+  params:set("cutoff", 20000); params:set("rev_mix", 0)
 end
 
 T.report("control harness OK")

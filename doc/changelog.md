@@ -3042,6 +3042,45 @@ fingerprint STAYS 65)**. New module lib/mseq.lua (amalgamate 9 to 10).
   84th was removed once, and its test failed. `tools/check.lua` green on Lua
   5.3.6.
 
+Eighty-sixth change: **the modulators (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65)**. New module lib/mlfo.lua (amalgamate 10 to 11).
+* **Two LFOs**, each on one knob from an append-only target list (the
+  option stores an index). Shapes SINE, TRI, SQUARE, RAMP, RANDOM and ENV
+  (the input envelope, fast up and slower down). The period is FREE in Hz or
+  locked to the clock's beat count. Depth is -1..1, in the knob's unmapped
+  space, so ENV with a negative depth ducks.
+* **The base is polled**, like the motion looper: a value that is not the
+  one the modulator last wrote is a new base. A hand, MIDI, a scene, the
+  morph and a motion lane all move the centre. Each write is accounted to
+  the looper in the same frame, so no lane records a modulator.
+* **A PSET save** stores the base: norns fires `action_write` after the file
+  is written, so `Mlfo.pset_patch` rewrites the modulated lines. Cleanup puts
+  every knob back.
+* **Not targets**: the window and loop pairs (they go through set_pair), the
+  buffer writers, the holds and `delay_time` (the clock owns it when synced).
+* **Purity**: an active modulator kills the ◇ mark. **Header**: steady SQ
+  (the sequencer) and LF (a modulator) flags, drawn only where they fit
+  before the page dots.
+* RENDERS: identical except PADS_SEQ, which now shows SQ. Device rows 16.7
+  to 16.9.
+* VERIFIED: 719 assertions (428/114/87/41/49), with the 87th. `tools/check.lua`
+  green on Lua 5.3.6.
+
+Eighty-seventh change: **the pad sequencer, the review fixes (Lua + tooling,
+ENGINE UNTOUCHED, fingerprint STAYS 65)**. A reviewer agent read the 85th.
+* **The voice id** was 3000, which is the typing keyboard's A. A held A had
+  its note cut at every step, and its release cut the sequencer's. It is now
+  4000, clear of every range.
+* **A gate close to legato** slept past the next boundary, and that step was
+  lost. A gated hit now releases at least 30 ms before the boundary.
+* **A new step length** waited for the old division's sync (up to two bars)
+  and could fire once off the grid. The clock restarts on the change, and a
+  beat off the grid is not a step.
+* **The idle dim**: `pad_trigger` takes an `auto` flag, so the sequencer no
+  longer counts as a hand.
+* **Left as it is**: under an external clock that stops, a legato hit holds
+  until the clock moves (said in lib/mseq.lua).
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

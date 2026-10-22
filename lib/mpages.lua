@@ -1695,6 +1695,8 @@ local function purity()
   -- a pad voice sounds on top of the take, and so does the sequencer that
   -- plays them (between its hits too: the voices release with a tail)
   if next(C.pad_held) ~= nil or pget("step_run", 0) == 1 then return false end
+  -- a modulator moving a knob: even at a zero crossing it is not the take
+  if C.lfo and C.lfo.active() then return false end
   -- the take must be ALL of what you hear. dry_wet blends the live INPUT
   -- against the playback path, so anything short of full wet means the monitor
   -- is mixed in on top of the recording — and at 0 the take is not audible at
@@ -1775,6 +1777,16 @@ local function draw_header()
   -- the last dot once the count reached twelve).
   local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   local dx0 = 126 - ((#PAGES - 1) * dpitch + 4)
+  -- the two machines that play on their own, steady (runs do not blink):
+  -- SQ the pad sequencer, LF a modulator. Only where they fit before the dots.
+  if pget("step_run", 0) == 1 and x + 10 < dx0 then
+    ptext("SQ", x, 1, 1, 7)
+    x = x + 12
+  end
+  if C.lfo and C.lfo.active() and x + 10 < dx0 then
+    ptext("LF", x, 1, 1, 7)
+    x = x + 12
+  end
   for i = 1, #PAGES do
     local dx = dx0 + (i - 1) * dpitch + (i > page and 2 or 0)
     if i == page then

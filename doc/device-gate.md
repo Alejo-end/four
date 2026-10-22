@@ -339,6 +339,9 @@ and that the engine polls behave as the stubs assume.
 | 16.4 | **Sequencer drone** | Set four pads to different pitches (PADS E3), GRAIN voice, `voice release` about 2s, then `sequencer run` on | A pad a bar, overlapping into a slow progression. PADS shows the steps, the current one bright | `Mseq.fire`, `clock.sync` |
 | 16.5 | Sequencer on the clock | Run it with 1/16 steps and 5 of 8, change the tempo, then stop and start it | It stays on the beat through the tempo change, and starts again on the bar | The beat count in `Mseq.fire` |
 | 16.6 | Sequencer stop | While it plays, K1+K2 (STOP), then `sequencer run` off | Silence at once, no voice left hanging after the stop or the run off | `release()`, `Mseq.stop` |
+| 16.7 | **A modulator** | LFO 1 target cutoff, SINE, 1 BAR, depth 0.4. Turn cutoff by hand while it runs | The filter breathes once a bar, around where your hand leaves it. The header shows LF | `Mlfo.tick`, the base tracking |
+| 16.8 | Ducking | LFO 2 target `eng level` (or reverb mix), ENV, depth -0.6, play the gear | The level dips while you play and comes back when you stop | The envelope in `Mlfo.tick`, the `amp_in` polls |
+| 16.9 | A PSET mid-swing | With LFO 1 swinging cutoff, save a PSET, set depth 0, load it | Cutoff comes back where your hand left it, not where the wave was | `Mlfo.pset_patch` |
 
 ## When it passes
 

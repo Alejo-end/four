@@ -216,6 +216,9 @@ local SCENE_EXCLUDE = {
   -- generates, are left where they are by a scene
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulators: machines too. A scene moves the knobs they ride on
+  "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
+  "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",

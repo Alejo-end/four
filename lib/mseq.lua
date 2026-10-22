@@ -19,12 +19,19 @@
 -- else, so a pattern can never strand a voice, whatever is cancelled when.
 -- The step is read off the clock's beat count, so a start, a tempo change or
 -- MIDI clock keeps the pattern on the bar. One clock coroutine, cancelled on
--- stop and in cleanup (the norns clock-race gotcha in CLAUDE.md).
+-- stop and in cleanup (the norns clock-race gotcha in CLAUDE.md). An external
+-- clock that stops stops the steps with it: a legato hit then holds until the
+-- clock moves, STOP, or the run is turned off.
 
 local floor = math.floor
 local C, pget
 
-local VOICE_ID = 3000
+-- clear of every other voice id range: the screen bank (0..8), MIDI (1000+),
+-- the grid (2000+ notes, 2600+ slices) and the typing keyboard (3000+)
+local VOICE_ID = 4000
+-- a gated hit releases at least this long before the next boundary, so a
+-- late wake from the sleep can never miss that boundary's clock.sync
+local GATE_MARGIN = 0.03
 -- beats per step, matching the step_div option names
 local DIVS = { 8, 4, 2, 1, 0.5, 0.25 }   -- 2 BAR, 1 BAR, 1/2, 1/4, 1/8, 1/16
 local ORDERS = { "UP", "DOWN", "BOUNCE", "RANDOM" }
@@ -82,7 +89,7 @@ local function div_beats()
 end
 
 local function release()
-  if C.pad_held[VOICE_ID] then C.pad_trigger(VOICE_ID, 0, 0) end
+  if C.pad_held[VOICE_ID] then C.pad_trigger(VOICE_ID, 0, 0, true) end
 end
 
 -- one step boundary, at clock beat `beats`. Returns the seconds the hit
@@ -91,18 +98,23 @@ function M.fire(beats)
   release()
   local div = div_beats()
   local n = floor(pget("step_len", 4) + 0.5)
-  local step = floor(beats / div + 0.5) % n
+  local q = floor(beats / div + 0.5)
+  -- a boundary of a division that is no longer set (a sync that was waiting
+  -- when step_div changed) is not a step: the next sync lands on the grid
+  if math.abs(beats / div - q) > 0.01 then return nil end
+  local step = q % n
   M.step = step
   if not M.hits[step + 1] then return nil end
   -- a STOP silences everything and an empty take has nothing to slice
   if pget("stop_all", 0) == 1 or not C.wave_any then return nil end
   if math.random() >= pget("step_chance", 1) then return nil end
   local pad = M.slices[step + 1] or math.random(0, 7)
-  C.pad_trigger(VOICE_ID, pad, 1)
+  C.pad_trigger(VOICE_ID, pad, 1, true)
   local gate = pget("step_gate", 1)
   if gate >= 0.999 then return nil end
   local tempo = (C.tempo and C.tempo()) or 120
-  return div * gate * 60 / tempo
+  local step_s = div * 60 / tempo
+  return math.max(0, math.min(step_s * gate, step_s - GATE_MARGIN))
 end
 
 local function run()
@@ -120,6 +132,14 @@ function M.start()
   if co then return end
   M.rebuild()
   co = clock.run(run)
+end
+
+-- a new step length takes effect at once: the running sync waits on the OLD
+-- division (up to two bars), so the coroutine is started again on the new one
+function M.restart()
+  if not co then return end
+  M.stop()
+  M.start()
 end
 
 function M.stop()

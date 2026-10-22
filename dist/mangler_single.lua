@@ -1202,8 +1202,8 @@ function M.init(ctx)
         -- both edges, like the grid: route_note plays pad (semi mod 8) as a
         -- polyphonic voice in pad mode, or retunes the mono drone (which
         -- ignores the release) otherwise. ids 3000+ keep typing-keyboard
-        -- voices clear of MIDI (1000+), grid (2000+ note / 2600+ slice) and
-        -- the screen bank (0..8).
+        -- voices clear of MIDI (1000+), grid (2000+ note / 2600+ slice), the
+        -- screen bank (0..8) and the sequencer (4000).
         kb_held[code] = st
         C.route_note(3000 + st, 2 ^ (semi / 12), semi, 1)
         -- in pad mode `pitch` doesn't move, so don't swell a value that isn't
@@ -2105,6 +2105,9 @@ local MOTION_EXCLUDE = {
   -- would fight it, so they are left to the hand, like the orbit's
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulators: a loop of their knobs would fight them
+  "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
+  "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
 }
 
 local M = {
@@ -2531,12 +2534,19 @@ local Mseq = (function()  -- inlined lib/mseq.lua
 -- else, so a pattern can never strand a voice, whatever is cancelled when.
 -- The step is read off the clock's beat count, so a start, a tempo change or
 -- MIDI clock keeps the pattern on the bar. One clock coroutine, cancelled on
--- stop and in cleanup (the norns clock-race gotcha in CLAUDE.md).
+-- stop and in cleanup (the norns clock-race gotcha in CLAUDE.md). An external
+-- clock that stops stops the steps with it: a legato hit then holds until the
+-- clock moves, STOP, or the run is turned off.
 
 local floor = math.floor
 local C, pget
 
-local VOICE_ID = 3000
+-- clear of every other voice id range: the screen bank (0..8), MIDI (1000+),
+-- the grid (2000+ notes, 2600+ slices) and the typing keyboard (3000+)
+local VOICE_ID = 4000
+-- a gated hit releases at least this long before the next boundary, so a
+-- late wake from the sleep can never miss that boundary's clock.sync
+local GATE_MARGIN = 0.03
 -- beats per step, matching the step_div option names
 local DIVS = { 8, 4, 2, 1, 0.5, 0.25 }   -- 2 BAR, 1 BAR, 1/2, 1/4, 1/8, 1/16
 local ORDERS = { "UP", "DOWN", "BOUNCE", "RANDOM" }
@@ -2594,7 +2604,7 @@ local function div_beats()
 end
 
 local function release()
-  if C.pad_held[VOICE_ID] then C.pad_trigger(VOICE_ID, 0, 0) end
+  if C.pad_held[VOICE_ID] then C.pad_trigger(VOICE_ID, 0, 0, true) end
 end
 
 -- one step boundary, at clock beat `beats`. Returns the seconds the hit
@@ -2603,18 +2613,23 @@ function M.fire(beats)
   release()
   local div = div_beats()
   local n = floor(pget("step_len", 4) + 0.5)
-  local step = floor(beats / div + 0.5) % n
+  local q = floor(beats / div + 0.5)
+  -- a boundary of a division that is no longer set (a sync that was waiting
+  -- when step_div changed) is not a step: the next sync lands on the grid
+  if math.abs(beats / div - q) > 0.01 then return nil end
+  local step = q % n
   M.step = step
   if not M.hits[step + 1] then return nil end
   -- a STOP silences everything and an empty take has nothing to slice
   if pget("stop_all", 0) == 1 or not C.wave_any then return nil end
   if math.random() >= pget("step_chance", 1) then return nil end
   local pad = M.slices[step + 1] or math.random(0, 7)
-  C.pad_trigger(VOICE_ID, pad, 1)
+  C.pad_trigger(VOICE_ID, pad, 1, true)
   local gate = pget("step_gate", 1)
   if gate >= 0.999 then return nil end
   local tempo = (C.tempo and C.tempo()) or 120
-  return div * gate * 60 / tempo
+  local step_s = div * 60 / tempo
+  return math.max(0, math.min(step_s * gate, step_s - GATE_MARGIN))
 end
 
 local function run()
@@ -2634,6 +2649,14 @@ function M.start()
   co = clock.run(run)
 end
 
+-- a new step length takes effect at once: the running sync waits on the OLD
+-- division (up to two bars), so the coroutine is started again on the new one
+function M.restart()
+  if not co then return end
+  M.stop()
+  M.start()
+end
+
 function M.stop()
   if co then clock.cancel(co) end
   co = nil
@@ -2646,6 +2669,212 @@ function M.running() return co ~= nil end
 function M.init(ctx)
   C = ctx
   pget = ctx.pget
+end
+
+return M
+
+end)()
+local Mlfo = (function()  -- inlined lib/mlfo.lua
+-- mlfo: two modulators that move any one knob each, a fifth driver of the
+-- params beside the keys, the encoders, MIDI and the motion loop.
+--
+-- A modulator writes its target param every frame, as base + depth x wave,
+-- in the param's own 0..1 (unmapped) space so a curve-mapped knob such as
+-- cutoff swings evenly. The BASE is where the knob stands without the
+-- modulator. Anything else that moves the knob (a hand, MIDI, a scene, the
+-- morph, a motion lane) is seen by polling: a value that is not the one this
+-- module last wrote is a new base, and the wave rides on top of it. That is
+-- the same polling the motion looper uses, for the same reason (an encoder
+-- on the device goes through paramset:delta, which no wrapper sees).
+--
+-- After each write it tells the motion looper the move was not a hand
+-- (Mmotion.account), so a gesture loop never records a modulator.
+--
+-- Shapes: SINE, TRI, SQUARE, RAMP, RANDOM (a new level each cycle), and ENV,
+-- the input's envelope: the knob follows how hard the gear plays. Depth is
+-- -1..1; negative inverts, so ENV with negative depth ducks. A period other
+-- than FREE locks the phase to the clock's beat count, so a modulator stays
+-- on the bar through a tempo change.
+--
+-- The TARGETS list is APPEND-ONLY: the target param stores an index into it,
+-- so a PSET or a PMAP names a target by its position here.
+
+local floor, min, max, sin, pi = math.floor, math.min, math.max, math.sin, math.pi
+local C, pget, FPS
+
+local TARGETS = {
+  "cutoff", "resonance", "drive", "dry_wet",
+  "delay_mix", "delay_fb", "rev_mix", "rev_size", "shimmer",
+  "scan", "pitch", "size", "density", "spread", "pan", "grain_jitter",
+  "pos_jitter", "warp_window", "clouds_pos", "clouds_tex",
+  "tape_rate", "mix", "lay1_level", "lay2_level", "pad_level", "wear",
+}
+local SHAPES = { "SINE", "TRI", "SQUARE", "RAMP", "RANDOM", "ENV" }
+local ENV_SHAPE = 6
+-- beats per cycle, matching the lfoN_period option names (nil = FREE)
+local PERIODS = { false, 1, 2, 4, 8, 16, 32 }
+local PERIOD_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
+local N = 2
+
+local M = {
+  TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
+  env = 0,        -- the input envelope, 0..1, shared by every ENV modulator
+  mods = {},      -- mods[i] = { id, base, wrote, phase, cycle, held } (state)
+}
+for i = 1, N do
+  M.mods[i] = { id = nil, base = 0, wrote = nil, phase = 0, cycle = -1, held = 0 }
+end
+
+local function pid(i, what) return "lfo" .. i .. "_" .. what end
+
+-- the target param id of modulator i, or nil when it is OFF
+local function target_of(i)
+  local t = floor(pget(pid(i, "target"), 1) + 0.5)
+  return TARGETS[t - 1]
+end
+
+-- one value of the wave, -1..1 (ENV is 0..1, handled by the caller)
+local function wave(shape, ph, m)
+  if shape == 1 then return sin(ph * 2 * pi) end
+  if shape == 2 then return ph < 0.5 and (ph * 4 - 1) or (3 - ph * 4) end
+  if shape == 3 then return ph < 0.5 and 1 or -1 end
+  if shape == 4 then return ph * 2 - 1 end
+  return m.held                      -- RANDOM: the level drawn this cycle
+end
+
+local function cs_of(id)
+  local p = params:lookup_param(id)
+  return p and p.controlspec
+end
+
+-- put the knob back where it stands without the modulator
+local function restore(m)
+  if m.id and m.wrote ~= nil then
+    local cur = pget(m.id, m.base)
+    -- only when the knob still holds the modulator's value: if something
+    -- else moved it last, that value stands
+    if math.abs(cur - m.wrote) < 1e-9 then
+      params:set(m.id, m.base)
+      if C.motion and C.motion.account then C.motion.account(m.id) end
+    end
+  end
+  m.id, m.wrote = nil, nil
+end
+
+local function beats_now()
+  return (clock.get_beats and clock.get_beats()) or 0
+end
+
+-- one frame. `amp`: the input level now (max of the two ADC polls).
+function M.tick(amp)
+  -- the envelope: fast up, slower down, on a square-root scale so a quiet
+  -- source still moves the knob
+  local a = math.sqrt(min(max(amp or 0, 0), 1))
+  M.env = M.env + (a - M.env) * (a > M.env and 0.6 or 0.15)
+  for i = 1, N do
+    local m = M.mods[i]
+    local id = target_of(i)
+    local depth = pget(pid(i, "depth"), 0)
+    if id ~= m.id or math.abs(depth) < 0.001 then
+      restore(m)
+      if id and math.abs(depth) >= 0.001 then
+        m.id, m.base, m.wrote = id, pget(id, 0), nil
+        print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name)
+      end
+    end
+    local cs = m.id and cs_of(m.id)
+    if cs then
+      local cur = pget(m.id, m.base)
+      if m.wrote == nil or math.abs(cur - m.wrote) > 1e-9 then
+        m.base = cur                 -- something else moved the knob
+      end
+      local shape = floor(pget(pid(i, "shape"), 1) + 0.5)
+      local per = PERIODS[floor(pget(pid(i, "period"), 1) + 0.5)]
+      if per then
+        local b = beats_now() / per
+        m.phase = b - floor(b)
+        local cyc = floor(b)
+        if cyc ~= m.cycle then m.cycle = cyc; m.held = math.random() * 2 - 1 end
+      else
+        local ph = m.phase + pget(pid(i, "rate"), 0.5) / FPS
+        if ph >= 1 then m.held = math.random() * 2 - 1 end
+        m.phase = ph - floor(ph)
+      end
+      local off
+      if shape == ENV_SHAPE then off = depth * M.env
+      else off = depth * 0.5 * wave(shape, m.phase, m) end
+      local raw = min(max(cs:unmap(m.base) + off, 0), 1)
+      local v = cs:map(raw)
+      params:set(m.id, v)
+      m.wrote = pget(m.id, v)        -- as stored (a quantum may round it)
+      if C.motion and C.motion.account then C.motion.account(m.id) end
+    end
+  end
+end
+
+-- any modulator set to move a knob (the purity mark asks). Read from the
+-- params, not from the tick's state, so it is true from the moment it is set.
+function M.active()
+  for i = 1, N do
+    if target_of(i) and math.abs(pget(pid(i, "depth"), 0)) >= 0.001 then return true end
+  end
+  return false
+end
+
+-- every knob back to its base (cleanup)
+function M.restore_all()
+  for i = 1, N do restore(M.mods[i]) end
+end
+
+-- a PSET save has just written the file (norns fires action_write AFTER it),
+-- so a modulated knob went in where the wave had it. Put its BASE in the
+-- file instead: a session saved mid-sweep must come back where the knob
+-- stands, not half a swing off. norns writes one `"id": value` line per param.
+function M.pset_patch(filename)
+  local fix = {}
+  for i = 1, N do
+    local m = M.mods[i]
+    if m.id and m.wrote ~= nil then fix[m.id] = m.base end
+  end
+  if next(fix) == nil then return end
+  local f = io.open(filename, "r")
+  if not f then return end
+  local lines = {}
+  for line in f:lines() do
+    local id = line:match('^"([^"]+)": ')
+    lines[#lines + 1] = (id and fix[id] ~= nil)
+      and ('"' .. id .. '": ' .. tostring(fix[id])) or line
+  end
+  f:close()
+  f = io.open(filename, "w")
+  if not f then return end
+  f:write(table.concat(lines, "\n"), "\n")
+  f:close()
+end
+
+function M.init(ctx)
+  C = ctx
+  pget, FPS = ctx.pget, ctx.FPS
+end
+
+-- the params, added by mangler.lua's init_params after every target exists
+-- (an option's names are the targets' own names)
+function M.add_params(add_group)
+  local names = { "OFF" }
+  for k = 1, #TARGETS do
+    local p = params:lookup_param(TARGETS[k])
+    names[k + 1] = p and p.name or TARGETS[k]
+  end
+  add_group("grp_lfo", "modulators", 5 * N)
+  for i = 1, N do
+    params:add_option(pid(i, "target"), "LFO " .. i .. " target", names, 1)
+    params:add_option(pid(i, "shape"), "LFO " .. i .. " shape", SHAPES, 1)
+    params:add_option(pid(i, "period"), "LFO " .. i .. " period", PERIOD_NAMES, 1)
+    params:add_control(pid(i, "rate"), "LFO " .. i .. " rate",
+      controlspec.new(0.01, 10, "exp", 0, 0.5, "Hz"))
+    params:add_control(pid(i, "depth"), "LFO " .. i .. " depth",
+      controlspec.new(-1, 1, "lin", 0, 0, ""))
+  end
 end
 
 return M
@@ -2870,6 +3099,9 @@ local SCENE_EXCLUDE = {
   -- generates, are left where they are by a scene
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulators: machines too. A scene moves the knobs they ride on
+  "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
+  "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",
@@ -6095,6 +6327,8 @@ local function purity()
   -- a pad voice sounds on top of the take, and so does the sequencer that
   -- plays them (between its hits too: the voices release with a tail)
   if next(C.pad_held) ~= nil or pget("step_run", 0) == 1 then return false end
+  -- a modulator moving a knob: even at a zero crossing it is not the take
+  if C.lfo and C.lfo.active() then return false end
   -- the take must be ALL of what you hear. dry_wet blends the live INPUT
   -- against the playback path, so anything short of full wet means the monitor
   -- is mixed in on top of the recording — and at 0 the take is not audible at
@@ -6175,6 +6409,16 @@ local function draw_header()
   -- the last dot once the count reached twelve).
   local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   local dx0 = 126 - ((#PAGES - 1) * dpitch + 4)
+  -- the two machines that play on their own, steady (runs do not blink):
+  -- SQ the pad sequencer, LF a modulator. Only where they fit before the dots.
+  if pget("step_run", 0) == 1 and x + 10 < dx0 then
+    ptext("SQ", x, 1, 1, 7)
+    x = x + 12
+  end
+  if C.lfo and C.lfo.active() and x + 10 < dx0 then
+    ptext("LF", x, 1, 1, 7)
+    x = x + 12
+  end
   for i = 1, #PAGES do
     local dx = dx0 + (i - 1) * dpitch + (i > page and 2 or 0)
     if i == page then
@@ -6247,6 +6491,7 @@ ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 ctx.seq = Mseq
+ctx.lfo = Mlfo
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -6527,6 +6772,7 @@ Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
+Mlfo.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -7146,9 +7392,11 @@ local function pad_order_remove(id)
 end
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
--- the note_on that started it). z=1 press, z=0 release.
-function ctx.pad_trigger(id, i, z)
-  ctx.last_input = ctx.frame   -- playing pads counts as presence (idle dim)
+-- the note_on that started it). z=1 press, z=0 release. `auto`: a machine
+-- played it (the sequencer), which is not a hand on the instrument.
+function ctx.pad_trigger(id, i, z, auto)
+  -- playing pads counts as presence (idle dim)
+  if not auto then ctx.last_input = ctx.frame end
   if z == 1 then
     if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
     if engine.note_on then
@@ -8430,6 +8678,7 @@ local function init_params()
   end)
   params:add_option("step_div", "step length",
     { "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16" }, 2)
+  params:set_action("step_div", function() Mseq.restart() end)
   params:add_number("step_len", "steps", 1, 16, 4)
   params:set_action("step_len", function() Mseq.rebuild() end)
   params:add_number("step_fill", "steps that play", 0, 16, 4)
@@ -8569,6 +8818,10 @@ local function init_params()
   end)
   add_eng_control("wear", "wear", unit(0.5))
 
+  -- the two modulators (lib/mlfo.lua). LAST, so every target already exists
+  -- and the target option can carry the targets' own names.
+  Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
+
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
   -- buffer — the live take, as an L/R wav pair beside the pset (ctx.take_pset_*
@@ -8597,7 +8850,11 @@ local function init_params()
       end
     end
   end
-  params.action_write = function(filename, name, number) each_part(1, number) end
+  params.action_write = function(filename, name, number)
+    local okl, errl = pcall(Mlfo.pset_patch, filename)
+    if not okl then print("mangler: pset modulators failed — " .. tostring(errl)) end
+    each_part(1, number)
+  end
   params.action_read = function(filename, silent, number)
     -- params:read fires tape_rec before the loop points (file order), so a
     -- PSET saved while the tape recorded opened a pass against the OLD
@@ -8674,6 +8931,9 @@ function init()
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
     Mpages.update_wave()
     Mpages.update_tape_wave()
+    -- the modulators, BEFORE motion: each write is accounted to the looper
+    -- in the same frame, so a gesture loop never records a modulator
+    Mlfo.tick(max(ctx.amp_in[1], ctx.amp_in[2]))
     Mmotion.tick()   -- advance + replay the gesture loop
     -- apply a pending morph sweep. AFTER motion, which may have just
     -- replayed a recorded scene_morph_amt move for us to act on.
@@ -8713,6 +8973,7 @@ function cleanup()
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
   Mseq.stop()          -- the sequencer's clock, and its voice
+  Mlfo.restore_all()   -- every modulated knob back to where it stands
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   midi.add, midi.remove = prev_midi_add, prev_midi_remove

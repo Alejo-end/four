@@ -174,6 +174,17 @@ legato: a slow drone sequence. `steps that play` spreads that many hits evenly o
 skips hits, and `step gate` shortens each hit. While it runs, PADS draws its steps under
 the pads. Map `sequencer run` to a footswitch to start and stop it.
 
+## Modulators
+
+PARAMS > modulators holds two LFOs. Each one moves one knob: pick its target, a shape
+(sine, triangle, square, ramp, random, or ENV, the input's envelope), a period (free in Hz,
+or one beat to eight bars on the clock) and a depth. The knob swings around where you set
+it, so turning it by hand, a scene or a motion lane moves the centre and the wave keeps
+going. A negative depth inverts the wave, so ENV with a negative depth ducks the knob while
+the gear plays. A motion loop never records a modulator, and a PSET saved mid-swing stores
+the knob where you set it. The header shows LF while a modulator runs and SQ while the
+sequencer does.
+
 ## Samples
 
 Load: PARAMS > take > load sample reads WAV in 8, 16, 24 or 32 bit, integer or float. The

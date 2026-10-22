@@ -228,6 +228,7 @@ local Minput = include "lib/minput"
 local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
 local Mseq = include "lib/mseq"
+local Mlfo = include "lib/mlfo"
 local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
@@ -237,6 +238,7 @@ ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
 ctx.grid = Mgrid
 ctx.motion = Mmotion
 ctx.seq = Mseq
+ctx.lfo = Mlfo
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -517,6 +519,7 @@ Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
+Mlfo.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -1136,9 +1139,11 @@ local function pad_order_remove(id)
 end
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
--- the note_on that started it). z=1 press, z=0 release.
-function ctx.pad_trigger(id, i, z)
-  ctx.last_input = ctx.frame   -- playing pads counts as presence (idle dim)
+-- the note_on that started it). z=1 press, z=0 release. `auto`: a machine
+-- played it (the sequencer), which is not a hand on the instrument.
+function ctx.pad_trigger(id, i, z, auto)
+  -- playing pads counts as presence (idle dim)
+  if not auto then ctx.last_input = ctx.frame end
   if z == 1 then
     if ctx.pad_held[id] and engine.note_off then engine.note_off(id) end
     if engine.note_on then
@@ -2420,6 +2425,7 @@ local function init_params()
   end)
   params:add_option("step_div", "step length",
     { "2 BAR", "1 BAR", "1/2", "1/4", "1/8", "1/16" }, 2)
+  params:set_action("step_div", function() Mseq.restart() end)
   params:add_number("step_len", "steps", 1, 16, 4)
   params:set_action("step_len", function() Mseq.rebuild() end)
   params:add_number("step_fill", "steps that play", 0, 16, 4)
@@ -2559,6 +2565,10 @@ local function init_params()
   end)
   add_eng_control("wear", "wear", unit(0.5))
 
+  -- the two modulators (lib/mlfo.lua). LAST, so every target already exists
+  -- and the target option can carry the targets' own names.
+  Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
+
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
   -- buffer — the live take, as an L/R wav pair beside the pset (ctx.take_pset_*
@@ -2587,7 +2597,11 @@ local function init_params()
       end
     end
   end
-  params.action_write = function(filename, name, number) each_part(1, number) end
+  params.action_write = function(filename, name, number)
+    local okl, errl = pcall(Mlfo.pset_patch, filename)
+    if not okl then print("mangler: pset modulators failed — " .. tostring(errl)) end
+    each_part(1, number)
+  end
   params.action_read = function(filename, silent, number)
     -- params:read fires tape_rec before the loop points (file order), so a
     -- PSET saved while the tape recorded opened a pass against the OLD
@@ -2664,6 +2678,9 @@ function init()
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
     Mpages.update_wave()
     Mpages.update_tape_wave()
+    -- the modulators, BEFORE motion: each write is accounted to the looper
+    -- in the same frame, so a gesture loop never records a modulator
+    Mlfo.tick(max(ctx.amp_in[1], ctx.amp_in[2]))
     Mmotion.tick()   -- advance + replay the gesture loop
     -- apply a pending morph sweep. AFTER motion, which may have just
     -- replayed a recorded scene_morph_amt move for us to act on.
@@ -2703,6 +2720,7 @@ function cleanup()
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
   Mseq.stop()          -- the sequencer's clock, and its voice
+  Mlfo.restore_all()   -- every modulated knob back to where it stands
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()
   midi.add, midi.remove = prev_midi_add, prev_midi_remove
