@@ -349,6 +349,7 @@ and that the engine polls behave as the stubs assume.
 | 16.14 | Undo a clear | K1+K3 hold on TAKE (erase), then undo take | The take comes back | The `empty` state |
 | 16.15 | **CC out** | `out source` MORPH, a synth on MIDI port 1 learning the CC; run the orbit | The synth's knob follows the morph; a still morph sends nothing (a MIDI monitor) | `Mout.tick`, `midi.connect` |
 | 16.16 | crow out | A crow on USB, `out to crow 1` on, `out source` LFO 1 | Output 1 swings 0 to 5 V at the LFO's rate | `crow.output[1].volts` |
+| 16.17 | A hand on a swung knob | LFO 1 on cutoff, SINE, 1 Hz, depth 0.4; turn cutoff slowly with E2 on FILTER | A smooth sweep under the swing, no zipper or clicks | `Mlfo.swung` in the eng-control action |
 
 ## When it passes
 

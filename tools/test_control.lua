@@ -2464,6 +2464,12 @@ do
   lo, hi = swing(CTX.FPS)
   near((cs:unmap(lo) + cs:unmap(hi)) / 2, cs:unmap(nudged), 0.03,
     "...and the wave swings around the knob")
+  -- a hand between the modulator's frames sends with the swing on it, so
+  -- the engine never gets the plain knob value as a spike
+  params:set("cutoff", 2500)
+  local cs2 = params:lookup_param("cutoff").controlspec
+  ok(lfo.swinging("cutoff") and math.abs(sent.cutoff - lfo.swung("cutoff", 2500)) < 1e-9,
+    "a hand on a modulated knob sends its value with the swing on it")
   -- the motion looper records the hand, never the modulator
   params:set("motion_rec", 1)
   _h.run_ticks(10)
@@ -2522,6 +2528,21 @@ do
     if sent.rev_mix <= 0 then zero = true end
   end
   ok(not zero, "a modulated reverb mix never sends 0, so the reverb is not respawned each cycle")
+  -- the delay's feedback hold is not swung across its line with the mix at 0
+  local fbsent = {}
+  local real_fb = engine.delay_fb
+  engine.delay_fb = function(v) fbsent[#fbsent + 1] = v end
+  params:set("delay_mix", 0); params:set("delay_fb", 0.95)
+  params:set("lfo1_target", tindex("delay_fb")); params:set("lfo1_shape", 3)
+  params:set("lfo1_period", 1); params:set("lfo1_rate", 2); params:set("lfo1_depth", 0.8)
+  fbsent = {}
+  _h.run_ticks(2 * CTX.FPS)
+  local below = false
+  for _, v in ipairs(fbsent) do if v <= 0.9 then below = true end end
+  ok(#fbsent > 0 and not below, "a swung feedback hold stays a hold while the delay mix is 0")
+  params:set("lfo1_depth", 0); _h.run_ticks(1)
+  engine.delay_fb = real_fb
+  params:set("delay_fb", 0.3); params:set("lfo1_target", tindex("cutoff"))
   -- cleanup gives every knob's own value back
   lfo.restore_all()
   near(sent.rev_mix, 0, 1e-9, "restoring gives the engine every knob's own value")
@@ -2629,13 +2650,24 @@ do
   local label = "?"
   local writes, reads, clears = 0, {}, 0
   local real_w, real_r, real_c = engine.write_take, engine.read_take, engine.clear
+  -- the engine as it is: a write is QUEUED (the file appears later than the
+  -- Lua turn that asked for it), and the server runs its commands in order,
+  -- so a read runs after every write queued before it
+  local queue = {}
+  local function flush()
+    for _, w in ipairs(queue) do
+      for _, side in ipairs({ "_L", "_R" }) do
+        local f = io.open(w[1] .. side .. ".wav", "w"); f:write(w[2]); f:close()
+      end
+    end
+    queue = {}
+  end
   engine.write_take = function(stem)
     writes = writes + 1
-    for _, side in ipairs({ "_L", "_R" }) do
-      local f = io.open(stem .. side .. ".wav", "w"); f:write(label); f:close()
-    end
+    queue[#queue + 1] = { stem, label }
   end
   engine.read_take = function(stem)
+    flush()
     local f = io.open(stem .. "_L.wav"); reads[#reads + 1] = f and f:read("a"); if f then f:close() end
   end
   engine.clear = function() clears = clears + 1 end
@@ -2670,22 +2702,42 @@ do
   CTX.take_undo()
   ok(clears == c0 + 1 and not CTX.wave_any, "...and a second UNDO clears it again")
   CTX.wave_any = true
-  -- an UNDO stops a writer that would write over what comes back
+  -- an UNDO during regen undoes the regen: one change back, not two
   state("C", 0.5, 0.6)
   state("D", 0.6, 0.7)
+  label = "D+regen"
   params:set("regen", 0.4)
   CTX.take_undo()
-  ok(params:get("regen") == 0 and reads[#reads] == "C", "UNDO stops regen, then goes back")
+  ok(params:get("regen") == 0 and reads[#reads] == "D", "UNDO during regen stops it and undoes it")
+  CTX.take_undo()
+  ok(reads[#reads] == "D+regen", "...and a second UNDO brings the regen back")
+  -- two marks in one turn keep each state's audio with its own window: a
+  -- clear while armed marks the pass, then the clear
+  state("F", 0.2, 0.3)
+  _h.push("rec_phase", 0.4); _h.run_ticks(1)
+  label = "G"
+  params:set("rec", 1); _h.push("rec_phase", 0.5); _h.run_ticks(1)
+  T.pulse("clear_rec")
+  CTX.take_undo()
+  ok(reads[#reads] == "G", "UNDO after a clear made while armed brings back the pass")
+  near(params:get("pos_start"), 0.4, 1e-6, "...with that pass's own window")
+  -- back to an empty buffer forgets the loaded file, as a clear does
+  CTX.take_undo()
+  ok(not CTX.wave_any and params:get("sample_file") == "", "UNDO to empty forgets the loaded file too")
+  CTX.wave_any = true
   -- a record pass marks a state
   local w0 = writes
   _h.push("rec_phase", 0.1); _h.run_ticks(1)
   params:set("rec", 1); _h.push("rec_phase", 0.2); _h.run_ticks(1); params:set("rec", 0)
   ok(writes == w0 + 1, "a record pass that stops is a finished take")
-  -- off, it writes nothing
+  -- off, it writes nothing, and never offers a take older than the last
   params:set("undo_keep", 0)
   w0 = writes
   state("E", 0.1, 0.2)
   ok(writes == w0, "with keep an undo off, nothing is dumped")
+  local r0 = #reads
+  CTX.take_undo()
+  ok(#reads == r0, "...and UNDO offers nothing older")
   params:set("undo_keep", 1)
   CTX.undo_forget()
   engine.write_take, engine.read_take, engine.clear = real_w, real_r, real_c
@@ -2699,11 +2751,12 @@ end
 -- to crow output 1 as 0..5 V. A CC goes out only when its value changes.
 do
   local ccs = {}
-  local fake = { cc = function(self, n, v, ch) ccs[#ccs + 1] = { n, v, ch } end }
+  local fake = { device = {}, cc = function(self, n, v, ch) ccs[#ccs + 1] = { n, v, ch } end }
   local real_connect = midi.connect
   midi.connect = function() return fake end
   params:set("orbit_on", 0); params:set("motion_play", 0)
   params:set("out_midi", 1); params:set("out_cc", 74); params:set("out_ch", 2)
+  params:set("lfo1_shape", 1)
   params:set("out_src", 2)                    -- MORPH
   params:set("scene_morph_amt", 0.5); _h.run_ticks(1)
   local c = ccs[#ccs]
@@ -2713,6 +2766,18 @@ do
   ok(#ccs == n, "...and a still source sends nothing more")
   params:set("scene_morph_amt", 0); _h.run_ticks(1)
   ok(ccs[#ccs][2] == 0, "...and follows the morph home")
+  -- a new number resends a still value; a port with no device sends nothing,
+  -- and the value goes out once the device is plugged in
+  params:set("out_cc", 75); _h.run_ticks(1)
+  ok(ccs[#ccs][1] == 75 and ccs[#ccs][2] == 0, "a new CC number gets the still value at once")
+  local dev = fake.device
+  fake.device = nil
+  params:set("scene_morph_amt", 0.25); _h.run_ticks(1)
+  n = #ccs
+  ok(ccs[#ccs][2] ~= 32, "a port with nothing plugged in sends nothing")
+  fake.device = dev; _h.run_ticks(1)
+  ok(#ccs == n + 1 and ccs[#ccs][2] == 32, "...and the device plugged in later gets the value")
+  params:set("scene_morph_amt", 0); _h.run_ticks(1)
   -- an LFO's wave goes out even when it moves no knob
   params:set("lfo1_target", 1); params:set("lfo1_depth", 0)
   params:set("lfo1_shape", 3); params:set("lfo1_period", 1); params:set("lfo1_rate", 2)
@@ -2726,6 +2791,12 @@ do
   params:set("out_crow", 1)
   params:set("out_src", 2); params:set("scene_morph_amt", 0.4); _h.run_ticks(1)
   near(crow.output[1].volts, 2, 1e-9, "the source goes to crow output 1 as 0 to 5 volts")
+  local up = true
+  crow.connected = function() return up end
+  up = false; _h.run_ticks(1)
+  crow.output[1].volts = 0                    -- a crow that rebooted
+  up = true; _h.run_ticks(1)
+  near(crow.output[1].volts, 2, 1e-9, "...and a crow that comes back gets the still value again")
   params:set("scene_morph_amt", 0); _h.run_ticks(1)
   crow = real_crow
   params:set("out_crow", 0)

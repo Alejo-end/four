@@ -3163,6 +3163,37 @@ fingerprint STAYS 65)**. New module lib/mout.lua (amalgamate 11 to 12).
 * VERIFIED: 759 assertions (468/114/87/41/49). `tools/check.lua` green on
   Lua 5.3.6.
 
+Ninety-third change: **the review fixes for the undo, the modulators and
+the modulation out (Lua + tooling, ENGINE UNTOUCHED, fingerprint STAYS 65)**.
+Two reviewer agents read the 91st and 92nd.
+* **The undo renamed files the engine had not opened yet.** `write_take` is
+  async, and the Lua renames ran first, so two marks in one turn (a clear
+  while armed, UNDO during a pass, a PSET load while armed) left one state's
+  audio under another state's window. The dumps now go into three fixed
+  slots, never renamed: a new one takes the slot no kept state uses, and the
+  engine's command order puts every read after its write. The test models
+  the queued write; the old design fails it.
+* **UNDO during regen or erosion** went two changes back. It now marks the
+  take as they left it first, so it goes back one, and a redo returns it.
+  It zeroes `erode` only when erosion is writing (PLAY).
+* **UNDO to empty** forgets `sample_file`, as a clear does. **`undo_keep`
+  off** forgets the kept states, so UNDO never offers a take older than the
+  last one.
+* **A modulated knob moved by a hand, a scene or a motion lane** sent its
+  plain value between the modulator's frames: a spike, and a zipper on every
+  move. Each engine control's action now adds the current swing
+  (`Mlfo.swung`).
+* **The delay's feedback hold** (the engine keeps the delay alive at mix 0
+  while the curved feedback is above 0.9) is kept on the knob's side of the
+  line, so a swing never drops a held loop.
+* **The modulation out** resends a still value on a new port, CC number,
+  channel or device, and when crow comes back or is switched on. Nothing is
+  sent to a port with no device. The default CC is 20, not the mod wheel. A
+  switch to RANDOM draws its level at once.
+* RENDERS: all 70 identical. Device row 16.17.
+* VERIFIED: 770 assertions (479/114/87/41/49). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

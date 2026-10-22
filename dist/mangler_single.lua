@@ -2800,9 +2800,12 @@ function M.tick(amp)
     -- source for the modulation outputs (lib/mout.lua)
     local shape = floor(pget(PID[i].shape, 1) + 0.5)
     local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
-    -- a RANDOM level is drawn only for a RANDOM wave: a draw from any other
-    -- would move the orbit's own random sequence
+    -- a RANDOM level is drawn only for a RANDOM wave, so the other shapes,
+    -- which run whether or not they move a knob, leave the orbit's random
+    -- sequence alone. Switched to RANDOM, it draws at once, not a cycle late.
     local rnd = shape == 5
+    if rnd and m.shape ~= 5 then m.held = math.random() * 2 - 1 end
+    m.shape = shape
     if per then
       local b = beats_now() / per
       m.phase = b - floor(b)
@@ -2823,16 +2826,42 @@ function M.tick(amp)
       sum[id] = (sum[id] or 0) + off
     end
   end
-  for id, off in pairs(sum) do
-    local cs = params:lookup_param(id).controlspec
-    local v = cs:map(min(max(cs:unmap(pget(id, 0)) + off, 0), 1))
-    if FLOOR[id] then v = max(v, FLOOR[id]) end
-    send(id, v)
-  end
+  for id in pairs(sum) do send(id, M.swung(id, pget(id, 0))) end
 end
 
--- this frame's swing on param `id` (nil when nothing moves it), for a test
-function M.swing(id) return sum[id] end
+-- the delay's feedback HOLD: with the delay mix at 0 the engine keeps the
+-- delay synth alive only while the (curved) feedback is above 0.9, so a
+-- held loop survives a KILL. A swing across that line would free the synth
+-- and drop the loop each cycle, so it is kept on the knob's own side of it.
+local FB_HOLD = 0.9
+local function fb_sent(v)
+  local map = C.eng_map and C.eng_map.delay_fb
+  return map and map(v) or v
+end
+
+-- is param `id` swung this frame (its action asks, before it sends)
+function M.swinging(id) return sum[id] ~= nil end
+
+-- knob value `v` of param `id` with this frame's swing on it, as the engine
+-- should get it (before the send map)
+function M.swung(id, v)
+  local off = sum[id]
+  if not off then return v end
+  local cs = params:lookup_param(id).controlspec
+  local w = cs:map(min(max(cs:unmap(v) + off, 0), 1))
+  if FLOOR[id] then w = max(w, FLOOR[id]) end
+  if id == "delay_fb" and pget("delay_mix", 0) <= 0 then
+    local above = fb_sent(v) > FB_HOLD
+    -- step back toward the knob until the sent value is on its side
+    for _ = 1, 20 do
+      if (fb_sent(w) > FB_HOLD) == above then break end
+      w = (w + v) / 2
+    end
+    if (fb_sent(w) > FB_HOLD) ~= above then w = v end
+  end
+  return w
+end
+
 
 -- any modulator set to move a knob (the purity mark and the header ask). Read
 -- from the params, so it is true from the moment it is set.
@@ -2889,14 +2918,23 @@ local Mout = (function()  -- inlined lib/mout.lua
 --
 -- It writes nothing in the instrument. A CC goes out only when its 7-bit value
 -- changes, so a still source sends nothing; crow only when the voltage moves
--- by more than a millivolt or so.
+-- by more than a millivolt or so. A new port, CC number, channel or device
+-- (a hot-plug), and a crow that comes back or is switched on, all resend the
+-- value once, so a still source is never left unsent.
+-- At cleanup nothing is sent: the outboard keeps the last value, as it would
+-- after any controller stopped moving.
+-- The default CC is 20, an undefined controller, so it does not land on a
+-- mod wheel (CC 1) that an outboard synth, or this script's own MIDI map,
+-- may have learned. A CC learned back onto the param that drives the source
+-- (an LFO's rate with that LFO as the source) is a loop: do not map it so.
 
 local floor = math.floor
 local C, pget
 
 local SOURCES = { "OFF", "MORPH", "ENV", "LFO 1", "LFO 2" }
 
-local M = { SOURCES = SOURCES, last_cc = -1, last_v = -1, dev = nil, dev_port = 0 }
+local M = { SOURCES = SOURCES, last_cc = -1, last_v = -1, dev = nil, dev_port = 0,
+  dest = nil, crow_on = false }
 
 -- the source's value now, 0..1, or nil when OFF
 function M.value()
@@ -2912,7 +2950,7 @@ end
 local function device()
   local port = floor(pget("out_midi", 0) + 0.5)
   if port ~= M.dev_port then
-    M.dev_port, M.last_cc = port, -1
+    M.dev_port = port
     M.dev = port > 0 and midi.connect(port) or nil
   end
   return M.dev
@@ -2924,14 +2962,23 @@ function M.tick()
   v = math.min(math.max(v, 0), 1)
   local dev = device()
   if dev and dev.cc then
+    local num, ch = floor(pget("out_cc", 20) + 0.5), floor(pget("out_ch", 1) + 0.5)
+    -- where it goes: a change of any part of it resends. `dest` is a number,
+    -- so this allocates nothing per frame (the device object is compared)
+    local dest = num * 16 + ch
+    if dest ~= M.dest or dev.device ~= M.dest_dev then
+      M.dest, M.dest_dev, M.last_cc = dest, dev.device, -1
+    end
     local cc = floor(v * 127 + 0.5)
-    if cc ~= M.last_cc then
+    if cc ~= M.last_cc and dev.device ~= nil then
       M.last_cc = cc
-      dev:cc(floor(pget("out_cc", 1) + 0.5), cc, floor(pget("out_ch", 1) + 0.5))
+      dev:cc(num, cc, ch)
     end
   end
-  if pget("out_crow", 0) == 1 and crow and crow.output and crow.connected
-      and crow.connected() then
+  local on = pget("out_crow", 0) == 1 and crow and crow.output and crow.connected
+    and crow.connected() or false
+  if on ~= M.crow_on then M.crow_on, M.last_v = on, -1 end
+  if on then
     local volts = v * 5
     if math.abs(volts - M.last_v) > 0.002 then
       M.last_v = volts
@@ -2951,7 +2998,7 @@ function M.add_params()
   params:add_number("out_midi", "out midi port", 0, 16, 0,
     function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
   params:add_number("out_ch", "out midi channel", 1, 16, 1)
-  params:add_number("out_cc", "out cc number", 0, 127, 1)
+  params:add_number("out_cc", "out cc number", 0, 127, 20)
   params:add_binary("out_crow", "out to crow 1", "toggle", 0)
 end
 
@@ -7882,48 +7929,51 @@ end
 -- One step back, and one forward again. After every change to the take that
 -- is FINISHED (a record pass stops, a load or a print lands, a PSET restores
 -- it, regen or erosion goes quiet, a clear), the take as it now stands is
--- dumped as an L/R pair (`undo-cur`), and the pair that stood before becomes
--- `undo-prev`. TAKE UNDO puts `undo-prev` back into the buffer and swaps the
--- two, so a second UNDO is a redo. The window and the take length come back
--- with it. A clear is a state too (`empty`), so an UNDO after a clear brings
--- the take back, and a second one clears it again.
--- The dump is the engine's own write_take, the PSET's path: no Lua work, and
--- at most twice the take on the card. `undo_keep` off writes nothing.
--- The snapshot is of the take when it FINISHED: an UNDO while a pass, regen
--- or erosion is still writing first stops it, as a clear does, and anything
--- written since the last finished state is not kept.
-local undo_cur, undo_prev     -- { empty, lo, hi, take_len } for each pair
-local function undo_stem(which) return norns.state.data .. "undo-" .. which end
-local function undo_files(which)
-  local st = undo_stem(which)
-  return st .. "_L.wav", st .. "_R.wav"
-end
--- the take that stood becomes the one to go back to
-local function undo_shift()
-  local pl, pr = undo_files("prev")
-  local cl, cr = undo_files("cur")
-  os.remove(pl); os.remove(pr)
-  os.rename(cl, pl); os.rename(cr, pr)
-  undo_prev, undo_cur = undo_cur, nil
+-- dumped as an L/R pair, and the state before it is kept as the one to go
+-- back to. TAKE UNDO loads that one and swaps the two, so a second UNDO is a
+-- redo. The window and the take length come back with it. A clear is a state
+-- too (`empty`), so an UNDO after a clear brings the take back.
+-- The dump is the engine's own write_take, the PSET's path, into one of THREE
+-- slots (`undo-1..3`). A dump is async: the engine opens its file later than
+-- this Lua turn, so files are never renamed (a rename ran before the file
+-- existed and left a state's audio under another state's window). A new dump
+-- goes into the one slot neither kept state uses, and the engine handles its
+-- commands in order, so a read of a slot always follows its write.
+-- UNDO while something writes first finishes that change: a pass stops (its
+-- stop marks a state), regen or erosion stops and the take as they left it
+-- is marked. So UNDO always goes back exactly one change.
+-- `undo_keep` off writes nothing and forgets the kept states, so UNDO never
+-- offers a take older than the last one you made.
+local undo_cur, undo_prev     -- { slot, empty, lo, hi, take_len }
+local function undo_stem(slot) return norns.state.data .. "undo-" .. slot end
+local function free_slot()
+  for k = 1, 3 do
+    if not ((undo_cur and undo_cur.slot == k) or (undo_prev and undo_prev.slot == k)) then
+      return k
+    end
+  end
 end
 function ctx.undo_mark()
-  if pget("undo_keep", 1) ~= 1 or not engine.write_take then return end
-  undo_shift()
+  if pget("undo_keep", 1) ~= 1 or not engine.write_take then
+    undo_cur, undo_prev = nil, nil
+    return
+  end
+  undo_prev = undo_cur
   if not ctx.wave_any then
     undo_cur = { empty = true }
     return
   end
-  engine.write_take(undo_stem("cur"), take_frames())
-  undo_cur = { lo = pget("pos_start", 0), hi = pget("pos_end", 1),
+  local k = free_slot()
+  engine.write_take(undo_stem(k), take_frames())
+  undo_cur = { slot = k, lo = pget("pos_start", 0), hi = pget("pos_end", 1),
     take_len = ctx.take_len }
 end
 -- a fresh session: an undo pair left on the card by the last one is not
--- this session's take, so it is never offered
+-- this session's take, so it is never offered, and its files go
 function ctx.undo_forget()
   undo_cur, undo_prev = nil, nil
-  for _, w in ipairs({ "cur", "prev" }) do
-    local l, r = undo_files(w)
-    os.remove(l); os.remove(r)
+  for k = 1, 3 do
+    os.remove(undo_stem(k) .. "_L.wav"); os.remove(undo_stem(k) .. "_R.wav")
   end
 end
 function ctx.take_undo()
@@ -7931,30 +7981,28 @@ function ctx.take_undo()
     print("mangler: UNDO — nothing to go back to")
     return
   end
-  -- a writer still running would go on writing over what comes back
+  -- finish a change still being written, so UNDO goes back exactly one.
+  -- A pass's stop marks a state itself; regen and erosion are marked here
   if pget("rec", 0) == 1 then params:set("rec", 0) end
+  local writing = pget("regen", 0) > 0 or Mpages.eroding()
   if pget("regen", 0) > 0 then params:set("regen", 0) end
-  if pget("erode", 0) > 0 then params:set("erode", 0) end
-  -- the rec stop above may have marked a state of its own: what comes back is
-  -- still the one that stood BEFORE the last finished change
+  if Mpages.eroding() then params:set("erode", 0) end
+  if writing then ctx.undo_mark() end
   local back = undo_prev
-  local pl, pr = undo_files("prev")
-  local cl, cr = undo_files("cur")
-  local tl, tr = undo_files("swap")
-  os.rename(cl, tl); os.rename(cr, tr)
-  os.rename(pl, cl); os.rename(pr, cr)
-  os.rename(tl, pl); os.rename(tr, pr)
+  if not back then return end   -- the mark above forgot them (undo_keep off)
   undo_prev, undo_cur = undo_cur, back
   if back.empty then
     engine.clear()
     Mpages.clear_wave()
     buffer_cleared()
     Mdeck.set_pair("pos_start", "pos_end", 0, 1)
+    -- as a clear does: a PSET saved now must not bring the loaded file back
+    if params:get("sample_file") ~= "" then params:set("sample_file", "") end
     print("mangler: UNDO — back to the empty buffer")
     return
   end
-  engine.read_take(undo_stem("cur"))
-  local dur = Mpages.load_wave(cl, BUF_SECS)
+  engine.read_take(undo_stem(back.slot))
+  local dur = Mpages.load_wave(undo_stem(back.slot) .. "_L.wav", BUF_SECS)
   buffer_replaced(dur)
   ctx.wave_any = true
   ctx.take_len = back.take_len
@@ -8361,6 +8409,10 @@ local function add_eng_control(id, name, spec, map)
   ctx.eng_map[id] = map
   params:add_control(id, name, spec)
   params:set_action(id, function(v)
+    -- a modulated knob sends its value WITH the swing, so a hand, a scene or
+    -- a motion lane moving it between the modulator's frames never sends the
+    -- plain value in between (a spike, and a zipper on every move)
+    if Mlfo.swinging(id) then v = Mlfo.swung(id, v) end
     if engine[id] then engine[id](map and map(v) or v) end
   end)
 end

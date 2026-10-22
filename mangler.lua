@@ -1543,48 +1543,51 @@ end
 -- One step back, and one forward again. After every change to the take that
 -- is FINISHED (a record pass stops, a load or a print lands, a PSET restores
 -- it, regen or erosion goes quiet, a clear), the take as it now stands is
--- dumped as an L/R pair (`undo-cur`), and the pair that stood before becomes
--- `undo-prev`. TAKE UNDO puts `undo-prev` back into the buffer and swaps the
--- two, so a second UNDO is a redo. The window and the take length come back
--- with it. A clear is a state too (`empty`), so an UNDO after a clear brings
--- the take back, and a second one clears it again.
--- The dump is the engine's own write_take, the PSET's path: no Lua work, and
--- at most twice the take on the card. `undo_keep` off writes nothing.
--- The snapshot is of the take when it FINISHED: an UNDO while a pass, regen
--- or erosion is still writing first stops it, as a clear does, and anything
--- written since the last finished state is not kept.
-local undo_cur, undo_prev     -- { empty, lo, hi, take_len } for each pair
-local function undo_stem(which) return norns.state.data .. "undo-" .. which end
-local function undo_files(which)
-  local st = undo_stem(which)
-  return st .. "_L.wav", st .. "_R.wav"
-end
--- the take that stood becomes the one to go back to
-local function undo_shift()
-  local pl, pr = undo_files("prev")
-  local cl, cr = undo_files("cur")
-  os.remove(pl); os.remove(pr)
-  os.rename(cl, pl); os.rename(cr, pr)
-  undo_prev, undo_cur = undo_cur, nil
+-- dumped as an L/R pair, and the state before it is kept as the one to go
+-- back to. TAKE UNDO loads that one and swaps the two, so a second UNDO is a
+-- redo. The window and the take length come back with it. A clear is a state
+-- too (`empty`), so an UNDO after a clear brings the take back.
+-- The dump is the engine's own write_take, the PSET's path, into one of THREE
+-- slots (`undo-1..3`). A dump is async: the engine opens its file later than
+-- this Lua turn, so files are never renamed (a rename ran before the file
+-- existed and left a state's audio under another state's window). A new dump
+-- goes into the one slot neither kept state uses, and the engine handles its
+-- commands in order, so a read of a slot always follows its write.
+-- UNDO while something writes first finishes that change: a pass stops (its
+-- stop marks a state), regen or erosion stops and the take as they left it
+-- is marked. So UNDO always goes back exactly one change.
+-- `undo_keep` off writes nothing and forgets the kept states, so UNDO never
+-- offers a take older than the last one you made.
+local undo_cur, undo_prev     -- { slot, empty, lo, hi, take_len }
+local function undo_stem(slot) return norns.state.data .. "undo-" .. slot end
+local function free_slot()
+  for k = 1, 3 do
+    if not ((undo_cur and undo_cur.slot == k) or (undo_prev and undo_prev.slot == k)) then
+      return k
+    end
+  end
 end
 function ctx.undo_mark()
-  if pget("undo_keep", 1) ~= 1 or not engine.write_take then return end
-  undo_shift()
+  if pget("undo_keep", 1) ~= 1 or not engine.write_take then
+    undo_cur, undo_prev = nil, nil
+    return
+  end
+  undo_prev = undo_cur
   if not ctx.wave_any then
     undo_cur = { empty = true }
     return
   end
-  engine.write_take(undo_stem("cur"), take_frames())
-  undo_cur = { lo = pget("pos_start", 0), hi = pget("pos_end", 1),
+  local k = free_slot()
+  engine.write_take(undo_stem(k), take_frames())
+  undo_cur = { slot = k, lo = pget("pos_start", 0), hi = pget("pos_end", 1),
     take_len = ctx.take_len }
 end
 -- a fresh session: an undo pair left on the card by the last one is not
--- this session's take, so it is never offered
+-- this session's take, so it is never offered, and its files go
 function ctx.undo_forget()
   undo_cur, undo_prev = nil, nil
-  for _, w in ipairs({ "cur", "prev" }) do
-    local l, r = undo_files(w)
-    os.remove(l); os.remove(r)
+  for k = 1, 3 do
+    os.remove(undo_stem(k) .. "_L.wav"); os.remove(undo_stem(k) .. "_R.wav")
   end
 end
 function ctx.take_undo()
@@ -1592,30 +1595,28 @@ function ctx.take_undo()
     print("mangler: UNDO — nothing to go back to")
     return
   end
-  -- a writer still running would go on writing over what comes back
+  -- finish a change still being written, so UNDO goes back exactly one.
+  -- A pass's stop marks a state itself; regen and erosion are marked here
   if pget("rec", 0) == 1 then params:set("rec", 0) end
+  local writing = pget("regen", 0) > 0 or Mpages.eroding()
   if pget("regen", 0) > 0 then params:set("regen", 0) end
-  if pget("erode", 0) > 0 then params:set("erode", 0) end
-  -- the rec stop above may have marked a state of its own: what comes back is
-  -- still the one that stood BEFORE the last finished change
+  if Mpages.eroding() then params:set("erode", 0) end
+  if writing then ctx.undo_mark() end
   local back = undo_prev
-  local pl, pr = undo_files("prev")
-  local cl, cr = undo_files("cur")
-  local tl, tr = undo_files("swap")
-  os.rename(cl, tl); os.rename(cr, tr)
-  os.rename(pl, cl); os.rename(pr, cr)
-  os.rename(tl, pl); os.rename(tr, pr)
+  if not back then return end   -- the mark above forgot them (undo_keep off)
   undo_prev, undo_cur = undo_cur, back
   if back.empty then
     engine.clear()
     Mpages.clear_wave()
     buffer_cleared()
     Mdeck.set_pair("pos_start", "pos_end", 0, 1)
+    -- as a clear does: a PSET saved now must not bring the loaded file back
+    if params:get("sample_file") ~= "" then params:set("sample_file", "") end
     print("mangler: UNDO — back to the empty buffer")
     return
   end
-  engine.read_take(undo_stem("cur"))
-  local dur = Mpages.load_wave(cl, BUF_SECS)
+  engine.read_take(undo_stem(back.slot))
+  local dur = Mpages.load_wave(undo_stem(back.slot) .. "_L.wav", BUF_SECS)
   buffer_replaced(dur)
   ctx.wave_any = true
   ctx.take_len = back.take_len
@@ -2022,6 +2023,10 @@ local function add_eng_control(id, name, spec, map)
   ctx.eng_map[id] = map
   params:add_control(id, name, spec)
   params:set_action(id, function(v)
+    -- a modulated knob sends its value WITH the swing, so a hand, a scene or
+    -- a motion lane moving it between the modulator's frames never sends the
+    -- plain value in between (a spike, and a zipper on every move)
+    if Mlfo.swinging(id) then v = Mlfo.swung(id, v) end
     if engine[id] then engine[id](map and map(v) or v) end
   end)
 end

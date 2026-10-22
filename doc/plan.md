@@ -14,8 +14,8 @@ The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
 then about thirty changes landed without a device test, several of them in the
 engine. After a RESTART the engine must report `count: 65`.
 
-The offscreen tests are strong. Five test scripts run 652 assertions, the
-render suite compares 67 screens pixel by pixel, and the single-file build is
+The offscreen tests are strong. Five test scripts run 770 assertions, the
+render suite compares 70 screens pixel by pixel, and the single-file build is
 tested for freshness. No test script can judge sound and feel. That is why the
 first step is a device session and not more code.
 
@@ -25,7 +25,7 @@ Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
 2. Make sure that maiden reads `count: 65`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 15, top to bottom. If a stage
+3. Walk doc/device-gate.md from stage 0 to stage 16, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
@@ -143,10 +143,22 @@ bugs in this work. The 81st change fixes them, and stage 15 of
 doc/device-gate.md checks them on the device. The other engine items wait for
 Phase 1:
 
-| Feature | Why | Cost |
-|---|---|---|
-| Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | medium |
-| Linked stereo limiting | Two independent limiters shift the stereo image while limiting | medium |
+The 83rd to 93rd changes added six Lua features, each reviewed by an agent
+and fixed before the next: start on sound, the pad sequencer, two
+modulators, the window on the clock, the take undo and the modulation out.
+Stage 16 of doc/device-gate.md checks them on the device.
+
+The engine items below wait for Phase 1, one at a time, each with its own
+RESTART and listening test. A new command moves the count from 65, so the
+command count in CLAUDE.md, tools/test_control.lua and the deploy ritual move
+with it.
+
+| Feature | Why | Design | Cost |
+|---|---|---|---|
+| Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | At alloc, play each plugin UGen into a 1-sample buffer and check a /done reply; fall back as for a missing class | medium |
+| Linked stereo limiting | Two independent limiters shift the stereo image while limiting | One gain from `max(abs(L), abs(R))` applied to both sides, in place of the two `Limiter.ar` | medium |
+| Beat repeat | A stutter on the output, on the clock, is the one performance effect missing | A spawn/free synth like `\mangler_erode`: a 2 s stereo `LocalBuf`, written while open, looped at a clock division while held. One new command (`repeat`, with the division in seconds), so the count moves to 66 | medium |
+| Reversed grains | GRAIN plays every grain forward | A per-grain rate sign drawn with a probability (`grain_rev`), on both grain copies (Phase 2 item 7 first, so it is written once). One new command, count 66 or 67 | small, after item 7 |
 
 ## Phase 6: decisions for you
 

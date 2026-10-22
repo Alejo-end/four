@@ -118,9 +118,12 @@ function M.tick(amp)
     -- source for the modulation outputs (lib/mout.lua)
     local shape = floor(pget(PID[i].shape, 1) + 0.5)
     local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
-    -- a RANDOM level is drawn only for a RANDOM wave: a draw from any other
-    -- would move the orbit's own random sequence
+    -- a RANDOM level is drawn only for a RANDOM wave, so the other shapes,
+    -- which run whether or not they move a knob, leave the orbit's random
+    -- sequence alone. Switched to RANDOM, it draws at once, not a cycle late.
     local rnd = shape == 5
+    if rnd and m.shape ~= 5 then m.held = math.random() * 2 - 1 end
+    m.shape = shape
     if per then
       local b = beats_now() / per
       m.phase = b - floor(b)
@@ -141,16 +144,42 @@ function M.tick(amp)
       sum[id] = (sum[id] or 0) + off
     end
   end
-  for id, off in pairs(sum) do
-    local cs = params:lookup_param(id).controlspec
-    local v = cs:map(min(max(cs:unmap(pget(id, 0)) + off, 0), 1))
-    if FLOOR[id] then v = max(v, FLOOR[id]) end
-    send(id, v)
-  end
+  for id in pairs(sum) do send(id, M.swung(id, pget(id, 0))) end
 end
 
--- this frame's swing on param `id` (nil when nothing moves it), for a test
-function M.swing(id) return sum[id] end
+-- the delay's feedback HOLD: with the delay mix at 0 the engine keeps the
+-- delay synth alive only while the (curved) feedback is above 0.9, so a
+-- held loop survives a KILL. A swing across that line would free the synth
+-- and drop the loop each cycle, so it is kept on the knob's own side of it.
+local FB_HOLD = 0.9
+local function fb_sent(v)
+  local map = C.eng_map and C.eng_map.delay_fb
+  return map and map(v) or v
+end
+
+-- is param `id` swung this frame (its action asks, before it sends)
+function M.swinging(id) return sum[id] ~= nil end
+
+-- knob value `v` of param `id` with this frame's swing on it, as the engine
+-- should get it (before the send map)
+function M.swung(id, v)
+  local off = sum[id]
+  if not off then return v end
+  local cs = params:lookup_param(id).controlspec
+  local w = cs:map(min(max(cs:unmap(v) + off, 0), 1))
+  if FLOOR[id] then w = max(w, FLOOR[id]) end
+  if id == "delay_fb" and pget("delay_mix", 0) <= 0 then
+    local above = fb_sent(v) > FB_HOLD
+    -- step back toward the knob until the sent value is on its side
+    for _ = 1, 20 do
+      if (fb_sent(w) > FB_HOLD) == above then break end
+      w = (w + v) / 2
+    end
+    if (fb_sent(w) > FB_HOLD) ~= above then w = v end
+  end
+  return w
+end
+
 
 -- any modulator set to move a knob (the purity mark and the header ask). Read
 -- from the params, so it is true from the moment it is set.
