@@ -109,6 +109,8 @@ local MOTION_EXCLUDE = {
   -- would fight it, so they are left to the hand, like the orbit's
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulation out: routing to other gear
+  "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
   -- the modulators: a loop of their knobs would fight them
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",

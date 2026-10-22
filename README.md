@@ -197,6 +197,11 @@ inverts the wave, so ENV with a negative depth ducks the sound while the gear pl
 pages draw the knob, not the swing; the header shows LF while a modulator runs and SQ while
 the sequencer does.
 
+PARAMS > modulation out sends one of those movements to other gear: the scene morph (so
+the orbit and a GLIDE move your synth too), the input envelope, or an LFO's wave, which
+runs even when it moves no knob. It goes out as a MIDI CC on the port, channel and number
+you pick, and to crow output 1 as 0 to 5 volts when a crow is connected.
+
 ## Samples
 
 Load: PARAMS > take > load sample reads WAV in 8, 16, 24 or 32 bit, integer or float. The

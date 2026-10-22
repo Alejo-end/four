@@ -2692,4 +2692,50 @@ do
   params:set("pos_start", 0); params:set("pos_end", 1)
 end
 
+-- ============================================================================
+-- 30 · the modulation out
+-- ============================================================================
+-- One source (the morph, the envelope, an LFO's wave) out as a MIDI CC, and
+-- to crow output 1 as 0..5 V. A CC goes out only when its value changes.
+do
+  local ccs = {}
+  local fake = { cc = function(self, n, v, ch) ccs[#ccs + 1] = { n, v, ch } end }
+  local real_connect = midi.connect
+  midi.connect = function() return fake end
+  params:set("orbit_on", 0); params:set("motion_play", 0)
+  params:set("out_midi", 1); params:set("out_cc", 74); params:set("out_ch", 2)
+  params:set("out_src", 2)                    -- MORPH
+  params:set("scene_morph_amt", 0.5); _h.run_ticks(1)
+  local c = ccs[#ccs]
+  ok(c and c[1] == 74 and c[2] == 64 and c[3] == 2, "the morph goes out as a CC on its number and channel")
+  local n = #ccs
+  _h.run_ticks(3)
+  ok(#ccs == n, "...and a still source sends nothing more")
+  params:set("scene_morph_amt", 0); _h.run_ticks(1)
+  ok(ccs[#ccs][2] == 0, "...and follows the morph home")
+  -- an LFO's wave goes out even when it moves no knob
+  params:set("lfo1_target", 1); params:set("lfo1_depth", 0)
+  params:set("lfo1_shape", 3); params:set("lfo1_period", 1); params:set("lfo1_rate", 2)
+  params:set("out_src", 4)                    -- LFO 1
+  local seen = {}
+  for _ = 1, CTX.FPS do _h.run_ticks(1); seen[ccs[#ccs][2]] = true end
+  ok(seen[0] and seen[127], "an LFO with no knob still drives the CC out, low and high")
+  -- crow output 1, 0..5 V, when connected
+  local real_crow = crow
+  crow = { connected = function() return true end, output = { {} } }
+  params:set("out_crow", 1)
+  params:set("out_src", 2); params:set("scene_morph_amt", 0.4); _h.run_ticks(1)
+  near(crow.output[1].volts, 2, 1e-9, "the source goes to crow output 1 as 0 to 5 volts")
+  params:set("scene_morph_amt", 0); _h.run_ticks(1)
+  crow = real_crow
+  params:set("out_crow", 0)
+  params:set("out_src", 1)
+  n = #ccs
+  params:set("scene_morph_amt", 0.7); _h.run_ticks(1)
+  ok(#ccs == n, "OFF sends nothing")
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("out_midi", 0)
+  midi.connect = real_connect
+end
+
 T.report("control harness OK")

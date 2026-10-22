@@ -2108,6 +2108,8 @@ local MOTION_EXCLUDE = {
   -- would fight it, so they are left to the hand, like the orbit's
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulation out: routing to other gear
+  "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
   -- the modulators: a loop of their knobs would fight them
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
@@ -2729,10 +2731,10 @@ local N = 2
 local M = {
   TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
   env = 0,        -- the input envelope, 0..1, shared by every ENV modulator
-  mods = {},      -- mods[i] = { id, phase, cycle, held }
+  mods = {},      -- mods[i] = { id, phase, cycle, held, out (0..1) }
 }
 for i = 1, N do
-  M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0 }
+  M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0, out = 0.5 }
 end
 local sum = {}    -- this frame's swing per target id (reused, never rebuilt)
 
@@ -2794,21 +2796,30 @@ function M.tick(amp)
       if id then print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name) end
       m.id = id
     end
-    if id then
-      local shape = floor(pget(PID[i].shape, 1) + 0.5)
-      local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
-      if per then
-        local b = beats_now() / per
-        m.phase = b - floor(b)
-        local cyc = floor(b)
-        if cyc ~= m.cycle then m.cycle = cyc; m.held = math.random() * 2 - 1 end
-      else
-        local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
-        if ph >= 1 then m.held = math.random() * 2 - 1 end
-        m.phase = ph - floor(ph)
+    -- the wave runs whether or not it moves a knob: `out` (0..1) is also a
+    -- source for the modulation outputs (lib/mout.lua)
+    local shape = floor(pget(PID[i].shape, 1) + 0.5)
+    local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
+    -- a RANDOM level is drawn only for a RANDOM wave: a draw from any other
+    -- would move the orbit's own random sequence
+    local rnd = shape == 5
+    if per then
+      local b = beats_now() / per
+      m.phase = b - floor(b)
+      local cyc = floor(b)
+      if cyc ~= m.cycle then
+        m.cycle = cyc
+        if rnd then m.held = math.random() * 2 - 1 end
       end
-      local off = shape == ENV_SHAPE and depth * M.env
-        or depth * 0.5 * wave(shape, m.phase, m)
+    else
+      local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
+      if ph >= 1 and rnd then m.held = math.random() * 2 - 1 end
+      m.phase = ph - floor(ph)
+    end
+    local w = shape == ENV_SHAPE and M.env or wave(shape, m.phase, m)
+    m.out = shape == ENV_SHAPE and w or (w + 1) * 0.5
+    if id then
+      local off = shape == ENV_SHAPE and depth * w or depth * 0.5 * w
       sum[id] = (sum[id] or 0) + off
     end
   end
@@ -2864,6 +2875,84 @@ function M.add_params(add_group)
     params:add_control(PID[i].depth, "LFO " .. i .. " depth",
       controlspec.new(-1, 1, "lin", 0, 0, ""))
   end
+end
+
+return M
+
+end)()
+local Mout = (function()  -- inlined lib/mout.lua
+-- mout: the modulation OUTPUT. One source of the instrument's movement, sent
+-- to other gear as a MIDI CC, and to crow's output 1 as 0..5 V when a crow is
+-- connected. The sources are what already moves on its own: the scene morph
+-- (so the orbit and a GLIDE drive the outboard too), the input envelope, and
+-- the two LFOs' waves (lib/mlfo.lua), which run even when they move no knob.
+--
+-- It writes nothing in the instrument. A CC goes out only when its 7-bit value
+-- changes, so a still source sends nothing; crow only when the voltage moves
+-- by more than a millivolt or so.
+
+local floor = math.floor
+local C, pget
+
+local SOURCES = { "OFF", "MORPH", "ENV", "LFO 1", "LFO 2" }
+
+local M = { SOURCES = SOURCES, last_cc = -1, last_v = -1, dev = nil, dev_port = 0 }
+
+-- the source's value now, 0..1, or nil when OFF
+function M.value()
+  local s = floor(pget("out_src", 1) + 0.5)
+  if s == 2 then return pget("scene_morph_amt", 0) end
+  local lfo = C.lfo
+  if not lfo then return nil end
+  if s == 3 then return lfo.env end
+  if s == 4 or s == 5 then return lfo.mods[s - 3].out end
+  return nil
+end
+
+local function device()
+  local port = floor(pget("out_midi", 0) + 0.5)
+  if port ~= M.dev_port then
+    M.dev_port, M.last_cc = port, -1
+    M.dev = port > 0 and midi.connect(port) or nil
+  end
+  return M.dev
+end
+
+function M.tick()
+  local v = M.value()
+  if not v then return end
+  v = math.min(math.max(v, 0), 1)
+  local dev = device()
+  if dev and dev.cc then
+    local cc = floor(v * 127 + 0.5)
+    if cc ~= M.last_cc then
+      M.last_cc = cc
+      dev:cc(floor(pget("out_cc", 1) + 0.5), cc, floor(pget("out_ch", 1) + 0.5))
+    end
+  end
+  if pget("out_crow", 0) == 1 and crow and crow.output and crow.connected
+      and crow.connected() then
+    local volts = v * 5
+    if math.abs(volts - M.last_v) > 0.002 then
+      M.last_v = volts
+      crow.output[1].volts = volts
+    end
+  end
+end
+
+function M.init(ctx)
+  C = ctx
+  pget = ctx.pget
+end
+
+function M.add_params()
+  params:add_group("grp_out", "modulation out", 5)
+  params:add_option("out_src", "out source", SOURCES, 1)
+  params:add_number("out_midi", "out midi port", 0, 16, 0,
+    function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
+  params:add_number("out_ch", "out midi channel", 1, 16, 1)
+  params:add_number("out_cc", "out cc number", 0, 127, 1)
+  params:add_binary("out_crow", "out to crow 1", "toggle", 0)
 end
 
 return M
@@ -3092,6 +3181,8 @@ local SCENE_EXCLUDE = {
   -- generates, are left where they are by a scene
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the modulation out: routing to other gear, not sound
+  "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
   -- the modulators: machines too. A scene moves the knobs they ride on
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
@@ -6769,6 +6860,7 @@ Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
 Mlfo.init(ctx)
+Mout.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -8975,6 +9067,7 @@ local function init_params()
   -- the two modulators (lib/mlfo.lua). LAST, so every target already exists
   -- and the target option can carry the targets' own names.
   Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
+  Mout.add_params()   -- ...and the modulation out, which reads them
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
@@ -9090,6 +9183,7 @@ function init()
     -- apply a pending morph sweep. AFTER motion, which may have just
     -- replayed a recorded scene_morph_amt move for us to act on.
     Mscenes.tick()
+    Mout.tick()   -- after the morph and the LFOs moved: send what they are now
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

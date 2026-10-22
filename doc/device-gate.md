@@ -347,6 +347,8 @@ and that the engine polls behave as the stubs assume.
 | 16.12 | SNAP under the lock | Locked to 1 BAR, TAKE K3, then K3 again | It opens to the take, then goes back to the bar | `apply_window_len` only on its moments |
 | 16.13 | **Take undo** | Record a take, record a second one over it, then PARAMS > undo take, then again | The first take comes back with its window, then the second | `ctx.take_undo`, the `undo-*` pairs |
 | 16.14 | Undo a clear | K1+K3 hold on TAKE (erase), then undo take | The take comes back | The `empty` state |
+| 16.15 | **CC out** | `out source` MORPH, a synth on MIDI port 1 learning the CC; run the orbit | The synth's knob follows the morph; a still morph sends nothing (a MIDI monitor) | `Mout.tick`, `midi.connect` |
+| 16.16 | crow out | A crow on USB, `out to crow 1` on, `out source` LFO 1 | Output 1 swings 0 to 5 V at the LFO's rate | `crow.output[1].volts` |
 
 ## When it passes
 

@@ -49,10 +49,10 @@ local N = 2
 local M = {
   TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
   env = 0,        -- the input envelope, 0..1, shared by every ENV modulator
-  mods = {},      -- mods[i] = { id, phase, cycle, held }
+  mods = {},      -- mods[i] = { id, phase, cycle, held, out (0..1) }
 }
 for i = 1, N do
-  M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0 }
+  M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0, out = 0.5 }
 end
 local sum = {}    -- this frame's swing per target id (reused, never rebuilt)
 
@@ -114,21 +114,30 @@ function M.tick(amp)
       if id then print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name) end
       m.id = id
     end
-    if id then
-      local shape = floor(pget(PID[i].shape, 1) + 0.5)
-      local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
-      if per then
-        local b = beats_now() / per
-        m.phase = b - floor(b)
-        local cyc = floor(b)
-        if cyc ~= m.cycle then m.cycle = cyc; m.held = math.random() * 2 - 1 end
-      else
-        local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
-        if ph >= 1 then m.held = math.random() * 2 - 1 end
-        m.phase = ph - floor(ph)
+    -- the wave runs whether or not it moves a knob: `out` (0..1) is also a
+    -- source for the modulation outputs (lib/mout.lua)
+    local shape = floor(pget(PID[i].shape, 1) + 0.5)
+    local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
+    -- a RANDOM level is drawn only for a RANDOM wave: a draw from any other
+    -- would move the orbit's own random sequence
+    local rnd = shape == 5
+    if per then
+      local b = beats_now() / per
+      m.phase = b - floor(b)
+      local cyc = floor(b)
+      if cyc ~= m.cycle then
+        m.cycle = cyc
+        if rnd then m.held = math.random() * 2 - 1 end
       end
-      local off = shape == ENV_SHAPE and depth * M.env
-        or depth * 0.5 * wave(shape, m.phase, m)
+    else
+      local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
+      if ph >= 1 and rnd then m.held = math.random() * 2 - 1 end
+      m.phase = ph - floor(ph)
+    end
+    local w = shape == ENV_SHAPE and M.env or wave(shape, m.phase, m)
+    m.out = shape == ENV_SHAPE and w or (w + 1) * 0.5
+    if id then
+      local off = shape == ENV_SHAPE and depth * w or depth * 0.5 * w
       sum[id] = (sum[id] or 0) + off
     end
   end

@@ -229,6 +229,7 @@ local Mgrid = include "lib/mgrid"
 local Mmotion = include "lib/mmotion"
 local Mseq = include "lib/mseq"
 local Mlfo = include "lib/mlfo"
+local Mout = include "lib/mout"
 local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
@@ -520,6 +521,7 @@ Mgrid.init(ctx)
 Mmotion.init(ctx)
 Mseq.init(ctx)
 Mlfo.init(ctx)
+Mout.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -2726,6 +2728,7 @@ local function init_params()
   -- the two modulators (lib/mlfo.lua). LAST, so every target already exists
   -- and the target option can carry the targets' own names.
   Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
+  Mout.add_params()   -- ...and the modulation out, which reads them
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
@@ -2841,6 +2844,7 @@ function init()
     -- apply a pending morph sweep. AFTER motion, which may have just
     -- replayed a recorded scene_morph_amt move for us to act on.
     Mscenes.tick()
+    Mout.tick()   -- after the morph and the LFOs moved: send what they are now
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

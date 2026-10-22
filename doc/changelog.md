@@ -3148,6 +3148,21 @@ fingerprint STAYS 65)**.
   morph exclusion were each removed once, and their tests failed.
   `tools/check.lua` green on Lua 5.3.6.
 
+Ninety-second change: **the modulation out (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65)**. New module lib/mout.lua (amalgamate 11 to 12).
+* **One source out**: the scene morph, the input envelope, or LFO 1 or 2
+  (their waves now run whether or not they move a knob, as `mods[i].out`).
+  It goes out as a MIDI CC (`out_midi` port, `out_ch`, `out_cc`) only when
+  the 7-bit value changes, and to crow output 1 as 0..5 V when `out_crow` is
+  on and a crow is connected.
+* It writes nothing in the instrument. It runs after the morph and the
+  LFOs in the frame. An LFO draws a RANDOM level only for a RANDOM wave, so the always
+  running waves do not move the orbit's own random sequence.
+* **Classified**: all five params in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`.
+* RENDERS: identical (70 shots). Device rows 16.15, 16.16.
+* VERIFIED: 759 assertions (468/114/87/41/49). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

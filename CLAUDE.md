@@ -15,7 +15,7 @@ the status block current, and add a change-log entry for every change.
   has changed several times; after a RESTART maiden must read **`count: 65`**.
 - **The one walkthrough:** doc/device-gate.md, stages 0 to 16, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 91st, the take undo (doc/changelog.md). Lua and
+- **Latest change:** the 92nd, the modulation out (doc/changelog.md). Lua and
   tooling only. The 80th moved erosion into its own synth (ENGINE, no new command), so the
   count stays 65. Work lives on the `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
