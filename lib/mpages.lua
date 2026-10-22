@@ -530,6 +530,9 @@ local function body_TAKE(frame)
   end
   local lo, hi = window_bounds()
   local wx = clamp(C.rec_phase, 0, 1) * 127
+  -- the window locked to the clock says so, top right
+  local wb = floor(pget("win_beats", 1) + 0.5)
+  if wb > 1 then ptext_r(C.WIN_BEAT_NAMES[wb], 126, 12, 1, 6) end
   -- marked for erase: K1+K3 held past the tap window on this page
   local marked = C.k13_frame ~= nil
     and (C.frame - C.k13_frame) >= 2 and not C.k13_fired

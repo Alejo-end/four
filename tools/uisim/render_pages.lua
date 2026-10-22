@@ -319,6 +319,14 @@ else
   export(pfx("TAKE", "_WAIT"))
   ctx.rec_waiting = false
   params:set("rec", 0)
+  -- the window locked to a bar of the clock: its length says so top right.
+  -- The window is put back after, so every later shot is as before
+  local ws, we = params:get("pos_start"), params:get("pos_end")
+  params:set("win_beats", 4)
+  redraw()
+  export(pfx("TAKE", "_LOCK"))
+  params:set("win_beats", 1)
+  params:set("pos_start", ws); params:set("pos_end", we)
   -- S17 self-resampling badges
   params:set("resample", 0.4)
   params:set("regen", 0.5)

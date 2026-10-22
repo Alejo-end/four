@@ -3081,6 +3081,21 @@ ENGINE UNTOUCHED, fingerprint STAYS 65)**. A reviewer agent read the 85th.
 * **Left as it is**: under an external clock that stops, a legato hit holds
   until the clock moves (said in lib/mseq.lua).
 
+Eighty-eighth change: **the window on the clock (Lua + tooling, ENGINE
+UNTOUCHED, fingerprint STAYS 65)**.
+* **`win_beats`** (FREE, 1 BEAT to 8 BAR) sets the window's end to the start
+  plus that many beats at the current tempo. `sync_window_len` runs each
+  frame beside `sync_delay_time` and follows the same law: the clock owns
+  the end, it writes only when the end is off by more than 0.5% of the
+  length, and each write is accounted to the motion looper. The write goes
+  through `Mdeck.set_pair`.
+* **Classified**: a scene remembers it (`SWITCH_IDS`, beside `delay_sync`);
+  a motion loop does not replay it.
+* **TAKE** shows the locked length top right.
+* RENDERS: identical, plus TAKE_LOCK (70 shots). Device rows 16.10, 16.11.
+* VERIFIED: 727 assertions (436/114/87/41/49). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

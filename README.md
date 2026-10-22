@@ -161,6 +161,12 @@ threshold. The take then starts there, with a short pre-roll that keeps the atta
 recording itself runs from the arm, so nothing is lost while the level is read. A pass with
 no sound over the threshold keeps the whole pass, and an overdub never waits.
 
+PARAMS > take - window > win length locks the window's length to the clock: one beat to
+eight bars at the current tempo. The window's start carries the length with it, so moving
+the start slides the whole window, and a tempo change re-times it. While it is locked the
+clock owns the window's end, the same way it owns a synced delay's time, and TAKE shows the
+length top right.
+
 ## Notes and pads
 
 A MIDI keyboard or a USB typing keyboard (letters as keys, Z and X for octave) retunes the

@@ -93,6 +93,8 @@ local MOTION_EXCLUDE = {
   "pad_input", "voices",
   -- UI cursors + the per-pad lock editors
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  -- a clock rule, set and left (a replayed one would jump the window)
+  "win_beats",
   -- config / keys
   "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE

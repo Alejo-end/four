@@ -109,6 +109,7 @@ local SPACE_IDS = {
 local SWITCH_IDS = {
   "filt_type", "clouds_mode", "grain_shape",
   "delay_sync",   -- a scene remembers whether the delay follows the clock
+  "win_beats",    -- ...and whether the window's length does
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's

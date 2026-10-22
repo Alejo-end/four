@@ -2509,4 +2509,39 @@ do
   params:set("cutoff", 20000); params:set("rev_mix", 0)
 end
 
+-- ============================================================================
+-- 28 · the window locked to the clock
+-- ============================================================================
+-- With win_beats other than FREE the window's end is the start plus that many
+-- beats, and the clock owns it, like a synced delay's time.
+do
+  local real_tempo = clock.get_tempo
+  local tempo = 120
+  clock.get_tempo = function() return tempo end
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  local B = CTX.BUF_SECS
+  params:set("pos_start", 0.2); params:set("pos_end", 0.6)
+  params:set("win_beats", 4)                  -- 1 BAR
+  near(params:get("pos_end"), 0.2 + 2 / B, 1e-6, "a bar at 120 is a two-second window")
+  params:set("pos_start", 0.5); _h.run_ticks(1)
+  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "moving the start slides the whole window")
+  params:set("pos_end", 0.9); _h.run_ticks(1)
+  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "the clock owns the end: a hand on it is put back")
+  tempo = 60; _h.run_ticks(1)
+  near(params:get("pos_end"), 0.5 + 4 / B, 1e-6, "a tempo change re-times it")
+  tempo = 60.1; _h.run_ticks(1)
+  near(params:get("pos_end"), 0.5 + 4 / B, 1e-6, "...but clock jitter does not write")
+  params:set("motion_rec", 1)
+  tempo = 90; _h.run_ticks(2)
+  params:set("motion_rec", 0)
+  ok(CTX.motion.lanes["pos_end"] == nil, "a gesture loop does not record the clock's writes")
+  params:set("pos_start", 0.99); _h.run_ticks(1)
+  near(params:get("pos_end"), 1, 1e-9, "a start too late ends the window at the buffer's end")
+  params:set("win_beats", 1)
+  params:set("pos_start", 0.1); params:set("pos_end", 0.7); _h.run_ticks(1)
+  near(params:get("pos_end"), 0.7, 1e-9, "FREE leaves the window alone")
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  clock.get_tempo = real_tempo
+end
+
 T.report("control harness OK")

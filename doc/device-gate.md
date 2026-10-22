@@ -342,6 +342,8 @@ and that the engine polls behave as the stubs assume.
 | 16.7 | **A modulator** | LFO 1 target cutoff, SINE, 1 BAR, depth 0.4. Turn cutoff by hand while it runs | The filter breathes once a bar, around where your hand leaves it. The header shows LF | `Mlfo.tick`, the base tracking |
 | 16.8 | Ducking | LFO 2 target `eng level` (or reverb mix), ENV, depth -0.6, play the gear | The level dips while you play and comes back when you stop | The envelope in `Mlfo.tick`, the `amp_in` polls |
 | 16.9 | A PSET mid-swing | With LFO 1 swinging cutoff, save a PSET, set depth 0, load it | Cutoff comes back where your hand left it, not where the wave was | `Mlfo.pset_patch` |
+| 16.10 | **A window on the bar** | A take in PLAY, `win length` 1 BAR, the delay synced to 1/4. Move the window start with E2 | The loop is exactly a bar and stays on the echoes. E2 slides it; the end follows. TAKE shows 1 BAR | `sync_window_len` |
+| 16.11 | Tempo change | With the window locked, change the clock tempo | The loop re-times to the new bar length without a click storm | The 0.5% write tolerance |
 
 ## When it passes
 

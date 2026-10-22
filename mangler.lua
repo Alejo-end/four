@@ -1820,6 +1820,29 @@ function ctx.export_take(name)
   end)
 end
 
+-- the window locked to the clock: with win_beats other than FREE, the
+-- window's END is the start plus that many beats at the current tempo, so a
+-- PLAY loop of the take stays in time with the synced delay, the decks and
+-- the sequencer. The same law as the synced delay: the clock OWNS the end
+-- while it is locked, so a hand, a scene or a motion lane on pos_end is put
+-- back the next frame, and moving the START slides the whole window. It
+-- writes only when the end is off by more than half a percent of the length,
+-- so MIDI clock jitter does not write every frame. A start too late for the
+-- length ends the window at the buffer's end, shorter.
+local WIN_BEATS = { 0, 1, 2, 4, 8, 16, 32 }
+local WIN_BEAT_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
+ctx.WIN_BEAT_NAMES = WIN_BEAT_NAMES
+local function sync_window_len()
+  local b = WIN_BEATS[math.floor(pget("win_beats", 1) + 0.5)] or 0
+  if b <= 0 then return end
+  local len = b * 60 / ctx.tempo() / BUF_SECS
+  local lo = pget("pos_start", 0)
+  local want = min(1, lo + len)
+  if math.abs(pget("pos_end", 1) - want) <= len * 0.005 then return end
+  Mdeck.set_pair("pos_start", "pos_end", lo, want)
+  if ctx.motion and ctx.motion.account then ctx.motion.account("pos_end") end
+end
+
 -- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
 -- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
@@ -2087,10 +2110,14 @@ local function init_params()
       return v < 0.05 and "AUTO (window)" or string.format("%.1f s", v)
     end)
 
-  params:add_group("grp_window", "take - window", 4)
+  params:add_group("grp_window", "take - window", 5)
   -- fine_unit: ~10ms nudges on a tight window once fine_delta scales it
   add_eng_control("pos_start", "win start", fine_unit(0.0))
   add_eng_control("pos_end", "win end", fine_unit(1.0))
+  -- the window's LENGTH on the clock (see sync_window_len): FREE, or a
+  -- length in beats that the start carries with it
+  params:add_option("win_beats", "win length", WIN_BEAT_NAMES, 1)
+  params:set_action("win_beats", function() sync_window_len() end)
   add_eng_control("scan", "scan rate",
     controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
   add_eng_control("pos_jitter", "jitter", unit(0.0))
@@ -2672,6 +2699,7 @@ function init()
     ctx.frame = ctx.frame + 1
     ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
     sync_delay_time()    -- keep a synced delay on the clock (writes when off)
+    sync_window_len()    -- ...and a locked window's length
     tick_rec_wait()        -- a start-on-sound take begins at the sound
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
