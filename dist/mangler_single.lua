@@ -1057,11 +1057,8 @@ function M.pset_read(number)
         -- keep_loop: the pset's loop points are already restored and are
         -- authoritative — reloading the audio must not re-snap them. Through
         -- layer_load when it is there, so an off-rate file is converted here
-        -- too instead of coming back a semitone sharp. That conversion runs
-        -- in the background, so the deck is cleared first: until the file
-        -- lands it is silent and empty, not the previous session's audio
-        -- (which an arm would otherwise overdub into).
-        M.clear(d)
+        -- too instead of coming back a semitone sharp (layer_load clears the
+        -- deck while it converts).
         if C.layer_load then C.layer_load(d, fp, true)
         else M.load_file(d, fp, nil, true) end
       else
@@ -1112,7 +1109,7 @@ local pget, ptoggle, FPS
 local function is_grid_vport(i)
   local G = C.grid
   local gg = G.gg
-  if not ((G.have_midigrid or G.have_launchpad) and gg and gg.device) then return false end
+  if not ((G.midigrid_loaded or G.have_launchpad) and gg and gg.device) then return false end
   local vp = midi.vports[i]
   local dev = vp and vp.device
   if not dev then return false end
@@ -1272,8 +1269,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
-local M = { gg = nil, have_midigrid = false, have_launchpad = false,
-            midigrid_loaded = false }
+local M = { gg = nil, have_launchpad = false, midigrid_loaded = false,
+            reconnect_due = false }
 
 local grid_mod = grid
 local no_monome = false    -- true when no native monome grid holds grid vport 1
@@ -1290,7 +1287,6 @@ do
     if ok and mg then
       grid_mod = mg
       M.midigrid_loaded = true
-      M.have_midigrid = true
       print("mangler: midigrid loaded — midi grid controllers welcome")
     else
       print("mangler: midigrid present but failed to load: " .. tostring(mg))
@@ -1917,6 +1913,11 @@ local function draw_scene_ws()
 end
 
 function M.redraw()
+  -- a hot-plug asked for a fresh connect (see M.hotplug)
+  if M.reconnect_due then
+    M.reconnect_due = false
+    M.connect()
+  end
   if not (gg and gg.device) then return end
   local s = surface()
   -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
@@ -1932,22 +1933,18 @@ function M.redraw()
   gg:refresh()
 end
 
-function M.connect(gone)
+function M.connect()
   gg = nil
-  -- the fallback drives unless the LP takes over below. Set on every connect,
-  -- because an LP that leaves hands the grid back to midigrid, and the vport
-  -- filter (minput) needs this flag to keep midigrid's pads out of the notes.
-  M.have_midigrid = M.midigrid_loaded
+  M.have_launchpad = false
   -- prefer a native Launchpad Mini MK3 colour driver over midigrid/native when
   -- no monome grid is attached; on ANY failure fall back — can't brick.
   if no_monome then
-    local lp = lp_find_device(gone)
+    local lp = lp_find_device()
     if lp then
       local ok, cand = pcall(function() return lp_make_backend(lp).connect() end)
       if ok and cand then
         gg = cand
         M.have_launchpad = true
-        M.have_midigrid = false     -- the LP is driving, not midigrid
         print("mangler: Launchpad Mini MK3 colour driver — " .. tostring(lp.name))
       else
         print("mangler: Mini MK3 found but colour driver failed; using fallback")
@@ -1966,13 +1963,20 @@ end
 -- takes over from the fallback grid; unplugged, the fallback comes back. A
 -- fresh connect also starts a fresh LED diff, so the pads all repaint.
 -- `gone`: the device being removed (midi.remove passes it), still listed.
+-- The connect itself waits for the next grid frame: norns deletes a leaving
+-- device only after midi.remove returns, and midigrid's own search, which
+-- cannot be told to skip it, would bind to the Launchpad that is leaving.
+-- A leaving Launchpad is dropped at once, so nothing draws to it meanwhile.
 function M.hotplug(gone)
   if not no_monome then return end
   local lp = lp_find_device(gone)
   local on_lp = M.have_launchpad and gg and gg.device
   if (lp and on_lp ~= lp) or (not lp and on_lp) then
-    M.have_launchpad = false
-    M.connect(gone)
+    if on_lp then
+      gg.key, gg.button = nil, nil
+      gg, M.gg, M.have_launchpad = nil, nil, false
+    end
+    M.reconnect_due = true
   end
 end
 
@@ -3024,12 +3028,6 @@ function M.capture(slot)
       or " params (the whole mangle: window, grain, stretch, tape loop,"
       .. " filter, FX, voices)"), slot)
   return true
-end
-
--- does a recall GLIDE? (the peek waits for a hold then, so a tap does not
--- move the sound before the glide starts from it: tick_keys in mangler.lua)
-function M.recall_glides()
-  return floor(pget("scene_recall_mode", 1) + 0.5) == GLIDE_MODE
 end
 
 -- recall a slot. scene_recall_mode decides when it lands (NOW / next BEAT /
@@ -4894,10 +4892,15 @@ end
 -- (PLAY is the only mode the engine erodes in). Declared BEFORE body_VOICE:
 -- referenced from there, and a later local would silently read as a global.
 local eros_gen, eros_acc, eros_live = 0, 0, false
+-- the one rule for "the erosion head is engaged": erode up, in PLAY. The
+-- strip repaint (mangler.lua's take_writing) asks the same question.
+function M.eroding()
+  return pget("erode", 0) > 0 and pget("mode", 5) == 5
+end
 function M.erosion_tick()
   -- the engine spawns its erosion head at the window's start each time
   -- erosion engages (erode up in PLAY), so an engagement starts a new pass
-  local live = pget("erode", 0) > 0 and pget("mode", 5) == 5
+  local live = M.eroding()
   if live and not eros_live then eros_acc = 0 end
   eros_live = live
   -- the erosion head runs at exactly one pass per window length, so a
@@ -6782,9 +6785,9 @@ end
 -- the same tick animates the scene PEEK ramp: holding RCL drives the morph
 -- amount toward the slot (~4 frames in), releasing sweeps it home — all
 -- through the scene_morph_amt param, so motion capture and MIDI stay true.
--- Under a GLIDE recall the ramp waits until the press is a hold: a tap
--- glides from where the sound stands, and a ramp that had already run would
--- turn the glide into a jump.
+-- The ramp waits until the press is a hold, in every recall mode: a tap
+-- recalls, and a ramp that had already run would move the sound before the
+-- recall is due (a BEAT or BAR queue) or turn a GLIDE into a jump.
 local function tick_keys()
   if ctx.k13_frame and not ctx.k13_fired
       and ctx.frame - ctx.k13_frame >= ERASE_FRAMES then
@@ -6793,8 +6796,7 @@ local function tick_keys()
     ctx.k13_fired = true
   end
   if ctx.peek_on then
-    if not (ctx.frame - (ctx.peek_at or 0) < TAP_FRAMES
-        and Mscenes.recall_glides()) then
+    if ctx.frame - (ctx.peek_at or 0) >= TAP_FRAMES then
       local a = pget("scene_morph_amt", 0)
       if a < 1 then params:set("scene_morph_amt", clamp(a + 0.34, 0, 1)) end
     end
@@ -7090,13 +7092,17 @@ end
 -- erosion as surely as its knob does, because the erosion head only runs in
 -- PLAY. The second of quiet means that a HEAL tap, a scene recall or a motion
 -- lane crossing 0 does not dump the whole take (17 MB at full length) each
--- time it happens.
+-- time it happens. The knobs' actions also mark the strip (strip_wrote): a
+-- burst that starts and ends between two frames still wrote the buffer.
 local function take_writing()
-  return pget("regen", 0) > 0 or (pget("erode", 0) > 0 and pget("mode", 5) == 5)
+  return pget("regen", 0) > 0 or Mpages.eroding()
+end
+local function strip_wrote()
+  strip_stale, strip_quiet = true, 0
 end
 local function tick_take_strip()
   if take_writing() then
-    strip_stale, strip_quiet = true, 0
+    strip_wrote()
   elseif strip_stale then
     strip_quiet = strip_quiet + 1
     -- a performer's dump still running would refuse the repaint: wait it out
@@ -7172,7 +7178,9 @@ end
 --   land(file, shown)  puts a file in place (`shown` = the name that was picked)
 --   gen()              the target's generation: a conversion that finishes
 --                      after it moved is dropped rather than landing on top
-local function load_at_rate(path, tmp, cap_secs, what, land, gen)
+--   converting()       optional: runs once a conversion is going to start,
+--                      before its generation is taken
+local function load_at_rate(path, tmp, cap_secs, what, land, gen, converting)
   if path == nil or path == "" or path == "-" or path == _path.audio then return end
   if not util.file_exists(path) then
     print("mangler: no such file — " .. tostring(path))
@@ -7186,6 +7194,7 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen)
   print(string.format("mangler: %d Hz file — resampling to %d before the %s load"
     .. " (it would play at %.2fx otherwise)", in_sr, SERVER_SR, what,
     SERVER_SR / in_sr))
+  if converting then converting() end
   local g = gen()
   ctx.run_task(function(yield)
     -- a job whose target moved on (while it waited in the queue, or between
@@ -7236,11 +7245,15 @@ end
 -- deck converts into its own temp, so a take load and a layer load can never
 -- race over one file the server is still reading. `keep_loop`: a PSET restore
 -- keeps the loop points it just restored instead of snapping to the file.
+-- A conversion runs in the background, so the deck is cleared when it starts:
+-- until the file lands the deck is silent and empty, not the previous audio
+-- under the new file's name (an arm would otherwise overdub into it).
 function ctx.layer_load(d, path, keep_loop)
   d.gen = (d.gen or 0) + 1
   load_at_rate(path, norns.state.data .. d.id .. "-srconv.wav", d.len + 1, d.name,
     function(file, shown) Mdeck.load_file(d, file, shown, keep_loop) end,
-    function() return d.gen end)
+    function() return d.gen end,
+    function() Mdeck.clear(d) end)
 end
 
 -- the live take rides the PSET as a private L/R pair beside the
@@ -7807,6 +7820,7 @@ local function init_params()
     -- the other half of the erode interlock (see grp_erode below)
     if v > 0 and pget("erode", 0) > 0 then params:set("erode", 0) end
     if engine.regen then engine.regen(v) end
+    if v > 0 then strip_wrote() end
     -- regen's record head traverses the WHOLE buffer, so once it runs the take
     -- can be anywhere: force a full-buffer PSET save (sticky until the next
     -- fresh rec / load / clear resets take_len), never truncate its decay tail.
@@ -8279,6 +8293,7 @@ local function init_params()
     -- acts when its own value is rising.
     if v > 0 and pget("regen", 0) > 0 then params:set("regen", 0) end
     if engine.erode then engine.erode(v) end
+    if Mpages.eroding() then strip_wrote() end
   end)
   add_eng_control("wear", "wear", unit(0.5))
 

@@ -316,12 +316,15 @@ norns calls behave as the stubs assume, and how it feels.
 |---|---|---|---|---|
 | 15.1 | **CHOP right after erosion** | Erode a take in PLAY, set `erode` to 0, and fire CHOP about two seconds later | maiden prints `take dump queued behind the strip repaint`, then the CHOP result. The pads land on the attacks | `take_to_wav`'s `export_next` |
 | 15.2 | A short HEAL dumps nothing | Erode in PLAY, hold VOICE K2 (HEAL) for half a second and release, then fire CHOP at once | maiden prints the CHOP result with no `queued` line | `tick_take_strip`'s second of quiet |
-| 15.3 | **Launchpad unplug** | With the Mini MK3 driving, unplug it. With midigrid and a second controller, try it with that controller attached too | maiden shows no error. The second controller takes over, and its pads do not move `pitch` | `Mgrid.hotplug(gone)`, `have_midigrid` |
-| 15.4 | GLIDE tap | Recall quantize GLIDE, glide beats 4, tap K2 on a filled slot | The sound crossfades over a bar. Nothing jumps at the tap | `tick_keys`' wait under GLIDE |
+| 15.3 | **Launchpad unplug** | With the Mini MK3 driving, unplug it. With midigrid and a second controller, try it with that controller attached too | maiden shows no error. The second controller takes over, and its pads do not move `pitch` | `Mgrid.hotplug(gone)`, `reconnect_due`, `midigrid_loaded` |
+| 15.4 | GLIDE tap | Recall quantize GLIDE, glide beats 4, tap K2 on a filled slot | The sound crossfades over a bar. Nothing jumps at the tap | `tick_keys`' tap wait |
 | 15.5 | GLIDE through chaos | Hold the chaos throw, recall a slot under GLIDE, release the throw mid-glide | The glide goes on and lands the scene | The GLIDE branch of `M.recall` |
 | 15.6 | A long peek under the orbit | Orbit on, hold K2 on a filled slot for three seconds, release | The sound sweeps back to where it was before the peek | `orbit_tick` |
-| 15.7 | An off-rate deck file in a PSET | Delete `lay1-N.wav` beside a PSET whose L1 came from a 44.1k file, then load the PSET | L1 is silent for a moment, then plays the file in tune | `Mdeck.pset_read`'s clear |
+| 15.7 | An off-rate deck file in a PSET | Delete `lay1-N.wav` beside a PSET whose L1 came from a 44.1k file, then load the PSET | L1 is silent for a moment, then plays the file in tune | `ctx.layer_load`'s clear |
 | 15.8 | Two off-rate loads in a row | Load a long 44.1k sample, then another a few seconds later | The second one loads soon after it is picked. maiden says the first was dropped | `load_at_rate`'s generation check |
+| 15.9 | BEAT tap | Recall quantize BEAT, a clock running, tap K2 on a filled slot between two beats | Nothing moves at the tap. The scene lands on the beat | `tick_keys`' tap wait |
+| 15.10 | A regen flick | MIDI-map `regen`, flick the CC up and straight back to 0 on a long take | About a second later maiden shows no error and the take strip redraws | `strip_wrote` in the regen action |
+| 15.11 | An off-rate layer file by hand | L1 playing, then PARAMS > layers > L1 load file, a 44.1k wav | L1 goes silent at once, then plays the new file in tune | `ctx.layer_load`'s clear |
 
 ## When it passes
 

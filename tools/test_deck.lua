@@ -299,26 +299,15 @@ do
   Mdeck.pset_read(3)
   ok(count("buffer_read_stereo") == 0 and last("buffer_clear_region") ~= nil,
     "an empty file param clears the deck as before")
-  -- an off-rate file converts in the background (ctx.layer_load), so until it
-  -- lands the deck must be empty and silent, not the previous session's audio
-  -- under the new loop points (an arm would overdub into that)
+  -- an off-rate file converts in the background through ctx.layer_load, which
+  -- clears the deck while it converts (test_control drives that part)
   P.lay1_file = "/tmp/bed.wav"
   P.lay1_start = 0.1; P.lay1_end = 0.3
   local asked
   ctx.layer_load = function(d, path, keep) asked = { d, path, keep } end
-  d1.any = true
-  calls = {}
   Mdeck.pset_read(3)
   ok(asked and asked[1] == d1 and asked[2] == "/tmp/bed.wav" and asked[3] == true,
     "a named file reloads through layer_load, keeping the loop")
-  local cleared = false
-  for _, c in ipairs(calls) do
-    if c[1] == "buffer_clear_region" and c[2] == d1.from and c[3] == d1.len then
-      cleared = true
-    end
-  end
-  ok(cleared, "...and the deck's region is cleared while it converts")
-  ok(d1.any == false, "...and the deck reads as empty until the file lands")
   near(P.lay1_start, 0.1, 1e-9, "...with the pset's loop untouched")
   ctx.layer_load = nil
   util.file_exists = function() return false end

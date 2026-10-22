@@ -1233,7 +1233,7 @@ end
 -- here drove the path. They are written against the failure, not the fix.
 do
   local page = T.goto_page
-  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  local pulse = T.pulse
   local function fill_slot(s)
     params:set("scene_slot", s); pulse("scene_capture")
   end
@@ -1351,13 +1351,7 @@ do
   util.file_exists = function(p) local f = io.open(p, "rb"); if f then f:close() end; return f ~= nil end
   local jobs = {}
   clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
-  local function finish(fn)
-    local co = coroutine.create(fn)
-    repeat
-      local okr, err = coroutine.resume(co)
-      if not okr then error(err) end
-    until coroutine.status(co) == "dead"
-  end
+  local finish = T.finish
   local function wav441(path)               -- 0.1s of stereo at 44.1k
     T.write_wav(path, 44100, 2, 16, 4410, function() return 1000 end)
   end
@@ -1391,8 +1385,20 @@ do
   finish(table.remove(jobs, 1))            -- job 2 runs next
   ok(#reads == 1 and reads[1]:find("srconv", 1, true) ~= nil,
     "...and the queued file loads CONVERTED, in tune")
-  -- the layer decks share the same guard: erase while converting
+  -- a layer file picked by hand that converts clears the deck meanwhile, as
+  -- a PSET restore does: the old audio used to play on (and take an overdub)
+  -- under the new file's name until the conversion landed
   local d1 = CTX.layers[1]
+  d1.any, d1.wave[1] = true, 0.5
+  sc_calls = {}
+  params:set("lay1_file", src44)
+  ok(#jobs == 1 and d1.any == false and d1.wave[1] == 0
+    and sc_last("buffer_clear_region") ~= nil,
+    "a layer file that converts leaves the deck empty and silent meanwhile")
+  finish(table.remove(jobs, 1))
+  ok(sc_last("buffer_read_stereo") ~= nil and d1.any == true,
+    "...and lands once it is converted")
+  -- the layer decks share the same guard: erase while converting
   CTX.layer_load(d1, src44)
   page("LAYERS"); params:set("layer_sel", 1)
   key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase L1
@@ -1664,9 +1670,12 @@ do
   ok(#bad == 0, "every shipped preset value is in range, momentaries at 0 ("
     .. table.concat(bad, ",") .. ")")
 
-  -- (d) dist/mangler_single.lua is GENERATED; a stale one ships old code
+  -- (d) dist/mangler_single.lua is GENERATED; a stale one ships old code.
+  -- The generators run on the interpreter running this harness (LUA53 under
+  -- tools/check.lua), not on whatever `lua` is on PATH.
+  local LUA = (arg and arg[-1]) or "lua"
   local tmp = os.tmpname()
-  local okb = os.execute("lua tools/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
+  local okb = os.execute(LUA .. " tools/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
   local built = io.open(tmp) and io.open(tmp):read("a")
   local shipped = io.open("dist/mangler_single.lua") and io.open("dist/mangler_single.lua"):read("a")
   os.remove(tmp)
@@ -1675,7 +1684,7 @@ do
 
   -- (e) doc/controls.md is GENERATED from the script's own tables too
   local ctmp = os.tmpname()
-  local okc = os.execute("lua tools/controls.lua " .. ctmp .. " >/dev/null")
+  local okc = os.execute(LUA .. " tools/controls.lua " .. ctmp .. " >/dev/null")
   local cmap = io.open(ctmp) and io.open(ctmp):read("a")
   local cdoc = io.open("doc/controls.md") and io.open("doc/controls.md"):read("a")
   os.remove(ctmp)
@@ -1688,7 +1697,7 @@ end
 -- 22 · the additions after the review
 -- ============================================================================
 do
-  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  local pulse = T.pulse
   params:set("orbit_on", 0)
   params:set("motion_rec", 0); params:set("motion_play", 0)
   params:set("stop_all", 0)
@@ -1822,14 +1831,7 @@ do
     local real_run = clock.run
     local jobs = {}
     clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
-    local function finish(fn)
-      if not fn then return end     -- no dump started: the assertion says so
-      local co = coroutine.create(fn)
-      repeat
-        local okr, err = coroutine.resume(co)
-        if not okr then error(err) end
-      until coroutine.status(co) == "dead"
-    end
+    local finish = T.finish   -- nil (no dump started) runs nothing
     local filled = {}
     local real_qf = CTX.wav.queue_fill
     CTX.wav.queue_fill = function(path, bins, secs)
@@ -1871,6 +1873,15 @@ do
     params:set("regen", 0.3); CTX.take_len = 0.002
     _h.run_ticks(1); params:set("regen", 0); _h.run_ticks(Q + 1)
     ok(#jobs == 1, "regen writes in every mode, and its stop repaints")
+    finish(table.remove(jobs, 1))
+    -- a burst that starts and ends between two frames (a CC, a motion lane)
+    -- still wrote the buffer, and the frame poll alone never sees it
+    params:set("regen", 0.3); params:set("regen", 0); _h.run_ticks(Q + 1)
+    ok(#jobs == 1, "a regen burst shorter than a frame still repaints")
+    finish(table.remove(jobs, 1))
+    params:set("mode", 5)
+    params:set("erode", 0.3); params:set("erode", 0); _h.run_ticks(Q + 1)
+    ok(#jobs == 1, "...and so does an erosion burst in PLAY")
     finish(table.remove(jobs, 1))
     params:set("mode", 5)
     -- a CHOP pressed while the repaint dumps waits for it, then runs
@@ -1981,11 +1992,20 @@ do
     function lp:send(m) sent[#sent + 1] = m end
     midi.devices = { [1] = lp }
     midi.to_msg = function(d) return d end
-    CTX.grid.midigrid_loaded, CTX.grid.have_midigrid = true, true  -- as on a device with midigrid
+    CTX.grid.midigrid_loaded = true           -- as on a device with midigrid
+    -- the fallback's connect records what it could see: midigrid scans
+    -- midi.devices itself, and cannot be told to skip a leaving device
+    local real_connect, seen_lp = grid.connect, nil
+    grid.connect = function()
+      seen_lp = false
+      for _, dv in pairs(midi.devices) do if dv == lp then seen_lp = true end end
+      return real_connect()
+    end
     midi.add(lp)
+    ok(not CTX.grid.have_launchpad, "a plugged-in Mini MK3 connects on the next grid frame")
+    CTX.grid.redraw()
     ok(CTX.grid.have_launchpad and CTX.grid.gg ~= _h.grid,
       "a Mini MK3 plugged in after load takes over the grid")
-    ok(CTX.grid.have_midigrid == false, "...and midigrid is no longer the grid")
     ok(sent[1] and sent[1][7] == 0x0E and sent[1][8] == 0x01,
       "...and is put in Programmer mode first")
     T.goto_page("TAKE")
@@ -2000,13 +2020,18 @@ do
     ok(math.floor(params:get("scene_slot") + 0.5) == 4, "the up arrow steps the scene slot")
     -- norns calls midi.remove while the device is STILL in midi.devices, and
     -- only deletes it afterwards
+    local n_sent = #sent
     midi.remove(lp)
+    ok(not CTX.grid.have_launchpad and CTX.grid.gg == nil,
+      "unplugged, the Launchpad is dropped at once")
     midi.devices = {}
+    CTX.grid.redraw()
+    ok(#sent == n_sent, "...nothing is drawn to it after it left")
+    ok(seen_lp == false, "...and the fallback connects only once norns has deleted it")
     ok(not CTX.grid.have_launchpad and CTX.grid.gg == _h.grid,
       "unplugged, the fallback grid comes back")
-    ok(CTX.grid.have_midigrid == true,
-      "...and midigrid is the grid again, so its pads stay out of the notes")
-    CTX.grid.midigrid_loaded, CTX.grid.have_midigrid = false, false
+    grid.connect = real_connect
+    CTX.grid.midigrid_loaded = false
     midi.devices, midi.to_msg = real_devices, real_to_msg
     params:set("scene_slot", 1)
   end
@@ -2079,7 +2104,7 @@ end
 -- before its fix.
 do
   local page = T.goto_page
-  local function pulse(id) params:set(id, 1); params:set(id, 0) end
+  local pulse = T.pulse
   local function fill(slot, cut, fb)
     params:set("cutoff", cut); params:set("delay_fb", fb)
     params:set("scene_slot", slot); pulse("scene_capture")
@@ -2120,6 +2145,19 @@ do
     "a GLIDE tapped on a grid scene pad starts from where the sound stood (" .. amt .. ")")
   _h.run_ticks(35)
   near(params:get("cutoff"), 500, 1e-6, "...and lands the scene")
+  -- a BEAT recall tapped on K2 waits for the beat: the peek ramp used to run
+  -- during the tap and leave the morph raised until the landing
+  params:set("scene_recall_mode", 2)          -- BEAT
+  local real_run, queued = clock.run, {}
+  clock.run = function(fn) queued[#queued + 1] = fn; return {} end
+  params:set("scene_slot", 2)
+  key(2, 1); _h.run_ticks(3); key(2, 0)
+  _h.run_ticks(1)
+  clock.run = real_run
+  amt = params:get("scene_morph_amt")
+  ok(#queued == 1 and amt < 0.2,
+    "a BEAT recall tapped on K2 does not move the sound before the beat (" .. amt .. ")")
+  params:set("scene_recall_mode", 4)
   -- a hold is still a peek, once it is a hold
   params:set("scene_slot", 2)
   key(2, 1); _h.run_ticks(8)
@@ -2166,36 +2204,28 @@ do
   util.file_exists = function(p) local f = io.open(p, "rb"); if f then f:close() end; return f ~= nil end
   local jobs = {}
   clock.run = function(fn) jobs[#jobs + 1] = fn; return {} end
-  local function resumes(co)                  -- run a job to its end; how many steps
-    local n = 0
-    repeat
-      local okr, err = coroutine.resume(co)
-      if not okr then error(err) end
-      n = n + 1
-    until coroutine.status(co) == "dead"
-    return n
-  end
+  local finish = T.finish                     -- returns how many steps
   local src = os.tmpname() .. "-44k.wav"      -- 1s at 44.1k: a dozen blocks
   T.write_wav(src, 44100, 2, 16, 44100, function() return 1000 end)
   local reads = {}
   engine.read_file = function(p) reads[#reads + 1] = p end
   CTX.load_sample(src)
-  local full = resumes(coroutine.create(table.remove(jobs, 1)))
+  local full = finish(table.remove(jobs, 1))
   ok(full > 5 and #reads == 1, "an undisturbed conversion runs (" .. full .. " steps) and lands")
   reads = {}
   CTX.load_sample(src)                        -- A converts
   CTX.load_sample(src)                        -- B queues behind it: A is doomed
-  local a = resumes(coroutine.create(table.remove(jobs, 1)))
+  local a = finish(table.remove(jobs, 1))
   ok(a == 1 and #reads == 0, "a doomed conversion stops before it converts (" .. a .. " steps)")
   ok(#jobs == 1, "...and the request behind it starts at once")
-  resumes(coroutine.create(table.remove(jobs, 1)))
+  finish(table.remove(jobs, 1))
   ok(#reads == 1, "...and lands")
   reads = {}
   CTX.load_sample(src)
   local co = coroutine.create(table.remove(jobs, 1))
   coroutine.resume(co); coroutine.resume(co)  -- two blocks in
   params:set("rec", 1); params:set("rec", 0)  -- a live pass outranks it
-  local rest = resumes(co)
+  local rest = finish(co)
   ok(rest == 1 and #reads == 0,
     "a conversion overtaken mid-way stops at the next block (" .. rest .. " steps)")
   os.remove(src)

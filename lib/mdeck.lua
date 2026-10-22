@@ -476,11 +476,8 @@ function M.pset_read(number)
         -- keep_loop: the pset's loop points are already restored and are
         -- authoritative — reloading the audio must not re-snap them. Through
         -- layer_load when it is there, so an off-rate file is converted here
-        -- too instead of coming back a semitone sharp. That conversion runs
-        -- in the background, so the deck is cleared first: until the file
-        -- lands it is silent and empty, not the previous session's audio
-        -- (which an arm would otherwise overdub into).
-        M.clear(d)
+        -- too instead of coming back a semitone sharp (layer_load clears the
+        -- deck while it converts).
         if C.layer_load then C.layer_load(d, fp, true)
         else M.load_file(d, fp, nil, true) end
       else

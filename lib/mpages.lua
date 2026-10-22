@@ -645,10 +645,15 @@ end
 -- (PLAY is the only mode the engine erodes in). Declared BEFORE body_VOICE:
 -- referenced from there, and a later local would silently read as a global.
 local eros_gen, eros_acc, eros_live = 0, 0, false
+-- the one rule for "the erosion head is engaged": erode up, in PLAY. The
+-- strip repaint (mangler.lua's take_writing) asks the same question.
+function M.eroding()
+  return pget("erode", 0) > 0 and pget("mode", 5) == 5
+end
 function M.erosion_tick()
   -- the engine spawns its erosion head at the window's start each time
   -- erosion engages (erode up in PLAY), so an engagement starts a new pass
-  local live = pget("erode", 0) > 0 and pget("mode", 5) == 5
+  local live = M.eroding()
   if live and not eros_live then eros_acc = 0 end
   eros_live = live
   -- the erosion head runs at exactly one pass per window length, so a

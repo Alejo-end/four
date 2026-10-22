@@ -524,12 +524,6 @@ function M.capture(slot)
   return true
 end
 
--- does a recall GLIDE? (the peek waits for a hold then, so a tap does not
--- move the sound before the glide starts from it: tick_keys in mangler.lua)
-function M.recall_glides()
-  return floor(pget("scene_recall_mode", 1) + 0.5) == GLIDE_MODE
-end
-
 -- recall a slot. scene_recall_mode decides when it lands (NOW / next BEAT /
 -- next BAR). a queued recall replaces any other queued recall — last press
 -- wins.

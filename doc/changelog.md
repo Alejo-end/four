@@ -2952,6 +2952,41 @@ has a test that failed before it.
   removing one part of a fix, each fail a test. `tools/check.lua` green on
   Lua 5.3.
 
+Eighty-second change: **the fixes from the second code review of `full-review`
+(Lua + tooling, ENGINE UNTOUCHED, fingerprint STAYS 65, on branch
+`full-review`)**. A second multi-agent review found two bugs and eight
+cleanups. Nine are done. Each behaviour fix has a test that failed before it.
+* **Grid**: on a Launchpad unplug, the connect now waits for the next grid
+  frame (`Mgrid.reconnect_due`). norns deletes the device only after
+  `midi.remove` returns, and midigrid's own search found the leaving
+  Launchpad and bound to it. The leaving Launchpad is dropped at once, so
+  nothing draws to it meanwhile. `have_midigrid` is gone: the note filter
+  reads `midigrid_loaded`, which said the same thing.
+* **The strip repaint**: the `regen` and `erode` actions mark the strip as
+  written (`strip_wrote`). A burst that started and ended between two frames
+  (a CC flick, a motion lane) wrote the buffer, but the frame poll never saw
+  it. `Mpages.eroding()` is now the one rule for "the erosion head runs".
+* **Scenes**: the peek ramp waits out the tap window in every recall mode,
+  not only under GLIDE. A BEAT or BAR tap raised the morph before the recall
+  was due. `Mscenes.recall_glides` is gone.
+* **Decks**: `ctx.layer_load` clears the deck when a conversion starts, so a
+  file picked by hand behaves like a PSET restore. The clear in
+  `Mdeck.pset_read` moved there.
+* **Tooling**: `tools/check.lua` no longer rebuilds and compares dist a second
+  time. test_control does it, and now runs the generators on its own
+  interpreter (`arg[-1]`), so under LUA53 they run on 5.3 too. `T.pulse` and
+  `T.finish` replace three copies each in test_control. The PEEK render holds
+  K2 for 8 frames, because the ramp now starts after the tap window.
+* **Not done**: a CHOP or TIGHTEN queued behind the strip repaint still dumps
+  the take again. Reusing the repaint's dump needs a sign that the buffer did
+  not change in between, and an overdub does not bump `take_gen`.
+* RENDERS: identical except SCENE_PEEK (now a full peek) and two frame-timed
+  shots that follow it (VOICE_ERODE, SCENE_ORBIT). Device rows:
+  doc/device-gate.md stage 15, rows 15.9 to 15.11.
+* VERIFIED: 657 assertions (372/114/87/41/43). Each behaviour fix was
+  removed once, and its test failed. `tools/check.lua` green on Lua 5.3.6
+  and on 5.5.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

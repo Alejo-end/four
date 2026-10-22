@@ -4,7 +4,8 @@
 --
 -- What it runs, in order:
 --   1. a syntax check of the script, the modules and the single-file build
---   2. the five harnesses (each prints its assertion count)
+--   2. the five harnesses (each prints its assertion count; test_control
+--      also fails on a stale single-file build)
 --   3. the render suite over the source AND the single-file build, all four
 --      variants, compared byte for byte (the build must draw what the source
 --      draws)
@@ -42,17 +43,9 @@ end
 print(is53 and ("checking with Lua 5.3 (" .. LUA .. ")")
   or "checking with `lua` (no Lua 5.3 found: set LUA53 for the norns version)")
 
--- 1. syntax
-step("syntax: mangler.lua, lib/*.lua",
-  sh(LUAC .. " -p mangler.lua lib/*.lua"))
--- built to a temp file and compared: building over dist/ itself would make a
--- stale build pass, and leave the fix uncommitted in the working tree
-local fresh = os.tmpname()
-step("single-file build is fresh and parses",
-  sh(LUA .. " tools/amalgamate.lua mangler.lua " .. fresh .. " >/dev/null") and
-  sh("cmp -s " .. fresh .. " dist/mangler_single.lua") and
-  sh(LUAC .. " -p dist/mangler_single.lua"))
-os.remove(fresh)
+-- 1. syntax. Whether dist/ is a fresh build is test_control's check, run below.
+step("syntax: script, modules, single-file build",
+  sh(LUAC .. " -p mangler.lua lib/*.lua dist/mangler_single.lua"))
 
 -- 2. the harnesses
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",

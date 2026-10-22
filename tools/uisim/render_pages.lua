@@ -458,11 +458,12 @@ else
   redraw()
   export(pfx("SCENE", "_BACK"))
   -- NU-3: hold-to-PEEK — RCL held ramps the morph toward the slot; the
-  -- punch release sweeps it home again
+  -- punch release sweeps it home again. The ramp waits out the tap window
+  -- (5 frames), then takes 3 to arrive
   params:set("scene_slot", 4)
   run_ticks(2)
   key(2, 1)
-  run_ticks(4)
+  run_ticks(8)
   redraw()
   export(pfx("SCENE", "_PEEK"))
   run_ticks(3)

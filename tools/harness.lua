@@ -41,6 +41,23 @@ function H.goto_page(page)
   return i
 end
 
+-- a momentary param's press: up, then back down
+function H.pulse(id) params:set(id, 1); params:set(id, 0) end
+
+-- run a job to its end: a coroutine, or a function in a fresh one. Its error
+-- is raised here. Returns how many resumes it took; nil runs nothing.
+function H.finish(co)
+  if not co then return 0 end
+  if type(co) == "function" then co = coroutine.create(co) end
+  local n = 0
+  repeat
+    local okr, err = coroutine.resume(co)
+    if not okr then error(err) end
+    n = n + 1
+  until coroutine.status(co) == "dead"
+  return n
+end
+
 -- write a PCM wav. `sample(i, c)` returns the INTEGER sample for frame i
 -- (0-based) and channel c (1-based), at the file's bit depth (8-bit WAV is
 -- unsigned, 0..255 centred on 128; every wider depth is signed).

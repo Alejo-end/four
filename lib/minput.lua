@@ -22,7 +22,7 @@ local pget, ptoggle, FPS
 local function is_grid_vport(i)
   local G = C.grid
   local gg = G.gg
-  if not ((G.have_midigrid or G.have_launchpad) and gg and gg.device) then return false end
+  if not ((G.midigrid_loaded or G.have_launchpad) and gg and gg.device) then return false end
   local vp = midi.vports[i]
   local dev = vp and vp.device
   if not dev then return false end

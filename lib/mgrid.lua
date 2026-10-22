@@ -34,8 +34,8 @@
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 
-local M = { gg = nil, have_midigrid = false, have_launchpad = false,
-            midigrid_loaded = false }
+local M = { gg = nil, have_launchpad = false, midigrid_loaded = false,
+            reconnect_due = false }
 
 local grid_mod = grid
 local no_monome = false    -- true when no native monome grid holds grid vport 1
@@ -52,7 +52,6 @@ do
     if ok and mg then
       grid_mod = mg
       M.midigrid_loaded = true
-      M.have_midigrid = true
       print("mangler: midigrid loaded — midi grid controllers welcome")
     else
       print("mangler: midigrid present but failed to load: " .. tostring(mg))
@@ -679,6 +678,11 @@ local function draw_scene_ws()
 end
 
 function M.redraw()
+  -- a hot-plug asked for a fresh connect (see M.hotplug)
+  if M.reconnect_due then
+    M.reconnect_due = false
+    M.connect()
+  end
   if not (gg and gg.device) then return end
   local s = surface()
   -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
@@ -694,22 +698,18 @@ function M.redraw()
   gg:refresh()
 end
 
-function M.connect(gone)
+function M.connect()
   gg = nil
-  -- the fallback drives unless the LP takes over below. Set on every connect,
-  -- because an LP that leaves hands the grid back to midigrid, and the vport
-  -- filter (minput) needs this flag to keep midigrid's pads out of the notes.
-  M.have_midigrid = M.midigrid_loaded
+  M.have_launchpad = false
   -- prefer a native Launchpad Mini MK3 colour driver over midigrid/native when
   -- no monome grid is attached; on ANY failure fall back — can't brick.
   if no_monome then
-    local lp = lp_find_device(gone)
+    local lp = lp_find_device()
     if lp then
       local ok, cand = pcall(function() return lp_make_backend(lp).connect() end)
       if ok and cand then
         gg = cand
         M.have_launchpad = true
-        M.have_midigrid = false     -- the LP is driving, not midigrid
         print("mangler: Launchpad Mini MK3 colour driver — " .. tostring(lp.name))
       else
         print("mangler: Mini MK3 found but colour driver failed; using fallback")
@@ -728,13 +728,20 @@ end
 -- takes over from the fallback grid; unplugged, the fallback comes back. A
 -- fresh connect also starts a fresh LED diff, so the pads all repaint.
 -- `gone`: the device being removed (midi.remove passes it), still listed.
+-- The connect itself waits for the next grid frame: norns deletes a leaving
+-- device only after midi.remove returns, and midigrid's own search, which
+-- cannot be told to skip it, would bind to the Launchpad that is leaving.
+-- A leaving Launchpad is dropped at once, so nothing draws to it meanwhile.
 function M.hotplug(gone)
   if not no_monome then return end
   local lp = lp_find_device(gone)
   local on_lp = M.have_launchpad and gg and gg.device
   if (lp and on_lp ~= lp) or (not lp and on_lp) then
-    M.have_launchpad = false
-    M.connect(gone)
+    if on_lp then
+      gg.key, gg.button = nil, nil
+      gg, M.gg, M.have_launchpad = nil, nil, false
+    end
+    M.reconnect_due = true
   end
 end
 
