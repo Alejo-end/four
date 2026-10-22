@@ -99,9 +99,9 @@ function M.fire(beats)
   local div = div_beats()
   local n = floor(pget("step_len", 4) + 0.5)
   local q = floor(beats / div + 0.5)
-  -- a boundary of a division that is no longer set (a sync that was waiting
-  -- when step_div changed) is not a step: the next sync lands on the grid
-  if math.abs(beats / div - q) > 0.01 then return nil end
+  -- far off the grid is not a step: the next sync lands on it. A quarter of
+  -- a step, so a coroutine woken late (matron busy, MIDI clock) still plays
+  if math.abs(beats / div - q) > 0.25 then return nil end
   local step = q % n
   M.step = step
   if not M.hits[step + 1] then return nil end

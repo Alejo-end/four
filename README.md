@@ -163,9 +163,14 @@ no sound over the threshold keeps the whole pass, and an overdub never waits.
 
 PARAMS > take - window > win length locks the window's length to the clock: one beat to
 eight bars at the current tempo. The window's start carries the length with it, so moving
-the start slides the whole window, and a tempo change re-times it. While it is locked the
-clock owns the window's end, the same way it owns a synced delay's time, and TAKE shows the
-length top right.
+the start slides the whole window, a record pass comes out that long, and a tempo change
+re-times it. Moving the end yourself (E3, SNAP, a scene, the morph) is left as you put it
+until the next of those. TAKE shows the length top right.
+
+PARAMS > take - record > undo take goes back to the take before the last finished change: a
+record pass, a load, a print, a PSET, regen or erosion going quiet, or a clear. Press it
+again to come forward. The window comes back with it. Each finished change writes the take
+to the card once, at most two takes' worth; turn `keep an undo` off to save the card.
 
 ## Notes and pads
 
@@ -182,14 +187,15 @@ the pads. Map `sequencer run` to a footswitch to start and stop it.
 
 ## Modulators
 
-PARAMS > modulators holds two LFOs. Each one moves one knob: pick its target, a shape
-(sine, triangle, square, ramp, random, or ENV, the input's envelope), a period (free in Hz,
-or one beat to eight bars on the clock) and a depth. The knob swings around where you set
-it, so turning it by hand, a scene or a motion lane moves the centre and the wave keeps
-going. A negative depth inverts the wave, so ENV with a negative depth ducks the knob while
-the gear plays. A motion loop never records a modulator, and a PSET saved mid-swing stores
-the knob where you set it. The header shows LF while a modulator runs and SQ while the
-sequencer does.
+PARAMS > modulators holds two LFOs. Each one moves the sound of one engine knob: pick its
+target, a shape (sine, triangle, square, ramp, random, or ENV, the input's envelope), a
+period (free in Hz, or one beat to eight bars on the clock) and a depth. The modulator never
+moves the knob itself, only what the engine hears, so the knob stays where you, a scene or a
+motion lane put it, and the sound swings around it. Scenes, UNDO, the motion loop and a PSET
+all store the knob, never the wave. Two modulators on one knob add up. A negative depth
+inverts the wave, so ENV with a negative depth ducks the sound while the gear plays. The
+pages draw the knob, not the swing; the header shows LF while a modulator runs and SQ while
+the sequencer does.
 
 ## Samples
 

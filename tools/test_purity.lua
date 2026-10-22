@@ -60,7 +60,16 @@ local PURE = {
   lfo1_depth = 0,    -- a modulator aimed at wear (below), at rest
 }
 -- wear alone does not touch the mark, so only the modulator's depth can
-params:set("lfo1_target", 27)   -- wear: the 26th target, after OFF
+local function ctx_lfo_targets()
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(key, i)
+    if n == nil then break end
+    if n == "ctx" then return v.lfo.TARGETS end
+  end
+end
+for k, t in ipairs(ctx_lfo_targets()) do
+  if t == "wear" then params:set("lfo1_target", k + 1) end
+end
 for id, v in pairs(PURE) do params:set(id, v) end
 
 -- ---- render + detect ------------------------------------------------------

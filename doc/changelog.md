@@ -3096,6 +3096,58 @@ UNTOUCHED, fingerprint STAYS 65)**.
 * VERIFIED: 727 assertions (436/114/87/41/49). `tools/check.lua` green on
   Lua 5.3.6.
 
+Eighty-ninth change: **the modulators, rebuilt after review (Lua + tooling,
+ENGINE UNTOUCHED, fingerprint STAYS 65)**. A reviewer agent read the 86th
+and reproduced five faults, all from one design choice: the modulator wrote
+its target param and tracked a "base" by polling. An encoder nudge moved the
+centre by the whole swing. A hand on a modulated knob could not be recorded.
+Two modulators on one knob ran away. Every snapshot (scenes, the safe
+snapshot and UNDO, the throws) stored where the wave happened to be. A
+reverb or delay mix swung through 0 respawned its synth every cycle.
+* **A modulator now never writes a param.** It sends the engine the knob's
+  value plus the swing, through the param's own send map (`ctx.eng_map`,
+  filled by `add_eng_control`). The knob stays the single source of truth,
+  so everything that reads or stores it sees the knob.
+* **Targets** are engine controls only (pitch, tape rate, the mix and the
+  deck levels are not). Two modulators on one knob add their swings. Delay
+  and reverb mix are held at 0.001 while modulated.
+* `pset_patch` is gone: a PSET stores the knob anyway.
+* **The sequencer's off-grid guard** is a quarter of a step, not a hundredth:
+  a coroutine woken late (matron busy, MIDI clock) still plays its step.
+
+Ninetieth change: **the window on the clock, the review fixes (Lua + tooling,
+ENGINE UNTOUCHED, fingerprint STAYS 65)**. A reviewer agent read the 88th
+and reproduced three faults: TAKE SNAP could not go back, a morph or GLIDE
+on the end fought the lock every frame (the read head wobbled at 7 Hz), and
+the morph flipped `win_beats` at its midpoint.
+* **The lock no longer owns the end.** It puts the end at start + length
+  when it is set, when a record pass stops, on a tempo move past 0.5%, and
+  when the start moves while the end does not. A write that moves the end
+  (SNAP, TIGHTEN, a scene, the morph, E3, any pair write) is left as it is.
+* **A start that jumps past the end** takes the end with it in its own
+  action, so the engine never reads a crossed pair.
+* `win_beats` joins `MORPH_EXCLUDE`.
+
+Ninety-first change: **the take undo (Lua + tooling, ENGINE UNTOUCHED,
+fingerprint STAYS 65)**.
+* **One step back and forward.** After every finished change (a record pass
+  stops, a load or print lands, a PSET restores the take, regen or erosion
+  goes quiet, a clear) the take is dumped as the `undo-cur` L/R pair through
+  the engine's own `write_take`, and the pair before becomes `undo-prev`.
+  `take_undo` loads `undo-prev` with `read_take` and swaps the two, so a
+  second UNDO is a redo. The window and the take length come back with it.
+  A clear is a state (`empty`), so UNDO after a clear brings the take back.
+* **Before it loads**, UNDO stops rec, regen and erosion, as a clear does.
+  The pairs from the last session are removed at init. `undo_keep` off
+  writes nothing.
+* **Classified**: both params in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`. The
+  record group is 17.
+* RENDERS: all 70 identical to the 88th. Device rows 16.7, 16.9, 16.12 to
+  16.14 (16.7 and 16.9 rewritten for the rebuilt modulators).
+* VERIFIED: 753 assertions (462/114/87/41/49). The window fixes and the
+  morph exclusion were each removed once, and their tests failed.
+  `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

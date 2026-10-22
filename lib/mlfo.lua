@@ -1,23 +1,29 @@
--- mlfo: two modulators that move any one knob each, a fifth driver of the
--- params beside the keys, the encoders, MIDI and the motion loop.
+-- mlfo: two modulators that each move the SOUND of one knob.
 --
--- A modulator writes its target param every frame, as base + depth x wave,
--- in the param's own 0..1 (unmapped) space so a curve-mapped knob such as
--- cutoff swings evenly. The BASE is where the knob stands without the
--- modulator. Anything else that moves the knob (a hand, MIDI, a scene, the
--- morph, a motion lane) is seen by polling: a value that is not the one this
--- module last wrote is a new base, and the wave rides on top of it. That is
--- the same polling the motion looper uses, for the same reason (an encoder
--- on the device goes through paramset:delta, which no wrapper sees).
+-- A modulator never writes its target param. The param stays where the hand,
+-- MIDI, a scene, the morph or a motion lane left it: that is the knob, the
+-- single source of truth, and everything that reads or stores it (scene
+-- capture, the safe snapshot and UNDO, the throws, the motion looper, a PSET
+-- save) sees the knob and never the wave. Each frame the modulator sends the
+-- ENGINE the knob's value plus depth x wave, in the param's own 0..1
+-- (unmapped) space, so a curve-mapped knob such as cutoff swings evenly, and
+-- through the same send map the param's action uses (`ctx.eng_map`).
+-- An earlier version wrote the param and tracked a "base" by polling. A
+-- reviewer found what that costs: an encoder nudge moved the centre by the
+-- whole swing, a hand on the knob could not be recorded, two modulators on
+-- one knob ran away, and every snapshot stored where the wave happened to be.
 --
--- After each write it tells the motion looper the move was not a hand
--- (Mmotion.account), so a gesture loop never records a modulator.
+-- So only ENGINE controls are targets (a plain `engine[id](v)` action). Two
+-- modulators on one knob add their swings. A target that the engine frees at
+-- 0 (delay and reverb mix) is held just above 0 while modulated, or the FX
+-- synth would be freed and spawned again every cycle; at depth 0 the knob's
+-- own value goes back to the engine, so a mix at 0 frees it as before.
+-- Pages draw the knob, not the swing; the header's LF says a modulator runs.
 --
 -- Shapes: SINE, TRI, SQUARE, RAMP, RANDOM (a new level each cycle), and ENV,
--- the input's envelope: the knob follows how hard the gear plays. Depth is
--- -1..1; negative inverts, so ENV with negative depth ducks. A period other
--- than FREE locks the phase to the clock's beat count, so a modulator stays
--- on the bar through a tempo change.
+-- the input's envelope. Depth is -1..1; negative inverts, so ENV with a
+-- negative depth ducks. A period other than FREE locks the phase to the
+-- clock's beat count, so a modulator stays on the bar through a tempo change.
 --
 -- The TARGETS list is APPEND-ONLY: the target param stores an index into it,
 -- so a PSET or a PMAP names a target by its position here.
@@ -28,13 +34,14 @@ local C, pget, FPS
 local TARGETS = {
   "cutoff", "resonance", "drive", "dry_wet",
   "delay_mix", "delay_fb", "rev_mix", "rev_size", "shimmer",
-  "scan", "pitch", "size", "density", "spread", "pan", "grain_jitter",
-  "pos_jitter", "warp_window", "clouds_pos", "clouds_tex",
-  "tape_rate", "mix", "lay1_level", "lay2_level", "pad_level", "wear",
+  "scan", "size", "density", "spread", "pan", "grain_jitter",
+  "pos_jitter", "warp_window", "clouds_pos", "clouds_tex", "wear",
 }
+-- kept above 0 while modulated: the engine frees these synths at 0
+local FLOOR = { delay_mix = 0.001, rev_mix = 0.001 }
 local SHAPES = { "SINE", "TRI", "SQUARE", "RAMP", "RANDOM", "ENV" }
 local ENV_SHAPE = 6
--- beats per cycle, matching the lfoN_period option names (nil = FREE)
+-- beats per cycle, matching the lfoN_period option names (false = FREE)
 local PERIODS = { false, 1, 2, 4, 8, 16, 32 }
 local PERIOD_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
 local N = 2
@@ -42,18 +49,30 @@ local N = 2
 local M = {
   TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
   env = 0,        -- the input envelope, 0..1, shared by every ENV modulator
-  mods = {},      -- mods[i] = { id, base, wrote, phase, cycle, held } (state)
+  mods = {},      -- mods[i] = { id, phase, cycle, held }
 }
 for i = 1, N do
-  M.mods[i] = { id = nil, base = 0, wrote = nil, phase = 0, cycle = -1, held = 0 }
+  M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0 }
 end
+local sum = {}    -- this frame's swing per target id (reused, never rebuilt)
 
-local function pid(i, what) return "lfo" .. i .. "_" .. what end
+-- the param ids, built once (the redraw path asks active() every frame)
+local PID = {}
+for i = 1, N do
+  PID[i] = {}
+  for _, w in ipairs({ "target", "shape", "period", "rate", "depth" }) do
+    PID[i][w] = "lfo" .. i .. "_" .. w
+  end
+end
 
 -- the target param id of modulator i, or nil when it is OFF
 local function target_of(i)
-  local t = floor(pget(pid(i, "target"), 1) + 0.5)
-  return TARGETS[t - 1]
+  return TARGETS[floor(pget(PID[i].target, 1) + 0.5) - 1]
+end
+
+local function depth_of(i)
+  local d = pget(PID[i].depth, 0)
+  return math.abs(d) >= 0.001 and d or 0
 end
 
 -- one value of the wave, -1..1 (ENV is 0..1, handled by the caller)
@@ -65,23 +84,12 @@ local function wave(shape, ph, m)
   return m.held                      -- RANDOM: the level drawn this cycle
 end
 
-local function cs_of(id)
-  local p = params:lookup_param(id)
-  return p and p.controlspec
-end
-
--- put the knob back where it stands without the modulator
-local function restore(m)
-  if m.id and m.wrote ~= nil then
-    local cur = pget(m.id, m.base)
-    -- only when the knob still holds the modulator's value: if something
-    -- else moved it last, that value stands
-    if math.abs(cur - m.wrote) < 1e-9 then
-      params:set(m.id, m.base)
-      if C.motion and C.motion.account then C.motion.account(m.id) end
-    end
-  end
-  m.id, m.wrote = nil, nil
+-- send the engine a value for param `id`, through the param's own send map
+local function send(id, v)
+  local f = engine[id]
+  if not f then return end
+  local map = C.eng_map and C.eng_map[id]
+  f(map and map(v) or v)
 end
 
 local function beats_now()
@@ -94,85 +102,63 @@ function M.tick(amp)
   -- source still moves the knob
   local a = math.sqrt(min(max(amp or 0, 0), 1))
   M.env = M.env + (a - M.env) * (a > M.env and 0.6 or 0.15)
+  for id in pairs(sum) do sum[id] = nil end
   for i = 1, N do
     local m = M.mods[i]
-    local id = target_of(i)
-    local depth = pget(pid(i, "depth"), 0)
-    if id ~= m.id or math.abs(depth) < 0.001 then
-      restore(m)
-      if id and math.abs(depth) >= 0.001 then
-        m.id, m.base, m.wrote = id, pget(id, 0), nil
-        print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name)
-      end
+    local depth = depth_of(i)
+    local id = depth ~= 0 and target_of(i) or nil
+    if id ~= m.id then
+      -- the knob it left gets its own value back (unless the other one
+      -- still swings it: that one's send below then wins)
+      if m.id then send(m.id, pget(m.id, 0)) end
+      if id then print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name) end
+      m.id = id
     end
-    local cs = m.id and cs_of(m.id)
-    if cs then
-      local cur = pget(m.id, m.base)
-      if m.wrote == nil or math.abs(cur - m.wrote) > 1e-9 then
-        m.base = cur                 -- something else moved the knob
-      end
-      local shape = floor(pget(pid(i, "shape"), 1) + 0.5)
-      local per = PERIODS[floor(pget(pid(i, "period"), 1) + 0.5)]
+    if id then
+      local shape = floor(pget(PID[i].shape, 1) + 0.5)
+      local per = PERIODS[floor(pget(PID[i].period, 1) + 0.5)]
       if per then
         local b = beats_now() / per
         m.phase = b - floor(b)
         local cyc = floor(b)
         if cyc ~= m.cycle then m.cycle = cyc; m.held = math.random() * 2 - 1 end
       else
-        local ph = m.phase + pget(pid(i, "rate"), 0.5) / FPS
+        local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
         if ph >= 1 then m.held = math.random() * 2 - 1 end
         m.phase = ph - floor(ph)
       end
-      local off
-      if shape == ENV_SHAPE then off = depth * M.env
-      else off = depth * 0.5 * wave(shape, m.phase, m) end
-      local raw = min(max(cs:unmap(m.base) + off, 0), 1)
-      local v = cs:map(raw)
-      params:set(m.id, v)
-      m.wrote = pget(m.id, v)        -- as stored (a quantum may round it)
-      if C.motion and C.motion.account then C.motion.account(m.id) end
+      local off = shape == ENV_SHAPE and depth * M.env
+        or depth * 0.5 * wave(shape, m.phase, m)
+      sum[id] = (sum[id] or 0) + off
     end
+  end
+  for id, off in pairs(sum) do
+    local cs = params:lookup_param(id).controlspec
+    local v = cs:map(min(max(cs:unmap(pget(id, 0)) + off, 0), 1))
+    if FLOOR[id] then v = max(v, FLOOR[id]) end
+    send(id, v)
   end
 end
 
--- any modulator set to move a knob (the purity mark asks). Read from the
--- params, not from the tick's state, so it is true from the moment it is set.
+-- this frame's swing on param `id` (nil when nothing moves it), for a test
+function M.swing(id) return sum[id] end
+
+-- any modulator set to move a knob (the purity mark and the header ask). Read
+-- from the params, so it is true from the moment it is set.
 function M.active()
   for i = 1, N do
-    if target_of(i) and math.abs(pget(pid(i, "depth"), 0)) >= 0.001 then return true end
+    if depth_of(i) ~= 0 and target_of(i) then return true end
   end
   return false
 end
 
--- every knob back to its base (cleanup)
+-- every modulated knob's own value back to the engine (cleanup)
 function M.restore_all()
-  for i = 1, N do restore(M.mods[i]) end
-end
-
--- a PSET save has just written the file (norns fires action_write AFTER it),
--- so a modulated knob went in where the wave had it. Put its BASE in the
--- file instead: a session saved mid-sweep must come back where the knob
--- stands, not half a swing off. norns writes one `"id": value` line per param.
-function M.pset_patch(filename)
-  local fix = {}
   for i = 1, N do
     local m = M.mods[i]
-    if m.id and m.wrote ~= nil then fix[m.id] = m.base end
+    if m.id then send(m.id, pget(m.id, 0)) end
+    m.id = nil
   end
-  if next(fix) == nil then return end
-  local f = io.open(filename, "r")
-  if not f then return end
-  local lines = {}
-  for line in f:lines() do
-    local id = line:match('^"([^"]+)": ')
-    lines[#lines + 1] = (id and fix[id] ~= nil)
-      and ('"' .. id .. '": ' .. tostring(fix[id])) or line
-  end
-  f:close()
-  f = io.open(filename, "w")
-  if not f then return end
-  f:write(table.concat(lines, "\n"), "\n")
-  f:close()
 end
 
 function M.init(ctx)
@@ -190,12 +176,12 @@ function M.add_params(add_group)
   end
   add_group("grp_lfo", "modulators", 5 * N)
   for i = 1, N do
-    params:add_option(pid(i, "target"), "LFO " .. i .. " target", names, 1)
-    params:add_option(pid(i, "shape"), "LFO " .. i .. " shape", SHAPES, 1)
-    params:add_option(pid(i, "period"), "LFO " .. i .. " period", PERIOD_NAMES, 1)
-    params:add_control(pid(i, "rate"), "LFO " .. i .. " rate",
+    params:add_option(PID[i].target, "LFO " .. i .. " target", names, 1)
+    params:add_option(PID[i].shape, "LFO " .. i .. " shape", SHAPES, 1)
+    params:add_option(PID[i].period, "LFO " .. i .. " period", PERIOD_NAMES, 1)
+    params:add_control(PID[i].rate, "LFO " .. i .. " rate",
       controlspec.new(0.01, 10, "exp", 0, 0.5, "Hz"))
-    params:add_control(pid(i, "depth"), "LFO " .. i .. " depth",
+    params:add_control(PID[i].depth, "LFO " .. i .. " depth",
       controlspec.new(-1, 1, "lin", 0, 0, ""))
   end
 end

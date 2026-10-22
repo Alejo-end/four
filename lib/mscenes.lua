@@ -156,6 +156,8 @@ local MORPH_EXCLUDE = {
   -- direction: also a hard event, not something to cross gradually. recall
   -- carries both; a morph leaves them (sweep to 1, then K2 RCL to land).
   mode = true, tape_reverse = true,
+  -- the window lock switching mid-sweep re-cuts the window in one frame
+  win_beats = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -199,6 +201,7 @@ local SCENE_EXCLUDE = {
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
   "rec_wait", "rec_thresh",
+  "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",

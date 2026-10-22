@@ -2383,7 +2383,7 @@ do
     "a gate close to legato still releases before the next boundary")
   params:set("step_gate", 1)
   local fired = seq.step
-  ok(seq.fire(5) == nil and seq.step == fired,
+  ok(seq.fire(6) == nil and seq.step == fired,
     "a beat off the step grid (a sync left from another step length) is not a step")
   local last = CTX.last_input
   CTX.frame = CTX.frame + 100
@@ -2391,6 +2391,8 @@ do
   ok(CTX.last_input == last, "the sequencer is not a hand: the idle dim still comes")
   ok(seq.VOICE_ID < 1000 and seq.VOICE_ID > 8 or seq.VOICE_ID >= 3200,
     "its voice id is clear of the typing keyboard's 3000+ and every other range")
+  seq.fire(4.2)
+  ok(seq.step == 1, "...but a boundary woken a little late still plays")
   local c0 = cancelled
   params:set("step_div", 6)
   ok(cancelled == c0 + 1 and seq.running(),
@@ -2420,50 +2422,75 @@ end
 -- ============================================================================
 -- 27 · the modulators
 -- ============================================================================
--- An LFO writes base + depth x wave into its target every frame, in the
--- param's unmapped space. A move from anything else is a new base. The
--- motion looper is told each write was not a hand.
+-- An LFO sends the ENGINE the knob's value plus depth x wave, in the param's
+-- unmapped space, and never writes the param: the knob stays the knob.
 do
   local lfo = CTX.lfo
   local function tindex(id)
     for k, t in ipairs(lfo.TARGETS) do if t == id then return k + 1 end end
   end
   local cs = params:lookup_param("cutoff").controlspec
+  local sent = {}
+  local real = { cutoff = engine.cutoff, rev_mix = engine.rev_mix, delay_mix = engine.delay_mix }
+  engine.cutoff = function(v) sent.cutoff = v end
+  engine.rev_mix = function(v) sent.rev_mix = v end
+  engine.delay_mix = function(v) sent.delay_mix = v end
   params:set("motion_rec", 0); params:set("motion_play", 0)
   params:set("orbit_on", 0); params:set("scene_morph_amt", 0)
   params:set("cutoff", 2000)
   params:set("lfo1_target", tindex("cutoff"))
   params:set("lfo1_shape", 1); params:set("lfo1_period", 1)
   params:set("lfo1_rate", 1); params:set("lfo1_depth", 0.4)
-  local lo, hi = 1e9, -1e9
-  for _ = 1, CTX.FPS do
-    _h.run_ticks(1)
-    local v = params:get("cutoff")
-    lo, hi = math.min(lo, v), math.max(hi, v)
+  local function swing(frames, id)
+    local lo, hi = 1e9, -1e9
+    for _ = 1, frames do
+      _h.run_ticks(1)
+      local v = sent[id or "cutoff"]
+      lo, hi = math.min(lo, v), math.max(hi, v)
+    end
+    return lo, hi
   end
+  local lo, hi = swing(CTX.FPS)
   local base_raw = cs:unmap(2000)
-  near(cs:unmap(hi), base_raw + 0.2, 0.02, "a sine at depth 0.4 swings the knob 0.2 up...")
+  near(cs:unmap(hi), base_raw + 0.2, 0.02, "a sine at depth 0.4 swings the sound 0.2 up...")
   near(cs:unmap(lo), base_raw - 0.2, 0.02, "...and 0.2 down, in the knob's own space")
+  near(params:get("cutoff"), 2000, 1e-9, "...and the knob itself stays where it was set")
   ok(lfo.active(), "...and says it is moving a knob")
-  -- a hand on the knob is the new base
-  params:set("cutoff", 4000)
-  lo, hi = 1e9, -1e9
-  for _ = 1, CTX.FPS do
-    _h.run_ticks(1)
-    local v = params:get("cutoff")
-    lo, hi = math.min(lo, v), math.max(hi, v)
-  end
-  near((cs:unmap(lo) + cs:unmap(hi)) / 2, cs:unmap(4000), 0.03,
-    "a hand on the knob moves the centre the wave swings around")
-  -- the motion looper never records a modulator
+  -- a nudge moves the centre by the nudge, not by the swing
+  params:delta("cutoff", 1)
+  local nudged = params:get("cutoff")
+  ok(math.abs(cs:unmap(nudged) - base_raw) < 0.02,
+    "an encoder nudge on a modulated knob moves it one step")
+  lo, hi = swing(CTX.FPS)
+  near((cs:unmap(lo) + cs:unmap(hi)) / 2, cs:unmap(nudged), 0.03,
+    "...and the wave swings around the knob")
+  -- the motion looper records the hand, never the modulator
   params:set("motion_rec", 1)
   _h.run_ticks(10)
-  params:set("motion_rec", 0)
   ok(CTX.motion.lanes["cutoff"] == nil, "a gesture loop does not record the modulator")
-  -- depth 0 puts the knob back
+  params:set("cutoff", 3000); _h.run_ticks(2)
+  params:set("motion_rec", 0)
+  ok(CTX.motion.lanes["cutoff"] ~= nil, "...but it does record a hand on the modulated knob")
+  while #CTX.motion.lane_ids > 0 do CTX.motion.clear_lane() end
+  -- a scene captures the knob, not the wave
+  params:set("cutoff", 4000)
+  params:set("scene_slot", 5); T.pulse("scene_capture")
+  _h.run_ticks(3)
+  near(CTX.scene.slots[5].cutoff, 4000, 1e-9, "a scene captures the knob, not where the wave was")
+  params:set("scene_slot", 5); T.pulse("scene_clear")
+  -- depth 0 gives the engine the knob's own value back
   params:set("lfo1_depth", 0); _h.run_ticks(1)
-  near(params:get("cutoff"), 4000, 1e-6, "depth 0 puts the knob back where it stands")
+  near(sent.cutoff, 4000, 1e-6, "depth 0 gives the engine the knob's own value back")
   ok(not lfo.active(), "...and nothing is modulated")
+  -- two modulators on one knob add their swings, and never run away
+  params:set("lfo1_depth", 0.2); params:set("lfo1_shape", 3)   -- SQUARE
+  params:set("lfo2_target", tindex("cutoff"))
+  params:set("lfo2_shape", 3); params:set("lfo2_depth", 0.2); params:set("lfo2_rate", 1)
+  lo, hi = swing(3 * CTX.FPS)
+  ok(cs:unmap(hi) <= cs:unmap(4000) + 0.2 + 1e-6 and cs:unmap(lo) >= cs:unmap(4000) - 0.2 - 1e-6,
+    "two modulators on one knob add up and stay bounded")
+  near(params:get("cutoff"), 4000, 1e-9, "...and the knob never moves")
+  params:set("lfo2_depth", 0); params:set("lfo2_target", 1)
   -- on the clock: the phase is the beat count
   local real_beats = clock.get_beats
   local beats = 0
@@ -2472,65 +2499,114 @@ do
   params:set("lfo1_shape", 4)                 -- RAMP
   params:set("lfo1_depth", 1)
   beats = 0; _h.run_ticks(1)
-  near(cs:unmap(params:get("cutoff")), cs:unmap(4000) - 0.5, 0.01, "a ramp on the bar starts low on the one")
+  near(cs:unmap(sent.cutoff), cs:unmap(4000) - 0.5, 0.01, "a ramp on the bar starts low on the one")
   beats = 2; _h.run_ticks(1)
-  near(cs:unmap(params:get("cutoff")), cs:unmap(4000), 0.01, "...and is at the centre half a bar later")
+  near(cs:unmap(sent.cutoff), cs:unmap(4000), 0.01, "...and is at the centre half a bar later")
   clock.get_beats = real_beats
   -- the input envelope: up with the input, and a negative depth ducks
   params:set("lfo1_shape", 6); params:set("lfo1_period", 1)
   params:set("lfo1_depth", 0.5)
   _h.push("amp_in_l", 0); _h.push("amp_in_r", 0); _h.run_ticks(20)
-  local quiet = params:get("cutoff")
+  local quiet = sent.cutoff
   _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5); _h.run_ticks(6)
-  ok(params:get("cutoff") > quiet * 1.5, "ENV opens the knob as the input plays")
+  ok(sent.cutoff > quiet * 1.5, "ENV opens the sound as the input plays")
   params:set("lfo1_depth", -0.5); _h.run_ticks(2)
-  ok(params:get("cutoff") < 4000, "...and a negative depth ducks it")
+  ok(sent.cutoff < 4000, "...and a negative depth ducks it")
   _h.push("amp_in_l", 0); _h.push("amp_in_r", 0)
-  -- a PSET saved mid-sweep stores the base, not the wave
-  local f = os.tmpname()
-  local h = io.open(f, "w")
-  h:write('-- pset\n"cutoff": 123\n"resonance": 0.1\n'); h:close()
-  lfo.pset_patch(f)
-  local txt = io.open(f):read("a")
-  os.remove(f)
-  ok(txt:find('"cutoff": 4000', 1, true) and txt:find('"resonance": 0.1', 1, true),
-    "a PSET saved while it moves stores the knob's base")
-  -- two modulators, two knobs, and cleanup restores both
-  params:set("lfo2_target", tindex("rev_mix")); params:set("rev_mix", 0.3)
-  params:set("lfo2_shape", 3); params:set("lfo2_depth", 0.5)
-  _h.run_ticks(2)
-  ok(math.abs(params:get("rev_mix") - 0.3) > 0.1, "the second modulator moves its own knob")
+  -- a mix the engine frees at 0 is held above it while modulated
+  params:set("lfo2_target", tindex("rev_mix")); params:set("rev_mix", 0)
+  params:set("lfo2_shape", 3); params:set("lfo2_depth", 0.3)
+  local zero = false
+  for _ = 1, 2 * CTX.FPS do
+    _h.run_ticks(1)
+    if sent.rev_mix <= 0 then zero = true end
+  end
+  ok(not zero, "a modulated reverb mix never sends 0, so the reverb is not respawned each cycle")
+  -- cleanup gives every knob's own value back
   lfo.restore_all()
-  near(params:get("rev_mix"), 0.3, 1e-6, "restoring puts every knob back")
-  near(params:get("cutoff"), 4000, 1e-6, "...both of them")
+  near(sent.rev_mix, 0, 1e-9, "restoring gives the engine every knob's own value")
+  near(sent.cutoff, 4000, 1e-6, "...both of them")
   params:set("lfo1_depth", 0); params:set("lfo2_depth", 0)
   params:set("lfo1_target", 1); params:set("lfo2_target", 1)
   _h.run_ticks(1)
+  engine.cutoff, engine.rev_mix, engine.delay_mix = real.cutoff, real.rev_mix, real.delay_mix
   params:set("cutoff", 20000); params:set("rev_mix", 0)
 end
 
 -- ============================================================================
 -- 28 · the window locked to the clock
 -- ============================================================================
--- With win_beats other than FREE the window's end is the start plus that many
--- beats, and the clock owns it, like a synced delay's time.
+-- With win_beats other than FREE the window's end is put at the start plus
+-- that many beats: when it is set, when the start moves on its own, when a
+-- pass stops and when the tempo moves. A write that moves the end is left.
 do
   local real_tempo = clock.get_tempo
   local tempo = 120
   clock.get_tempo = function() return tempo end
   params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("orbit_on", 0); params:set("scene_morph_amt", 0)
   local B = CTX.BUF_SECS
   params:set("pos_start", 0.2); params:set("pos_end", 0.6)
   params:set("win_beats", 4)                  -- 1 BAR
   near(params:get("pos_end"), 0.2 + 2 / B, 1e-6, "a bar at 120 is a two-second window")
-  params:set("pos_start", 0.5); _h.run_ticks(1)
-  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "moving the start slides the whole window")
-  params:set("pos_end", 0.9); _h.run_ticks(1)
-  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "the clock owns the end: a hand on it is put back")
+  params:set("pos_start", 0.21); _h.run_ticks(1)
+  near(params:get("pos_end"), 0.21 + 2 / B, 1e-6, "moving the start slides the whole window")
+  -- a start that jumps past the end never leaves the pair crossed
+  local crossed = false
+  local real_set = params.set
+  params.set = function(self, id, v, ...)
+    real_set(self, id, v, ...)
+    if id == "pos_start" and params:get("pos_start") > params:get("pos_end") then crossed = true end
+  end
+  params:set("pos_start", 0.5)
+  params.set = real_set
+  ok(not crossed or params:get("pos_end") > params:get("pos_start"),
+    "a start that jumps past the end takes the end with it at once")
+  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "...a bar from the new start")
+  _h.run_ticks(1)
+  -- a write that moves the end is left
+  params:set("pos_end", 0.9); _h.run_ticks(3)
+  near(params:get("pos_end"), 0.9, 1e-9, "a hand on the end is left where it put it")
+  -- TAKE SNAP opens the window and a second SNAP goes back
+  params:set("pos_end", 0.5 + 2 / B); _h.run_ticks(1)
+  T.goto_page("TAKE")
+  key(3, 1); key(3, 0); _h.run_ticks(3)
+  near(params:get("pos_end") - params:get("pos_start"), 1, 1e-6, "SNAP opens the locked window")
+  key(3, 1); key(3, 0); _h.run_ticks(3)
+  near(params:get("pos_start"), 0.5, 1e-6, "...and a second SNAP goes back to it")
+  near(params:get("pos_end"), 0.5 + 2 / B, 1e-6, "...the whole of it")
+  -- a tempo move re-times it, clock jitter does not
   tempo = 60; _h.run_ticks(1)
   near(params:get("pos_end"), 0.5 + 4 / B, 1e-6, "a tempo change re-times it")
+  params:set("pos_end", 0.7); _h.run_ticks(1)
   tempo = 60.1; _h.run_ticks(1)
-  near(params:get("pos_end"), 0.5 + 4 / B, 1e-6, "...but clock jitter does not write")
+  near(params:get("pos_end"), 0.7, 1e-9, "...but clock jitter does not write")
+  -- the morph never fights it: a sweep toward a scene with another end
+  params:set("pos_end", 0.5 + 4 / B); _h.run_ticks(1)
+  params:set("win_beats", 1)
+  params:set("pos_end", 0.8); params:set("scene_slot", 6); T.pulse("scene_capture")
+  params:set("pos_end", 0.5 + 4 / B)
+  params:set("win_beats", 4)
+  -- every write of the end is logged: the old lock pulled it back between
+  -- the morph's writes, every frame
+  local flips, last = 0, nil
+  local real_set2 = params.set
+  params.set = function(self, id, v, ...)
+    real_set2(self, id, v, ...)
+    if id == "pos_end" then
+      local e = params:get("pos_end")
+      if last and e < last - 1e-9 then flips = flips + 1 end
+      last = e
+    end
+  end
+  for k = 1, 14 do
+    params:set("scene_morph_amt", k / 20); _h.run_ticks(1)
+  end
+  params.set = real_set2
+  ok(flips == 0, "a morph on the end moves it one way, without the lock pulling it back")
+  ok(math.floor(params:get("win_beats") + 0.5) == 4, "...and the morph does not flip the lock itself")
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_slot", 6); T.pulse("scene_clear")
   params:set("motion_rec", 1)
   tempo = 90; _h.run_ticks(2)
   params:set("motion_rec", 0)
@@ -2542,6 +2618,78 @@ do
   near(params:get("pos_end"), 0.7, 1e-9, "FREE leaves the window alone")
   params:set("pos_start", 0); params:set("pos_end", 1)
   clock.get_tempo = real_tempo
+end
+
+-- ============================================================================
+-- 29 · the take undo
+-- ============================================================================
+-- After every finished change the take is dumped as undo-cur and the one
+-- before becomes undo-prev. UNDO loads undo-prev and swaps the two.
+do
+  local label = "?"
+  local writes, reads, clears = 0, {}, 0
+  local real_w, real_r, real_c = engine.write_take, engine.read_take, engine.clear
+  engine.write_take = function(stem)
+    writes = writes + 1
+    for _, side in ipairs({ "_L", "_R" }) do
+      local f = io.open(stem .. side .. ".wav", "w"); f:write(label); f:close()
+    end
+  end
+  engine.read_take = function(stem)
+    local f = io.open(stem .. "_L.wav"); reads[#reads + 1] = f and f:read("a"); if f then f:close() end
+  end
+  engine.clear = function() clears = clears + 1 end
+  params:set("rec", 0); params:set("regen", 0); params:set("erode", 0)
+  params:set("win_beats", 1)
+  CTX.undo_forget()
+  CTX.wave_any = true
+  local function state(name, lo, hi)
+    label = name
+    params:set("pos_start", lo); params:set("pos_end", hi)
+    CTX.take_len = 0.002
+    CTX.undo_mark()
+  end
+  CTX.take_undo()
+  ok(#reads == 0, "with no change behind it, UNDO does nothing")
+  state("A", 0.1, 0.2)
+  ok(writes == 1, "a finished take is dumped for the undo")
+  state("B", 0.3, 0.4)
+  CTX.take_undo()
+  ok(reads[#reads] == "A", "UNDO loads the take before the last change")
+  near(params:get("pos_start"), 0.1, 1e-9, "...with its window")
+  near(params:get("pos_end"), 0.2, 1e-9, "...the whole of it")
+  CTX.take_undo()
+  ok(reads[#reads] == "B", "a second UNDO goes forward again")
+  near(params:get("pos_start"), 0.3, 1e-9, "...window and all")
+  -- a clear is a state too
+  T.pulse("clear_rec")
+  ok(not CTX.wave_any, "a clear empties the take")
+  CTX.take_undo()
+  ok(reads[#reads] == "B" and CTX.wave_any, "UNDO after a clear brings the take back")
+  local c0 = clears
+  CTX.take_undo()
+  ok(clears == c0 + 1 and not CTX.wave_any, "...and a second UNDO clears it again")
+  CTX.wave_any = true
+  -- an UNDO stops a writer that would write over what comes back
+  state("C", 0.5, 0.6)
+  state("D", 0.6, 0.7)
+  params:set("regen", 0.4)
+  CTX.take_undo()
+  ok(params:get("regen") == 0 and reads[#reads] == "C", "UNDO stops regen, then goes back")
+  -- a record pass marks a state
+  local w0 = writes
+  _h.push("rec_phase", 0.1); _h.run_ticks(1)
+  params:set("rec", 1); _h.push("rec_phase", 0.2); _h.run_ticks(1); params:set("rec", 0)
+  ok(writes == w0 + 1, "a record pass that stops is a finished take")
+  -- off, it writes nothing
+  params:set("undo_keep", 0)
+  w0 = writes
+  state("E", 0.1, 0.2)
+  ok(writes == w0, "with keep an undo off, nothing is dumped")
+  params:set("undo_keep", 1)
+  CTX.undo_forget()
+  engine.write_take, engine.read_take, engine.clear = real_w, real_r, real_c
+  params:set("pos_start", 0); params:set("pos_end", 1)
 end
 
 T.report("control harness OK")
