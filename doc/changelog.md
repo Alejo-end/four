@@ -3343,6 +3343,18 @@ only)**.
   TAKE_SNAP_SAID. Device rows 18.11 to 18.13.
 * VERIFIED: `tools/check.lua` green on Lua 5.3.6.
 
+Hundredth change: **the beat repeat on the grid, and its division in the
+header (Lua only)**.
+* **The main workspace's row 6** was dark. Pads 1 to 5 now hold a repeat at
+  a half note to a 32nd. A second pad while one is held changes the
+  division (a re-capture, so sliding a finger across them rolls), letting
+  it go returns to the pad still held, and the last pad up ends the repeat.
+  A repeat a footswitch holds is not the grid's to end: a pad then only
+  rolls the division. The held division lights cyan.
+* **RP names its division** (RP2 to RP32), with the header's shrink rule.
+* RENDERS: none changed. Device row 18.14.
+* VERIFIED: `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

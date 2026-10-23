@@ -211,7 +211,9 @@ PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat` (map it to a 
 footswitch) and on the next division the engine captures that much of what you hear and
 loops it until you let go. `repeat length` sets the division, a half note to a 32nd, and
 turning it while you hold re-captures a shorter slice: a roll. STOP releases it. The header
-shows RP while it holds. Resampling and PRINT record the sound without the stutter.
+shows RP and the division while it holds (RP8 for an eighth). On the grid, row 6 of the main
+workspace holds a repeat at a half note to a 32nd (pads 1 to 5): slide a finger across them
+for a roll. Resampling and PRINT record the sound without the stutter.
 
 PARAMS > modulation out sends one of those movements to other gear: the scene morph (so
 the orbit and a GLIDE move your synth too), the input envelope, or an LFO's wave, which

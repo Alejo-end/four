@@ -1256,7 +1256,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 --     main   row 3 window slices (span gesture; write head glows while
 --            recording) · row 4 tape loop slices (same gesture) · row 5
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
---            pitch quantize x8 · row 6 dark
+--            pitch quantize x8 · row 6 the beat repeat, held: x1-5 = 1/2 to
+--            1/32 (slide a finger across them for a roll)
 --     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
 --            row 6 voice type x1 · sequencer run x3, fewer/more hits x5/x6 ·
 --            notes->pads x8
@@ -1616,7 +1617,43 @@ local function is_layers_page() return C.PAGES[C.page] == "LAYERS" end
 -- layer 1, row 4 layer 2, the same order the screen draws them)
 local function lay(n, k) return C.deck_p(C.layers[n], k) end
 
+-- the beat repeat on the main workspace's row 6: hold a pad to repeat at its
+-- division (x1 1/2 .. x5 1/32). A second pad while one is held changes the
+-- division (a re-capture: a roll), and letting go of it goes back to the one
+-- still held. The repeat ends when the last pad comes up, and only if a pad
+-- started it: a footswitch holding `beat_repeat` keeps it.
+local rep_held = {}         -- x -> the order it was pressed in
+local rep_seq, rep_owned = 0, false
+local function repeat_key(x, z)
+  if z == 1 then
+    rep_seq = rep_seq + 1
+    rep_held[x] = rep_seq
+    params:set("repeat_div", x)
+    if pget("beat_repeat", 0) ~= 1 then
+      rep_owned = true
+      params:set("beat_repeat", 1)
+    end
+    return
+  end
+  rep_held[x] = nil
+  local last, lx = 0, nil
+  for k, n in pairs(rep_held) do
+    if n > last then last, lx = n, k end
+  end
+  if lx then
+    params:set("repeat_div", lx)
+  elseif rep_owned then
+    rep_owned = false
+    params:set("beat_repeat", 0)
+  end
+end
+M.repeat_key = repeat_key
+
 local function main_ws_key(x, y, z)
+  if y == 6 then
+    if x <= 5 then repeat_key(x, z) end
+    return
+  end
   if y == 3 then
     slice_key("pos_start", "pos_end", x, z)
   elseif y == 4 then
@@ -1838,6 +1875,15 @@ local function draw_main_ws()
   local quant = en and pget("pitch_quant", 0) == 1
   gg:led(7, 5, en and 3 or 1)
   gg:led(8, 5, quant and 15 or (en and 3 or 1), quant and "yellow" or nil)
+  -- row 6: the beat repeat. The held division CYAN (a hold), the division
+  -- set but not held a dim cyan, the rest barely there
+  local on = pget("beat_repeat", 0) == 1
+  local div = floor(pget("repeat_div", 3) + 0.5)
+  for x = 1, 5 do
+    if on and x == div then gg:led(x, 6, 15, "cyan")
+    elseif x == div then gg:led(x, 6, 5, "cyan")
+    else gg:led(x, 6, 2) end
+  end
 end
 
 -- Grid PADS LED map, in the colour language: row 3 = the 8 slice pads (ORANGE,
@@ -6615,9 +6661,14 @@ local HFLAGS = {
 M.HFLAGS = HFLAGS
 local HF = {}
 for _, f in ipairs(HFLAGS) do
-  HF[f.ch] = f
+  f.id = f.ch                                      -- ch can change (RP8)
+  HF[f.id] = f
   f.w, f.on, f.x, f.full = 0, false, nil, false   -- w: set in init
 end
+-- RP carries the division it repeats: RP2 for a half note .. RP32. Built
+-- once, indexed like the repeat_div option, widths measured in init.
+local RP_CH = { "RP2", "RP4", "RP8", "RP16", "RP32" }
+local RP_W = {}
 -- the width of a flag whole, and short (a writer's letter, or a bar)
 local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 local function hflag_pip(f) return f.write and f.w + 2 or 4 end
@@ -6713,6 +6764,8 @@ local function draw_header()
   -- RP bright while the engine loops, dim while a press waits for its beat
   HF.RP.on = pget("beat_repeat", 0) == 1
   HF.RP.lvl = (C.repeat_live and C.repeat_live()) and 12 or 4
+  local rd = clamp(floor(pget("repeat_div", 3) + 0.5), 1, #RP_CH)
+  HF.RP.ch, HF.RP.w = RP_CH[rd], RP_W[rd]
   HF.SQ.on = pget("step_run", 0) == 1
   HF.LF.on = C.lfo and C.lfo.active() or false
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
@@ -6778,6 +6831,7 @@ function M.init(ctx)
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
   for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
+  for i, ch in ipairs(RP_CH) do RP_W[i] = text_w(ch, 1) end
   layout_dots()
 end
 

@@ -2922,6 +2922,36 @@ do
   params.action_read("none", false, 98764)
   ok(params:get("beat_repeat") == 0 and sent[#sent] == 0, "a PSET saved while it held loads it let go")
   params:set("repeat_div", 3)
+  -- the grid's main row 6: hold a pad to repeat at its division, slide to
+  -- another for a roll, and the last pad up ends it
+  local g = _h.grid
+  T.goto_page("TAKE")
+  g.key(3, 6, 1)
+  ok(params:get("beat_repeat") == 1 and params:get("repeat_div") == 3,
+    "grid row 6 x3 holds a repeat at 1/8")
+  T.finish(table.remove(jobs, 1))
+  g.key(4, 6, 1)
+  ok(params:get("repeat_div") == 4, "...a second pad while held rolls to 1/16")
+  g.key(4, 6, 0)
+  ok(params:get("beat_repeat") == 1 and params:get("repeat_div") == 3,
+    "...letting it go returns to the pad still held")
+  g.key(3, 6, 0)
+  ok(params:get("beat_repeat") == 0, "...and the last pad up ends it")
+  -- a footswitch hold is not the grid's to end
+  params:set("beat_repeat", 1)
+  T.finish(table.remove(jobs, 1))
+  g.key(5, 6, 1); g.key(5, 6, 0)
+  ok(params:get("beat_repeat") == 1 and params:get("repeat_div") == 5,
+    "a pad under a footswitch hold rolls the division and leaves the hold")
+  params:set("beat_repeat", 0)
+  -- the release belongs to the surface that took the press
+  g.key(2, 6, 1)
+  T.goto_page("PADS")
+  g.key(2, 6, 0)
+  ok(params:get("beat_repeat") == 0, "a pad let go on another page still ends its repeat")
+  T.goto_page("TAKE")
+  while #jobs > 0 do T.finish(table.remove(jobs, 1)) end
+  params:set("repeat_div", 3)
   engine.beat_repeat, clock.run, clock.cancel = real_br, real_run, real_cancel
   clock.sync, clock.get_tempo = real_sync, real_tempo
 end

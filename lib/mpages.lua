@@ -1840,9 +1840,14 @@ local HFLAGS = {
 M.HFLAGS = HFLAGS
 local HF = {}
 for _, f in ipairs(HFLAGS) do
-  HF[f.ch] = f
+  f.id = f.ch                                      -- ch can change (RP8)
+  HF[f.id] = f
   f.w, f.on, f.x, f.full = 0, false, nil, false   -- w: set in init
 end
+-- RP carries the division it repeats: RP2 for a half note .. RP32. Built
+-- once, indexed like the repeat_div option, widths measured in init.
+local RP_CH = { "RP2", "RP4", "RP8", "RP16", "RP32" }
+local RP_W = {}
 -- the width of a flag whole, and short (a writer's letter, or a bar)
 local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 local function hflag_pip(f) return f.write and f.w + 2 or 4 end
@@ -1938,6 +1943,8 @@ local function draw_header()
   -- RP bright while the engine loops, dim while a press waits for its beat
   HF.RP.on = pget("beat_repeat", 0) == 1
   HF.RP.lvl = (C.repeat_live and C.repeat_live()) and 12 or 4
+  local rd = clamp(floor(pget("repeat_div", 3) + 0.5), 1, #RP_CH)
+  HF.RP.ch, HF.RP.w = RP_CH[rd], RP_W[rd]
   HF.SQ.on = pget("step_run", 0) == 1
   HF.LF.on = C.lfo and C.lfo.active() or false
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
@@ -2003,6 +2010,7 @@ function M.init(ctx)
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
   for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
+  for i, ch in ipairs(RP_CH) do RP_W[i] = text_w(ch, 1) end
   layout_dots()
 end
 

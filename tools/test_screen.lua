@@ -60,7 +60,7 @@ do
   clock.run = function() return {} end
   clock.cancel = function() end
   local HF = {}
-  for _, f in ipairs(Mp.HFLAGS) do HF[f.ch] = f end
+  for _, f in ipairs(Mp.HFLAGS) do HF[f.id] = f end
   local dx0 = Mp.DOT_X0
 
   -- a lone writer draws whole
@@ -101,6 +101,14 @@ do
     end
   end
   ok(last <= dx0 - 2, "the last flag ends before the page dots (" .. last .. " <= " .. (dx0 - 2) .. ")")
+  -- RP names its division
+  T.goto_page("TAKE")
+  for _, id in ipairs(ON) do if id ~= "beat_repeat" then params:set(id, 0) end end
+  params:set("lfo1_depth", 0)
+  params:set("repeat_div", 4)
+  redraw()
+  ok(HF.RP.ch == "RP16" and HF.RP.full, "RP names the division it repeats (" .. HF.RP.ch .. ")")
+  params:set("repeat_div", 3)
   for _, id in ipairs(ON) do params:set(id, 0) end
   params:set("lfo1_depth", 0); params:set("lfo1_target", 1)
   _h.run_ticks(1)
