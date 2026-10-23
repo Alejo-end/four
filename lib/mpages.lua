@@ -1699,7 +1699,7 @@ local function purity()
   -- plays them (between its hits too: the voices release with a tail)
   if next(C.pad_held) ~= nil or pget("step_run", 0) == 1 then return false end
   -- a held beat repeat plays a captured slice, not the take
-  if pget("beat_repeat", 0) == 1 then return false end
+  if C.repeat_live and C.repeat_live() then return false end
   -- a modulator moving a knob: even at a zero crossing it is not the take
   if C.lfo and C.lfo.active() then return false end
   -- the take must be ALL of what you hear. dry_wet blends the live INPUT
@@ -1785,8 +1785,9 @@ local function draw_header()
   -- RP a held beat repeat, and the two machines that play on their own,
   -- all steady (runs do not blink): SQ the pad sequencer, LF a modulator.
   -- Only where they fit before the dots.
+  -- RP bright while the engine loops, dim while a press waits for its beat
   if pget("beat_repeat", 0) == 1 and x + 10 < dx0 then
-    ptext("RP", x, 1, 1, 12)
+    ptext("RP", x, 1, 1, (C.repeat_live and C.repeat_live()) and 12 or 4)
     x = x + 12
   end
   if pget("step_run", 0) == 1 and x + 10 < dx0 then

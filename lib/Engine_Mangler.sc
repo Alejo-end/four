@@ -39,9 +39,10 @@ Engine_Mangler : CroneEngine {
     // at rest nothing writes the take). it reads eroKeys out of playParams;
     // modeV is the mode setMode last switched to (4 = PLAY).
     var <eroSynth, <eroKeys, <modeV;
-    // beat repeat spawn/release synth, alive only while held. TWO capture
-    // buffers, used in turn: a repeat re-struck while the last one fades out
-    // captures into the other, so neither reads what the other is writing.
+    // beat repeat spawn/release synth, alive only while held. THREE capture
+    // buffers, used in turn: a repeat re-struck while the last one (or two,
+    // on a fast spin of the division) fades out captures into one that no
+    // fading synth still reads.
     var <repSynth, <repBufs, <repIdx;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
@@ -136,7 +137,7 @@ Engine_Mangler : CroneEngine {
     updateRepeat { arg len;
         repSynth.notNil.if({ repSynth.set(\gate, 0); repSynth = nil });
         (len > 0).if({
-            repIdx = 1 - repIdx;
+            repIdx = (repIdx + 1) % 3;
             repSynth = Synth.new(\mangler_repeat, [
                 \out, context.out_b.index, \buf, repBufs[repIdx], \len, len.min(2),
             ], ioSynth, \addAfter);
@@ -228,9 +229,9 @@ Engine_Mangler : CroneEngine {
         phaseBus = Bus.control(s, 1);
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
-        // the beat repeat's two capture buffers: 2s of stereo each (a half
-        // note down to 60 BPM), allocated once, never per repeat
-        repBufs = Array.fill(2, { Buffer.alloc(s, (s.sampleRate * 2).asInteger, 2) });
+        // the beat repeat's three capture buffers: 2s of stereo each (a half
+        // note down to 60 BPM), allocated once, never per repeat (2.3 MB)
+        repBufs = Array.fill(3, { Buffer.alloc(s, (s.sampleRate * 2).asInteger, 2) });
         repIdx = 0;
 
         // voice state
@@ -772,7 +773,11 @@ Engine_Mangler : CroneEngine {
             src = In.ar(out, 2);
             l = len.clip(0.01, 2);
             frames = (l * SampleRate.ir).max(64);
-            firstK = Sweep.kr(0, 1) < l;
+            // the capture runs two blocks PAST the slice: a kr Sweep reads
+            // a block ahead, and stopping at l exactly left the last frames
+            // of the loop holding an older capture (a tick in every fade).
+            // Writing past `frames` is harmless; the loop never reads it.
+            firstK = Sweep.kr(0, 1) < (l + (2 * ControlDur.ir));
             first = Sweep.ar(0, 1) < l;
             RecordBuf.ar(src, buf, 0, 1, 0, firstK, 0);
             phase = Phasor.ar(0, 1, 0, frames);

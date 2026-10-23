@@ -15,10 +15,10 @@ the status block current, and add a change-log entry for every change.
   has changed several times; after a RESTART maiden must read **`count: 66`**.
 - **The one walkthrough:** doc/device-gate.md, stages 0 to 17, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 94th, the beat repeat (doc/changelog.md). ENGINE: a new
-  synth and the `beat_repeat` command, so the count moved from 65 to 66. Built by
-  request ahead of the device session, like the 80th. Work lives on the
-  `full-review` branch until it is merged.
+- **Latest change:** the 95th, the beat repeat's review fixes (doc/changelog.md).
+  The 94th added the beat repeat (ENGINE: a new synth and the `beat_repeat`
+  command, so the count moved from 65 to 66), by request ahead of the device
+  session. Work lives on the `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**

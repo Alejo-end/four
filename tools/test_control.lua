@@ -2838,11 +2838,21 @@ do
   near(sent[#sent], 0.125, 1e-9, "a shorter division while it holds re-captures at once (a roll)")
   params:set("beat_repeat", 0)
   ok(sent[#sent] == 0, "letting go releases it")
-  -- let go before the division comes: nothing ever repeats
+  -- let go before the division comes: nothing ever repeats, and the wait is
+  -- not cancelled under the sync (the norns clock race)
   local n = #sent
+  local c0 = cancelled
   params:set("beat_repeat", 1)
   params:set("beat_repeat", 0)
-  ok(#jobs == 0 and #sent == n, "a press let go before the beat repeats nothing")
+  ok(cancelled == c0, "a press let go before its beat does not cancel the waiting clock")
+  T.finish(table.remove(jobs, 1))
+  ok(#sent == n, "...and repeats nothing when the beat comes")
+  -- two presses before one beat: one repeat, not two
+  params:set("beat_repeat", 1); params:set("beat_repeat", 0); params:set("beat_repeat", 1)
+  T.finish(table.remove(jobs, 1)); T.finish(table.remove(jobs, 1))
+  ok(#sent == n + 1, "two presses before one beat repeat once")
+  params:set("beat_repeat", 0)
+  n = #sent
   -- a STOP releases it, and a press under STOP does nothing
   params:set("beat_repeat", 1); T.finish(table.remove(jobs, 1))
   params:set("stop_all", 1)
@@ -2851,6 +2861,7 @@ do
   n = #sent
   params:set("beat_repeat", 1)
   ok(#jobs == 0 and #sent == n, "...and a press under STOP does nothing")
+  ok(not CTX.repeat_live(), "...and the instrument knows nothing loops")
   params:set("beat_repeat", 0)
   params:set("stop_all", 0)
   -- the division is capped at the engine's 2 second buffer
@@ -2859,6 +2870,10 @@ do
   params:set("beat_repeat", 1); T.finish(table.remove(jobs, 1))
   near(sent[#sent], 2, 1e-9, "a slice longer than the engine's buffer is capped at 2 seconds")
   params:set("beat_repeat", 0)
+  -- a PSET saved while it was held loads it let go
+  params:set("beat_repeat", 1); T.finish(table.remove(jobs, 1))
+  params.action_read("none", false, 98764)
+  ok(params:get("beat_repeat") == 0 and sent[#sent] == 0, "a PSET saved while it held loads it let go")
   params:set("repeat_div", 3)
   engine.beat_repeat, clock.run, clock.cancel = real_br, real_run, real_cancel
   clock.sync, clock.get_tempo = real_sync, real_tempo

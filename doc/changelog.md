@@ -3229,6 +3229,32 @@ before more engine work lands.
 * VERIFIED: 780 assertions (487/114/87/41/51). `tools/check.lua` green on
   Lua 5.3.6. The SuperCollider is unverified until stage 17.
 
+Ninety-fifth change: **the beat repeat, the review fixes (ENGINE + Lua,
+fingerprint STAYS 66)**. A reviewer agent read the 94th against SC 3.11/3.12
+semantics: nothing in alloc can throw, the argument orders, the Select
+expansion, the fade's division and the node order (the fading synth reads the
+new one's output, a true crossfade) all hold. It found:
+* **The capture stopped up to a block short** of the loop: a kr `Sweep` reads
+  a block ahead, so the last frames of the slice held an older capture and
+  ticked inside every fade. The capture now runs two blocks past the slice.
+* **A fast spin of the division** re-used a capture buffer a fading synth
+  still read. Three buffers now (2.3 MB), used in turn.
+* **A PSET saved while the repeat was held** loaded it held, with no release
+  to come. `action_read` lets it go.
+* **RP and the ◇ mark** read the held key, not the engine. They now read
+  `ctx.repeat_live()`: the mark dies only while a slice loops, and RP is dim
+  while a press waits for its beat. A clear releases the Lua side too.
+* **A press let go before its beat cancelled the waiting clock**, which is
+  the norns clock race in CLAUDE.md and crossed often. Each press takes a
+  generation instead, and a wait that wakes stale does nothing; only cleanup
+  cancels. Two presses before one beat repeat once.
+* Left as designed: a re-strike captures at once, off the grid (a roll), and
+  every capture starts late by the matron-to-scsynth latency.
+* Still 29 problem nodes under the tree-sitter grammar, the old file's 29.
+* RENDERS: all 70 identical.
+* VERIFIED: 785 assertions (491/114/87/41/52). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

@@ -43,8 +43,8 @@ passes the output through while it captures one slice of the clock, then loops t
 until you let go. The first pass plays the live output itself, not a read of what it is
 writing, so it never depends on the order the server runs the write and the read in. A 3 ms
 fade at every loop point stops the repeats clicking. A shorter division while held starts a
-new synth with a fresh capture, and the old one fades into it over 10 ms; two capture
-buffers, used in turn, keep the two from touching the same memory. Accepted trades: it sits
+new synth with a fresh capture, and the old one fades into it over 10 ms; three capture
+buffers, used in turn, keep a capture from writing what a fading synth still reads. Accepted trades: it sits
 after the record tap, so resample, regen and PRINT never record a repeat, and it sits after
 the output limiter, which it cannot push past because it only replays what passed it.
 

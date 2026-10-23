@@ -1346,6 +1346,9 @@ function ctx.clear_recording()
   -- window whose first seconds were the erased silence
   if pget("rec", 0) == 1 then params:set("rec", 0) end
   engine.clear()
+  -- the engine's \clear released a held repeat with it. Through ctx: the
+  -- local is declared further down, and read from here it would be a global
+  ctx.repeat_release()
   Mpages.clear_wave()
   buffer_cleared()
   -- a clear must be SILENCE (S23 B2): regen would immediately re-record the
@@ -1968,9 +1971,14 @@ end
 -- releases it, as it silences everything, and an arm under STOP waits for
 -- the next press. The engine places it after the record tap, so resample,
 -- regen and PRINT never record it.
+-- A press that waits for its beat is never cancelled: a cancel landing as the
+-- sync fires is the norns clock race in CLAUDE.md, and a press let go before
+-- its beat is common. Each press takes a generation, and a wait that wakes
+-- to a newer press, or to the key let go, does nothing. Cleanup cancels.
 local REPEAT_BEATS = { 2, 1, 0.5, 0.25, 0.125 }
 local REPEAT_NAMES = { "1/2", "1/4", "1/8", "1/16", "1/32" }
-local repeat_clock          -- the coroutine waiting for the division
+local repeat_clock          -- the newest coroutine waiting for the division
+local repeat_gen = 0        -- bumped by every press and every release
 local repeat_on = false     -- the engine holds a repeat now
 local function repeat_beats()
   return REPEAT_BEATS[math.floor(pget("repeat_div", 3) + 0.5)] or 0.5
@@ -1979,7 +1987,7 @@ local function repeat_secs()
   return min(2, repeat_beats() * 60 / ctx.tempo())
 end
 local function repeat_release()
-  if repeat_clock then clock.cancel(repeat_clock); repeat_clock = nil end
+  repeat_gen = repeat_gen + 1
   if repeat_on and engine.beat_repeat then engine.beat_repeat(0) end
   repeat_on = false
 end
@@ -1989,17 +1997,19 @@ local function repeat_start()
     return
   end
   if pget("stop_all", 0) == 1 then return end
-  if repeat_clock then clock.cancel(repeat_clock) end
-  local b = repeat_beats()
+  repeat_gen = repeat_gen + 1
+  local g, b = repeat_gen, repeat_beats()
   repeat_clock = clock.run(function()
     clock.sync(b)
-    repeat_clock = nil
-    if pget("beat_repeat", 0) ~= 1 or pget("stop_all", 0) == 1 then return end
+    if g ~= repeat_gen or pget("beat_repeat", 0) ~= 1
+        or pget("stop_all", 0) == 1 then return end
     engine.beat_repeat(repeat_secs())
     repeat_on = true
   end)
 end
 ctx.repeat_release = repeat_release
+-- the engine is looping a slice now (not just held, waiting for its beat)
+function ctx.repeat_live() return repeat_on end
 
 -- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
@@ -2824,6 +2834,9 @@ local function init_params()
     -- session; its disarm then re-cut the loop just restored. The deck twin
     -- of this is Mdeck.pset_read's abort_loop.
     tape_arm_phase, tape_arm_was = nil, nil
+    -- norns saves a momentary binary like any other, so a PSET saved while
+    -- a footswitch held the repeat loads it held, with no release to come
+    if pget("beat_repeat", 0) == 1 then params:set("beat_repeat", 0) end
     each_part(2, number)
   end
   params.action_delete = function(filename, name, number) each_part(3, number) end
@@ -2939,7 +2952,8 @@ function cleanup()
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
   Mseq.stop()          -- the sequencer's clock, and its voice
-  repeat_release()     -- a held beat repeat, and its clock
+  repeat_release()     -- a held beat repeat...
+  if repeat_clock then clock.cancel(repeat_clock) end   -- ...and its clock
   Mlfo.restore_all()   -- every modulated knob's own value back to the engine
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()

@@ -14,7 +14,7 @@ The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
 then about thirty changes landed without a device test, several of them in the
 engine. After a RESTART the engine must report `count: 66`.
 
-The offscreen tests are strong. Five test scripts run 770 assertions, the
+The offscreen tests are strong. Five test scripts run 785 assertions, the
 render suite compares 70 screens pixel by pixel, and the single-file build is
 tested for freshness. No test script can judge sound and feel. That is why the
 first step is a device session and not more code.

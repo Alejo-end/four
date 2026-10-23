@@ -360,10 +360,10 @@ new command, `beat_repeat`. Do stage 0 again first: maiden must read
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 17.1 | **It loads** | RESTART, load the script | `count: 66`, no error in the SC tab | `\mangler_repeat`, `updateRepeat`, the two `repBufs` |
+| 17.1 | **It loads** | RESTART, load the script | `count: 66`, no error in the SC tab | `\mangler_repeat`, `updateRepeat`, the three `repBufs` |
 | 17.2 | **A repeat on the beat** | A take playing, clock at 120, `repeat length` 1/8. Hold `beat repeat` for two bars | It starts on the next eighth and stutters that eighth until you let go, then the live sound returns. The header shows RP | `clock.sync` in `repeat_start`, the `first` pass |
 | 17.3 | No clicks | Hold it over a sustained pad, then over drums | The loop points are smooth (the 3 ms fade); entering and leaving does not click | `fade`, the `gate` envelope |
-| 17.4 | A roll | While holding, turn `repeat length` from 1/8 to 1/16 to 1/32 | Each step re-captures a shorter slice: a roll, no click between steps | The two capture buffers, `updateRepeat` |
+| 17.4 | A roll | While holding, turn `repeat length` from 1/8 to 1/16 to 1/32, then spin it fast | Each step re-captures a shorter slice: a roll, no click or smear between steps | The three capture buffers, `updateRepeat` |
 | 17.5 | STOP and clear | Hold a repeat, then K1+K2. Later hold one and erase the take (K1+K3 hold on TAKE) | STOP silences it at once. The erase stops it too | `repeat_release` in `stop_all`, `\clear` |
 | 17.6 | Not recorded | Hold a repeat with `resample` up and record a pass, or PRINT | The take records the sound without the stutter | It sits after the record tap |
 | 17.7 | %CPU | Watch %CPU with no repeat, then held | No change at rest; a small rise while held | The synth exists only while held |
