@@ -368,6 +368,21 @@ new command, `beat_repeat`. Do stage 0 again first: maiden must read
 | 17.6 | Not recorded | Hold a repeat with `resample` up and record a pass, or PRINT | The take records the sound without the stutter | It sits after the record tap |
 | 17.7 | %CPU | Watch %CPU with no repeat, then held | No change at rest; a small rise while held | The synth exists only while held |
 
+## Stage 18: the screen fixes (Lua only)
+
+No engine change. `tools/test_screen.lua` reads these off the offscreen
+pixels. The device check is that the OLED shows the same, and that the
+frame rate holds with the GRAIN cloud at its densest.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 18.1 | L flag | Record on a layer deck (LAYERS, K2), then go to TAKE | L blinks in the header with the other write flags | `any_layer_rec` |
+| 18.2 | A full header | On LAYERS, record the take, the tape, a motion lane and a layer at once, with FREEZE on, a beat repeat held, the sequencer running and a modulator set | R T M L blink as letters, then five short bars; nothing touches the page dots | `draw_hflags` |
+| 18.3 | The erase arc | On TAKE, hold K1+K3 and let go before it lands | The ring sits between ERASE and MOV and touches neither | `FOOT`, `keys_right` |
+| 18.4 | The GRAIN cloud | VOICE in GRAIN. Turn SIZE and DENSITY, then spread, pan and jitter in PARAMS | Longer ticks with SIZE, more with DENSITY, wider with jitter; pan moves the cloud up (left) or down (right) and spread scatters it. At density 200 the screen does not stutter | `grain_cloud` |
+| 18.5 | WET | Open DELAY and REVERB | The E2 word reads WET on both | `FULL` |
+| 18.6 | HELD | PV freeze on, then step VOICE through its modes | HELD is bright in PV and GRAIN, dim in PLAY and WARP, and does not touch the PV chip | `body_VOICE` |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new

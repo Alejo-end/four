@@ -11,7 +11,7 @@
 
 local floor, sin, cos = math.floor, math.sin, math.cos
 local abs, sqrt, min, max = math.abs, math.sqrt, math.min, math.max
-local log, exp = math.log, math.exp
+local log, exp, PI = math.log, math.exp, math.pi
 
 local C     -- shared ctx, bound at init
 local W     -- lib/mwav (the file reader), handed in through ctx.wav
@@ -256,7 +256,7 @@ local FULL = {
   cut_source = "SOURCE",
   cutoff = "CUTOFF", resonance = "RESO", drive = "DRIVE",
   delay_fb = "FEEDBACK",
-  rev_mix = "REVERB",
+  delay_mix = "WET", rev_mix = "WET",
   rev_damp = "DAMP",
   voice_rel = "RELEASE",
   motion_depth = "DEPTH", motion_len = "LENGTH",
@@ -441,7 +441,11 @@ local function draw_big_value()
   framed2x(v, 126 - (text_w(v, 2) + 9), 41)
 end
 
--- footer: K2 K3 | E2· E3· — four quiet words that never lie about the keys
+-- footer: K2 K3 | E2· E3· — four quiet words that never lie about the keys.
+-- M.FOOT keeps the last layout for the tests: `arc` the erase arc's right
+-- edge (nil when it is not drawn) and `e2` the E2 word's left edge.
+local FOOT = { arc = nil, e2 = 0 }
+M.FOOT = FOOT
 local function draw_footer()
   local x = 2
   if C.alt then                       -- the shift bar: K1 is held
@@ -454,11 +458,16 @@ local function draw_footer()
   x = x + w + 9
   w = fkey_draw(3, x)
   local keys_right = x + w + 4     -- the key words' right edge (labels clear it)
-  -- the erase hold-arc beside the K3 word (only where material exists)
+  FOOT.arc = nil
+  -- the erase hold-arc beside the K3 word (only where material exists). It
+  -- belongs to the key words, so the encoder words clear it too: one that
+  -- would cross it drops to its short word while the arc draws.
   if C.alt and C.k13_frame and C.page_erase() then
     local dt = C.frame - C.k13_frame
     if dt >= 2 then
       local ax, ay = x + w + 8, FY + 2
+      keys_right = ax + 7
+      FOOT.arc = ax + 4
       local frac = clamp(dt / C.ERASE_FRAMES, 0, 1)
       screen.level(4)
       for a = 0, 2 * math.pi, 0.22 do
@@ -476,7 +485,7 @@ local function draw_footer()
     end
   end
   local e3x = flabel_r(C.enc_param(3), 126, keys_right)
-  flabel_r(C.enc_param(2), e3x - 9, keys_right)
+  FOOT.e2 = flabel_r(C.enc_param(2), e3x - 9, keys_right)
   draw_big_value()
 end
 
@@ -681,6 +690,45 @@ function M.erosion_tick()
 end
 function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 
+-- GRAIN: the cloud the knobs make. Each grain is a short tick: DENSITY sets
+-- how many (3 to 40), SIZE how long each one is and how long it lives, and
+-- grain JITTER how much the lengths differ. The x axis is the buffer, as the
+-- window bar below it says, so the cloud sits on the play head and position
+-- JITTER widens it over the window. The y axis is the stereo field, left at
+-- the top: PAN moves the cloud and SPREAD scatters it. A grain fades in and
+-- out over its life and drifts the way SPEED reads, except while a freeze
+-- holds the read point (FREEZE, or the PV freeze that Clouds takes as its
+-- own). The randoms come from `hash` on the frame, never from math.random,
+-- so the orbit keeps its own sequence and a shot repeats.
+local GR_MAX, GR_MID, GR_HALF = 40, 34, 11
+local function grain_cloud(frame, scan)
+  local sn = value_norm("size", pget("size", 0.1))
+  local dn = value_norm("density", pget("density", 20))
+  local spread = clamp(pget("spread", 0.5), 0, 1)
+  local pan = clamp(pget("pan", 0), -1, 1)
+  local pj = clamp(pget("pos_jitter", 0), 0, 1)
+  local gj = clamp(pget("grain_jitter", 0), 0, 1)
+  local lo, hi = window_bounds()
+  local n = 3 + floor(dn * (GR_MAX - 3) + 0.5)
+  local life = 2 + floor(sn * 14 + 0.5)
+  local reach = 3 + pj * (hi - lo) * 127
+  local cx = clamp(C.play_phase, 0, 1) * 127
+  local held = pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1
+  local drift = held and 0 or scan * 0.6
+  for k = 1, n do
+    local t = frame + floor(k * life / n)     -- the births are staggered
+    local e = floor(t / life)                 -- this grain's generation
+    local age = t - e * life
+    local len = max(1, floor((1 + sn * 10) * (1 + gj * (hash(k, e, 3) * 2 - 1)) + 0.5))
+    local x = (cx + (hash(k, e, 1) * 2 - 1) * reach + age * drift) % 128
+    local y = GR_MID + floor(clamp(pan + (hash(k, e, 2) * 2 - 1) * spread, -1, 1)
+      * GR_HALF + 0.5)
+    screen.level(3 + floor(sin(PI * (age + 0.5) / life) * 12 + 0.5))
+    screen.rect(floor(x - len / 2), y, len, 1)
+    screen.fill()
+  end
+end
+
 local function body_VOICE(frame)
   local mode = pget("mode", 5)
   local held_pv = pget("pv_freeze", 0) == 1
@@ -696,15 +744,19 @@ local function body_VOICE(frame)
     else
       ptext(m[1], x, 13, 1, mode == 1 and 2 or 5)
     end
-    x = x + w + 10
+    x = x + w + 8
   end
+  -- HELD: the PV freeze is heard in PV, and in GRAIN on the Clouds voice
+  -- (it doubles as the Clouds freeze). In PLAY and WARP it waits, dim.
   if mode == 1 then ptext_r("OFF", 126, 13, 1, 8)
-  elseif held_pv then ptext_r("HELD", 126, 13, 1, 12) end
+  elseif held_pv then
+    ptext_r("HELD", 126, 13, 1, (mode == 4 or mode == 2) and 12 or 4)
+  end
   -- the texture IS the mode, drawn from the playing motion (drifts with
   -- scan, stands still frozen, lies flat when the voice is freed/silent)
   local scan = pget("scan", 1)
   local rate = max(abs(scan), 0.05)
-  local ph = held_pv and 0 or frame * 0.8 * scan
+  local ph = (held_pv and mode == 4) and 0 or frame * 0.8 * scan
   -- silent = nothing recorded, OR the engine deck is choked (STOP, or MIX
   -- thrown fully to tape): the engine halts the read head then, so the
   -- texture lies flat and the playhead goes, as everywhere else
@@ -713,12 +765,8 @@ local function body_VOICE(frame)
     screen.level(1)
     screen.move(0, 33) screen.line(128, 33)
     screen.stroke()
-  elseif mode == 2 then        -- GRAIN: the wave sampled as grains
-    screen.level(6)
-    for gx = 0, 127, 3 do
-      screen.rect(gx, voice_wy(gx, ph, rate), 1, 1)
-    end
-    screen.fill()
+  elseif mode == 2 then        -- GRAIN: the cloud (grain_cloud)
+    grain_cloud(frame, scan)
   elseif mode == 3 then        -- WARP: an overlapped window ghosts behind
     local off = 9 + sin(frame * 0.9) * 6 * pget("warp_rand", 0)
     screen.level(2)
@@ -1728,17 +1776,70 @@ local function purity()
 end
 
 -- header: TITLE ◇ flags ···· path dots. STOP inverts the title chip;
--- writes (R/T/M) carry the ONLY fast blink; runs are steady.
--- a write flag: dot + letter, blinking. hoisted to module scope (no per-frame
--- closure); returns the advanced x so the caller threads the cursor.
-local function wflag(x, blink, ch, adv)
-  if blink then
-    screen.level(15)
-    screen.rect(x, 1, 3, 3)
-    screen.fill()
-    ptext(ch, x + 5, 1, 1, 15)
+-- writes (R/T/M/L) carry the ONLY fast blink; holds and runs are steady.
+-- The flags, in priority order: the writers (R the take, T the tape, M the
+-- motion looper, L a layer deck), the holds (FZ, TF, RP a beat repeat), then
+-- the machines that play on their own (SQ the pad sequencer, LF a
+-- modulator). A flag that does not fit whole shrinks: a writer to its
+-- blinking letter without the dot, the others to a 2px bar. Room is kept for
+-- the short forms of the lit flags after it, so a lit state never drops off
+-- the header. Built once: draw_header refreshes `on` (and RP's `lvl`), and
+-- leaves `x` and `full` for the tests.
+local HFLAGS = {
+  { ch = "R", write = true }, { ch = "T", write = true },
+  { ch = "M", write = true }, { ch = "L", write = true },
+  { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
+  { ch = "SQ", lvl = 7 }, { ch = "LF", lvl = 7 },
+}
+M.HFLAGS = HFLAGS
+local HF = {}
+for _, f in ipairs(HFLAGS) do
+  HF[f.ch] = f
+  f.w, f.on, f.x, f.full = 0, false, nil, false   -- w: set in init
+end
+-- the width of a flag whole, and short (a writer's letter, or a bar)
+local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
+local function hflag_pip(f) return f.write and f.w + 2 or 4 end
+local function any_layer_rec()
+  local decks = C.layers
+  if not decks then return false end
+  for i = 1, #decks do
+    if pget(C.deck_p(decks[i], "rec"), 0) == 1 then return true end
   end
-  return x + adv
+  return false
+end
+-- draw the lit flags from x, keeping clear of `lim` (the page dots)
+local function draw_hflags(x, lim, blink)
+  local n = #HFLAGS
+  for i = 1, n do
+    local f = HFLAGS[i]
+    f.x, f.full = nil, false
+    if f.on then
+      local rest = 0
+      for j = i + 1, n do
+        if HFLAGS[j].on then rest = rest + hflag_pip(HFLAGS[j]) end
+      end
+      f.x = x
+      f.full = x + hflag_w(f) - 3 + rest <= lim
+      if f.write then
+        if blink and f.full then
+          screen.level(15)
+          screen.rect(x, 1, 3, 3)
+          screen.fill()
+          ptext(f.ch, x + 5, 1, 1, 15)
+        elseif blink then
+          ptext(f.ch, x, 1, 1, 15)
+        end
+      elseif f.full then
+        ptext(f.ch, x, 1, 1, f.lvl)
+      else
+        screen.level(f.lvl)
+        screen.rect(x, 1, 2, 5)      -- a bar at cap height, not a page dot
+        screen.fill()
+      end
+      x = x + (f.full and hflag_w(f) or hflag_pip(f))
+    end
+  end
 end
 local function draw_header()
   local page, frame = C.page, C.frame
@@ -1763,18 +1864,6 @@ local function draw_header()
     screen.fill()
     x = x + 8
   end
-  local blink = (frame % 4) < 2
-  if pget("rec", 0) == 1 then x = wflag(x, blink, "R", 12) end
-  if pget("tape_rec", 0) == 1 then x = wflag(x, blink, "T", 11) end
-  if pget("motion_rec", 0) == 1 then x = wflag(x, blink, "M", 13) end
-  if pget("pv_freeze", 0) == 1 or pget("freeze", 0) == 1 then
-    ptext("FZ", x, 1, 1, 10)
-    x = x + 12
-  end
-  if pget("tape_freeze", 0) == 1 then
-    ptext("TF", x, 1, 1, 10)
-    x = x + 12
-  end
   -- path dots, top-right: uniform spacing, current page a rounded 4x4 block.
   -- the wider current dot nudges every dot after it 2px right so it gets
   -- matching breathing room. the row is RIGHT-ANCHORED to end 2px clear of
@@ -1782,22 +1871,18 @@ local function draw_header()
   -- the last dot once the count reached twelve).
   local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
   local dx0 = 126 - ((#PAGES - 1) * dpitch + 4)
-  -- RP a held beat repeat, and the two machines that play on their own,
-  -- all steady (runs do not blink): SQ the pad sequencer, LF a modulator.
-  -- Only where they fit before the dots.
+  HF.R.on = pget("rec", 0) == 1
+  HF.T.on = pget("tape_rec", 0) == 1
+  HF.M.on = pget("motion_rec", 0) == 1
+  HF.L.on = any_layer_rec()
+  HF.FZ.on = pget("pv_freeze", 0) == 1 or pget("freeze", 0) == 1
+  HF.TF.on = pget("tape_freeze", 0) == 1
   -- RP bright while the engine loops, dim while a press waits for its beat
-  if pget("beat_repeat", 0) == 1 and x + 10 < dx0 then
-    ptext("RP", x, 1, 1, (C.repeat_live and C.repeat_live()) and 12 or 4)
-    x = x + 12
-  end
-  if pget("step_run", 0) == 1 and x + 10 < dx0 then
-    ptext("SQ", x, 1, 1, 7)
-    x = x + 12
-  end
-  if C.lfo and C.lfo.active() and x + 10 < dx0 then
-    ptext("LF", x, 1, 1, 7)
-    x = x + 12
-  end
+  HF.RP.on = pget("beat_repeat", 0) == 1
+  HF.RP.lvl = (C.repeat_live and C.repeat_live()) and 12 or 4
+  HF.SQ.on = pget("step_run", 0) == 1
+  HF.LF.on = C.lfo and C.lfo.active() or false
+  draw_hflags(x, dx0 - 2, (frame % 4) < 2)
   for i = 1, #PAGES do
     local dx = dx0 + (i - 1) * dpitch + (i > page and 2 or 0)
     if i == page then
@@ -1859,6 +1944,7 @@ function M.init(ctx)
   local F = ctx.font
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
+  for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
 end
 
 return M

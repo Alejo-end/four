@@ -13,12 +13,13 @@ the status block current, and add a change-log entry for every change.
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 66`**.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 17, top to bottom. When it
+- **The one walkthrough:** doc/device-gate.md, stages 0 to 18, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 95th, the beat repeat's review fixes (doc/changelog.md).
-  The 94th added the beat repeat (ENGINE: a new synth and the `beat_repeat`
-  command, so the count moved from 65 to 66), by request ahead of the device
-  session. Work lives on the `full-review` branch until it is merged.
+- **Latest change:** the 96th, the screen fixes (doc/changelog.md): the
+  GRAIN cloud, the header flags (L, and none drops off), the erase arc's
+  room, WET for both FX mixes, and HELD. Lua only, the count stays 66. The
+  95th fixed the beat repeat's review findings. Work lives on the
+  `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
@@ -222,7 +223,7 @@ Each line was learned the hard way; the change log has the story.
 ## Workflow
 
 ```sh
-# EVERYTHING below in one command, with one verdict: syntax, the five harnesses,
+# EVERYTHING below in one command, with one verdict: syntax, the six harnesses,
 # and source == single-file build across all render variants. With LUA53 set to a
 # Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
 # it runs on 5.3, which is the only check of what the device actually accepts.
@@ -248,6 +249,8 @@ lua tools/test_deck.lua      # the softcut loop decks and the tape's delegated m
 lua tools/test_wav.lua       # the wav layer: resampling, headers, transients, onsets
 lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
 lua tools/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
+lua tools/test_screen.lua    # the screen's promises, read off the pixels: header
+                             # flags, the erase arc's room, the GRAIN cloud
 
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)

@@ -536,6 +536,21 @@ else
   redraw()
   export(pfx("SCENE", "_ORBIT"))
   params:set("orbit_on", 0)
+  -- the header with every flag lit on a long title: the words that do not
+  -- fit shrink to dots and pips, and none of them drops off. Shot in the
+  -- blink's lit phase, so the write letters show. The sequencer's and the
+  -- repeat's clocks are not run (env's clock.run replaces the frame loop).
+  goto_page("LAYERS")
+  clock.run = function() return {} end
+  for _, id in ipairs({ "rec", "tape_rec", "motion_rec", "lay1_rec", "freeze",
+      "tape_freeze", "beat_repeat", "step_run" }) do
+    params:set(id, 1)
+  end
+  params:set("lfo1_target", 2); params:set("lfo1_depth", 0.5)
+  run_ticks(1)
+  while script_ctx().frame % 4 >= 2 do run_ticks(1) end
+  redraw()
+  export(pfx("LAYERS", "_FLAGS"))
 end
 
 print("done: " .. _h.ticks() .. " ticks")

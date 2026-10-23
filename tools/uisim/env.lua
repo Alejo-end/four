@@ -385,6 +385,8 @@ function M.install(opts)
     push = function(name, v) if POLL_FNS[name] then POLL_FNS[name](v) end end,
     phase = function(v, pos) if SC_PHASE_FN then SC_PHASE_FN(v, pos) end end,
     has_phase = function() return SC_PHASE_FN ~= nil end,
+    -- the level (0..15) of screen pixel x, y (0-based), as last drawn
+    pixel = function(x, y) return buf[y + 1] and buf[y + 1][x + 1] or 0 end,
     poll_fns = POLL_FNS,
     -- the grid the script connected to. `grid.key(x, y, z)` drives the REAL
     -- handler; `grid.leds` is every led() call since it was last cleared.

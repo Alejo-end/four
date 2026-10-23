@@ -82,7 +82,7 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | Page | What it does | Keys |
 |---|---|---|
 | TAKE | Record and frame the material | K2 record, K3 snap window |
-| VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
+| VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In GRAIN the picture is the grain cloud, left channel at the top. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
 | LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 | FILTER | Diode ladder filter plus drive | K2 open, K3 type |
@@ -92,6 +92,11 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | PADS | The take chopped into eight playable slices | K2 play slice, K3 route notes |
 | MOTION | Record and replay knob movements | K2 record, K3 play |
 | SCENE | Capture, recall and morph whole sounds. The alt knobs run the orbit. | K2 recall or peek, K3 capture |
+
+The header shows what runs, from any page. A blinking R, T, M or L means the take, the
+tape, the motion looper or a layer deck is recording. FZ and TF are the freezes, RP a held
+beat repeat, SQ the pad sequencer and LF a modulator. When many are lit, a flag shrinks to
+its letter or to a short bar, but it never disappears.
 
 Notes on the less obvious ones.
 

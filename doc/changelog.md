@@ -3255,6 +3255,42 @@ new one's output, a true crossfade) all hold. It found:
 * VERIFIED: 785 assertions (491/114/87/41/52). `tools/check.lua` green on
   Lua 5.3.6.
 
+Ninety-sixth change: **the screen fixes, UI-a in doc/tracks-plan.md (Lua
+only, the count stays 66)**. The screen audit found two bugs that I checked
+in the renders, two tight footers, and header flags that could drop off.
+* **The GRAIN picture ignored the grain knobs.** It drew every third column
+  of the wave as dots, so the ten grain shots differed only in the play
+  head. VOICE in GRAIN now draws the cloud (`grain_cloud`): DENSITY sets how
+  many grains (3 to 40), SIZE their length and life, grain jitter how much
+  the lengths differ. The cloud sits on the play head, and position jitter
+  widens it over the window. The y axis is the stereo field, left at the
+  top: pan moves the cloud and spread scatters it. The randoms come from
+  `hash` on the frame, never `math.random`.
+* **The erase arc sat on the E2 word** ("MOVE" on TAKE): the footer
+  reserved the key words' width but not the ring's. While the arc draws, the
+  encoder words now clear it, and E2 drops to its short word (MOV).
+* **The header could drop a lit flag.** RP, SQ and LF were drawn only where
+  they fit, so a long title with R, T and FZ lit hid RP. The flags are now
+  one list in priority order: the writers R T M and a new **L** (a layer
+  deck recording, which no page but LAYERS showed), the holds FZ TF RP, the
+  machines SQ LF. A flag that does not fit whole shrinks to its blinking
+  letter (a writer) or a short bar, with room kept for the flags after it.
+* **Two tight footers.** DELAY and REVERB name their mix **WET** (ux-feedback
+  #24 asked what "echo 100%" meant), which also opens REVERB's 4 px gap. The
+  VOICE rail spacing went from 10 to 8 px, so the PV chip no longer touches
+  HELD. HELD is dim in PLAY and WARP, where a PV freeze is not heard, and
+  bright in PV and GRAIN (Clouds takes `pv_freeze` as its freeze). The PLAY
+  and WARP textures keep moving under a PV freeze they cannot hear.
+* **A sixth harness**, `tools/test_screen.lua`, reads the offscreen pixels
+  (`env.pixel`): every lit flag draws and ends before the page dots, the E2
+  word starts right of the arc, and the cloud follows each knob. Each check
+  failed against a mutation that undid its fix. `tools/check.lua` runs it.
+* RENDERS: 26 shots changed, all on VOICE, DELAY, REVERB, the arc and
+  LAYERS_LIVE (its L flag). One new shot, LAYERS_FLAGS: the header with every
+  flag lit. The other 44 are identical. Device rows: stage 18.
+* VERIFIED: 828 assertions (491/114/87/41/52/43). `tools/check.lua` green on
+  Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

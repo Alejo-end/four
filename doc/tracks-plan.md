@@ -180,6 +180,8 @@ TAPE reels stay as they are).
 
 ### Bugs to fix first (small)
 
+Done in the 96th change, with the header flags below.
+
 - **The GRAIN texture ignores the grain knobs.** VOICE in GRAIN draws
   every third column of the wave as dots, whatever `size`, `density`,
   `spread`, `grain_jitter` or `pan` say. The ten grain shots differ only in
@@ -196,6 +198,8 @@ TAPE reels stay as they are).
   which also answers ux-feedback #24 ("what does echo 100% mean").
 
 ### The header must show every writer (small to medium)
+
+Done in the 96th change.
 
 - **No flag for a layer that records.** The header has R, T and M, but a
   layer deck recording shows nothing on any other page. Add L.
@@ -256,7 +260,7 @@ TAPE reels stay as they are).
 | Phase | What | Engine | Cost |
 |---|---|---|---|
 | 0 | The device session | none | a session |
-| UI-a | The screen bugs and the header flags | no | small |
+| UI-a | The screen bugs and the header flags (done, 96th) | no | small |
 | UI-b | Homes for the PARAMS-only features, consistency | no | medium |
 | 1 | A filter on each deck | no | small to medium |
 | 2 | Modulators on the decks | no | medium |

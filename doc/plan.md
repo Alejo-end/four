@@ -25,7 +25,7 @@ Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
 2. Make sure that maiden reads `count: 66`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 17, top to bottom. If a stage
+3. Walk doc/device-gate.md from stage 0 to stage 18, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
