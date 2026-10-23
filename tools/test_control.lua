@@ -2956,4 +2956,57 @@ do
   clock.sync, clock.get_tempo = real_sync, real_tempo
 end
 
+-- ============================================================================
+-- 32 · MOTION hosts the modulators
+-- ============================================================================
+-- E2 walks the lanes and then the two modulator rows; a modulator row takes
+-- E3 (depth), K1+E2 (period) and K1+E3 (target). The eraser lets the
+-- selected modulator go and leaves the lanes.
+do
+  T.goto_page("MOTION")
+  params:set("mod_focus", 1); params:set("motion_lane", 0)
+  local n = #CTX.motion.lane_ids
+  for _ = 1, n do enc(2, 1) end
+  ok(params:get("mod_focus") == 1 and params:get("motion_lane") == n,
+    "E2 walks the lanes first (" .. n .. " of them)")
+  enc(2, 1)
+  ok(params:get("mod_focus") == 2, "...then LFO 1")
+  enc(2, 1)
+  ok(params:get("mod_focus") == 3, "...then LFO 2")
+  enc(2, 5)
+  ok(params:get("mod_focus") == 3, "...and stops there")
+  enc(2, -1)
+  ok(params:get("mod_focus") == 2, "back down to LFO 1")
+  enc(2, -1)
+  ok(params:get("mod_focus") == 1 and params:get("motion_lane") == n,
+    "...and back onto the last lane")
+  enc(2, 1)                                   -- LFO 1
+  ok(CTX.enc_param(2) == "@mo_sel" and CTX.enc_param(3) == "lfo1_depth",
+    "with LFO 1 selected, E3 is its depth")
+  local d0, md0, ml0 = params:get("lfo1_depth"), params:get("motion_depth"), params:get("motion_len")
+  enc(3, 5)
+  ok(params:get("lfo1_depth") > d0 and params:get("motion_depth") == md0,
+    "...E3 moves the LFO's depth, not the lanes'")
+  key(1, 1)
+  local p0, t0 = params:get("lfo1_period"), params:get("lfo1_target")
+  enc(2, 1)
+  ok(params:get("lfo1_period") == p0 + 1 and params:get("motion_len") == ml0,
+    "...K1+E2 its period, not the loop length")
+  enc(3, 2)
+  ok(params:get("lfo1_target") == t0 + 2, "...K1+E3 its target")
+  key(1, 0)
+  ok(params:get("mod_focus") == 2, "K1 held, E2 did not move the selection")
+  -- the eraser lets it go and leaves the lanes alone
+  local lanes = #CTX.motion.lane_ids
+  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
+  ok(params:get("lfo1_depth") == 0 and params:get("lfo1_target") == 1,
+    "K1+K3 held on a modulator row lets it go (OFF, depth 0)")
+  ok(#CTX.motion.lane_ids == lanes, "...and clears no lane")
+  -- the footer reads the selection at rest
+  CTX.alt = false
+  ok(CTX.enc_target("@mo_sel") == "mod_focus", "the footer reads the selection as the focus")
+  params:set("mod_focus", 1); params:set("lfo1_period", 1)
+  ok(CTX.enc_param(3) == "motion_depth", "with the lanes selected, E3 is the lanes' depth again")
+end
+
 T.report("control harness OK")

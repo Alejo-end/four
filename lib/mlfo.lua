@@ -84,6 +84,10 @@ local function wave(shape, ph, m)
   return m.held                      -- RANDOM: the level drawn this cycle
 end
 
+-- the shape of a wave for drawing (MOTION's modulator rows): SINE to RAMP
+-- only, since RANDOM and ENV have no shape to draw ahead of time
+function M.wave(shape, ph) return wave(shape, ph) end
+
 -- send the engine a value for param `id`, through the param's own send map
 local function send(id, v)
   local f = engine[id]

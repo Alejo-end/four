@@ -9,7 +9,8 @@ material when held for about a second.
 
 Compound targets: `@win_move` slides the take window, `@lay_move` slides the
 selected layer's loop, `@lay_level` and `@lay_rate` set the selected layer's
-level and rate.
+level and rate. `@mo_sel` walks MOTION's rows: the lanes, then the two
+modulators; with a modulator selected the other knobs are its own.
 
 | Page | E2 | E3 | K1+E2 | K1+E3 | K2 | K3 | Erase |
 |---|---|---|---|---|---|---|---|
@@ -25,5 +26,7 @@ level and rate.
 | REVERB | `rev_mix` | `rev_decay` | `rev_size` | `rev_damp` | WASH | BLOOM | no |
 | MIX | `mix` | `out_level` | `input_level` | `monitor_level` | ENG | TAPE | no |
 | PADS | `seq_slice` | `pad_pitch` | `pad_voice` | `voice_rel` | PAD | ROUTE | no |
-| MOTION | `motion_lane` | `motion_depth` | `motion_len` | none | REC | PLAY | yes |
+| MOTION (lanes) | `@mo_sel` | `motion_depth` | `motion_len` | none | REC | PLAY | yes |
+| MOTION (LFO 1) | `@mo_sel` | `lfo1_depth` | `lfo1_period` | `lfo1_target` | REC | PLAY | yes |
+| MOTION (LFO 2) | `@mo_sel` | `lfo2_depth` | `lfo2_period` | `lfo2_target` | REC | PLAY | yes |
 | SCENE | `scene_slot` | `scene_morph_amt` | `orbit_rate` | `orbit_reach` | RCL | CAP | yes |

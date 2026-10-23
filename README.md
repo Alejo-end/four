@@ -90,7 +90,7 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | REVERB | Tail and shimmer, added on top of the dry sound | K2 wash, K3 shimmer bloom |
 | MIX | Input, both decks, output | K2 engine throw, K3 tape throw |
 | PADS | The take chopped into eight playable slices | K2 play slice, K3 route notes |
-| MOTION | Record and replay knob movements | K2 record, K3 play |
+| MOTION | Record and replay knob movements, and the two modulators | K2 record, K3 play |
 | SCENE | Capture, recall and morph whole sounds. The alt knobs run the orbit. | K2 recall or peek, K3 capture |
 
 The header shows what runs, from any page. A blinking R, T, M or L means the take, the
@@ -206,6 +206,11 @@ all store the knob, never the wave. Two modulators on one knob add up. A negativ
 inverts the wave, so ENV with a negative depth ducks the sound while the gear plays. The
 pages draw the knob, not the swing; the header shows LF while a modulator runs and SQ while
 the sequencer does.
+
+The two modulators also live on MOTION, as two rows under the lanes. Turn E2 past the last
+lane to select one: its row draws its wave and what it moves ("1>CUT"), E3 sets its depth,
+K1+E2 its period and K1+E3 its target. Holding K1+K3 on a modulator row lets it go. The
+shape and the free rate stay in PARAMS.
 
 PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat` (map it to a pad or a
 footswitch) and on the next division the engine captures that much of what you hear and

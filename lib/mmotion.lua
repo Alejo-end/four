@@ -101,6 +101,7 @@ local MOTION_EXCLUDE = {
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "mod_focus",
   "scene_slot", "scene_recall_mode", "scene_scope", "scene_glide", "scene_capture",
   "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",

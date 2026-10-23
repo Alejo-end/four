@@ -3355,6 +3355,27 @@ header (Lua only)**.
 * RENDERS: none changed. Device row 18.14.
 * VERIFIED: `tools/check.lua` green on Lua 5.3.6.
 
+Hundred-and-first change: **MOTION hosts the modulators (Lua only)**.
+* **Two rows under the lanes.** Each draws two cycles of its wave, as tall as
+  its depth (inverted for a negative depth), with a dot where it is now; ENV
+  draws the input's envelope as a bar. The name column says which one and
+  what it moves ("1>CUT", "2 OFF"), and a modulator that also goes out to
+  other gear says so on the right (>CC, >CV, >OUT). With no lanes the rows
+  sit under the invitation. The rails, the playhead and the armed frame span
+  the lanes only. `Mlfo.wave` is exported for the drawing.
+* **One walk.** E2 is a compound target, `@mo_sel`: no lane, the lanes,
+  then LFO 1 and LFO 2. A new param, `mod_focus` (LANES, LFO 1, LFO 2),
+  holds which rows the encoders address, so MIDI and a PSET reach it too
+  (classified as excluded from scenes and motion; the motion group is 6).
+  With a modulator selected, E3 is its depth, K1+E2 its period and K1+E3
+  its target (`MOTION_LFO`); the footer reads LANE·LFO1, a signed depth
+  and the target's short word. K1+K3 held on a modulator row lets it go
+  (target OFF, depth 0) and clears no lane.
+* `doc/controls.md` lists MOTION per focus.
+* RENDERS: the MOTION shots changed (the two rows); one new shot,
+  MOTION_LFO. Device rows 18.15 and 18.16.
+* VERIFIED: `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

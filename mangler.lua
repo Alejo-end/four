@@ -344,6 +344,9 @@ end
 -- (the layer targets read "--" and drew no pointer).
 function ctx.enc_target(id)
   if id == "@win_move" then return "pos_start" end
+  if id == "@mo_sel" then
+    return pget("mod_focus", 1) > 1.5 and "mod_focus" or "motion_lane"
+  end
   if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
   if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
   if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
@@ -772,7 +775,16 @@ local KEYS = {
   MOTION = {
     k2 = pk("REC", "motion_rec"),
     k3 = pk("PLAY", "motion_play"),
-    erase = function() ctx.motion.clear_lane() end,
+    -- the selected row's: a lane is cleared, a modulator let go (OFF, depth 0)
+    erase = function()
+      local f = math.floor(pget("mod_focus", 1) + 0.5)
+      if f > 1 then
+        params:set("lfo" .. (f - 1) .. "_depth", 0)
+        params:set("lfo" .. (f - 1) .. "_target", 1)
+      else
+        ctx.motion.clear_lane()
+      end
+    end,
   },
   LAYERS = {
     -- K2/K3 are per deck (LAYER_KEYS below): key_def picks the selected
@@ -916,7 +928,9 @@ local ENC_MAP = {
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
-  MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
+  -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
+  -- modulator row selected the other three are its own (MOTION_LFO below)
+  MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
   -- the alt pair is the ORBIT: drift time + how far each leg reaches. the
   -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
   -- config knob lost its encoder to a performance one.
@@ -934,9 +948,25 @@ local VOICE_FACE = {
   { "scan", "pitch" },            -- PLAY
 }
 
+-- MOTION with a modulator row selected (mod_focus 2 or 3): E3 its depth,
+-- K1+E2 its period, K1+E3 its target. E2 stays the row selector.
+local MOTION_LFO = {
+  { "@mo_sel", "lfo1_period", "lfo1_depth", "lfo1_target" },
+  { "@mo_sel", "lfo2_period", "lfo2_depth", "lfo2_target" },
+}
+
 -- the param id addressed by encoder n (2 or 3), page + alt + mode aware
 local function enc_param(n)
   local page = PAGES[ctx.page]
+  if page == "MOTION" then
+    local f = math.floor(pget("mod_focus", 1) + 0.5)
+    local m = MOTION_LFO[f - 1]
+    if m then
+      if n == 2 then return ctx.alt and m[2] or m[1] end
+      if n == 3 then return ctx.alt and m[4] or m[3] end
+      return nil
+    end
+  end
   if page == "VOICE" and not ctx.alt then
     local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
     return n == 2 and f[1] or f[2]
@@ -2737,7 +2767,7 @@ local function init_params()
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
-  params:add_group("grp_motion", "motion", 5)
+  params:add_group("grp_motion", "motion", 6)
   params:add_binary("motion_rec", "motion record", "toggle", 0)
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
@@ -2751,6 +2781,8 @@ local function init_params()
       if n == 0 or v == 0 then return "-" end
       return ids[v]
     end)
+  -- which rows MOTION's encoders address: the lanes, or one modulator
+  params:add_option("mod_focus", "motion focus", { "LANES", "LFO 1", "LFO 2" }, 1)
   params:add_control("motion_depth", "motion depth", unit(1.0))
   -- settable loop length (K1+E2 on MOTION). 0 = AUTO (the recorded length);
   -- >0 retimes the loop's playback SPEED without touching the stored gesture.
@@ -3046,6 +3078,20 @@ function enc(n, d)
     elseif id == "@lay_move" then
       local dk = ctx.layer_sel()
       move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
+    elseif id == "@mo_sel" then
+      -- one walk over the rows MOTION draws: no lane (0), the lanes, then
+      -- the two modulators
+      local n = #ctx.motion.lane_ids
+      local f = math.floor(pget("mod_focus", 1) + 0.5)
+      local cur = f > 1 and n + f - 1
+        or clamp(math.floor(pget("motion_lane", 0) + 0.5), 0, n)
+      local nxt = clamp(cur + d, 0, n + 2)
+      if nxt > n then
+        params:set("mod_focus", nxt - n + 1)
+      else
+        params:set("mod_focus", 1)
+        params:set("motion_lane", nxt)
+      end
     elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
     else

@@ -390,6 +390,8 @@ frame rate holds with the GRAIN cloud at its densest.
 | 18.12 | The abort zone | Hold K3 on TAKE for half a second and let go; then hold it and turn E1 to another page | Nothing happens either time | `st.fired`, `st.page` |
 | 18.13 | What TAKE shows | Turn on start on sound and lock the window to a bar; turn E2 | "<" top left while an UNDO is kept, ON SND and 1 BAR top right; the START swell reads seconds | `take_top_row`, `fmt_value` |
 | 18.14 | The repeat on the grid | A take playing on the clock. On TAKE, hold grid row 6 pad 3, then slide to pad 4 and back, then let go | A 1/8 repeat on the beat, a roll to 1/16 and back, the live sound when the last pad comes up. The header reads RP8, then RP16. The held pad is bright cyan | `repeat_key`, `RP_CH` |
+| 18.15 | The modulators on MOTION | On MOTION, turn E2 past the last lane to LFO 1. Turn K1+E3 to CUTOFF, E3 up, K1+E2 to 1 BAR | The row reads 1>CUT and draws its wave with a moving dot; the filter swings on the bar; the footer reads LANE·LFO1, DEPTH, PERIOD, TARGET | `@mo_sel`, `MOTION_LFO`, `lfo_row` |
+| 18.16 | Let a modulator go | With LFO 1 selected and moving, hold K1+K3 | The arc lands, the row goes OFF and flat, the swing stops, and no lane is cleared | MOTION's `erase` |
 
 ## When it passes
 

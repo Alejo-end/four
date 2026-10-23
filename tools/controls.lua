@@ -53,19 +53,22 @@ local out = {
   "",
   "Compound targets: `@win_move` slides the take window, `@lay_move` slides the",
   "selected layer's loop, `@lay_level` and `@lay_rate` set the selected layer's",
-  "level and rate.",
+  "level and rate. `@mo_sel` walks MOTION's rows: the lanes, then the two",
+  "modulators; with a modulator selected the other knobs are its own.",
   "",
   "| Page | E2 | E3 | K1+E2 | K1+E3 | K2 | K3 | Erase |",
   "|---|---|---|---|---|---|---|---|",
 }
 
 local MODES = { { 5, "PLAY" }, { 2, "GRAIN" }, { 3, "WARP" }, { 4, "PV" } }
+local FOCUS = { { 1, "lanes" }, { 2, "LFO 1" }, { 3, "LFO 2" } }
 
 for i, name in ipairs(T.pages()) do
   T.goto_page(i)
-  local variants = name == "VOICE" and MODES or { { nil, nil } }
+  local variants = name == "VOICE" and MODES
+    or (name == "MOTION" and FOCUS or { { nil, nil } })
   for _, m in ipairs(variants) do
-    if m[1] then params:set("mode", m[1]) end
+    if m[1] then params:set(name == "VOICE" and "mode" or "mod_focus", m[1]) end
     local label = m[2] and (name .. " (" .. m[2] .. ")") or name
     out[#out + 1] = string.format("| %s | %s | %s | %s | %s | %s | %s | %s |",
       label, enc_cell(2, false), enc_cell(3, false), enc_cell(2, true),
@@ -73,6 +76,7 @@ for i, name in ipairs(T.pages()) do
       CTX.page_erase() and "yes" or "no")
   end
   if name == "VOICE" then params:set("mode", 5) end
+  if name == "MOTION" then params:set("mod_focus", 1) end
 end
 
 local f = assert(io.open(OUT, "w"))

@@ -465,6 +465,26 @@ else
   run_ticks(10)
   redraw()
   export(pfx("MOTION", "_PLAY"))
+  -- the modulators under the lanes: LFO 1 swings the cutoff (selected, its
+  -- encoders on the footer), LFO 2 ducks the reverb on the input's envelope
+  -- and also goes out as a MIDI CC
+  local ctx = script_ctx()
+  local function tgt(id)
+    for k, t in ipairs(ctx.lfo.TARGETS) do if t == id then return k + 1 end end
+  end
+  params:set("lfo1_target", tgt("cutoff")); params:set("lfo1_depth", 0.6)
+  params:set("lfo2_target", tgt("rev_mix")); params:set("lfo2_shape", 6)
+  params:set("lfo2_depth", -0.5)
+  params:set("out_src", 5); params:set("out_midi", 1)
+  params:set("mod_focus", 2)
+  run_ticks(6)
+  redraw()
+  export(pfx("MOTION", "_LFO"))
+  params:set("mod_focus", 1)
+  params:set("out_src", 1); params:set("out_midi", 0)
+  params:set("lfo1_depth", 0); params:set("lfo1_target", 1)
+  params:set("lfo2_depth", 0); params:set("lfo2_target", 1); params:set("lfo2_shape", 1)
+  run_ticks(1)
   params:set("motion_play", 0)
   -- S19 scenes (param-driven; recall mode stays NOW so no clock.sync)
   goto_page("SCENE")

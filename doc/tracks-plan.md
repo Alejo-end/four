@@ -210,6 +210,8 @@ Done in the 96th change.
 
 ### A home for the features that live only in PARAMS (medium)
 
+Done in the 98th to the 101st changes.
+
 - **MOTION hosts the modulators.** It has a free K1+E3 slot and an empty
   lower half. LFO 1 and LFO 2 become rows that `motion_lane` can select,
   drawn as their waves: E3 sets the depth, K1+E2 the period, K1+E3 the
@@ -228,6 +230,8 @@ Done in the 96th change.
   the division ("RP8").
 
 ### Consistency (small)
+
+Done in the 96th (HELD) and the 97th changes.
 
 - VOICE with an empty buffer has no "EMPTY - K2 REC" invitation, and the
   MOTION invitation is dimmer than TAKE's.
@@ -261,7 +265,7 @@ Done in the 96th change.
 |---|---|---|---|
 | 0 | The device session | none | a session |
 | UI-a | The screen bugs and the header flags (done, 96th) | no | small |
-| UI-b | Homes for the PARAMS-only features, consistency | no | medium |
+| UI-b | Homes for the PARAMS-only features, consistency (done, 97th to 101st) | no | medium |
 | 1 | A filter on each deck | no | small to medium |
 | 2 | Modulators on the decks | no | medium |
 | 3 | Sends between decks | no | medium |

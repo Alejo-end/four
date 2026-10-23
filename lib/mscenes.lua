@@ -215,6 +215,7 @@ local SCENE_EXCLUDE = {
   -- the other machines' transports, and scene's own params (NEVER capture
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "mod_focus",
   "orbit_on", "orbit_rate", "orbit_reach",
   -- the sequencer is a machine like the orbit: its run, and the pattern it
   -- generates, are left where they are by a scene

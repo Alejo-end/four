@@ -15,11 +15,12 @@ the status block current, and add a change-log entry for every change.
   has changed several times; after a RESTART maiden must read **`count: 66`**.
 - **The one walkthrough:** doc/device-gate.md, stages 0 to 18, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 96th, the screen fixes (doc/changelog.md): the
-  GRAIN cloud, the header flags (L, and none drops off), the erase arc's
-  room, WET for both FX mixes, and HELD. Lua only, the count stays 66. The
-  95th fixed the beat repeat's review findings. Work lives on the
-  `full-review` branch until it is merged.
+- **Latest change:** the 101st, MOTION hosts the modulators. The 96th to
+  the 101st are the screen work of doc/tracks-plan.md (UI-a and UI-b): the
+  GRAIN cloud, the header flags, one blink, the page dot families, the
+  sequencer on PADS, UNDO on a held TAKE K3, the beat repeat on the grid.
+  Lua only, the count stays 66. Work lives on the `full-review` branch
+  until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**

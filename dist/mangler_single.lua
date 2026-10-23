@@ -2154,6 +2154,7 @@ local MOTION_EXCLUDE = {
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "mod_focus",
   "scene_slot", "scene_recall_mode", "scene_scope", "scene_glide", "scene_capture",
   "scene_recall",
   "scene_next", "scene_clear", "scene_safe_capture", "scene_safe_restore",
@@ -2822,6 +2823,10 @@ local function wave(shape, ph, m)
   return m.held                      -- RANDOM: the level drawn this cycle
 end
 
+-- the shape of a wave for drawing (MOTION's modulator rows): SINE to RAMP
+-- only, since RANDOM and ENV have no shape to draw ahead of time
+function M.wave(shape, ph) return wave(shape, ph) end
+
 -- send the engine a value for param `id`, through the param's own send map
 local function send(id, v)
   local f = engine[id]
@@ -3279,6 +3284,7 @@ local SCENE_EXCLUDE = {
   -- the other machines' transports, and scene's own params (NEVER capture
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "mod_focus",
   "orbit_on", "orbit_rate", "orbit_reach",
   -- the sequencer is a machine like the orbit: its run, and the pattern it
   -- generates, are left where they are by a scene
@@ -5044,6 +5050,9 @@ local SHORT = {
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voice_atk = "ATK", voice_rel = "REL",
   motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
+  ["@mo_sel"] = "LANE", mod_focus = "LANE",
+  lfo1_depth = "DPT", lfo1_period = "PER", lfo1_target = "TGT",
+  lfo2_depth = "DPT", lfo2_period = "PER", lfo2_target = "TGT",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
@@ -5081,6 +5090,8 @@ local FULL = {
   rev_damp = "DAMP",
   voice_rel = "RELEASE",
   motion_depth = "DEPTH", motion_len = "LENGTH",
+  lfo1_depth = "DEPTH", lfo1_period = "PERIOD", lfo1_target = "TARGET",
+  lfo2_depth = "DEPTH", lfo2_period = "PERIOD", lfo2_target = "TARGET",
   pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_morph_amt = "MORPH",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE",
@@ -5131,6 +5142,16 @@ local function fmt_value(id)
   if id == "pos_start" or id == "pos_end" then
     -- the window's edges in seconds of the buffer, not a percentage
     return string.format("%.2fS", params:get(id) * (C.BUF_SECS or 60))
+  end
+  if id == "mod_focus" then
+    return params:get(id) > 2.5 and "LFO2" or "LFO1"
+  end
+  if id == "lfo1_target" or id == "lfo2_target" then
+    local t = C.lfo and C.lfo.TARGETS[floor(params:get(id) + 0.5) - 1]
+    return t and (SHORT[t] or string.upper(t)) or "OFF"
+  end
+  if id == "lfo1_depth" or id == "lfo2_depth" then
+    return string.format("%+d%%", floor(params:get(id) * 100 + 0.5))
   end
   if id == "motion_len" then
     local v = params:get(id)
@@ -5184,6 +5205,7 @@ end
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
   seq_slice = true, motion_lane = true, scene_slot = true, layer_sel = true,
+  ["@mo_sel"] = true,
 }
 
 local FY = 58  -- the footer text row (four quiet words)
@@ -6277,6 +6299,83 @@ end
 --     recorded param, named with its page's own word; one playhead crosses
 --     every lane with a live-value dot)
 -- ============================================================================
+-- MOTION's modulator rows (MOTION hosts the two LFOs): below the lanes, one
+-- row each, selected by the same E2 walk. The name column says which one
+-- and what it moves ("1>CUT", "2 OFF"); the row draws two cycles of its
+-- wave, as tall as its depth (upside down for a negative depth), with a dot
+-- where the wave is now. ENV draws the input's envelope as a bar. A
+-- modulator that also goes out to other gear says where on the right (>CC
+-- the MIDI CC, >CV crow, >OUT both). Dim and flat while it moves nothing.
+local LFO_PID = {}
+for k = 1, 2 do
+  LFO_PID[k] = { target = "lfo" .. k .. "_target", depth = "lfo" .. k .. "_depth",
+    shape = "lfo" .. k .. "_shape" }
+end
+local LFO_TAG = { "1>", "2>" }
+local LFO_OFF = { "1 OFF", "2 OFF" }
+local LFO_GX1 = 110
+local function lfo_row(k, yb, selected, gx0)
+  local L = C.lfo
+  if not L then return end
+  local P = LFO_PID[k]
+  local tid = L.TARGETS[floor(pget(P.target, 1) + 0.5) - 1]
+  local depth = pget(P.depth, 0)
+  local live = tid ~= nil and abs(depth) >= 0.001
+  local lvl = selected and 11 or (live and 7 or 4)
+  if tid then
+    ptext(LFO_TAG[k], 2, yb - 6, 1, lvl)
+    ptext(SHORT[tid] or "?", 2 + text_w(LFO_TAG[k], 1) + 1, yb - 6, 1, lvl)
+  else
+    ptext(LFO_OFF[k], 2, yb - 6, 1, lvl)
+  end
+  local w = LFO_GX1 - gx0
+  local mid = yb - 4
+  local shape = floor(pget(P.shape, 1) + 0.5)
+  local m = L.mods[k]
+  if not live then
+    screen.level(2)
+    screen.rect(gx0, mid, w, 1)
+    screen.fill()
+  else
+    local a = max(1, abs(depth) * 4)
+    local sg = depth < 0 and -1 or 1
+    screen.level(selected and 11 or 6)
+    if shape == 6 then                        -- ENV: the envelope, as a bar
+      screen.rect(gx0, mid, max(1, floor(L.env * w)), 1)
+    else
+      for x = 0, w do
+        local ph = (x / w * 2) % 1
+        local v = shape == 5 and (hash(floor(x / w * 6), k, 7) * 2 - 1)
+          or L.wave(shape, ph)
+        screen.rect(gx0 + x, floor(mid - v * a * sg + 0.5), 1, 1)
+      end
+    end
+    screen.fill()
+    -- where it is now
+    local v = shape == 6 and (L.env * 2 - 1) or (m.out * 2 - 1)
+    local dx = shape == 6 and gx0 + L.env * w or gx0 + m.phase * w / 2
+    screen.level(15)
+    screen.rect(floor(dx) - 1, floor(mid - v * a * sg + 0.5) - 1, 3, 3)
+    screen.fill()
+  end
+  -- does it also go out?
+  if floor(pget("out_src", 1) + 0.5) == k + 3 then
+    local cc = pget("out_midi", 0) > 0
+    local cv = pget("out_crow", 0) == 1
+    if cc or cv then
+      ptext(cc and cv and ">OUT" or (cc and ">CC" or ">CV"), LFO_GX1 + 3, yb - 6, 1, 6)
+    end
+  end
+  if selected then
+    screen.level(15)
+    screen.move(0, yb - 8) screen.line(0, yb + 2)
+    screen.stroke()
+    screen.rect(1, yb - 8, 1, 1)
+    screen.rect(1, yb + 2, 1, 1)
+    screen.fill()
+  end
+end
+
 local function body_MOTION(frame)
   local mo = C.motion
   local ll = mo.loop_len
@@ -6284,32 +6383,42 @@ local function body_MOTION(frame)
   local nlane = #ids
   local armed = pget("motion_rec", 0) == 1
   local playing = pget("motion_play", 0) == 1
+  local top, rh = 15, 10
+  local gx0, gx1 = 33, 124
+  -- the selection over every row: 0 none, 1..nlane the lanes, then the
+  -- two modulators
+  local focus = floor(pget("mod_focus", 1) + 0.5)
+  local sel = focus > 1 and nlane + focus - 1
+    or clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
   if nlane == 0 then
+    -- no lanes: the invitation above, the two modulator rows below it
     if armed then
       chip("REC", 2, 12)              -- steady: the header M is the blink
-      ptext_c("MOVE A KNOB TO RECORD", 64, 28, 1, 8)
+      ptext_c("MOVE A KNOB TO RECORD", 64, 22, 1, 8)
     else
-      ptext_c("EMPTY - K2 ARM", 64, 24, 1, 10)
-      ptext_c("THEN MOVE A KNOB", 64, 32, 1, 5)
+      ptext_c("EMPTY - K2 ARM", 64, 16, 1, 10)
+      ptext_c("THEN MOVE A KNOB", 64, 24, 1, 5)
     end
+    for k = 1, 2 do lfo_row(k, top + (k + 1) * rh + 8, sel == k, gx0) end
     return
   end
   if ll > 0 then
     ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 9, 1, 5)
   end
-  local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
+  local nrow = nlane + 2
   local VIS = 4
-  local shown = min(nlane, VIS)
-  local top, rh = 15, 10
-  local gx0, gx1 = 33, 124
-  -- scroll: the VIS-lane window follows the selected lane so every lane is
+  local shown = min(nrow, VIS)
+  -- scroll: the VIS-row window follows the selection so every row is
   -- reachable (a scrollbar on the right edge shows where in the stack you are)
   local off = 0
-  if nlane > VIS then
-    local focus = sel > 0 and sel or 1
-    off = clamp(focus - VIS, 0, nlane - VIS)   -- keep the selected lane visible:
-    if focus - 1 < off then off = focus - 1 end --   between the top and bottom row
+  if nrow > VIS then
+    local fsel = sel > 0 and sel or 1
+    off = clamp(fsel - VIS, 0, nrow - VIS)     -- keep the selected row visible:
+    if fsel - 1 < off then off = fsel - 1 end  --   between the top and bottom row
   end
+  -- the lane rows in the window (the rails, the playhead and the armed frame
+  -- span these, not the modulators)
+  local lshown = clamp(nlane - off, 0, shown)
   -- drawing length: the loop once set, else the furthest event so far
   local dl = ll                          -- playhead / rails denominator (loop_len)
   if dl == 0 then
@@ -6325,15 +6434,21 @@ local function body_MOTION(frame)
   local el = mo.rec_len or 0
   if el < 1 then el = dl end
   -- quarter rails through the loop
-  screen.level(2)
-  for k = 0, 4 do
-    local x = gx0 + floor((gx1 - gx0) * k / 4)
-    for y = top - 2, top + shown * rh - 2, 2 do screen.rect(x, y, 1, 1) end
+  if lshown > 0 then
+    screen.level(2)
+    for k = 0, 4 do
+      local x = gx0 + floor((gx1 - gx0) * k / 4)
+      for y = top - 2, top + lshown * rh - 2, 2 do screen.rect(x, y, 1, 1) end
+    end
+    screen.fill()
   end
-  screen.fill()
   local phx = gx0 + (clamp(mo.playhead, 0, dl) / dl) * (gx1 - gx0)
   for row = 1, shown do
-    local li = off + row                  -- the lane index this row shows
+    local li = off + row                  -- the row index this row shows
+    if li > nlane then
+      lfo_row(li - nlane, top + (row - 1) * rh + 8, li == sel, gx0)
+      goto continue
+    end
     local id = ids[li]
     local L = mo.lanes[id]
     local yb = top + (row - 1) * rh + 8   -- the lane's value baseline
@@ -6395,32 +6510,33 @@ local function body_MOTION(frame)
       screen.rect(phx - 1, vy - 1, 3, 3)
       screen.fill()
     end
+    ::continue::
   end
   -- one playhead crosses every lane
-  if ll > 0 then
+  if lshown > 0 and ll > 0 then
     screen.level(playing and 10 or 3)
     screen.move(phx, top - 3)
-    screen.line(phx, top + shown * rh - 3)
+    screen.line(phx, top + lshown * rh - 3)
     screen.stroke()
-  elseif armed then
+  elseif lshown > 0 and armed then
     screen.level(15)
     screen.move(gx1, top - 3)
-    screen.line(gx1, top + shown * rh - 3)
+    screen.line(gx1, top + lshown * rh - 3)
     screen.stroke()
   end
-  if armed then                          -- armed frame, steady (header M blinks)
+  if armed and lshown > 0 then           -- armed frame, steady (header M blinks)
     screen.level(15)
-    screen.rect(gx0 - 2.5, top - 4.5, gx1 - gx0 + 6, shown * rh + 5)
+    screen.rect(gx0 - 2.5, top - 4.5, gx1 - gx0 + 6, lshown * rh + 5)
     screen.stroke()
   end
-  -- scrollbar (right edge): the VIS-lane window's place in the whole stack
-  if nlane > VIS then
+  -- scrollbar (right edge): the VIS-row window's place in the whole stack
+  if nrow > VIS then
     local sy0, sy1 = top - 2, top + shown * rh - 3
     screen.level(2)
     screen.rect(127, sy0, 1, sy1 - sy0)
     screen.fill()
-    local th0 = sy0 + (sy1 - sy0) * (off / nlane)
-    local th1 = sy0 + (sy1 - sy0) * ((off + VIS) / nlane)
+    local th0 = sy0 + (sy1 - sy0) * (off / nrow)
+    local th1 = sy0 + (sy1 - sy0) * ((off + VIS) / nrow)
     screen.level(9)
     screen.rect(127, th0, 1, max(1, th1 - th0))
     screen.fill()
@@ -6949,6 +7065,9 @@ end
 -- (the layer targets read "--" and drew no pointer).
 function ctx.enc_target(id)
   if id == "@win_move" then return "pos_start" end
+  if id == "@mo_sel" then
+    return pget("mod_focus", 1) > 1.5 and "mod_focus" or "motion_lane"
+  end
   if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
   if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
   if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
@@ -7377,7 +7496,16 @@ local KEYS = {
   MOTION = {
     k2 = pk("REC", "motion_rec"),
     k3 = pk("PLAY", "motion_play"),
-    erase = function() ctx.motion.clear_lane() end,
+    -- the selected row's: a lane is cleared, a modulator let go (OFF, depth 0)
+    erase = function()
+      local f = math.floor(pget("mod_focus", 1) + 0.5)
+      if f > 1 then
+        params:set("lfo" .. (f - 1) .. "_depth", 0)
+        params:set("lfo" .. (f - 1) .. "_target", 1)
+      else
+        ctx.motion.clear_lane()
+      end
+    end,
   },
   LAYERS = {
     -- K2/K3 are per deck (LAYER_KEYS below): key_def picks the selected
@@ -7521,7 +7649,9 @@ local ENC_MAP = {
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "monitor_level" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
-  MOTION = { "motion_lane", "motion_len", "motion_depth", nil },
+  -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
+  -- modulator row selected the other three are its own (MOTION_LFO below)
+  MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
   -- the alt pair is the ORBIT: drift time + how far each leg reaches. the
   -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
   -- config knob lost its encoder to a performance one.
@@ -7539,9 +7669,25 @@ local VOICE_FACE = {
   { "scan", "pitch" },            -- PLAY
 }
 
+-- MOTION with a modulator row selected (mod_focus 2 or 3): E3 its depth,
+-- K1+E2 its period, K1+E3 its target. E2 stays the row selector.
+local MOTION_LFO = {
+  { "@mo_sel", "lfo1_period", "lfo1_depth", "lfo1_target" },
+  { "@mo_sel", "lfo2_period", "lfo2_depth", "lfo2_target" },
+}
+
 -- the param id addressed by encoder n (2 or 3), page + alt + mode aware
 local function enc_param(n)
   local page = PAGES[ctx.page]
+  if page == "MOTION" then
+    local f = math.floor(pget("mod_focus", 1) + 0.5)
+    local m = MOTION_LFO[f - 1]
+    if m then
+      if n == 2 then return ctx.alt and m[2] or m[1] end
+      if n == 3 then return ctx.alt and m[4] or m[3] end
+      return nil
+    end
+  end
   if page == "VOICE" and not ctx.alt then
     local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
     return n == 2 and f[1] or f[2]
@@ -9342,7 +9488,7 @@ local function init_params()
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
-  params:add_group("grp_motion", "motion", 5)
+  params:add_group("grp_motion", "motion", 6)
   params:add_binary("motion_rec", "motion record", "toggle", 0)
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
@@ -9356,6 +9502,8 @@ local function init_params()
       if n == 0 or v == 0 then return "-" end
       return ids[v]
     end)
+  -- which rows MOTION's encoders address: the lanes, or one modulator
+  params:add_option("mod_focus", "motion focus", { "LANES", "LFO 1", "LFO 2" }, 1)
   params:add_control("motion_depth", "motion depth", unit(1.0))
   -- settable loop length (K1+E2 on MOTION). 0 = AUTO (the recorded length);
   -- >0 retimes the loop's playback SPEED without touching the stored gesture.
@@ -9651,6 +9799,20 @@ function enc(n, d)
     elseif id == "@lay_move" then
       local dk = ctx.layer_sel()
       move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
+    elseif id == "@mo_sel" then
+      -- one walk over the rows MOTION draws: no lane (0), the lanes, then
+      -- the two modulators
+      local n = #ctx.motion.lane_ids
+      local f = math.floor(pget("mod_focus", 1) + 0.5)
+      local cur = f > 1 and n + f - 1
+        or clamp(math.floor(pget("motion_lane", 0) + 0.5), 0, n)
+      local nxt = clamp(cur + d, 0, n + 2)
+      if nxt > n then
+        params:set("mod_focus", nxt - n + 1)
+      else
+        params:set("mod_focus", 1)
+        params:set("motion_lane", nxt)
+      end
     elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
     else
