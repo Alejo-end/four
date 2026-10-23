@@ -1258,7 +1258,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
 --            pitch quantize x8 · row 6 dark
 --     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
---            row 6 voice type x1 / notes->pads x8
+--            row 6 voice type x1 · sequencer run x3, fewer/more hits x5/x6 ·
+--            notes->pads x8
 --     SCENE  row 3 AIM (point the morph without jumping) · row 5 the morph
 --            bar · row 6 [CAP mod][CLR mod] · [CHAOS, hold] · · [◄ back]
 --   rows 7-8  ONE piano octave (black row above white; same shape as the
@@ -1638,6 +1639,9 @@ local function pads_ws_key(x, y, z)
   if y == 5 then params:set("seq_slice", x - 1)         -- select a slice to edit
   elseif y == 6 then
     if x == 1 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
+    elseif x == 3 then ptoggle("step_run")               -- the sequencer
+    elseif x == 5 then params:delta("step_fill", -1)     -- fewer hits
+    elseif x == 6 then params:delta("step_fill", 1)      -- more hits
     elseif x == 8 then ptoggle("pad_input") end          -- notes -> pads/drone
   end
 end
@@ -1850,6 +1854,9 @@ local function draw_pads_ws()
     gg:led(x, 5, sel and 15 or 6, sel and "white" or "blue")             -- select
   end
   gg:led(1, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")     -- voice: SLICE/GRAIN
+  gg:led(3, 6, pget("step_run", 0) == 1 and 12 or 4, "green")           -- sequencer run
+  gg:led(5, 6, 3)                                                       -- fewer hits
+  gg:led(6, 6, 3)                                                       -- more hits
   gg:led(8, 6, pget("pad_input", 0) == 1 and 15 or 5, "yellow")          -- route
 end
 
@@ -6141,36 +6148,34 @@ local function body_PADS(frame)
       screen.fill()
     end
   end
-  -- the free row below the slices. Normally a quiet cue for the sound-lock
-  -- encoders (82px, well under the 124 limit); once a CHOP is in force that
-  -- row says so instead — what the pads now mean outranks a hint you have
-  -- already read, and the two together overran the line.
-  -- the sequencer, while it runs, outranks both: its steps under the pads,
-  -- the hits as bars, the rests as dots, and the step the clock is on
-  -- bright (a tall bar while its pad sounds, a bright dot on a rest)
+  -- the row below the slices is the sequencer's, at all times: its steps
+  -- under the pads, the hits as bars, the rests as dots. Running, it is
+  -- bright and the step the clock is on lights (a tall bar while its pad
+  -- sounds, a bright dot on a rest); stopped, the pattern waits dim. A CHOP
+  -- in force says so on the line below it: what the pads now mean.
   local seq = C.seq
-  if seq and pget("step_run", 0) == 1 then
+  if seq then
+    local run = pget("step_run", 0) == 1
     local n = floor(pget("step_len", 4) + 0.5)
     local sw2 = floor(112 / n)
     local x0 = 64 - floor(sw2 * n / 2)
     for s = 0, n - 1 do
       local x = x0 + s * sw2
-      local now = s == seq.step
+      local now = run and s == seq.step
       if seq.hits[s + 1] then
-        screen.level(now and 15 or 6)
-        if now then screen.rect(x + 1, 44, sw2 - 2, 5)
-        else screen.rect(x + 1, 45, sw2 - 2, 3) end
+        screen.level(now and 15 or (run and 6 or 3))
+        if now then screen.rect(x + 1, 42, sw2 - 2, 5)
+        else screen.rect(x + 1, 43, sw2 - 2, 3) end
       else
-        screen.level(now and 15 or 3)
-        screen.rect(x + floor(sw2 / 2), 46, 1, 1)
+        screen.level(now and 15 or (run and 3 or 2))
+        screen.rect(x + floor(sw2 / 2), 44, 1, 1)
       end
       screen.fill()
     end
-  elseif C.pad_cuts then
+  end
+  if C.pad_cuts then
     local n = #C.pad_cuts - 1
-    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 5)
-  else
-    ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
+    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 49, 1, 5)
   end
 end
 

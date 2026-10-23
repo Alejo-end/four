@@ -267,4 +267,22 @@ do
     .. g_family .. " > " .. g_inside .. ")")
 end
 
+-- ============================================================================
+-- 6 · PADS shows the sequencer's pattern at all times
+-- ============================================================================
+do
+  T.goto_page("PADS")
+  _h.run_ticks(30)
+  params:set("step_run", 0)
+  params:set("step_len", 8); params:set("step_fill", 3)
+  redraw()
+  local bars, maxl = 0, 0
+  for x = 0, 127 do
+    if px(x, 44) > 0 then bars = bars + 1; maxl = math.max(maxl, px(x, 44)) end
+  end
+  ok(bars > 0, "stopped, the step row is drawn (" .. bars .. " px)")
+  ok(maxl <= 3, "...dim (level " .. maxl .. ")")
+  params:set("step_len", 4); params:set("step_fill", 4)
+end
+
 T.report("screen harness OK")

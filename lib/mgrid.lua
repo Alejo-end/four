@@ -22,7 +22,8 @@
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
 --            pitch quantize x8 · row 6 dark
 --     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
---            row 6 voice type x1 / notes->pads x8
+--            row 6 voice type x1 · sequencer run x3, fewer/more hits x5/x6 ·
+--            notes->pads x8
 --     SCENE  row 3 AIM (point the morph without jumping) · row 5 the morph
 --            bar · row 6 [CAP mod][CLR mod] · [CHAOS, hold] · · [◄ back]
 --   rows 7-8  ONE piano octave (black row above white; same shape as the
@@ -402,6 +403,9 @@ local function pads_ws_key(x, y, z)
   if y == 5 then params:set("seq_slice", x - 1)         -- select a slice to edit
   elseif y == 6 then
     if x == 1 then params:set("pad_voice", pget("pad_voice", 1) == 1 and 2 or 1)
+    elseif x == 3 then ptoggle("step_run")               -- the sequencer
+    elseif x == 5 then params:delta("step_fill", -1)     -- fewer hits
+    elseif x == 6 then params:delta("step_fill", 1)      -- more hits
     elseif x == 8 then ptoggle("pad_input") end          -- notes -> pads/drone
   end
 end
@@ -614,6 +618,9 @@ local function draw_pads_ws()
     gg:led(x, 5, sel and 15 or 6, sel and "white" or "blue")             -- select
   end
   gg:led(1, 6, 12, pget("pad_voice", 1) == 2 and "orange" or "cyan")     -- voice: SLICE/GRAIN
+  gg:led(3, 6, pget("step_run", 0) == 1 and 12 or 4, "green")           -- sequencer run
+  gg:led(5, 6, 3)                                                       -- fewer hits
+  gg:led(6, 6, 3)                                                       -- more hits
   gg:led(8, 6, pget("pad_input", 0) == 1 and 15 or 5, "yellow")          -- route
 end
 

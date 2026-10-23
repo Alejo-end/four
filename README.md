@@ -187,8 +187,10 @@ The pad sequencer (PARAMS > pads - sequencer) plays the pads on the clock, so th
 voices and pitches become a progression. By default it steps through four pads a bar each,
 legato: a slow drone sequence. `steps that play` spreads that many hits evenly over
 `steps`, `pad order` walks the pads up, down, back and forth or at random, `step chance`
-skips hits, and `step gate` shortens each hit. While it runs, PADS draws its steps under
-the pads. Map `sequencer run` to a footswitch to start and stop it.
+skips hits, and `step gate` shortens each hit. PADS draws the pattern under the pads, dim
+while it is stopped and bright with the current step while it runs. Map `sequencer run` to
+a footswitch to start and stop it. On the grid's PADS rows, row 6 pad 3 runs it and pads 5
+and 6 take a hit away or add one.
 
 ## Modulators
 

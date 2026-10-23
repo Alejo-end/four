@@ -2415,6 +2415,19 @@ do
   params:set("step_run", 0)
   ok(not seq.running() and cancelled >= 1 and CTX.pad_held[seq.VOICE_ID] == nil,
     "stopped, the clock is cancelled and the voice released")
+  -- the grid's PADS workspace runs it: x3 run, x5/x6 fewer and more hits
+  local g = _h.grid
+  T.goto_page("PADS")
+  params:set("step_fill", 4)
+  g.key(3, 6, 1); g.key(3, 6, 0)
+  ok(params:get("step_run") == 1 and seq.running(), "grid PADS row 6 x3 runs the sequencer")
+  g.key(6, 6, 1); g.key(6, 6, 0)
+  ok(params:get("step_fill") == 5, "...x6 adds a hit")
+  g.key(5, 6, 1); g.key(5, 6, 0); g.key(5, 6, 1); g.key(5, 6, 0)
+  ok(params:get("step_fill") == 3, "...x5 takes one away")
+  g.key(3, 6, 1); g.key(3, 6, 0)
+  ok(params:get("step_run") == 0 and not seq.running(), "...and x3 again stops it")
+  params:set("step_fill", 4)
   clock.run, clock.cancel = real_run, real_cancel
   engine.note_on, engine.note_off = real_on, real_off
 end

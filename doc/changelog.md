@@ -3313,6 +3313,16 @@ doc/tracks-plan.md (Lua only, the count stays 66)**.
   18.7 to 18.9.
 * VERIFIED: `tools/check.lua` green on Lua 5.3.6.
 
+Ninety-eighth change: **the sequencer has a home on PADS (Lua only)**.
+* **The step row is always there.** It replaced a hint ("E2 SLICE - E3
+  PITCH") that only repeated the footer. Stopped, the pattern waits dim, so
+  you see it before you start it; running, it is bright with the current
+  step lit. A CHOP note moves to the line below it.
+* **The grid's PADS row 6** runs the sequencer (pad 3, green while it runs)
+  and takes a hit away or adds one (pads 5 and 6).
+* RENDERS: the three PADS shots changed. Device row 18.10.
+* VERIFIED: `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

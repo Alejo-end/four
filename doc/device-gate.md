@@ -385,6 +385,7 @@ frame rate holds with the GRAIN cloud at its densest.
 | 18.7 | One blink | Record on TAKE, TAPE, a layer and MOTION in turn, and run the orbit on SCENE | Only the header's write flags blink. TAPE's REC chip, the LAYERS dot, MOTION's REC chip and frame, the ORBIT chip and TAKE's WAIT are steady | the page chips |
 | 18.8 | Readable text | Look at PADS (PLAY>DRONE, the voice count), SCENE (NOW), TAPE (the seconds) and MOTION (LOOP) from playing distance | All of it reads; an empty page's invitation is as bright as TAKE's, and VOICE with no take says EMPTY - REC ON TAKE | the level floor of 5 |
 | 18.9 | Page dots in families | Step E1 through all the pages | The dots sit in five groups: TAKE VOICE, TAPE LAYERS, FILTER DELAY REVERB, MIX, PADS MOTION SCENE | `layout_dots` |
+| 18.10 | The pattern on PADS | Open PADS with the sequencer stopped, then run it from the grid (PADS, row 6 pad 3); add and take hits with pads 6 and 5 | The pattern shows dim while stopped, bright with the moving step while it runs; the hits follow pads 5 and 6 | `body_PADS`, `pads_ws_key` |
 
 ## When it passes
 
