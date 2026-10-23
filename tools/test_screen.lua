@@ -144,6 +144,18 @@ do
   _h.run_ticks(1)
   redraw()
   ok(Mp.FOOT.arc == nil, "...gone with the key")
+  -- a hold aborted by leaving the page draws no arc when it comes back
+  key(3, 1); _h.run_ticks(3)
+  T.goto_page("VOICE"); _h.run_ticks(2)
+  T.goto_page("TAKE"); _h.run_ticks(8)
+  redraw()
+  ok(Mp.FOOT.arc == nil, "an aborted hold draws no arc back on TAKE")
+  key(3, 0); _h.run_ticks(1)
+  -- K1 pressed mid-hold aborts: no arc under another word
+  key(3, 1); _h.run_ticks(4); key(1, 1); _h.run_ticks(4)
+  redraw()
+  ok(Mp.FOOT.arc == nil, "K1 mid-hold aborts the UNDO arc")
+  key(1, 0); key(3, 0); _h.run_ticks(1)
   CTX.take_undo = real_undo
 end
 

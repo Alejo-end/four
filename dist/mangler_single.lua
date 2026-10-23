@@ -1648,6 +1648,15 @@ local function repeat_key(x, z)
   end
 end
 M.repeat_key = repeat_key
+-- the grid went away mid-hold: its releases will never come, so forget the
+-- held pads and end a repeat the grid started
+function M.repeat_drop()
+  for k in pairs(rep_held) do rep_held[k] = nil end
+  if rep_owned then
+    rep_owned = false
+    params:set("beat_repeat", 0)
+  end
+end
 
 local function main_ws_key(x, y, z)
   if y == 6 then
@@ -2030,6 +2039,8 @@ function M.hotplug(gone)
     if on_lp then
       gg.key, gg.button = nil, nil
       gg, M.gg, M.have_launchpad = nil, nil, false
+      -- a repeat pad held on the grid that left will never come up
+      M.repeat_drop()
     end
     M.reconnect_due = true
   end
@@ -5220,11 +5231,9 @@ local function arc_start()
   if C.alt and C.k13_frame and C.page_erase() then
     return C.k13_frame, "ERASE"
   end
-  local hf = C.hold_frame and C.hold_frame(3)
-  if hf then
-    local def = C.key_def(3)
-    return hf, def and def.hold_label or "HOLD"
-  end
+  if not C.hold_frame then return end
+  local hf, def = C.hold_frame(3)   -- (an `and` here would keep one value)
+  if hf then return hf, def.hold_label or "HOLD" end
 end
 local function fkey_draw(n, x)
   local def = C.key_def(n)
@@ -7743,7 +7752,7 @@ local function tick_keys()
     local st = key_state[n]
     if st.def and st.def.hold and not st.fired then
       if ctx.page ~= st.page then
-        st.fired = true      -- E1 left the page mid-hold: abort, as K1 does
+        st.fired, st.aborted = true, true   -- E1 left the page mid-hold: abort
       elseif ctx.frame - st.frame >= ERASE_FRAMES then
         st.fired = true
         st.def.hold()
@@ -7780,9 +7789,13 @@ ctx.TAP_FRAMES = TAP_FRAMES
 -- the frame key n's hold began on, while a def with a `hold` is held on the
 -- page that took the press (nil otherwise): the footer draws its arc from
 -- it, full once the hold has fired, until the key comes up
+-- The def comes back too: the arc's word is the press-time def's, never a
+-- fresh lookup (K1 down would read the DRY def). An aborted hold draws none.
 function ctx.hold_frame(n)
   local st = key_state[n]
-  if st and st.def and st.def.hold and st.page == ctx.page then return st.frame end
+  if st and st.def and st.def.hold and not st.aborted and st.page == ctx.page then
+    return st.frame, st.def
+  end
 end
 
 -- ============================================================================
@@ -9461,7 +9474,7 @@ local function init_params()
     controlspec.new(0.05, 1, "lin", 0, 1, ""),
     function(p)
       local v = p:get()
-      return v >= 0.999 and "LEGATO" or string.format("%d%%", floor(v * 100 + 0.5))
+      return v >= 0.999 and "LEGATO" or string.format("%d%%", math.floor(v * 100 + 0.5))
     end)
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
@@ -9830,6 +9843,16 @@ function key(n, z)
   ctx.last_input = ctx.frame
   if n == 1 then
     ctx.alt = (z == 1)
+    -- K1 down during a tap-or-hold key (TAKE K3) aborts it: K1+K3 is the
+    -- eraser's gesture, and the hold must not land under another word
+    if z == 1 then
+      for k = 2, 3 do
+        local st = key_state[k]
+        if st.def and st.def.hold and not st.fired then
+          st.fired, st.aborted = true, true
+        end
+      end
+    end
     -- releasing K1 ABORTS a pending K1+K3 erase. the arc is gated on K1, so
     -- letting go reads as "abort" — honour that instead of firing anyway. (you
     -- can't navigate stations while K1 is held — K1+E1 is the morph — so the
@@ -9847,7 +9870,7 @@ function key(n, z)
   if z == 1 then
     local def = key_def(n)
     st.def, st.frame, st.engaged, st.unlatched = def, ctx.frame, false, false
-    st.fired, st.page = false, ctx.page
+    st.fired, st.aborted, st.page = false, false, ctx.page
     if def then
       if def.hold then
         -- tap or hold: nothing fires on the press (tick_keys and the release)

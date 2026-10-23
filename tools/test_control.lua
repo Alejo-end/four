@@ -2428,6 +2428,11 @@ do
   g.key(3, 6, 1); g.key(3, 6, 0)
   ok(params:get("step_run") == 0 and not seq.running(), "...and x3 again stops it")
   params:set("step_fill", 4)
+  -- the step gate's PARAMS text (a global `floor` threw below 100%)
+  params:set("step_gate", 0.5)
+  local okfmt, txt = pcall(function() return params:string("step_gate") end)
+  ok(okfmt and txt == "50%", "step gate reads 50% in PARAMS (" .. tostring(txt) .. ")")
+  params:set("step_gate", 1)
   clock.run, clock.cancel = real_run, real_cancel
   engine.note_on, engine.note_off = real_on, real_off
 end
@@ -2786,6 +2791,12 @@ do
   key(3, 0)
   ok(#reads == r1 + 1, "leaving TAKE mid-hold aborts the UNDO")
   T.goto_page("TAKE")
+  -- K1 down mid-hold aborts it too (K1+K3 is the eraser's gesture)
+  key(3, 1); _h.run_ticks(3)
+  key(1, 1); _h.run_ticks(20); key(1, 0)
+  key(3, 0)
+  ok(#reads == r1 + 1, "K1 pressed mid-hold aborts the UNDO")
+  ok(CTX.hold_frame(3) == nil, "...and no arc is left to draw")
   CTX.undo_forget()
   engine.write_take, engine.read_take, engine.clear = real_w, real_r, real_c
   params:set("pos_start", 0); params:set("pos_end", 1)
@@ -2949,7 +2960,20 @@ do
   T.goto_page("PADS")
   g.key(2, 6, 0)
   ok(params:get("beat_repeat") == 0, "a pad let go on another page still ends its repeat")
+  -- the grid unplugged mid-hold: its release never comes, so the repeat
+  -- it started ends and the held pad is forgotten
+  local Mg
+  for i = 1, 255 do
+    local nm, v = debug.getupvalue(cleanup, i)
+    if nm == nil then break end
+    if nm == "Mgrid" then Mg = v end
+  end
   T.goto_page("TAKE")
+  g.key(2, 6, 1)
+  Mg.repeat_drop()
+  ok(params:get("beat_repeat") == 0, "a grid that leaves mid-hold ends the repeat it started")
+  g.key(4, 6, 1); g.key(4, 6, 0)
+  ok(params:get("beat_repeat") == 0, "...and a later pad is not held up by the lost one")
   while #jobs > 0 do T.finish(table.remove(jobs, 1)) end
   params:set("repeat_div", 3)
   engine.beat_repeat, clock.run, clock.cancel = real_br, real_run, real_cancel

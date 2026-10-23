@@ -412,6 +412,15 @@ local function repeat_key(x, z)
   end
 end
 M.repeat_key = repeat_key
+-- the grid went away mid-hold: its releases will never come, so forget the
+-- held pads and end a repeat the grid started
+function M.repeat_drop()
+  for k in pairs(rep_held) do rep_held[k] = nil end
+  if rep_owned then
+    rep_owned = false
+    params:set("beat_repeat", 0)
+  end
+end
 
 local function main_ws_key(x, y, z)
   if y == 6 then
@@ -794,6 +803,8 @@ function M.hotplug(gone)
     if on_lp then
       gg.key, gg.button = nil, nil
       gg, M.gg, M.have_launchpad = nil, nil, false
+      -- a repeat pad held on the grid that left will never come up
+      M.repeat_drop()
     end
     M.reconnect_due = true
   end

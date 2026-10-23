@@ -393,11 +393,9 @@ local function arc_start()
   if C.alt and C.k13_frame and C.page_erase() then
     return C.k13_frame, "ERASE"
   end
-  local hf = C.hold_frame and C.hold_frame(3)
-  if hf then
-    local def = C.key_def(3)
-    return hf, def and def.hold_label or "HOLD"
-  end
+  if not C.hold_frame then return end
+  local hf, def = C.hold_frame(3)   -- (an `and` here would keep one value)
+  if hf then return hf, def.hold_label or "HOLD" end
 end
 local function fkey_draw(n, x)
   local def = C.key_def(n)

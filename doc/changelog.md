@@ -3376,6 +3376,25 @@ Hundred-and-first change: **MOTION hosts the modulators (Lua only)**.
   MOTION_LFO. Device rows 18.15 and 18.16.
 * VERIFIED: `tools/check.lua` green on Lua 5.3.6.
 
+Hundred-and-second change: **the screen work's review fixes (Lua only)**. A
+reviewer agent read the 96th to the 101st changes and reproduced each of
+these in the sim. Each fix has a test that failed against a mutation.
+* **An aborted UNDO hold drew a full arc.** Hold TAKE K3, turn E1 away and
+  back, keep holding: the footer showed the arc and UNDO, though nothing
+  fired. An abort is now recorded (`st.aborted`), and `ctx.hold_frame`
+  returns nothing for it.
+* **K1 during the hold** changed the arc's word to HOLD (a fresh lookup
+  read the DRY def), and UNDO still fired under it. `ctx.hold_frame` now
+  returns the press-time def for the word, and a K1 press aborts the hold:
+  K1+K3 is the eraser's gesture.
+* **Before this range: a global `floor`** in the step gate's PARAMS text
+  threw below 100%. It is `math.floor`.
+* **A grid unplugged with a repeat pad down** left the repeat looping and
+  the pad held forever. `Mgrid.repeat_drop` (run when the Launchpad leaves)
+  forgets the held pads and ends a repeat the grid started.
+* VERIFIED: 534 + 60 assertions in test_control and test_screen;
+  `tools/check.lua` green on Lua 5.3.6. RENDERS: unchanged.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)
