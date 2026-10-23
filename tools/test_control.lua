@@ -1630,7 +1630,7 @@ do
         :gmatch("\\([%w_]+)%s*%->") do add(id) end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
-  ok(n == 65, "the engine command count is 65, the expected fingerprint (got " .. n .. ")")
+  ok(n == 66, "the engine command count is 66, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2807,6 +2807,61 @@ do
   params:set("scene_morph_amt", 0); _h.run_ticks(2)
   params:set("out_midi", 0)
   midi.connect = real_connect
+end
+
+-- ============================================================================
+-- 31 · the beat repeat
+-- ============================================================================
+-- Held, it waits for the next division of the clock, then the engine loops
+-- that much of the output. The engine cannot run here; this pins what Lua
+-- sends it and when.
+do
+  local sent = {}
+  local real_br, real_run, real_cancel = engine.beat_repeat, clock.run, clock.cancel
+  local real_sync, real_tempo = clock.sync, clock.get_tempo
+  engine.beat_repeat = function(len) sent[#sent + 1] = len end
+  local jobs, cancelled = {}, 0
+  clock.run = function(fn) jobs[#jobs + 1] = fn; return fn end
+  clock.cancel = function(co)
+    cancelled = cancelled + 1
+    for k = #jobs, 1, -1 do if jobs[k] == co then table.remove(jobs, k) end end
+  end
+  clock.sync = function() end
+  clock.get_tempo = function() return 120 end
+  params:set("stop_all", 0)
+  params:set("repeat_div", 3)                 -- 1/8
+  params:set("beat_repeat", 1)
+  ok(#sent == 0 and #jobs == 1, "a press waits for the next division before it repeats")
+  T.finish(table.remove(jobs, 1))
+  near(sent[#sent], 0.25, 1e-9, "...then loops an eighth: a quarter second at 120")
+  params:set("repeat_div", 4)
+  near(sent[#sent], 0.125, 1e-9, "a shorter division while it holds re-captures at once (a roll)")
+  params:set("beat_repeat", 0)
+  ok(sent[#sent] == 0, "letting go releases it")
+  -- let go before the division comes: nothing ever repeats
+  local n = #sent
+  params:set("beat_repeat", 1)
+  params:set("beat_repeat", 0)
+  ok(#jobs == 0 and #sent == n, "a press let go before the beat repeats nothing")
+  -- a STOP releases it, and a press under STOP does nothing
+  params:set("beat_repeat", 1); T.finish(table.remove(jobs, 1))
+  params:set("stop_all", 1)
+  ok(sent[#sent] == 0, "a STOP releases a held repeat")
+  params:set("beat_repeat", 0)
+  n = #sent
+  params:set("beat_repeat", 1)
+  ok(#jobs == 0 and #sent == n, "...and a press under STOP does nothing")
+  params:set("beat_repeat", 0)
+  params:set("stop_all", 0)
+  -- the division is capped at the engine's 2 second buffer
+  clock.get_tempo = function() return 40 end
+  params:set("repeat_div", 1)                 -- 1/2 at 40 BPM: 3 seconds
+  params:set("beat_repeat", 1); T.finish(table.remove(jobs, 1))
+  near(sent[#sent], 2, 1e-9, "a slice longer than the engine's buffer is capped at 2 seconds")
+  params:set("beat_repeat", 0)
+  params:set("repeat_div", 3)
+  engine.beat_repeat, clock.run, clock.cancel = real_br, real_run, real_cancel
+  clock.sync, clock.get_tempo = real_sync, real_tempo
 end
 
 T.report("control harness OK")

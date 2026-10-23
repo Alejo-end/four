@@ -1961,6 +1961,46 @@ local function sync_window_len()
   win_lo, win_hi = lo, hi
 end
 
+-- BEAT REPEAT (the engine's \mangler_repeat). Held, it waits for the next
+-- division of the clock, then the engine captures that much of the output
+-- and loops it until you let go: a stutter on the beat. Turning the division
+-- while it holds re-captures at once (a roll to a shorter one). A STOP
+-- releases it, as it silences everything, and an arm under STOP waits for
+-- the next press. The engine places it after the record tap, so resample,
+-- regen and PRINT never record it.
+local REPEAT_BEATS = { 2, 1, 0.5, 0.25, 0.125 }
+local REPEAT_NAMES = { "1/2", "1/4", "1/8", "1/16", "1/32" }
+local repeat_clock          -- the coroutine waiting for the division
+local repeat_on = false     -- the engine holds a repeat now
+local function repeat_beats()
+  return REPEAT_BEATS[math.floor(pget("repeat_div", 3) + 0.5)] or 0.5
+end
+local function repeat_secs()
+  return min(2, repeat_beats() * 60 / ctx.tempo())
+end
+local function repeat_release()
+  if repeat_clock then clock.cancel(repeat_clock); repeat_clock = nil end
+  if repeat_on and engine.beat_repeat then engine.beat_repeat(0) end
+  repeat_on = false
+end
+local function repeat_start()
+  if not engine.beat_repeat then
+    print("mangler: engine has no `beat_repeat` — SYSTEM > RESTART for the new engine")
+    return
+  end
+  if pget("stop_all", 0) == 1 then return end
+  if repeat_clock then clock.cancel(repeat_clock) end
+  local b = repeat_beats()
+  repeat_clock = clock.run(function()
+    clock.sync(b)
+    repeat_clock = nil
+    if pget("beat_repeat", 0) ~= 1 or pget("stop_all", 0) == 1 then return end
+    engine.beat_repeat(repeat_secs())
+    repeat_on = true
+  end)
+end
+ctx.repeat_release = repeat_release
+
 -- tempo-synced delay: when delay_sync is not FREE, delay_time follows the
 -- clock at the chosen division. computed here (Lua) so the ENGINE command
 -- set is untouched; the engine's 0.2s time-lag turns tempo changes into a
@@ -2102,7 +2142,7 @@ local function init_params()
   -- pedal; SPACE on a typing keyboard and grid (8,2) drive it too.
   params:add_binary("stop_all", "stop all", "toggle", 0)
   params:set_action("stop_all", function(v)
-    if v == 1 then ctx.pads_all_off() end
+    if v == 1 then ctx.pads_all_off(); repeat_release() end
     Mtape.update_mix()
     ctx.layers_relevel()   -- the layer decks choke with everything else
     -- TRUE STOP (S23 B1): the transports HALT too, not just the levels. every
@@ -2523,6 +2563,20 @@ local function init_params()
   add_eng_control("shimmer_tone", "shimmer tone",
     controlspec.new(500, 12000, "exp", 0, 4500, "hz"))
 
+  -- the BEAT REPEAT (see repeat_start): held, a stutter on the clock.
+  -- momentary, so a footswitch or a MIDI note holds it
+  params:add_group("grp_repeat", "beat repeat", 2)
+  params:add_binary("beat_repeat", "beat repeat", "momentary", 0)
+  params:set_action("beat_repeat", function(v)
+    if v == 1 then repeat_start() else repeat_release() end
+  end)
+  params:add_option("repeat_div", "repeat length", REPEAT_NAMES, 3)
+  params:set_action("repeat_div", function()
+    -- a new division while it holds: re-capture now (a roll), or wait on it
+    if pget("beat_repeat", 0) ~= 1 then return end
+    if repeat_on then engine.beat_repeat(repeat_secs()) else repeat_start() end
+  end)
+
   -- polyphonic voices: the per-note/per-pad layer that coexists with the
   -- drone. `pad_input` reroutes MIDI + grid note-pads to voices instead of
   -- the mono drone pitch (default OFF = existing behavior). voices = poly
@@ -2885,6 +2939,7 @@ function cleanup()
   ctx.record_cancel()   -- a recording pass mid-flight: stop the tape with it
   Mwav.cancel_load()  -- close any in-flight waveform read
   Mseq.stop()          -- the sequencer's clock, and its voice
+  repeat_release()     -- a held beat repeat, and its clock
   Mlfo.restore_all()   -- every modulated knob's own value back to the engine
   ctx.pads_all_off()   -- release any held pad voices before teardown
   Minput.cleanup()

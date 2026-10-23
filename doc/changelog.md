@@ -3194,6 +3194,41 @@ Two reviewer agents read the 91st and 92nd.
 * VERIFIED: 770 assertions (479/114/87/41/49). `tools/check.lua` green on
   Lua 5.3.6.
 
+Ninety-fourth change: **the beat repeat (ENGINE + Lua + tooling, fingerprint
+MOVES 65 -> 66, on branch `full-review`)**. Built by request ahead of the
+device session, as the 80th was. Stage 17 of doc/device-gate.md must pass
+before more engine work lands.
+* **The engine**: a new spawn/release synth, `\mangler_repeat`, and one new
+  command, `beat_repeat` (the slice length in seconds, 0 releases). Not
+  `repeat`: that is a Lua keyword, and `engine.repeat` would not parse.
+  Placed after io, it reads the finished output off the engine's out bus and
+  replaces it. On spawn it passes the output through while `RecordBuf`
+  captures `len` seconds, then `BufRd` loops the slice. The first pass sends
+  the live signal itself, so it does not depend on the server's order of the
+  write and the read. A 3 ms fade sits at every loop point; `gate` fades in
+  over 5 ms and out over 10 ms, then frees the synth. Two 2 s stereo capture
+  buffers are allocated once and used in turn: a re-capture fades the old
+  synth into the new one, which is placed before it.
+* **`\clear`** releases a held repeat. `free` frees the synth and buffers.
+* **Lua**: `beat_repeat` (a momentary binary, so a footswitch holds it) and
+  `repeat_div` (1/2 to 1/32 of a note). A press waits for the next division
+  of the clock (`clock.sync`); a new division while it holds re-captures at
+  once (a roll). A STOP releases it and a press under STOP does nothing.
+  The slice is capped at the engine's 2 s. Purity: a held repeat kills the
+  mark. Header: a steady RP.
+* **Accepted trade**: it sits after the record tap, so resample, regen and
+  PRINT never record a repeat.
+* **Checked without hardware**: the new code adds no parse error under the
+  tree-sitter SuperCollider grammar (29 problem nodes, the same 29 the old,
+  device-proven file has, at the same constructs). Brackets balance. The
+  `Select.ar` over two stereo arrays is the idiom the DFM1 band pass already
+  uses on the device.
+* **Classified**: both params in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`. The
+  test's command count is 66.
+* RENDERS: all 70 identical. Device rows: stage 17.
+* VERIFIED: 780 assertions (487/114/87/41/51). `tools/check.lua` green on
+  Lua 5.3.6. The SuperCollider is unverified until stage 17.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

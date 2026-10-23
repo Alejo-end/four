@@ -12,21 +12,22 @@ the status block current, and add a change-log entry for every change.
 - **Last device-confirmed:** 2026-07-16 at `count: 63` (S21, S22 Phase A, the NU-1..4
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
-  has changed several times; after a RESTART maiden must read **`count: 65`**.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 16, top to bottom. When it
+  has changed several times; after a RESTART maiden must read **`count: 66`**.
+- **The one walkthrough:** doc/device-gate.md, stages 0 to 17, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 93rd, the review fixes for the undo, the modulators and
-  the modulation out (doc/changelog.md). Lua and tooling only. The 80th moved erosion into its own synth (ENGINE, no new command), so the
-  count stays 65. Work lives on the `full-review` branch until it is merged.
+- **Latest change:** the 94th, the beat repeat (doc/changelog.md). ENGINE: a new
+  synth and the `beat_repeat` command, so the count moved from 65 to 66. Built by
+  request ahead of the device session, like the 80th. Work lives on the
+  `full-review` branch until it is merged.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 65` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 66` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. tools/test_control.lua parses the command set and fails if the
-   source no longer adds up to 65.
+   source no longer adds up to 66.
 
 Lua-only changes skip all this: save and reload the script.
 

@@ -12,7 +12,7 @@ the device gate.
 
 The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
 then about thirty changes landed without a device test, several of them in the
-engine. After a RESTART the engine must report `count: 65`.
+engine. After a RESTART the engine must report `count: 66`.
 
 The offscreen tests are strong. Five test scripts run 770 assertions, the
 render suite compares 70 screens pixel by pixel, and the single-file build is
@@ -24,8 +24,8 @@ first step is a device session and not more code.
 Nothing else in this plan is safe until this passes.
 
 1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
-2. Make sure that maiden reads `count: 65`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 16, top to bottom. If a stage
+2. Make sure that maiden reads `count: 66`. If it does not, stop.
+3. Walk doc/device-gate.md from stage 0 to stage 17, top to bottom. If a stage
    fails, stop there and note what you heard.
 4. When it passes, update the STATUS block in CLAUDE.md with the date and the
    count.
@@ -38,7 +38,7 @@ conversion must no longer replace a live take.
 
 Do these one at a time, after Phase 1, each with its own RESTART and listening
 test.
-None of them adds a command, so the count stays 65. They are ordered by risk to
+None of them adds a command, so the count stays 66. They are ordered by risk to
 the sound.
 
 1. **STOP clicks and leaks DC.** The STOP gate in `winRead` freezes the read
@@ -157,7 +157,7 @@ with it.
 |---|---|---|---|
 | Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | At alloc, play each plugin UGen into a 1-sample buffer and check a /done reply; fall back as for a missing class | medium |
 | Linked stereo limiting | Two independent limiters shift the stereo image while limiting | One gain from `max(abs(L), abs(R))` applied to both sides, in place of the two `Limiter.ar` | medium |
-| Beat repeat | A stutter on the output, on the clock, is the one performance effect missing | A spawn/free synth like `\mangler_erode`: a 2 s stereo `LocalBuf`, written while open, looped at a clock division while held. One new command (`repeat`, with the division in seconds), so the count moves to 66 | medium |
+| Beat repeat | BUILT in the 94th change, by request ahead of the device session: `\mangler_repeat` and the `beat_repeat` command (count 66). Stage 17 of doc/device-gate.md | | |
 | Reversed grains | GRAIN plays every grain forward | A per-grain rate sign drawn with a probability (`grain_rev`), on both grain copies (Phase 2 item 7 first, so it is written once). One new command, count 66 or 67 | small, after item 7 |
 
 ## Phase 6: decisions for you

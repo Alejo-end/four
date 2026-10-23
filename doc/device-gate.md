@@ -2,7 +2,8 @@
 
 The last hardware-confirmed state was **2026-07-16 at `count: 63`**. Everything
 from the 48th change onward is unverified: about fifteen logged batches,
-several of them engine, and the fingerprint has moved to **65**.
+several of them engine, and the fingerprint has moved to **66** (the 94th
+change added the `beat_repeat` command).
 
 This folds those scattered per-change gates into one ordered pass. The order is
 deliberate — **the checks that would invalidate everything else come first**, and
@@ -32,7 +33,7 @@ against the new Lua, which is the most confusing possible state.
 |---|---|---|
 | 0.1 | Only one `Engine_Mangler.sc` on the device | `find ~/dust/code -name 'Engine_Mangler.sc'` returns exactly one path |
 | 0.2 | Script loads | No hang on LOADING |
-| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 65` |
+| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 66` |
 
 **0.3 is the whole stage.** If it says 63, the old engine is still live and every
 sound check below is meaningless — restart again. If it says anything else,
@@ -351,10 +352,26 @@ and that the engine polls behave as the stubs assume.
 | 16.16 | crow out | A crow on USB, `out to crow 1` on, `out source` LFO 1 | Output 1 swings 0 to 5 V at the LFO's rate | `crow.output[1].volts` |
 | 16.17 | A hand on a swung knob | LFO 1 on cutoff, SINE, 1 Hz, depth 0.4; turn cutoff slowly with E2 on FILTER | A smooth sweep under the swing, no zipper or clicks | `Mlfo.swung` in the eng-control action |
 
+## Stage 17: the beat repeat (ENGINE, a new command)
+
+The one engine change since stage 14: a new synth, `\mangler_repeat`, and a
+new command, `beat_repeat`. Do stage 0 again first: maiden must read
+`count: 66`. MIDI-map `beat repeat` to a pad or a footswitch (it is a hold).
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 17.1 | **It loads** | RESTART, load the script | `count: 66`, no error in the SC tab | `\mangler_repeat`, `updateRepeat`, the two `repBufs` |
+| 17.2 | **A repeat on the beat** | A take playing, clock at 120, `repeat length` 1/8. Hold `beat repeat` for two bars | It starts on the next eighth and stutters that eighth until you let go, then the live sound returns. The header shows RP | `clock.sync` in `repeat_start`, the `first` pass |
+| 17.3 | No clicks | Hold it over a sustained pad, then over drums | The loop points are smooth (the 3 ms fade); entering and leaving does not click | `fade`, the `gate` envelope |
+| 17.4 | A roll | While holding, turn `repeat length` from 1/8 to 1/16 to 1/32 | Each step re-captures a shorter slice: a roll, no click between steps | The two capture buffers, `updateRepeat` |
+| 17.5 | STOP and clear | Hold a repeat, then K1+K2. Later hold one and erase the take (K1+K3 hold on TAKE) | STOP silences it at once. The erase stops it too | `repeat_release` in `stop_all`, `\clear` |
+| 17.6 | Not recorded | Hold a repeat with `resample` up and record a pass, or PRINT | The take records the sound without the stutter | It sits after the record tap |
+| 17.7 | %CPU | Watch %CPU with no repeat, then held | No change at rest; a small rise while held | The synth exists only while held |
+
 ## When it passes
 
 Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new
-confirmed state — the date and `count: 65`. That marker is what tells the next
+confirmed state — the date and `count: 66`. That marker is what tells the next
 session which changes are trustworthy, and it is the only reason this document
 could be written at all.
 

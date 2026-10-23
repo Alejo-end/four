@@ -220,6 +220,8 @@ local SCENE_EXCLUDE = {
   -- generates, are left where they are by a scene
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the beat repeat: a hold you play, not a sound a scene keeps
+  "beat_repeat", "repeat_div",
   -- the modulation out: routing to other gear, not sound
   "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
   -- the modulators: machines too. A scene moves the knobs they ride on

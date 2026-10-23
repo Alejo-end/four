@@ -34,7 +34,7 @@ Then SYSTEM > RESTART on the norns and pick mangler in SELECT. Two rules:
    `dust/code` hangs every norns script on LOADING.
 2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
    reload. After a restart the maiden log prints the engine command count. It must read
-   `count: 65`; any other number means an old engine is still running.
+   `count: 66`; any other number means an old engine is still running.
 
 ## First session
 
@@ -197,6 +197,12 @@ inverts the wave, so ENV with a negative depth ducks the sound while the gear pl
 pages draw the knob, not the swing; the header shows LF while a modulator runs and SQ while
 the sequencer does.
 
+PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat` (map it to a pad or a
+footswitch) and on the next division the engine captures that much of what you hear and
+loops it until you let go. `repeat length` sets the division, a half note to a 32nd, and
+turning it while you hold re-captures a shorter slice: a roll. STOP releases it. The header
+shows RP while it holds. Resampling and PRINT record the sound without the stutter.
+
 PARAMS > modulation out sends one of those movements to other gear: the scene morph (so
 the orbit and a GLIDE move your synth too), the input envelope, or an LFO's wave, which
 runs even when it moves no knob. It goes out as a MIDI CC on the port, channel and number
@@ -241,7 +247,7 @@ loaded. In pad mode the piano rows light the keys whose pad is sounding. Details
 1. Every script hangs on LOADING: almost always a duplicate engine class under `dust/code`.
    Redeploy with `rsync --delete`. Errors appear in maiden's SC tab, not matron.
 2. Engine edits do nothing: you skipped SYSTEM > RESTART, or the printed command count is
-   not `count: 65`.
+   not `count: 66`.
 3. Dry playback has reverb on it: check the system reverb under PARAMS, a raised reverb or
    delay mix, or clouds feedback. K1 plus K3 zeros all of them.
 4. Reverb knobs beyond decay, damp and mix do nothing: JPverb is not installed and the

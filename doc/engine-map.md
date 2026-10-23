@@ -37,6 +37,17 @@ The erosion head is the third synth of this shape. It exists only while `erode` 
 zero in PLAY mode, so at rest nothing writes the take and the PLAY voice only reads it.
 Accepted trade: each time erosion starts, its head starts again at the start of the window.
 
+The beat repeat is the fourth. It exists only while the repeat is held, and it sits after
+the io synth on the output bus: it reads the finished output and replaces it. On a press it
+passes the output through while it captures one slice of the clock, then loops that slice
+until you let go. The first pass plays the live output itself, not a read of what it is
+writing, so it never depends on the order the server runs the write and the read in. A 3 ms
+fade at every loop point stops the repeats clicking. A shorter division while held starts a
+new synth with a fresh capture, and the old one fades into it over 10 ms; two capture
+buffers, used in turn, keep the two from touching the same memory. Accepted trades: it sits
+after the record tap, so resample, regen and PRINT never record a repeat, and it sits after
+the output limiter, which it cannot push past because it only replays what passed it.
+
 ## Why it cannot brick
 
 Exactly one `Engine_Mangler` class may exist on the device. A duplicate hangs every norns
@@ -46,9 +57,9 @@ Every plugin UGen (JPverb, MiClouds, DFM1) is looked up by name so the file comp
 it, and wrapped in `try` so a mismatch degrades to the stock fallback instead of failing to
 load. A missing plugin costs lushness, never the instrument.
 
-The command count printed at load is the deploy truth: it must read `count: 65`. Any other
+The command count printed at load is the deploy truth: it must read `count: 66`. Any other
 number means an old engine is running and nothing you test means anything
-(tools/test_control.lua parses the command set and fails if it is not 65). New args on
+(tools/test_control.lua parses the command set and fails if it is not 66). New args on
 existing commands are preferred over new commands so the count moves rarely.
 
 The grain envelope buffers are filled before the server sync so the first grain that fires

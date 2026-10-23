@@ -9,7 +9,9 @@
 // + TWO spawn/free FX synths: the delay (updateDelay — alive while delay_mix
 // > 0 or the feedback is a near-infinite hold) and the reverb (updateReverb,
 // only while rev_mix > 0) + the spawn/free erosion head (updateErode, only
-// while erode > 0 in PLAY). Drone and voices Out.ar additively onto play_bus;
+// while erode > 0 in PLAY) + the spawn/release beat repeat (updateRepeat,
+// only while the `beat_repeat` command holds a length > 0, placed after io on the
+// output bus). Drone and voices Out.ar additively onto play_bus;
 // io reads it. Plugin UGens (JPverb, MiClouds, DFM1) are guarded via .asClass
 // -> stock fallback so a missing plugin never bricks the load.
 //
@@ -37,6 +39,10 @@ Engine_Mangler : CroneEngine {
     // at rest nothing writes the take). it reads eroKeys out of playParams;
     // modeV is the mode setMode last switched to (4 = PLAY).
     var <eroSynth, <eroKeys, <modeV;
+    // beat repeat spawn/release synth, alive only while held. TWO capture
+    // buffers, used in turn: a repeat re-struck while the last one fades out
+    // captures into the other, so neither reads what the other is writing.
+    var <repSynth, <repBufs, <repIdx;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
     // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
@@ -120,6 +126,20 @@ Engine_Mangler : CroneEngine {
             });
         }, {
             eroSynth.notNil.if({ eroSynth.set(\gate, 0); eroSynth = nil });
+        });
+    }
+
+    // spawn/release the beat repeat. A new length (a roll to a shorter
+    // division) RE-CAPTURES: the old synth fades out over 10ms while the new
+    // one, placed before it, starts from the live output, so the old one's
+    // crossfade lands on the new one's sound. len <= 0 releases it.
+    updateRepeat { arg len;
+        repSynth.notNil.if({ repSynth.set(\gate, 0); repSynth = nil });
+        (len > 0).if({
+            repIdx = 1 - repIdx;
+            repSynth = Synth.new(\mangler_repeat, [
+                \out, context.out_b.index, \buf, repBufs[repIdx], \len, len.min(2),
+            ], ioSynth, \addAfter);
         });
     }
 
@@ -208,6 +228,10 @@ Engine_Mangler : CroneEngine {
         phaseBus = Bus.control(s, 1);
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
+        // the beat repeat's two capture buffers: 2s of stereo each (a half
+        // note down to 60 BPM), allocated once, never per repeat
+        repBufs = Array.fill(2, { Buffer.alloc(s, (s.sampleRate * 2).asInteger, 2) });
+        repIdx = 0;
 
         // voice state
         maxVoices = 8;
@@ -731,6 +755,34 @@ Engine_Mangler : CroneEngine {
             Out.ar(out, sig);
         }).add;
 
+        // ---- BEAT REPEAT, in its own spawn/release synth (updateRepeat).
+        // Placed after io, it reads io's finished output off the engine's out
+        // bus and REPLACES it. On spawn it passes the output through while it
+        // captures the first `len` seconds, then plays that slice in a loop
+        // until released. The first pass sends the live input itself, not a
+        // read of what is being written, so it never depends on the order the
+        // server runs the write and the read in. A 3ms fade at every loop point
+        // (and at the first pass's end) keeps the repeats from clicking; `gate`
+        // crossfades in over 5ms and back to the live output over 10ms, then
+        // frees the synth. It sits after the record tap, so resample, regen
+        // and PRINT never record it: a performance effect on what you hear.
+        SynthDef(\mangler_repeat, {
+            arg out, buf, len = 0.25, gate = 1;
+            var src, l, frames, firstK, first, phase, fade, rep, env;
+            src = In.ar(out, 2);
+            l = len.clip(0.01, 2);
+            frames = (l * SampleRate.ir).max(64);
+            firstK = Sweep.kr(0, 1) < l;
+            first = Sweep.ar(0, 1) < l;
+            RecordBuf.ar(src, buf, 0, 1, 0, firstK, 0);
+            phase = Phasor.ar(0, 1, 0, frames);
+            fade = (phase.min(frames - phase)
+                / (frames * 0.25).min(SampleRate.ir * 0.003)).clip(0, 1);
+            rep = Select.ar(first, [BufRd.ar(2, buf, phase, 1, 2), src]) * fade;
+            env = EnvGen.kr(Env.asr(0.005, 1, 0.01), gate, doneAction: 2);
+            ReplaceOut.ar(out, (src * (1 - env)) + (rep * env));
+        }).add;
+
         // delay synth (spawned by updateDelay). reads io's post-drive wet,
         // returns the 100%-wet echo; io does the crossfade. the regeneration
         // loop lives HERE (this def's own LocalIn/LocalOut pair), so freeing
@@ -883,6 +935,12 @@ Engine_Mangler : CroneEngine {
         this.addCommand(\note_one_shot, "fffff", { arg msg;
             this.noteOneShot(msg[1], msg[2], msg[3], msg[4], msg[5]);
         });
+        // the beat repeat: the slice length in seconds, 0 = release. The 66th
+        // command (the count moved from 65). Not `repeat`: that is a Lua
+        // keyword, and `engine.repeat` would not even parse.
+        this.addCommand(\beat_repeat, "f", { arg msg;
+            this.updateRepeat(msg[1]);
+        });
         this.addCommand(\voices, "i", { arg msg;
             maxVoices = msg[1].max(1);
         });
@@ -906,6 +964,8 @@ Engine_Mangler : CroneEngine {
             this.updateDelay;
             revSynth.notNil.if({ revSynth.free; revSynth = nil });
             this.updateReverb(revMixV);
+            // ...and a held repeat would go on playing the erased sound
+            this.updateRepeat(0);
             "mangler: engine buffer cleared".postln;
         });
 
@@ -995,6 +1055,8 @@ Engine_Mangler : CroneEngine {
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });
+        repSynth.notNil.if({ repSynth.free });
+        repBufs.notNil.if({ repBufs.do({ arg b; b.free }) });
         ioSynth.free;
         playGroup.free;
         bufL.free;

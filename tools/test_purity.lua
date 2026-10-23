@@ -57,6 +57,7 @@ local PURE = {
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
   stop_all = 0,
   step_run = 0,      -- the pad sequencer
+  beat_repeat = 0,   -- a held beat repeat
   lfo1_depth = 0,    -- a modulator aimed at wear (below), at rest
 }
 -- wear alone does not touch the mark, so only the modulator's depth can
@@ -146,6 +147,7 @@ local MOVES = {
   { "the master STOP", "stop_all", 1 },
   { "the pad sequencer running", "step_run", 1 },
   { "a modulator moving a knob", "lfo1_depth", 0.5 },
+  { "a held beat repeat", "beat_repeat", 1 },
 }
 -- the sequencer's clock is not run here: env's clock.run would replace the
 -- frame loop that lit() renders through

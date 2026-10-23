@@ -109,6 +109,8 @@ local MOTION_EXCLUDE = {
   -- would fight it, so they are left to the hand, like the orbit's
   "step_run", "step_div", "step_len", "step_fill", "step_order",
   "step_chance", "step_gate",
+  -- the beat repeat: a hold you play live (a replayed one would stutter on its own)
+  "beat_repeat", "repeat_div",
   -- the modulation out: routing to other gear
   "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
   -- the modulators: a loop of their knobs would fight them
