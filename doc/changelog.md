@@ -3395,6 +3395,14 @@ these in the sim. Each fix has a test that failed against a mutation.
 * VERIFIED: 534 + 60 assertions in test_control and test_screen;
   `tools/check.lua` green on Lua 5.3.6. RENDERS: unchanged.
 
+Hundred-and-third change: **the screenshots in doc/ui (docs only)**. The 18
+gallery images were made before the screen work and showed the old GRAIN
+dots, header and page dots. Each is regenerated from its render
+(`render_pages.lua`, then `pgm2png.py` at 4x), matched to the shot it was
+made from. Three new ones show the new screens: `motion-lfo.png` (the
+modulators on MOTION), `pads-seq.png` (the sequencer running) and
+`take-undo.png` (K3 held toward UNDO).
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)
