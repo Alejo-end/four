@@ -321,11 +321,27 @@ else
   params:set("rec", 0)
   -- the window locked to a bar of the clock: its length says so top right.
   -- The window is put back after, so every later shot is as before
+  -- start on sound is on too: "ON SND" beside it, before you arm
   local ws, we = params:get("pos_start"), params:get("pos_end")
   params:set("win_beats", 4)
+  params:set("rec_wait", 1)
   redraw()
   export(pfx("TAKE", "_LOCK"))
+  params:set("rec_wait", 0)
   params:set("win_beats", 1)
+  params:set("pos_start", ws); params:set("pos_end", we)
+  -- K3 held toward UNDO: the arc and the word, released before it lands
+  key(3, 1)
+  run_ticks(8)
+  redraw()
+  export(pfx("TAKE", "_UNDO_ARC"))
+  key(3, 0)
+  -- a SNAP tap says what it did on the top row; a second tap puts it back
+  key(3, 1); key(3, 0)
+  redraw()
+  export(pfx("TAKE", "_SNAP_SAID"))
+  key(3, 1); key(3, 0)
+  run_ticks(20)
   params:set("pos_start", ws); params:set("pos_end", we)
   -- S17 self-resampling badges
   params:set("resample", 0.4)

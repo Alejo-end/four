@@ -5082,6 +5082,10 @@ local function fmt_value(id)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
   end
+  if id == "pos_start" or id == "pos_end" then
+    -- the window's edges in seconds of the buffer, not a percentage
+    return string.format("%.2fS", params:get(id) * (C.BUF_SECS or 60))
+  end
   if id == "motion_len" then
     local v = params:get(id)
     return v < 0.05 and "AUTO" or string.format("%.1fS", v)
@@ -5141,13 +5145,28 @@ local FY = 58  -- the footer text row (four quiet words)
 -- one key word: rest = dim text, engaged (latched or held) = inverted chip.
 -- def.lit() is the truth; a punched key reads identical while the finger is
 -- down and reverts on release — the whole temporary/latched language.
+-- the frame the arc beside the K3 word started on, or nil: the K1+K3
+-- eraser, or a key held on a def with a `hold` (TAKE K3 = UNDO). Its word is
+-- the arc's, from the frame the tap window can no longer be a tap.
+local function arc_start()
+  if C.alt and C.k13_frame and C.page_erase() then
+    return C.k13_frame, "ERASE"
+  end
+  local hf = C.hold_frame and C.hold_frame(3)
+  if hf then
+    local def = C.key_def(3)
+    return hf, def and def.hold_label or "HOLD"
+  end
+end
 local function fkey_draw(n, x)
   local def = C.key_def(n)
   local lab = def and def.label or "--"
-  if def and def.dryerase and C.k13_frame
-      and C.frame - C.k13_frame >= 2 and C.page_erase() then
-    ptext("ERASE", x, FY, 1, 15)   -- the tap became the eraser
-    return text_w("ERASE", 1)
+  if n == 3 then
+    local f0, word = arc_start()
+    if f0 and C.frame - f0 >= 2 then
+      ptext(word, x, FY, 1, 15)      -- the tap became the hold
+      return text_w(word, 1)
+    end
   end
   local on = false
   if def then
@@ -5234,11 +5253,12 @@ local function draw_footer()
   w = fkey_draw(3, x)
   local keys_right = x + w + 4     -- the key words' right edge (labels clear it)
   FOOT.arc = nil
-  -- the erase hold-arc beside the K3 word (only where material exists). It
+  -- the hold-arc beside the K3 word (the eraser, or TAKE's UNDO). It
   -- belongs to the key words, so the encoder words clear it too: one that
   -- would cross it drops to its short word while the arc draws.
-  if C.alt and C.k13_frame and C.page_erase() then
-    local dt = C.frame - C.k13_frame
+  local f0 = arc_start()
+  if f0 then
+    local dt = C.frame - f0
     if dt >= 2 then
       local ax, ay = x + w + 8, FY + 2
       keys_right = ax + 7
@@ -5302,6 +5322,39 @@ local pad_lit = {}
 -- ============================================================================
 local TK_MID, TK_HALF = 30, 11
 
+-- TAKE's top row. Right: the window locked to the clock ("1 BAR"), and
+-- "ON SND" while a record would wait for sound, so you know before you arm.
+-- Left: "<" while an UNDO is kept, then the chips of a writer that re-touches
+-- the buffer (RSMP, REGN). What K3's SNAP or UNDO just did takes the whole row
+-- for a moment (LAYERS' rule): the action proves it happened.
+local function take_top_row(frame, rec)
+  if C.take_msg and (frame - (C.take_msg_at or -1e9)) < FPS * 1.2 then
+    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
+    ptext_c(C.take_msg, 64, 12, 1, 12)
+    return
+  end
+  local rx = 126
+  local wb = floor(pget("win_beats", 1) + 0.5)
+  if wb > 1 then
+    local name = C.WIN_BEAT_NAMES[wb]
+    ptext_r(name, rx, 12, 1, 6)
+    rx = rx - text_w(name, 1) - 5
+  end
+  if not rec and pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001 then
+    ptext_r("ON SND", rx, 12, 1, 5)
+  end
+  local bx = 2
+  if C.undo_ready and C.undo_ready() then
+    ptext("<", bx, 12, 1, 6)
+    bx = bx + 7
+  end
+  if not rec then
+    -- resample/regen: the buffer is being re-touched by output
+    if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 12) + 2 end
+    if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
+  end
+end
+
 local function body_TAKE(frame)
   local rec = pget("rec", 0) == 1 and pget("freeze", 0) == 0
   if not C.wave_any and not rec then
@@ -5310,13 +5363,11 @@ local function body_TAKE(frame)
     screen.fill()
     ptext_c("EMPTY - K2 REC", 64, 24, 1, 10)
     ptext_c("OR PARAMS > LOAD", 64, 34, 1, 5)
+    take_top_row(frame, rec)
     return
   end
   local lo, hi = window_bounds()
   local wx = clamp(C.rec_phase, 0, 1) * 127
-  -- the window locked to the clock says so, top right
-  local wb = floor(pget("win_beats", 1) + 0.5)
-  if wb > 1 then ptext_r(C.WIN_BEAT_NAMES[wb], 126, 12, 1, 6) end
   -- marked for erase: K1+K3 held past the tap window on this page
   local marked = C.k13_frame ~= nil
     and (C.frame - C.k13_frame) >= 2 and not C.k13_fired
@@ -5403,11 +5454,6 @@ local function body_TAKE(frame)
     screen.rect(40, 45, 1, 2)
     screen.rect(57, 45, 1, 2)
     screen.fill()
-  else
-    -- resample/regen: the buffer is being re-touched by output
-    local bx = 2
-    if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 12) + 2 end
-    if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
   end
   -- the READ (playback) head, drawn LAST so it never hides behind the solid
   -- WRITE head. distinct SHAPE, not just tone: a
@@ -5421,6 +5467,7 @@ local function body_TAKE(frame)
     screen.rect(phx - 1, TK_MID - TK_HALF - 4, 3, 1)      -- caret ▽ above the strip
     screen.fill()
   end
+  take_top_row(frame, rec)   -- last: a message's pocket covers the caret
 end
 
 -- ============================================================================
@@ -6965,6 +7012,12 @@ local function layer_say(msg, detail)
   ctx.lay_msg, ctx.lay_msg_at = msg, ctx.frame or 0
   print("mangler: " .. (detail or msg))
 end
+-- the same for TAKE: what K3's SNAP and UNDO just did, on its top row
+local function take_say(msg, detail)
+  ctx.take_msg, ctx.take_msg_at = msg, ctx.frame or 0
+  print("mangler: " .. (detail or msg))
+end
+ctx.take_say = take_say
 
 -- tol = nil forces the snap; tol = a log-ratio only takes it when the length
 -- was already that close (the automatic pass at the end of a record).
@@ -7045,6 +7098,11 @@ Mpages.init(ctx)
 
 local TAP_FRAMES = 5     -- <=4 frames (~300ms at 15fps) reads as a tap
 local ERASE_FRAMES = 15  -- K1+K3 held ~1s (the drawn arc) erases material
+
+-- per-key press bookkeeping for the punch law: the def is resolved at the
+-- PRESS and the release routes back to it, so an alt released mid-hold can
+-- never hand the release to the wrong action (the grid learned this the hard way)
+local key_state = { [2] = {}, [3] = {} }
 
 -- punchable binary param: the common case
 local function pk(label, id)
@@ -7143,6 +7201,7 @@ local function snap_window()
     if snap_mem then
       params:set("pos_start", snap_mem[1])
       params:set("pos_end", snap_mem[2])
+      take_say("SNAP - WINDOW BACK")
     else
       -- full window, nothing remembered — the state on every fresh load, where
       -- this key used to do nothing at all and say nothing about it. Snap to
@@ -7153,14 +7212,17 @@ local function snap_window()
         snap_mem = { lo, hi }
         params:set("pos_start", 0)
         params:set("pos_end", tl)
+        take_say("SNAP - WINDOW ON THE TAKE")
       else
-        print("mangler: SNAP — the window is already the whole buffer")
+        take_say("SNAP - ALREADY WHOLE",
+          "SNAP — the window is already the whole buffer")
       end
     end
   else
     snap_mem = { lo, hi }
     params:set("pos_start", 0)
     params:set("pos_end", 1)
+    take_say("SNAP - WHOLE BUFFER")
   end
 end
 
@@ -7168,7 +7230,10 @@ end
 local KEYS = {
   TAKE = {
     k2 = pk("REC", "rec"),
-    k3 = { label = "SNAP", act = snap_window },
+    -- tap = SNAP, hold to the arc = UNDO (the eraser's gesture, without K1).
+    -- SNAP moved from the press to the release, so a hold never snaps first
+    k3 = { label = "SNAP", tap = snap_window,
+      hold = function() ctx.take_undo() end, hold_label = "UNDO" },
     erase = function() pulse("clear_rec") end,   -- audio: NOT undoable
   },
   VOICE = {
@@ -7472,6 +7537,19 @@ end
 -- recalls, and a ramp that had already run would move the sound before the
 -- recall is due (a BEAT or BAR queue) or turn a GLIDE into a jump.
 local function tick_keys()
+  -- a key held to the arc on a def with a `hold` (TAKE K3 = UNDO) fires AT
+  -- the threshold, the same promise the eraser keeps
+  for n = 2, 3 do
+    local st = key_state[n]
+    if st.def and st.def.hold and not st.fired then
+      if ctx.page ~= st.page then
+        st.fired = true      -- E1 left the page mid-hold: abort, as K1 does
+      elseif ctx.frame - st.frame >= ERASE_FRAMES then
+        st.fired = true
+        st.def.hold()
+      end
+    end
+  end
   if ctx.k13_frame and not ctx.k13_fired
       and ctx.frame - ctx.k13_frame >= ERASE_FRAMES then
     local e = page_erase()
@@ -7499,6 +7577,13 @@ ctx.key_def = key_def
 ctx.page_erase = page_erase
 ctx.ERASE_FRAMES = ERASE_FRAMES
 ctx.TAP_FRAMES = TAP_FRAMES
+-- the frame key n's hold began on, while a def with a `hold` is held on the
+-- page that took the press (nil otherwise): the footer draws its arc from
+-- it, full once the hold has fired, until the key comes up
+function ctx.hold_frame(n)
+  local st = key_state[n]
+  if st and st.def and st.def.hold and st.page == ctx.page then return st.frame end
+end
 
 -- ============================================================================
 -- polyphonic pad voices
@@ -8097,9 +8182,11 @@ function ctx.undo_forget()
     os.remove(undo_stem(k) .. "_L.wav"); os.remove(undo_stem(k) .. "_R.wav")
   end
 end
+-- is there a state to go back to (TAKE draws its "<" while there is)
+function ctx.undo_ready() return undo_prev ~= nil end
 function ctx.take_undo()
   if not (undo_prev and engine.read_take) then
-    print("mangler: UNDO — nothing to go back to")
+    ctx.take_say("UNDO - NOTHING TO GO BACK TO", "UNDO — nothing to go back to")
     return
   end
   -- finish a change still being written, so UNDO goes back exactly one.
@@ -8110,7 +8197,10 @@ function ctx.take_undo()
   if Mpages.eroding() then params:set("erode", 0) end
   if writing then ctx.undo_mark() end
   local back = undo_prev
-  if not back then return end   -- the mark above forgot them (undo_keep off)
+  if not back then               -- the mark above forgot them (undo_keep off)
+    ctx.take_say("UNDO - NOTHING KEPT", "UNDO — keep an undo is off")
+    return
+  end
   undo_prev, undo_cur = undo_cur, back
   if back.empty then
     engine.clear()
@@ -8119,7 +8209,7 @@ function ctx.take_undo()
     Mdeck.set_pair("pos_start", "pos_end", 0, 1)
     -- as a clear does: a PSET saved now must not bring the loaded file back
     if params:get("sample_file") ~= "" then params:set("sample_file", "") end
-    print("mangler: UNDO — back to the empty buffer")
+    ctx.take_say("UNDO - EMPTY AGAIN", "UNDO — back to the empty buffer")
     return
   end
   engine.read_take(undo_stem(back.slot))
@@ -8128,7 +8218,8 @@ function ctx.take_undo()
   ctx.wave_any = true
   ctx.take_len = back.take_len
   Mdeck.set_pair("pos_start", "pos_end", back.lo, back.hi)
-  print("mangler: UNDO — the take before the last change is back (UNDO again to return)")
+  ctx.take_say("UNDO - THE TAKE BEFORE",
+    "UNDO — the take before the last change is back (UNDO again to return)")
 end
 
 -- SOUND-LOCKS ride the PSET like the take + scenes: the 8 per-pad voice+pitch
@@ -9467,10 +9558,6 @@ function cleanup()
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
--- per-key press bookkeeping for the punch law: the def is resolved at the
--- PRESS and the release routes back to it, so an alt released mid-hold can
--- never hand the release to the wrong action (the grid learned this the hard way)
-local key_state = { [2] = {}, [3] = {} }
 
 -- step through the stations (E1, and the Launchpad's arrows). The page name
 -- pops big for a moment: the stations scroll past faster than the 1x title
@@ -9544,8 +9631,11 @@ function key(n, z)
   if z == 1 then
     local def = key_def(n)
     st.def, st.frame, st.engaged, st.unlatched = def, ctx.frame, false, false
+    st.fired, st.page = false, ctx.page
     if def then
-      if def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
+      if def.hold then
+        -- tap or hold: nothing fires on the press (tick_keys and the release)
+      elseif def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
         ctx.k13_frame, ctx.k13_fired = ctx.frame, false
         -- what the arc will erase is fixed NOW (SCENE: the slot under the
         -- finger, before a running orbit can re-aim the selector)
@@ -9569,7 +9659,11 @@ function key(n, z)
     local def = st.def
     st.def = nil
     if def then
-      if def.dryerase then
+      if def.hold then
+        -- tap = the def's tap; between the tap and the arc = the abort zone
+        if not st.fired and ctx.frame - st.frame < TAP_FRAMES then def.tap() end
+        st.fired = false
+      elseif def.dryerase then
         local dt = ctx.frame - (ctx.k13_frame or ctx.frame)
         -- tap = DRY; the frames between tap and arc = the abort zone
         if not ctx.k13_fired and dt < TAP_FRAMES then ctx.fx_dry() end

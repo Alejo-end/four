@@ -81,7 +81,7 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 
 | Page | What it does | Keys |
 |---|---|---|
-| TAKE | Record and frame the material | K2 record, K3 snap window |
+| TAKE | Record and frame the material | K2 record, K3 tap snap window, hold undo |
 | VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In GRAIN the picture is the grain cloud, left channel at the top. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
 | LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
@@ -164,7 +164,8 @@ Turn on PARAMS > take - record > start on sound, and an armed take starts where 
 does. K2 arms as usual and TAKE shows WAIT until what is being recorded crosses the sound
 threshold. The take then starts there, with a short pre-roll that keeps the attack. The
 recording itself runs from the arm, so nothing is lost while the level is read. A pass with
-no sound over the threshold keeps the whole pass, and an overdub never waits.
+no sound over the threshold keeps the whole pass, and an overdub never waits. While it is
+on, TAKE shows ON SND top right, so you know before you arm.
 
 PARAMS > take - window > win length locks the window's length to the clock: one beat to
 eight bars at the current tempo. The window's start carries the length with it, so moving
@@ -172,9 +173,11 @@ the start slides the whole window, a record pass comes out that long, and a temp
 re-times it. Moving the end yourself (E3, SNAP, a scene, the morph) is left as you put it
 until the next of those. TAKE shows the length top right.
 
-PARAMS > take - record > undo take goes back to the take before the last finished change: a
-record pass, a load, a print, a PSET, regen or erosion going quiet, or a clear. Press it
-again to come forward. The window comes back with it. Each finished change writes the take
+Hold K3 on TAKE for about a second (the arc, as for the eraser) to go back to the take before
+the last finished change: a record pass, a load, a print, a PSET, regen or erosion going
+quiet, or a clear. Hold it again to come forward. A tap is still SNAP, and TAKE says on its
+top row what either one did. A "<" at the top left means there is a take to go back to.
+PARAMS > take - record > undo take does the same from a footswitch. The window comes back with it. Each finished change writes the take
 to the card once, at most two takes' worth; turn `keep an undo` off to save the card.
 
 ## Notes and pads

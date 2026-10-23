@@ -13,7 +13,7 @@ level and rate.
 
 | Page | E2 | E3 | K1+E2 | K1+E3 | K2 | K3 | Erase |
 |---|---|---|---|---|---|---|---|
-| TAKE | `pos_start` | `pos_end` | `@win_move` | `pos_jitter` | REC | SNAP | yes |
+| TAKE | `pos_start` | `pos_end` | `@win_move` | `pos_jitter` | REC | SNAP, hold UNDO | yes |
 | VOICE (PLAY) | `scan` | `pitch` | `erode` | `wear` | HEAL | MODE | no |
 | VOICE (GRAIN) | `size` | `density` | `scan` | `pitch` | FRZ | MODE | no |
 | VOICE (WARP) | `warp_window` | `warp_rand` | `scan` | `pitch` | FRZ | MODE | no |

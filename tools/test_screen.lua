@@ -124,6 +124,19 @@ do
   ok(CTX.wave_any, "...and the abort leaves the take")
   redraw()
   ok(Mp.FOOT.arc == nil, "the arc is gone with the keys")
+  -- TAKE's K3 held toward UNDO draws the same arc, with the same room
+  local real_undo = CTX.take_undo
+  CTX.take_undo = function() end
+  key(3, 1)
+  _h.run_ticks(8)
+  redraw()
+  ok(Mp.FOOT.arc ~= nil, "K3 held on TAKE draws the UNDO arc")
+  ok(Mp.FOOT.arc and Mp.FOOT.e2 > Mp.FOOT.arc, "...and the E2 word clears it")
+  key(3, 0)
+  _h.run_ticks(1)
+  redraw()
+  ok(Mp.FOOT.arc == nil, "...gone with the key")
+  CTX.take_undo = real_undo
 end
 
 -- ============================================================================
@@ -151,7 +164,8 @@ end
 do
   T.goto_page("VOICE")
   local BASE = { mode = 2, size = 0.1, density = 20, spread = 0.5, pan = 0,
-    pos_jitter = 0, grain_jitter = 0, freeze = 0, stop_all = 0, mix = 0.5 }
+    pos_jitter = 0, grain_jitter = 0, freeze = 0, stop_all = 0, mix = 0.5,
+    pos_start = 0, pos_end = 1 }   -- the whole buffer: jitter has room to show
   local function set(t)
     for id, v in pairs(BASE) do params:set(id, v) end
     for id, v in pairs(t or {}) do params:set(id, v) end

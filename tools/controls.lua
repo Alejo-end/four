@@ -37,7 +37,8 @@ end
 local function key_cell(n)
   CTX.alt = false
   local def = CTX.key_def(n)
-  return def and def.label or "none"
+  if not def then return "none" end
+  return def.label .. (def.hold_label and (", hold " .. def.hold_label) or "")
 end
 
 local out = {

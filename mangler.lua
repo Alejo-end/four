@@ -461,6 +461,12 @@ local function layer_say(msg, detail)
   ctx.lay_msg, ctx.lay_msg_at = msg, ctx.frame or 0
   print("mangler: " .. (detail or msg))
 end
+-- the same for TAKE: what K3's SNAP and UNDO just did, on its top row
+local function take_say(msg, detail)
+  ctx.take_msg, ctx.take_msg_at = msg, ctx.frame or 0
+  print("mangler: " .. (detail or msg))
+end
+ctx.take_say = take_say
 
 -- tol = nil forces the snap; tol = a log-ratio only takes it when the length
 -- was already that close (the automatic pass at the end of a record).
@@ -541,6 +547,11 @@ Mpages.init(ctx)
 
 local TAP_FRAMES = 5     -- <=4 frames (~300ms at 15fps) reads as a tap
 local ERASE_FRAMES = 15  -- K1+K3 held ~1s (the drawn arc) erases material
+
+-- per-key press bookkeeping for the punch law: the def is resolved at the
+-- PRESS and the release routes back to it, so an alt released mid-hold can
+-- never hand the release to the wrong action (the grid learned this the hard way)
+local key_state = { [2] = {}, [3] = {} }
 
 -- punchable binary param: the common case
 local function pk(label, id)
@@ -639,6 +650,7 @@ local function snap_window()
     if snap_mem then
       params:set("pos_start", snap_mem[1])
       params:set("pos_end", snap_mem[2])
+      take_say("SNAP - WINDOW BACK")
     else
       -- full window, nothing remembered — the state on every fresh load, where
       -- this key used to do nothing at all and say nothing about it. Snap to
@@ -649,14 +661,17 @@ local function snap_window()
         snap_mem = { lo, hi }
         params:set("pos_start", 0)
         params:set("pos_end", tl)
+        take_say("SNAP - WINDOW ON THE TAKE")
       else
-        print("mangler: SNAP — the window is already the whole buffer")
+        take_say("SNAP - ALREADY WHOLE",
+          "SNAP — the window is already the whole buffer")
       end
     end
   else
     snap_mem = { lo, hi }
     params:set("pos_start", 0)
     params:set("pos_end", 1)
+    take_say("SNAP - WHOLE BUFFER")
   end
 end
 
@@ -664,7 +679,10 @@ end
 local KEYS = {
   TAKE = {
     k2 = pk("REC", "rec"),
-    k3 = { label = "SNAP", act = snap_window },
+    -- tap = SNAP, hold to the arc = UNDO (the eraser's gesture, without K1).
+    -- SNAP moved from the press to the release, so a hold never snaps first
+    k3 = { label = "SNAP", tap = snap_window,
+      hold = function() ctx.take_undo() end, hold_label = "UNDO" },
     erase = function() pulse("clear_rec") end,   -- audio: NOT undoable
   },
   VOICE = {
@@ -968,6 +986,19 @@ end
 -- recalls, and a ramp that had already run would move the sound before the
 -- recall is due (a BEAT or BAR queue) or turn a GLIDE into a jump.
 local function tick_keys()
+  -- a key held to the arc on a def with a `hold` (TAKE K3 = UNDO) fires AT
+  -- the threshold, the same promise the eraser keeps
+  for n = 2, 3 do
+    local st = key_state[n]
+    if st.def and st.def.hold and not st.fired then
+      if ctx.page ~= st.page then
+        st.fired = true      -- E1 left the page mid-hold: abort, as K1 does
+      elseif ctx.frame - st.frame >= ERASE_FRAMES then
+        st.fired = true
+        st.def.hold()
+      end
+    end
+  end
   if ctx.k13_frame and not ctx.k13_fired
       and ctx.frame - ctx.k13_frame >= ERASE_FRAMES then
     local e = page_erase()
@@ -995,6 +1026,13 @@ ctx.key_def = key_def
 ctx.page_erase = page_erase
 ctx.ERASE_FRAMES = ERASE_FRAMES
 ctx.TAP_FRAMES = TAP_FRAMES
+-- the frame key n's hold began on, while a def with a `hold` is held on the
+-- page that took the press (nil otherwise): the footer draws its arc from
+-- it, full once the hold has fired, until the key comes up
+function ctx.hold_frame(n)
+  local st = key_state[n]
+  if st and st.def and st.def.hold and st.page == ctx.page then return st.frame end
+end
 
 -- ============================================================================
 -- polyphonic pad voices
@@ -1593,9 +1631,11 @@ function ctx.undo_forget()
     os.remove(undo_stem(k) .. "_L.wav"); os.remove(undo_stem(k) .. "_R.wav")
   end
 end
+-- is there a state to go back to (TAKE draws its "<" while there is)
+function ctx.undo_ready() return undo_prev ~= nil end
 function ctx.take_undo()
   if not (undo_prev and engine.read_take) then
-    print("mangler: UNDO — nothing to go back to")
+    ctx.take_say("UNDO - NOTHING TO GO BACK TO", "UNDO — nothing to go back to")
     return
   end
   -- finish a change still being written, so UNDO goes back exactly one.
@@ -1606,7 +1646,10 @@ function ctx.take_undo()
   if Mpages.eroding() then params:set("erode", 0) end
   if writing then ctx.undo_mark() end
   local back = undo_prev
-  if not back then return end   -- the mark above forgot them (undo_keep off)
+  if not back then               -- the mark above forgot them (undo_keep off)
+    ctx.take_say("UNDO - NOTHING KEPT", "UNDO — keep an undo is off")
+    return
+  end
   undo_prev, undo_cur = undo_cur, back
   if back.empty then
     engine.clear()
@@ -1615,7 +1658,7 @@ function ctx.take_undo()
     Mdeck.set_pair("pos_start", "pos_end", 0, 1)
     -- as a clear does: a PSET saved now must not bring the loaded file back
     if params:get("sample_file") ~= "" then params:set("sample_file", "") end
-    print("mangler: UNDO — back to the empty buffer")
+    ctx.take_say("UNDO - EMPTY AGAIN", "UNDO — back to the empty buffer")
     return
   end
   engine.read_take(undo_stem(back.slot))
@@ -1624,7 +1667,8 @@ function ctx.take_undo()
   ctx.wave_any = true
   ctx.take_len = back.take_len
   Mdeck.set_pair("pos_start", "pos_end", back.lo, back.hi)
-  print("mangler: UNDO — the take before the last change is back (UNDO again to return)")
+  ctx.take_say("UNDO - THE TAKE BEFORE",
+    "UNDO — the take before the last change is back (UNDO again to return)")
 end
 
 -- SOUND-LOCKS ride the PSET like the take + scenes: the 8 per-pad voice+pitch
@@ -2963,10 +3007,6 @@ function cleanup()
   Mscenes.cleanup()    -- cancel a queued (quantized) scene recall, same reason
 end
 
--- per-key press bookkeeping for the punch law: the def is resolved at the
--- PRESS and the release routes back to it, so an alt released mid-hold can
--- never hand the release to the wrong action (the grid learned this the hard way)
-local key_state = { [2] = {}, [3] = {} }
 
 -- step through the stations (E1, and the Launchpad's arrows). The page name
 -- pops big for a moment: the stations scroll past faster than the 1x title
@@ -3040,8 +3080,11 @@ function key(n, z)
   if z == 1 then
     local def = key_def(n)
     st.def, st.frame, st.engaged, st.unlatched = def, ctx.frame, false, false
+    st.fired, st.page = false, ctx.page
     if def then
-      if def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
+      if def.hold then
+        -- tap or hold: nothing fires on the press (tick_keys and the release)
+      elseif def.dryerase then          -- K1+K3: DRY on tap, ERASE at the arc
         ctx.k13_frame, ctx.k13_fired = ctx.frame, false
         -- what the arc will erase is fixed NOW (SCENE: the slot under the
         -- finger, before a running orbit can re-aim the selector)
@@ -3065,7 +3108,11 @@ function key(n, z)
     local def = st.def
     st.def = nil
     if def then
-      if def.dryerase then
+      if def.hold then
+        -- tap = the def's tap; between the tap and the arc = the abort zone
+        if not st.fired and ctx.frame - st.frame < TAP_FRAMES then def.tap() end
+        st.fired = false
+      elseif def.dryerase then
         local dt = ctx.frame - (ctx.k13_frame or ctx.frame)
         -- tap = DRY; the frames between tap and arc = the abort zone
         if not ctx.k13_fired and dt < TAP_FRAMES then ctx.fx_dry() end

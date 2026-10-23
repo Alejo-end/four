@@ -307,6 +307,10 @@ local function fmt_value(id)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
   end
+  if id == "pos_start" or id == "pos_end" then
+    -- the window's edges in seconds of the buffer, not a percentage
+    return string.format("%.2fS", params:get(id) * (C.BUF_SECS or 60))
+  end
   if id == "motion_len" then
     local v = params:get(id)
     return v < 0.05 and "AUTO" or string.format("%.1fS", v)
@@ -366,13 +370,28 @@ local FY = 58  -- the footer text row (four quiet words)
 -- one key word: rest = dim text, engaged (latched or held) = inverted chip.
 -- def.lit() is the truth; a punched key reads identical while the finger is
 -- down and reverts on release — the whole temporary/latched language.
+-- the frame the arc beside the K3 word started on, or nil: the K1+K3
+-- eraser, or a key held on a def with a `hold` (TAKE K3 = UNDO). Its word is
+-- the arc's, from the frame the tap window can no longer be a tap.
+local function arc_start()
+  if C.alt and C.k13_frame and C.page_erase() then
+    return C.k13_frame, "ERASE"
+  end
+  local hf = C.hold_frame and C.hold_frame(3)
+  if hf then
+    local def = C.key_def(3)
+    return hf, def and def.hold_label or "HOLD"
+  end
+end
 local function fkey_draw(n, x)
   local def = C.key_def(n)
   local lab = def and def.label or "--"
-  if def and def.dryerase and C.k13_frame
-      and C.frame - C.k13_frame >= 2 and C.page_erase() then
-    ptext("ERASE", x, FY, 1, 15)   -- the tap became the eraser
-    return text_w("ERASE", 1)
+  if n == 3 then
+    local f0, word = arc_start()
+    if f0 and C.frame - f0 >= 2 then
+      ptext(word, x, FY, 1, 15)      -- the tap became the hold
+      return text_w(word, 1)
+    end
   end
   local on = false
   if def then
@@ -459,11 +478,12 @@ local function draw_footer()
   w = fkey_draw(3, x)
   local keys_right = x + w + 4     -- the key words' right edge (labels clear it)
   FOOT.arc = nil
-  -- the erase hold-arc beside the K3 word (only where material exists). It
+  -- the hold-arc beside the K3 word (the eraser, or TAKE's UNDO). It
   -- belongs to the key words, so the encoder words clear it too: one that
   -- would cross it drops to its short word while the arc draws.
-  if C.alt and C.k13_frame and C.page_erase() then
-    local dt = C.frame - C.k13_frame
+  local f0 = arc_start()
+  if f0 then
+    local dt = C.frame - f0
     if dt >= 2 then
       local ax, ay = x + w + 8, FY + 2
       keys_right = ax + 7
@@ -527,6 +547,39 @@ local pad_lit = {}
 -- ============================================================================
 local TK_MID, TK_HALF = 30, 11
 
+-- TAKE's top row. Right: the window locked to the clock ("1 BAR"), and
+-- "ON SND" while a record would wait for sound, so you know before you arm.
+-- Left: "<" while an UNDO is kept, then the chips of a writer that re-touches
+-- the buffer (RSMP, REGN). What K3's SNAP or UNDO just did takes the whole row
+-- for a moment (LAYERS' rule): the action proves it happened.
+local function take_top_row(frame, rec)
+  if C.take_msg and (frame - (C.take_msg_at or -1e9)) < FPS * 1.2 then
+    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
+    ptext_c(C.take_msg, 64, 12, 1, 12)
+    return
+  end
+  local rx = 126
+  local wb = floor(pget("win_beats", 1) + 0.5)
+  if wb > 1 then
+    local name = C.WIN_BEAT_NAMES[wb]
+    ptext_r(name, rx, 12, 1, 6)
+    rx = rx - text_w(name, 1) - 5
+  end
+  if not rec and pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001 then
+    ptext_r("ON SND", rx, 12, 1, 5)
+  end
+  local bx = 2
+  if C.undo_ready and C.undo_ready() then
+    ptext("<", bx, 12, 1, 6)
+    bx = bx + 7
+  end
+  if not rec then
+    -- resample/regen: the buffer is being re-touched by output
+    if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 12) + 2 end
+    if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
+  end
+end
+
 local function body_TAKE(frame)
   local rec = pget("rec", 0) == 1 and pget("freeze", 0) == 0
   if not C.wave_any and not rec then
@@ -535,13 +588,11 @@ local function body_TAKE(frame)
     screen.fill()
     ptext_c("EMPTY - K2 REC", 64, 24, 1, 10)
     ptext_c("OR PARAMS > LOAD", 64, 34, 1, 5)
+    take_top_row(frame, rec)
     return
   end
   local lo, hi = window_bounds()
   local wx = clamp(C.rec_phase, 0, 1) * 127
-  -- the window locked to the clock says so, top right
-  local wb = floor(pget("win_beats", 1) + 0.5)
-  if wb > 1 then ptext_r(C.WIN_BEAT_NAMES[wb], 126, 12, 1, 6) end
   -- marked for erase: K1+K3 held past the tap window on this page
   local marked = C.k13_frame ~= nil
     and (C.frame - C.k13_frame) >= 2 and not C.k13_fired
@@ -628,11 +679,6 @@ local function body_TAKE(frame)
     screen.rect(40, 45, 1, 2)
     screen.rect(57, 45, 1, 2)
     screen.fill()
-  else
-    -- resample/regen: the buffer is being re-touched by output
-    local bx = 2
-    if pget("resample", 0) > 0 then bx = bx + chip("RSMP", bx, 12) + 2 end
-    if pget("regen", 0) > 0 then chip("REGN", bx, 12) end
   end
   -- the READ (playback) head, drawn LAST so it never hides behind the solid
   -- WRITE head. distinct SHAPE, not just tone: a
@@ -646,6 +692,7 @@ local function body_TAKE(frame)
     screen.rect(phx - 1, TK_MID - TK_HALF - 4, 3, 1)      -- caret ▽ above the strip
     screen.fill()
   end
+  take_top_row(frame, rec)   -- last: a message's pocket covers the caret
 end
 
 -- ============================================================================

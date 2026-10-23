@@ -3323,6 +3323,26 @@ Ninety-eighth change: **the sequencer has a home on PADS (Lua only)**.
 * RENDERS: the three PADS shots changed. Device row 18.10.
 * VERIFIED: `tools/check.lua` green on Lua 5.3.6.
 
+Ninety-ninth change: **UNDO and start on sound have a home on TAKE (Lua
+only)**.
+* **K3 is two gestures.** A tap is SNAP, as before, but it now fires on the
+  release, so a hold never snaps first. A hold to the arc (the eraser's
+  second, without K1) is UNDO, and it lands AT the arc. Released between the
+  tap and the arc, nothing happens; leaving the page with E1 mid-hold aborts
+  it. A def with a `hold` and a `tap` is a new key shape in `key()`, and
+  `tick_keys` fires it. The footer draws the same arc and word ("UNDO") for
+  it as for the eraser, with the same room. `key_state` moved above
+  `tick_keys`, which now reads it.
+* **TAKE says what K3 did** on its top row for a moment (`take_say`, the
+  LAYERS rule): SNAP whole buffer, on the take, back, already whole; UNDO
+  the take before, empty again, nothing to go back to, nothing kept.
+* **TAKE's top row** shows "<" while an UNDO is kept (`ctx.undo_ready`),
+  and ON SND beside the clock lock while a record would wait for sound.
+* **The START and END swell reads seconds** of the buffer, not a percentage.
+* RENDERS: TAKE_LOCK shows ON SND; two new shots, TAKE_UNDO_ARC and
+  TAKE_SNAP_SAID. Device rows 18.11 to 18.13.
+* VERIFIED: `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

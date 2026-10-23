@@ -386,6 +386,9 @@ frame rate holds with the GRAIN cloud at its densest.
 | 18.8 | Readable text | Look at PADS (PLAY>DRONE, the voice count), SCENE (NOW), TAPE (the seconds) and MOTION (LOOP) from playing distance | All of it reads; an empty page's invitation is as bright as TAKE's, and VOICE with no take says EMPTY - REC ON TAKE | the level floor of 5 |
 | 18.9 | Page dots in families | Step E1 through all the pages | The dots sit in five groups: TAKE VOICE, TAPE LAYERS, FILTER DELAY REVERB, MIX, PADS MOTION SCENE | `layout_dots` |
 | 18.10 | The pattern on PADS | Open PADS with the sequencer stopped, then run it from the grid (PADS, row 6 pad 3); add and take hits with pads 6 and 5 | The pattern shows dim while stopped, bright with the moving step while it runs; the hits follow pads 5 and 6 | `body_PADS`, `pads_ws_key` |
+| 18.11 | TAKE K3: tap and hold | With a take, tap K3; tap again. Then record a second pass and hold K3 for a second | A tap snaps the window and TAKE's top row says so; a second tap puts it back. Held, the arc fills beside UNDO and the first take comes back AT the arc, with a message; letting go does not snap | `tick_keys`, `ctx.hold_frame` |
+| 18.12 | The abort zone | Hold K3 on TAKE for half a second and let go; then hold it and turn E1 to another page | Nothing happens either time | `st.fired`, `st.page` |
+| 18.13 | What TAKE shows | Turn on start on sound and lock the window to a bar; turn E2 | "<" top left while an UNDO is kept, ON SND and 1 BAR top right; the START swell reads seconds | `take_top_row`, `fmt_value` |
 
 ## When it passes
 
