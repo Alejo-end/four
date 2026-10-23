@@ -1877,7 +1877,8 @@ local function draw_layers_ws()
       gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))
     end
     -- rec and mute, one column per deck
-    gg:led(n, 5, recing and ((C.frame % 8) < 5 and 15 or 4) or 3, "red")
+    -- the write blink is the state strip's (and the header's) phase
+    gg:led(n, 5, recing and ((C.frame % 4) < 2 and 15 or 5) or 3, "red")
     gg:led(n, 6, playing and 9 or 3, "green")
     -- SNAP: round this deck's loop length to match what else is playing.
     -- LAYERS has no key free for it (K2 and K3 are taken, and holding K1 is
@@ -5301,7 +5302,7 @@ local function body_TAKE(frame)
     for x = 2, 125, 3 do screen.rect(x, TK_MID, 1, 1) end
     screen.fill()
     ptext_c("EMPTY - K2 REC", 64, 24, 1, 10)
-    ptext_c("OR PARAMS > LOAD", 64, 34, 1, 4)
+    ptext_c("OR PARAMS > LOAD", 64, 34, 1, 5)
     return
   end
   local lo, hi = window_bounds()
@@ -5376,7 +5377,7 @@ local function body_TAKE(frame)
     -- elapsed seconds: the one number a performer needs
     -- ...or, armed to start on sound and none yet, WAIT
     if C.rec_waiting then
-      ptext("WAIT", 88, 46, 2, (frame % FPS) < (FPS / 2) and 15 or 6)
+      ptext("WAIT", 88, 46, 2, 12)   -- steady: the header R is the blink
     else
       local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
       ptext(string.format("%.1fS", el), 88, 46, 2, 15)
@@ -5532,6 +5533,8 @@ local function body_VOICE(frame)
     screen.level(1)
     screen.move(0, 33) screen.line(128, 33)
     screen.stroke()
+    -- nothing to play: the invitation, in TAKE's voice (K2 here is a freeze)
+    if not C.wave_any then ptext_c("EMPTY - REC ON TAKE", 64, 24, 1, 10) end
   elseif mode == 2 then        -- GRAIN: the cloud (grain_cloud)
     grain_cloud(frame, scan)
   elseif mode == 3 then        -- WARP: an overlapped window ghosts behind
@@ -5651,12 +5654,12 @@ local function body_TAPE(frame)
   local tx = clamp(C.tape_phase, 0, 1) * 127
   screen.move(tx, 37) screen.line(tx, 43)
   screen.stroke()
-  ptext_r(string.format("%.1fS", lspan * (C.TAPE_LEN or 60)), 126, 12, 1, 4)
+  ptext_r(string.format("%.1fS", lspan * (C.TAPE_LEN or 60)), 126, 12, 1, 5)
   src_flag(2, 46)
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
-    if (frame % FPS) < (FPS / 2) then chip("REC", 2, 12) end
+    chip("REC", 2, 12)                -- steady: the header T is the blink
   elseif not C.twave_any then
-    ptext_c("EMPTY - K2 REC", 64, 26, 1, 3)
+    ptext_c("EMPTY - K2 REC", 64, 26, 1, 10)
   end
 end
 
@@ -5679,10 +5682,8 @@ local function layer_strip(d, y, sel, frame)
   -- name, and the state in words rather than an icon to decode
   ptext(d.name, 3, y - 6, 1, sel and 15 or 6)
   if rec then
-    -- the only fast blink in the instrument means WRITING, here as everywhere
-    if (frame % 8) < 5 then
-      screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
-    end
+    -- steady: the header's L is the one blink that says WRITING
+    screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
     ptext(pget(C.deck_p(d, "pre"), 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
   elseif not playing then
     -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
@@ -5717,7 +5718,7 @@ local function layer_strip(d, y, sel, frame)
     screen.level(0)
     screen.rect(tx - 2, y - 2, tw + 4, 9)
     screen.fill()
-    ptext(msg, tx, y + 3, 1, sel and 6 or 3)
+    ptext(msg, tx, y + 3, 1, sel and 10 or 3)
   end
 
   -- the head, drawn last so it is never hidden
@@ -5735,7 +5736,7 @@ local function body_LAYERS(frame)
   local sel = floor(pget("layer_sel", 1) + 0.5)
   local decks = C.layers or {}
   if #decks == 0 then
-    ptext_c("NO LAYER DECKS", 64, 30, 1, 4)
+    ptext_c("NO LAYER DECKS", 64, 30, 1, 5)
     return
   end
   -- the rate of the selected deck, top right: the number that makes two decks
@@ -6061,16 +6062,16 @@ local function body_PADS(frame)
     used = used + 1
   end
   local routed = pget("pad_input", 0) == 1
-  ptext(routed and "PLAY>PADS" or "PLAY>DRONE", 2, 12, 1, routed and 12 or 3)
+  ptext(routed and "PLAY>PADS" or "PLAY>DRONE", 2, 12, 1, routed and 12 or 5)
   -- the SELECTED pad's sound-lock: voice + pitch (the cursor editor). e.g. SLC+5
   local cvi = clamp(floor(pget("seq_slice", 0) + 0.5), 0, 7)
   local cp = C.pad_pitch and (C.pad_pitch[cvi] or 0) or 0
   local lk = ((C.pad_type and C.pad_type[cvi] or 0) == 1 and "SLC" or "GRN")
     .. (cp ~= 0 and ((cp > 0 and "+" or "") .. cp) or "")
   ptext_c(lk, 72, 12, 1, 6)
-  ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 12, 1, 4)
+  ptext_r(used .. "/" .. floor(pget("voices", 8) + 0.5) .. "V", 126, 12, 1, 5)
   if not C.wave_any and pget("rec", 0) == 0 then
-    ptext_c("EMPTY - K2 REC", 64, 28, 1, 6)
+    ptext_c("EMPTY - K2 REC", 64, 28, 1, 10)
     return
   end
   -- THE TAKE: the window zoomed full width, divided into 8 (a pad is
@@ -6167,7 +6168,7 @@ local function body_PADS(frame)
     end
   elseif C.pad_cuts then
     local n = #C.pad_cuts - 1
-    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 4)
+    ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 46, 1, 5)
   else
     ptext_c("E2 SLICE - E3 PITCH", 64, 46, 1, 3)
   end
@@ -6187,16 +6188,16 @@ local function body_MOTION(frame)
   local playing = pget("motion_play", 0) == 1
   if nlane == 0 then
     if armed then
-      if (frame % 4) < 2 then chip("REC", 2, 12) end
+      chip("REC", 2, 12)              -- steady: the header M is the blink
       ptext_c("MOVE A KNOB TO RECORD", 64, 28, 1, 8)
     else
-      ptext_c("EMPTY - K2 ARM", 64, 24, 1, 4)
-      ptext_c("THEN MOVE A KNOB", 64, 32, 1, 3)
+      ptext_c("EMPTY - K2 ARM", 64, 24, 1, 10)
+      ptext_c("THEN MOVE A KNOB", 64, 32, 1, 5)
     end
     return
   end
   if ll > 0 then
-    ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 9, 1, 4)
+    ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 9, 1, 5)
   end
   local sel = clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
   local VIS = 4
@@ -6309,7 +6310,7 @@ local function body_MOTION(frame)
     screen.line(gx1, top + shown * rh - 3)
     screen.stroke()
   end
-  if armed and (frame % 4) < 2 then      -- armed frame: the fast blink
+  if armed then                          -- armed frame, steady (header M blinks)
     screen.level(15)
     screen.rect(gx0 - 2.5, top - 4.5, gx1 - gx0 + 6, shown * rh + 5)
     screen.stroke()
@@ -6370,11 +6371,11 @@ local function body_SCENE(frame)
   elseif amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
     ptext_c("K2 TO LAND THE REST", 64, 13, 1, 5)
   else
-    ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 4)
+    ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
   end
-  -- the orbit lives here now (its knobs are this page's alt pair): a blinking
+  -- the orbit lives here now (its knobs are this page's alt pair): a steady
   -- chip while the wander runs — the moving selector and rail are its motion
-  if pget("orbit_on", 0) == 1 and (frame % 16) < 10 then
+  if pget("orbit_on", 0) == 1 then
     chip("ORBIT", 2, 11)
   end
   -- the ◄ cell: the way back (the safe state, auto-marked by chaos)
@@ -6403,10 +6404,11 @@ local function body_SCENE(frame)
     if i == sc.msg_slot then x = x + shake end
     local filled = sc.slots[i] ~= nil
     if filled then nfilled = nfilled + 1 end
-    local pending = sc.pending == i and (frame % FPS) < (FPS / 2)
+    local pending = sc.pending == i
     local flash = msg_live and sc.msg_slot == i
     if filled or pending or flash then
-      screen.level((pending or flash) and 15 or 7)
+      -- a queued recall is steady and between the two (one blink: the header)
+      screen.level(flash and 15 or (pending and 11 or 7))
       screen.rect(x, 22, 12, 12)
       screen.fill()
     else
@@ -6439,16 +6441,16 @@ local function body_SCENE(frame)
   -- ◄ selected: the rail has no target — this cell is a recall, not a morph
   if sel == 0 then
     ptext_c(sc.safe and "K2 = THE WAY BACK" or "< FILLS ON RECALL/CHAOS",
-      64, 44, 1, 4)
+      64, 44, 1, 5)
     return
   end
   -- the morph rail: LIVE toward the selected slot, from wherever you are
   if nfilled == 0 then
-    ptext_c("EMPTY - K3 CAP", 64, 44, 1, 4)
+    ptext_c("EMPTY - K3 CAP", 64, 44, 1, 10)
     return
   end
   if not sc.slots[sel] then
-    ptext_c("SLOT " .. sel .. " EMPTY - K3 CAP", 64, 44, 1, 4)
+    ptext_c("SLOT " .. sel .. " EMPTY - K3 CAP", 64, 44, 1, 10)
     return
   end
   local live = amt > 0.001 and amt < 0.999
@@ -6608,6 +6610,24 @@ local function draw_hflags(x, lim, blink)
     end
   end
 end
+-- path dots, top-right, current page a rounded 4x4 block. The wider current
+-- dot nudges every dot after it 2px right so it gets matching breathing room.
+-- The dots sit in the families the README names (the take, the decks, the
+-- tone, the console, the performance pages): 3px apart inside a family and
+-- 5px between families, so the row reads in groups (ux-feedback #9) and keeps
+-- its width. The row is RIGHT-ANCHORED to end 2px clear of the screen edge
+-- whatever the page count (a fixed left origin cropped the last dot once the
+-- count reached twelve). Laid out once, in init.
+local FAMILY_END = { VOICE = true, LAYERS = true, REVERB = true, MIX = true }
+local DOT_OFF = {}
+local function layout_dots()
+  local off = 0
+  for i = 1, #PAGES do
+    DOT_OFF[i] = off
+    off = off + (FAMILY_END[PAGES[i]] and 5 or 3)
+  end
+  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 4)
+end
 local function draw_header()
   local page, frame = C.page, C.frame
   local title = PAGES[page]
@@ -6631,13 +6651,7 @@ local function draw_header()
     screen.fill()
     x = x + 8
   end
-  -- path dots, top-right: uniform spacing, current page a rounded 4x4 block.
-  -- the wider current dot nudges every dot after it 2px right so it gets
-  -- matching breathing room. the row is RIGHT-ANCHORED to end 2px clear of
-  -- the screen edge whatever the page count (a fixed left origin cropped
-  -- the last dot once the count reached twelve).
-  local dpitch = #PAGES > 1 and min(5, floor(45 / (#PAGES - 1))) or 5
-  local dx0 = 126 - ((#PAGES - 1) * dpitch + 4)
+  local dx0 = M.DOT_X0
   HF.R.on = pget("rec", 0) == 1
   HF.T.on = pget("tape_rec", 0) == 1
   HF.M.on = pget("motion_rec", 0) == 1
@@ -6651,7 +6665,7 @@ local function draw_header()
   HF.LF.on = C.lfo and C.lfo.active() or false
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
   for i = 1, #PAGES do
-    local dx = dx0 + (i - 1) * dpitch + (i > page and 2 or 0)
+    local dx = dx0 + DOT_OFF[i] + (i > page and 2 or 0)
     if i == page then
       screen.level(15)
       screen.rect(dx, 3, 4, 4)
@@ -6712,6 +6726,7 @@ function M.init(ctx)
   ptext, ptext_c, ptext_r, chip, text_w =
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
   for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
+  layout_dots()
 end
 
 return M

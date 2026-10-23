@@ -3291,6 +3291,28 @@ in the renders, two tight footers, and header flags that could drop off.
 * VERIFIED: 828 assertions (491/114/87/41/52/43). `tools/check.lua` green on
   Lua 5.3.6.
 
+Ninety-seventh change: **the screen's consistency, the first part of UI-b in
+doc/tracks-plan.md (Lua only, the count stays 66)**.
+* **One blink.** The header's write flags are now the only thing that
+  blinks (ux-feedback #29). TAPE's REC chip, the LAYERS write dot, MOTION's
+  REC chip and armed frame, SCENE's ORBIT chip and a queued scene slot, and
+  TAKE's WAIT are steady. The grid's layer REC pads blink on the state
+  strip's phase.
+* **Readable text.** Text that carries information has a floor of level 5:
+  PADS' PLAY>DRONE and voice count, SCENE's recall mode, TAPE's seconds,
+  MOTION's LOOP, the CHOP note, the second line of an invitation. An empty
+  page's invitation is level 10 on every page, as TAKE's was, and VOICE with
+  no take now says EMPTY - REC ON TAKE.
+* **The page dots in families** (ux-feedback #9): 3 px apart inside a
+  family and 5 px between the take, the decks, the tone, the console and the
+  performance pages. The row is 2 px narrower than before.
+* `test_screen` gains two sections: each page chip draws the same on every
+  phase of the old blinks while the header still blinks, and a family gap is
+  wider than a gap inside a family. Both failed against a mutation.
+* RENDERS: all 71 changed (the dots are in every header). Device rows
+  18.7 to 18.9.
+* VERIFIED: `tools/check.lua` green on Lua 5.3.6.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

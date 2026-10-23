@@ -641,7 +641,8 @@ local function draw_layers_ws()
       gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))
     end
     -- rec and mute, one column per deck
-    gg:led(n, 5, recing and ((C.frame % 8) < 5 and 15 or 4) or 3, "red")
+    -- the write blink is the state strip's (and the header's) phase
+    gg:led(n, 5, recing and ((C.frame % 4) < 2 and 15 or 5) or 3, "red")
     gg:led(n, 6, playing and 9 or 3, "green")
     -- SNAP: round this deck's loop length to match what else is playing.
     -- LAYERS has no key free for it (K2 and K3 are taken, and holding K1 is

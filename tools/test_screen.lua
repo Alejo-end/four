@@ -61,9 +61,7 @@ do
   clock.cancel = function() end
   local HF = {}
   for _, f in ipairs(Mp.HFLAGS) do HF[f.ch] = f end
-  local npages = #CTX.PAGES
-  local dpitch = math.min(5, math.floor(45 / (npages - 1)))
-  local dx0 = 126 - ((npages - 1) * dpitch + 4)
+  local dx0 = Mp.DOT_X0
 
   -- a lone writer draws whole
   T.goto_page("TAKE")
@@ -195,6 +193,78 @@ do
   local b = cloud()
   ok(a == b, "the cloud is drawn from the frame, not from math.random")
   set({ mode = 5 })
+end
+
+-- ============================================================================
+-- 4 · one blink: only the header's write flags blink
+-- ============================================================================
+-- A page's own chip for a write (TAPE's REC, LAYERS' dot, MOTION's REC and
+-- frame, TAKE's WAIT) is steady: drawn the same on every phase of the old
+-- blinks (every 4 frames, every 8, every second).
+local function region(x0, y0, x1, y1)
+  local t = {}
+  for y = y0, y1 do for x = x0, x1 do t[#t + 1] = px(x, y) end end
+  return table.concat(t, ",")
+end
+local function steady(name, x0, y0, x1, y1)
+  local keep = CTX.frame
+  local ref
+  local same, lit = true, false
+  for _, f in ipairs({ 0, 2, 6, 8, 12 }) do
+    CTX.frame = f
+    redraw()
+    local r = region(x0, y0, x1, y1)
+    if r:find("[1-9]") then lit = true end
+    if ref and r ~= ref then same = false end
+    ref = ref or r
+  end
+  CTX.frame = keep
+  ok(lit, name .. " draws")
+  ok(same, name .. " is steady (the header's write flags are the one blink)")
+end
+do
+  T.goto_page("TAPE")
+  _h.run_ticks(30)
+  params:set("tape_rec", 1)
+  steady("TAPE's REC chip", 0, 10, 24, 20)
+  params:set("tape_rec", 0)
+  T.goto_page("LAYERS")
+  _h.run_ticks(30)
+  params:set("lay1_rec", 1)
+  steady("the LAYERS write dot", 14, 21, 18, 25)
+  params:set("lay1_rec", 0)
+  T.goto_page("MOTION")
+  _h.run_ticks(30)
+  params:set("motion_rec", 1)
+  steady("MOTION's REC chip", 0, 10, 24, 20)
+  params:set("motion_rec", 0)
+  -- the header still blinks
+  params:set("tape_rec", 1)
+  CTX.frame = 0; redraw(); local on = region(30, 0, 80, 7)
+  CTX.frame = 2; redraw(); local off = region(30, 0, 80, 7)
+  ok(on ~= off, "...and the header's T still blinks")
+  params:set("tape_rec", 0)
+  _h.run_ticks(1)
+end
+
+-- ============================================================================
+-- 5 · the page dots sit in families
+-- ============================================================================
+do
+  local x = {}
+  T.goto_page("TAKE")             -- the current dot is the first: no nudge
+  _h.run_ticks(30)
+  redraw()
+  for c = Mp.DOT_X0 + 4, 127 do
+    if px(c, 4) > 0 and px(c - 1, 4) == 0 then x[#x + 1] = c end
+  end
+  ok(#x == #CTX.PAGES - 1, "one dot per page after the current one (" .. #x .. ")")
+  -- VOICE ends the take family: the gap after it is wider than the gap
+  -- inside the tone family (FILTER, DELAY, REVERB)
+  local g_family = x[2] - x[1]          -- VOICE -> TAPE
+  local g_inside = x[5] - x[4]          -- FILTER -> DELAY
+  ok(g_family > g_inside, "a family gap is wider than a gap inside a family ("
+    .. g_family .. " > " .. g_inside .. ")")
 end
 
 T.report("screen harness OK")
