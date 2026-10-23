@@ -160,6 +160,12 @@ with it.
 | Beat repeat | BUILT in the 94th change, by request ahead of the device session: `\mangler_repeat` and the `beat_repeat` command (count 66). Stage 17 of doc/device-gate.md | | |
 | Reversed grains | GRAIN plays every grain forward | A per-grain rate sign drawn with a probability (`grain_rev`), on both grain copies (Phase 2 item 7 first, so it is written once). One new command, count 66 or 67 | small, after item 7 |
 
+## Next: the decks as tracks, and the screen
+
+doc/tracks-plan.md plans the next stage: a filter, modulation, sends and a
+texture mode for each deck, macros, and a list of screen fixes from an
+audit of every page. It is research and design; nothing in it is built.
+
 ## Phase 6: decisions for you
 
 These are not code questions. Each one needs a yes or no.
