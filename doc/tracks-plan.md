@@ -34,16 +34,24 @@ Mangler already has the take with four play modes and three loop decks
 them sit scenes with a morph and an orbit, a motion looper, pads with a
 sequencer, two LFOs, a beat repeat, erosion and regen.
 
-Two limits are fixed by the platform:
+Two limits come from the default norns setup. doc/norns-platform.md holds the
+measurements from the device, on 2026-11-06.
 
-- **One SuperCollider voice.** scsynth gets one core on a Pi 4, and the
-  project measured audio dropouts past about 60%. Four granular or stretch
-  chains side by side are not possible. The take keeps its mode switch.
-- **The decks cannot reach the engine's effects.** The norns audio routing
-  sends the input, the engine and the tape INTO softcut. softcut's output
-  goes only to the output and to the system reverb (`audio.level_cut_rev`,
-  one level for all of softcut). No function sends softcut into the engine.
-  So the decks cannot use the engine's filter, delay or reverb.
+- **One scsynth thread.** The engine runs on one audio thread, and xruns start
+  when that thread passes about 60%. A second scsynth can run as its own JACK
+  client, but it is not a dependable way to get more budget. At 40% on each
+  server it gave 36 to 71 xruns in 20 s. At 50% on each it gave none in 20 s and
+  66 in 5 minutes. So this plan still assumes one engine voice at a time, and the
+  take keeps its mode switch.
+- **softcut into the engine.** No softcut function sends softcut into the
+  engine, but JACK can: `jack_connect softcut:output_1 SuperCollider:in_1`.
+  The public scripts otis and splnkr do this, and the device test passed with 0
+  xruns. JACK exposes only softcut's stereo mix, so all decks go in together. The
+  mix also shares the engine's live input, so the engine must keep the decks out
+  of the take. Nothing in mangler uses this route yet.
+
+The whole instrument at once uses about 43% of that thread, and a SLICE voice
+costs 0.3%. So CPU is not the limit on the number of sampler voices.
 
 What softcut already offers, and mangler does not use yet:
 
@@ -168,7 +176,7 @@ chose, by the ranges you chose.
 One at a time, after Phase 0, each with its own RESTART: reversed grains,
 linked stereo limiting, the plugin test (doc/plan.md, Phase 5). A deck
 DEFORM (distortion per deck) is not possible: softcut has no saturation, and
-the decks cannot reach the engine.
+JACK can send only the mix of all decks into the engine.
 
 ## The screen
 
@@ -241,9 +249,9 @@ Done in the 96th (HELD) and the 97th changes.
 - **One blink.** There are three blink phases (the header, the LAYERS dot,
   the MOTION chip). You disliked blinking (ux-feedback #29). Keep the
   header's write flags as the only blink and make the page chips steady.
-- **The page dots in families.** A 2 px gap between the families (the take,
-  the decks, the FX, MIX, the performance pages) brings back ux-feedback #9
-  within the same 45 px.
+- **The page dots on one line.** The family gaps and the nudge beside the
+  current page made the row look uneven (ux-feedback #9), so the 105th change
+  removed both. Each page now has a fixed slot at an even spacing.
 
 ### The screen for the deck phases
 

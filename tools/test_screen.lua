@@ -282,23 +282,44 @@ do
 end
 
 -- ============================================================================
--- 5 · the page dots sit in families
+-- 5 · the page dots stay on one straight, fixed grid
 -- ============================================================================
 do
-  local x = {}
-  T.goto_page("TAKE")             -- the current dot is the first: no nudge
-  _h.run_ticks(30)
-  redraw()
-  for c = Mp.DOT_X0 + 4, 127 do
-    if px(c, 4) > 0 and px(c - 1, 4) == 0 then x[#x + 1] = c end
+  -- where the dots are on one page: the middle of every lit run on row 4
+  local function dots()
+    local at = {}
+    local c = Mp.DOT_X0 - 1
+    while c <= 127 do
+      if px(c, 4) > 0 then
+        local from = c
+        while px(c + 1, 4) > 0 do c = c + 1 end
+        at[#at + 1] = (from + c) / 2
+      end
+      c = c + 1
+    end
+    return at
   end
-  ok(#x == #CTX.PAGES - 1, "one dot per page after the current one (" .. #x .. ")")
-  -- VOICE ends the take family: the gap after it is wider than the gap
-  -- inside the tone family (FILTER, DELAY, REVERB)
-  local g_family = x[2] - x[1]          -- VOICE -> TAPE
-  local g_inside = x[5] - x[4]          -- FILTER -> DELAY
-  ok(g_family > g_inside, "a family gap is wider than a gap inside a family ("
-    .. g_family .. " > " .. g_inside .. ")")
+  local first
+  local same, straight, evenly = true, true, true
+  for i = 1, #CTX.PAGES do
+    T.goto_page(CTX.PAGES[i])
+    _h.run_ticks(30)
+    redraw()
+    local at = dots()
+    ok(#at == #CTX.PAGES, CTX.PAGES[i] .. ": one dot per page (" .. #at .. ")")
+    first = first or at
+    for k = 1, #at do
+      if at[k] ~= first[k] then same = false end
+      if k > 1 and at[k] - at[k - 1] ~= 4 then evenly = false end
+    end
+    for c = Mp.DOT_X0 - 1, 127 do
+      if px(c, 3) > 0 or px(c, 6) > 0 then straight = false end
+      if (px(c, 4) > 0) ~= (px(c, 5) > 0) then straight = false end
+    end
+  end
+  ok(same, "no dot moves when the page changes")
+  ok(evenly, "the dots are evenly spaced")
+  ok(straight, "every dot sits on rows 4 and 5, the current page too")
 end
 
 -- ============================================================================

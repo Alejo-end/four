@@ -2000,23 +2000,19 @@ local function draw_hflags(x, lim, blink)
     end
   end
 end
--- path dots, top-right, current page a rounded 4x4 block. The wider current
--- dot nudges every dot after it 2px right so it gets matching breathing room.
--- The dots sit in the families the README names (the take, the decks, the
--- tone, the console, the performance pages): 3px apart inside a family and
--- 5px between families, so the row reads in groups (ux-feedback #9) and keeps
--- its width. The row is RIGHT-ANCHORED to end 2px clear of the screen edge
+-- path dots, top-right. Every page has a fixed slot on one straight row: all
+-- dots share rows y=4..5 and a 4px pitch, and no dot ever moves when the page
+-- changes. The current page is a brighter, wider bar centred on its own slot,
+-- so it stays on the row and clear of its neighbours. The row is RIGHT-ANCHORED
 -- whatever the page count (a fixed left origin cropped the last dot once the
 -- count reached twelve). Laid out once, in init.
-local FAMILY_END = { VOICE = true, LAYERS = true, REVERB = true, MIX = true }
+local DOT_PITCH = 4
 local DOT_OFF = {}
 local function layout_dots()
-  local off = 0
-  for i = 1, #PAGES do
-    DOT_OFF[i] = off
-    off = off + (FAMILY_END[PAGES[i]] and 5 or 3)
-  end
-  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 4)
+  for i = 1, #PAGES do DOT_OFF[i] = (i - 1) * DOT_PITCH end
+  -- the last dot ends 2px clear of the edge; its bar, 1px wider each way, ends
+  -- 1px clear, and at the first slot it stays clear of the header flags
+  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 2)
 end
 local function draw_header()
   local page, frame = C.page, C.frame
@@ -2057,22 +2053,15 @@ local function draw_header()
   HF.LF.on = C.lfo and C.lfo.active() or false
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
   for i = 1, #PAGES do
-    local dx = dx0 + DOT_OFF[i] + (i > page and 2 or 0)
+    local dx = dx0 + DOT_OFF[i]
     if i == page then
       screen.level(15)
-      screen.rect(dx, 3, 4, 4)
-      screen.fill()
-      screen.level(0)
-      screen.rect(dx, 3, 1, 1)
-      screen.rect(dx + 3, 3, 1, 1)
-      screen.rect(dx, 6, 1, 1)
-      screen.rect(dx + 3, 6, 1, 1)
-      screen.fill()
+      screen.rect(dx - 1, 4, 4, 2)
     else
       screen.level(3)
       screen.rect(dx, 4, 2, 2)
-      screen.fill()
     end
+    screen.fill()
   end
 end
 

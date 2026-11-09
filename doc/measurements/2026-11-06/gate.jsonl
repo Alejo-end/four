@@ -1,0 +1,182 @@
+{"id": "0.1", "status": "pass", "note": "['/home/we/dust/code/mangler/lib/Engine_Mangler.sc']"}
+{"id": "0.2", "status": "pass", "note": "script reached init() done"}
+{"id": "0.3", "status": "pass", "note": "['Engine.register_commands; count: 66']"}
+{"id": "1.1", "status": "pass", "note": "11 pages drawn, frame counter moves (162 to 169), no traceback"}
+{"id": "1.2", "status": "pass", "note": "TAKE VOICE TAPE LAYERS FILTER DELAY REVERB MIX PADS MOTION SCENE"}
+{"id": "1.3", "status": "pass", "note": "no SuperCollider errors this boot"}
+{"id": "1.4", "status": "pass", "note": "amp_in 0.088 with the test tone, 0.00000 without"}
+{"id": "2.1", "status": "pass", "note": "control: erosion moved the take=True. Under STOP for 5 min the digest stayed 3376d0d3c836 920b605ed764 = 3376d0d3c836 920b605ed764"}
+{"id": "2.2", "status": "pass", "note": "take_len 0.1682 before the punch, 0.1682 after, 0.1690 loaded; the file holds 10.142021s"}
+{"id": "2.3", "status": "pass", "note": "aborted message=True; take digest same=True; print files 0 to 0"}
+{"id": "3.1", "status": "measured", "note": "dB before, stopped, after: {'TAKE': (-19.3, -180.0, -19.3), 'MIX': (-18.7, -180.0, -18.7), 'SCENE': (-19.3, -180.0, -19.3)}"}
+{"id": "3.2", "status": "pass", "note": "{'delay_mix': 0.0, 'rev_mix': 0.0, 'shimmer': 0.0, 'drive': 0.0, 'clouds_fb': 0.0, 'resonance': 0.0, 'cutoff': 20000.0}"}
+{"id": "3.3", "status": "pass", "note": "take_len 0.0, wave_any false, engine -86.0 dB"}
+{"id": "3.4", "status": "pass", "note": "K1 let go at 0.6s: take_len 0.17148889601231, delay_mix 0.3 (DRY did not fire)"}
+{"id": "3.5", "status": "pass", "note": "K3 let go at 0.55s: take_len 0.17148889601231, delay_mix 0.3"}
+{"id": "3.6", "status": "pass", "note": "file before: True, after the empty save: False, take_len after load 0.0"}
+{"id": "4.1", "status": "measured", "note": "dB by cutoff {20000: -11.9, 2000: -12.0, 400: -15.6, 120: -26.4}. Sweep clicks []. Character: listen to 4.1_sweep.wav"}
+{"id": "4.2", "status": "measured", "note": "{'peak_db': -0.7, 'rms_db': -7.8, 'clipped': 0}; second half against first 0.0 dB (no growth means no runaway)"}
+{"id": "4.3", "status": "measured", "note": "band levels in dB at resonance 0.5: {'LP': {220: -11.4, 442: -24.0, 884: -77.0}, 'BP': {220: -12.7, 442: -23.6, 884: -113.3}, 'HP': {220: -27.3, 442: -31.5, 884: -109.9}}. The BP peak: listen to 4.3_BP.wav"}
+{"id": "4.4", "status": "measured", "note": "tone at 220 Hz -10.2 dB; other bands {1000: -90.6, 3000: -99.7, 8000: -106.7}. Listen for grit"}
+{"id": "4.5", "status": "pass", "note": "220 Hz dry -10.0 dB, with rev_mix 0.5 -9.0 dB: the dry stays"}
+{"id": "4.6", "status": "pass", "note": "reverb node on=True, off=False; CPU 23.5% to 22.0%"}
+{"id": "4.7", "status": "measured", "note": "884 Hz -85.5 dB to -60.2 dB with shimmer. Robotic or not: listen to 4.7_shim80.wav"}
+{"id": "4.8", "status": "pass", "note": "a 1s window of tone over 8s (about 8 seams): detected clicks []"}
+{"id": "4.9", "status": "measured", "note": "RMS dB by drive {0: -11.9, 0.25: -11.3, 0.5: -10.7, 0.75: -10.4, 1: -10.3}. Mid-knob minus the louder end: -0.4 dB"}
+{"id": "4.10", "status": "pass", "note": "hasClouds=true. dB by density {1: -11.1, 5: -7.7, 11: -7.4, 13: -7.5, 16: -7.3, 20: -7.2, 30: -7.2, 80: -7.0, 200: -6.7}, spread 4.4 dB"}
+{"id": "4.11", "status": "pass", "note": "220 Hz, spread 0 then 12: GRAIN drone -5.4 and -15.3 dB; a GRAIN pad -44.9 and -56.1 dB"}
+{"id": "4.12", "status": "measured", "note": "4 pads, GRAIN: -26.8 dB at density 20, -26.7 dB at density 100"}
+{"id": "4.13", "status": "measured", "note": "PV sounds: {220: -10.0, 442: -22.0, 884: -123.1}, {'peak_db': -5.2, 'rms_db': -11.9, 'clipped': 0}. Artefacts: listen to 4.13_pv.wav"}
+{"id": "4.14", "status": "measured", "note": "50 encoder steps on pos_start during playback: clicks []"}
+{"id": "4.15", "status": "pass", "note": "erode 0: digest b56a6590c524 db317c91fdbe = b56a6590c524 db317c91fdbe after 3 min; no erode node"}
+{"id": "4.16", "status": "pass", "note": "brightness -28.6 to -39.9 dB, level -19.3 to -19.7 dB after 60s"}
+{"id": "4.17", "status": "pass", "note": "the take's brightness before, after 30s, drop in dB: {'speed2': (-27.8, -40.0, 12.2), 'speedm1': (-27.9, -40.0, 12.1)}"}
+{"id": "4.18", "status": "pass", "note": "raise regen: {'erode': 0.0, 'regen': 0.4}. raise erode: {'erode': 0.3, 'regen': 0.0}"}
+{"id": "4.19", "status": "pass", "note": "erode 0.4, 0.0 held, 0.4 after; regen 0.4, 0.4 after"}
+{"id": "5.1", "status": "pass", "note": "message=True; dB by Hz {404: -99.4, 440: -1.1, 480: -101.1}"}
+{"id": "5.2", "status": "pass", "note": "no resample=True; {404: -99.8, 440: -1.1, 480: -100.7}"}
+{"id": "5.3", "status": "pass", "note": "a 3s file has 0.375s slices. Pad held for 2s sounded about 0.3s"}
+{"id": "5.4", "status": "pass", "note": "boundaries in seconds [0.0, 0.01, 1.01, 2.51, 3.01, 3.51, 4.51, 5.39, 6.13]. The last slice is 0.74s of 6.13s"}
+{"id": "5.5", "status": "pass", "note": "6 slices; the eight pads play 0 1 2 3 4 5 0 1"}
+{"id": "5.6", "status": "pass", "note": "chopped before the load=true; even slices after=true"}
+{"id": "5.7", "status": "pass", "note": "start 0.00s to 1.50s; sound begins at 1.50s. ['mangler: TIGHTEN \u2014 window is 2.50s of sound (was 4.00s)']"}
+{"id": "5.8", "status": "pass", "note": "message=True; window (0.0, 0.02) to (0.0, 0.02)"}
+{"id": "5.9", "status": "pass", "note": "['mangler: PRINT \u2014 recording the master mix, 2.0s', 'mangler: PRINT done \u2014 mangler-print-001.wav is the new take']; take 2.10s"}
+{"id": "6.1", "status": "measured", "note": "fb 0.3; held 1.0, released 0.3; tapped 1.0 (latched). Feel: yours"}
+{"id": "6.2", "status": "pass", "note": "1.0 lit, 0.3 after the second tap, 0.3 later: no re-arm"}
+{"id": "6.3", "status": "pass", "note": "centre 0.5, ENG 0.0, then TAPE 1.0, off 0.5"}
+{"id": "6.4", "status": "pass", "note": "before, thrown, back: {'OPEN': (800, 20000.0, 800.0), 'KILL': (0.3, 0.0, 0.3), 'WASH': (2.0, 30.0, 2.0)}"}
+{"id": "6.5", "status": "pass", "note": "start: thrown, back {0.2: (0.6, 0.2), 0.95: (1.0, 0.95)}"}
+{"id": "6.6", "status": "pass", "note": "thrown 1.0, recalled 0.3. The next tap is a new throw 1.0, and its release returns to the recalled 0.3"}
+{"id": "6.7", "status": "measured", "note": "hold K2 peeks 0.3, release returns 0.6. Commit and chaos: try them yourself"}
+{"id": "6.8", "status": "measured", "note": "42 morph steps: crossed pairs 0; loop 0.070 and 30% of it are the ends, smallest seen 0.021"}
+{"id": "6.9", "status": "pass", "note": "after a sweep with the encoder, cutoff plays 40 to 16257"}
+{"id": "6.10", "status": "pass", "note": "first lane cutoff 40..16257; second lane resonance 0.03..0.60"}
+{"id": "6.11", "status": "you", "note": "tools/test_control covers the lane ends offscreen. Needs a person to judge the gesture"}
+{"id": "6.12", "status": "you", "note": "tools/test_purity covers every reason offscreen. Look at the mark on the OLED"}
+{"id": "6.13", "status": "you", "note": "needs a physical grid; connected: none"}
+{"id": "6.14", "status": "you", "note": "needs a physical grid; connected: none"}
+{"id": "6.15", "status": "you", "note": "needs a physical grid; connected: none"}
+{"id": "7.1", "status": "pass", "note": "before {'take': 0.10255555808544, 'cuts': '9', 'tape': 'true'}; after {'take': 0.10338923611111, 'cuts': '9', 'tape': 'true', 'pitch': '5', 'type': '1'}; scene delay_fb 0.42; engine -19.3 dB"}
+{"id": "7.2", "status": "pass", "note": "twave_any false, softcut -180.0 dB after loading a pset with an empty tape"}
+{"id": "7.3", "status": "pass", "note": "sample before /home/we/dust/audio/mangler_test/t48k.wav; after reload ''; take_len 0.0"}
+{"id": "7.4", "status": "measured", "note": "no pset older than S22 is on the device. August pset 2 loads without error: '1\\n\"sample_file\": /home/we/dust/audio/loopmasters/Loops/Hiphop/Drum Loops/DUP_97_The_one_two_Drums.wav', take_len 0.32971527777778, take file for pset 1 exists=False"}
+{"id": "8.1", "status": "pass", "note": "nodes ['mangler_play', 'mangler_io']; scsynth (21.4, 21.9)"}
+{"id": "8.2", "status": "pass", "note": "drone alone (21.5, 22.6); drone plus 8 pads (22.1, 22.7); xruns 0"}
+{"id": "8.3", "status": "measured", "note": "xruns 0. Zipper: listen to 8.3_morph.wav (drums make a click count useless here)"}
+{"id": "8.4", "status": "pass", "note": "frames per second while it loads [12.5, 14.5, 14.5, 15.0, 14.5]; xruns 0; take 60.0s"}
+{"id": "9.1", "status": "pass", "note": "softcut -19.7 dB and engine -19.3 dB at the same time"}
+{"id": "9.2", "status": "measured", "note": "12s at rates 0.5 and 1: clicks []. Drift: listen to 9.2_drift.wav"}
+{"id": "9.3", "status": "pass", "note": "-19.1 dB; after overdub of silence at pre 1 -19.1 dB; at pre 0 -77.0 dB"}
+{"id": "9.4", "status": "pass", "note": "L1 -76.5 to -180.0 dB; L2 -180.0 to -180.0 dB"}
+{"id": "9.5", "status": "pass", "note": "softcut -47.8, stopped -180.0, engine stopped -180.0, after -47.8 dB"}
+{"id": "9.6", "status": "pass", "note": "files: lay1-97.wav; softcut -18.9 dB before, -18.9 dB after"}
+{"id": "9.7", "status": "you", "note": "needs a physical grid; connected: none"}
+{"id": "9.8", "status": "pass", "note": "take in GRAIN, tape and both layers: scsynth (21.8, 22.9); system idle 87.8%; xruns 0; threads [('crone', 15.7, '-91'), ('scsynth', 7.6, '-91'), ('crone', 4.2, '-91'), ('jackd', 2.4, '-96'), ('matron', 2.4, '20')]"}
+{"id": "10.1", "status": "measured", "note": "-17.8 dB dry, -15.7 dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav"}
+{"id": "10.2", "status": "measured", "note": "delay on (21.4, 23.1), off (21.3, 21.6): the node is gone, the difference is under the noise. No older build to compare"}
+{"id": "10.3", "status": "pass", "note": "after INF, voice off, KILL, wait, un-KILL: the loop plays at -23.1 dB"}
+{"id": "10.4", "status": "measured", "note": "raised with E2: breaks [1.351]. Jumped from 0 to 0.4 by a param set, as MIDI or a scene can: breaks [0.692]. Listen to 10.4_spawn_knob.wav"}
+{"id": "10.5", "status": "pass", "note": "take, tape, L1 heads: (0.020079381763935, 0.97250003814697, 0.024166742960612) and (0.020079381763935, 0.97250003814697, 0.024166742960612) under STOP, (0.056501567363739, 0.95666669209798, 0.0099999745686849) after START"}
+{"id": "10.6", "status": "pass", "note": "write head 0.09747 and 0.09747 under STOP; silent 50ms blocks near the stop 0"}
+{"id": "10.7", "status": "measured", "note": "head 0.1139, thrown 0.1146 and 0.1146, released 0.1331. Whether it feels right is yours"}
+{"id": "10.8", "status": "measured", "note": "-12.9 dB, then -85.5 dB after the erase; buffer all zero=True; regen 0.0. Listen to 10.8_after.wav"}
+{"id": "11.1", "status": "pass", "note": "a fresh layer's first pass: the loop is 4.09s and plays -19.1 dB"}
+{"id": "11.2", "status": "pass", "note": "loop 4.092s before and after an overdub"}
+{"id": "11.2b", "status": "pass", "note": "the head was at 5.08s in the region, and the hit landed at 5.24s (peak 0.92)"}
+{"id": "11.2c", "status": "pass", "note": "the deck's whole region is the same after 15s at rest: True 8640000"}
+{"id": "11.2d", "status": "pass", "note": "the tape's first pass, after 3s of playing: softcut -17.2 dB"}
+{"id": "11.3", "status": "pass", "note": "take 6.1s, played about 4.5s, loop 4.58s"}
+{"id": "11.4", "status": "pass", "note": "take 6.055s; loop 3.027s. See 11.4_snap.png. L1 3.00>3.03S 1/2 x TAKE"}
+{"id": "11.5", "status": "pass", "note": "lengths 3.027s and 6.055s, ratio 2.0000. Phase gap 0.661 then 0.661 after 5 min; walked 0.000 of a cycle"}
+{"id": "11.6", "status": "measured", "note": "take 6.124s; the loop goes 4.593s to 4.593s with lay1_snap; the page says L1 ON GRID 3/4 x TAKE. Footswitch and grid: yours"}
+{"id": "11.6b", "status": "measured", "note": "loop unchanged (0.9999, 1.0). Message on the page: see 11.6b_no_room.png. L1 NO ROOM TO SNAP"}
+{"id": "11.7", "status": "measured", "note": "RMS by seam {0.001: -25.2, 0.2: -25.2}. Hard downbeat or blend: listen to 11.7_fade0.001.wav and 11.7_fade0.2.wav"}
+{"id": "11.8", "status": "pass", "note": "L and R dB of a deck recorded on the left only, by width: {1: (-19.1, -93.0), 0: (-22.1, -22.1)}"}
+{"id": "11.9", "status": "pass", "note": "file 24 bit; take_len 0.0849 and 0.0857"}
+{"id": "11.10", "status": "pass", "note": "/home/we/dust/audio/mg_gate.wav: channels and bits ['2', '24']. <ok>\n\n@@2820@@\n<ok>\n\nmangler: exported /home/we/dust/audio/mg_gate.wav"}
+{"id": "11.11", "status": "measured", "note": "dB by Hz {440: -1.2, 880: -98.5, 3000: -120.6, 9000: -131.6, 15000: -137.7}. Whistle or grit: listen to 11.11_96k.wav"}
+{"id": "11.12", "status": "measured", "note": "Pi 4: seconds to load, and lowest frames per second while it converts: {'long44k.wav': (13.7, 13), 'long96k.wav': (7.9, 8)}. long44k is 30s of audio, long96k is 10s"}
+{"id": "11.13", "status": "you", "note": "only an ear can judge these. Use resample 0.5 and a slammed INF delay"}
+{"id": "11.14", "status": "you", "note": "only an ear can judge these. Use resample 0.5 and a slammed INF delay"}
+{"id": "12.1", "status": "pass", "note": "window 3.08s, and 3.08s after the late conversion; dropped message=True"}
+{"id": "12.2", "status": "pass", "note": "first tap 60.00s, second tap back on the take 4.07s; the PSET file holds 4.118021s"}
+{"id": "12.3", "status": "pass", "note": "L1 rec 0.0, L2 rec 0.0, selected 2.0"}
+{"id": "12.4", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.5", "status": "pass", "note": "loop (0.1, 0.14) and (0.1, 0.14) after two quick taps"}
+{"id": "12.6", "status": "pass", "note": "tape loop 0.3s, seam 0.4s: softcut -16.8 dB"}
+{"id": "12.7", "status": "measured", "note": "see 12.7_stopped_TAPE.png and 12.7_stopped_VOICE.png"}
+{"id": "12.8", "status": "you", "note": "needs a physical grid"}
+{"id": "12.9", "status": "pass", "note": "dB by Hz {404: -54.2, 440: -1.2, 480: -54.5}; picture in 12.9_float.png"}
+{"id": "12.10", "status": "measured", "note": "see 12.10_right_only.png: the strip must show the hits"}
+{"id": "12.11", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.12", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.13", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.14", "status": "pass", "note": "7.8s to load 10s at 96k; lowest frames per second 9"}
+{"id": "13.1", "status": "pass", "note": "not armed=True; the loop plays cutoff 112 to 16257 after a reload"}
+{"id": "13.2", "status": "pass", "note": "delay_fb 0.80 to 0.20 through 9 values over 3.5s"}
+{"id": "13.3", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "13.4", "status": "pass", "note": "delay_time 0.5 synced at 120 BPM, 0.5 after a recall"}
+{"id": "13.5", "status": "pass", "note": "the file holds 6.975000s; softcut -22.1 dB after the load"}
+{"id": "13.6", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "13.7", "status": "you", "note": "needs a Launchpad Mini MK3 or a grid"}
+{"id": "13.8", "status": "you", "note": "needs a Launchpad Mini MK3 or a grid"}
+{"id": "13.9", "status": "you", "note": "needs a Launchpad Mini MK3 or a grid"}
+{"id": "13.10", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "14.1", "status": "pass", "note": "nodes ['mangler_play', 'mangler_io']"}
+{"id": "14.2", "status": "pass", "note": "erode node present; the take changed=True"}
+{"id": "14.3", "status": "measured", "note": "erode 1 turns the tone to a noisy texture, so a break count cannot judge this (3 found). Listen to 14.3_after_switching.wav"}
+{"id": "14.4", "status": "pass", "note": "erode node by mode {'PLAY': [True, True], 'GRAIN': [False], 'WARP': [False], 'PV': [False]}"}
+{"id": "14.5", "status": "pass", "note": "digest d1ae594c7fba 9f6d7077902a = d1ae594c7fba 9f6d7077902a over 10s of STOP"}
+{"id": "14.6", "status": "measured", "note": "PLAY at rest (22.0, 26.0); with erosion (21.5, 21.9). No older build to compare"}
+{"id": "15.1", "status": "measured", "note": "['mangler: CHOP \u2014 8 slices, on the attacks']. The queued line depends on the timing of the repaint"}
+{"id": "15.2", "status": "pass", "note": "['mangler: CHOP \u2014 8 slices, on the attacks']"}
+{"id": "15.3", "status": "you", "note": "needs a Launchpad"}
+{"id": "15.4", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.5", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.6", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.7", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.8", "status": "pass", "note": "the second load wins: window 3.00s; ['mangler: 44100 Hz file \u2014 resampling to 48000 before the take load (it ', 'mangler: 44100 Hz file \u2014 resampling to 48000 before the take load (it ', 'mangler: queued behind the background job already running', 'mangler: /home/we/dust/audio/mangler_test/long44k.wav dropped before i', 'mangler: loaded /home/we/dust/audio/mangler_test/t44k.wav (3.0s) \u2014 win']"}
+{"id": "15.9", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.10", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "15.11", "status": "you", "note": "tools/test_control covers the logic offscreen. Try these by hand"}
+{"id": "16.1", "status": "pass", "note": "WAIT shown=true; the loop is 1.07s; ['mangler: sound at 3.81s into the pass, the take starts there']"}
+{"id": "16.2", "status": "pass", "note": "waiting after a quiet hit=true, after a loud sound=false"}
+{"id": "16.3", "status": "pass", "note": "previous take 4.14s; the loop is now 1.43s, the hit plus the REPL's delay before K2"}
+{"id": "16.4", "status": "measured", "note": "engine {'peak_db': -15.4, 'rms_db': -32.4, 'clipped': 0}. Progression: listen to 16.4_sequencer.wav"}
+{"id": "16.5", "status": "measured", "note": "running true, after a tempo change true, after a restart true. On the beat: listen"}
+{"id": "16.6", "status": "pass", "note": "STOP -180.0 dB; held voices 0; after run off -86.0 dB"}
+{"id": "16.7", "status": "pass", "note": "knob stays 500.0 and 500.0; the level swings 13.1 dB over a bar"}
+{"id": "16.8", "status": "pass", "note": "ENV on the cutoff: engine -12.7 dB without input, -24.8 dB with input. `eng level` is not a target, so the gate's text is out of date"}
+{"id": "16.9", "status": "pass", "note": "reverb node with the LFO=True, at depth 0=False; CPU (23.6, 24.2)"}
+{"id": "16.10", "status": "pass", "note": "at 120 BPM the window is 2.000s, and 2.000s after E2"}
+{"id": "16.11", "status": "pass", "note": "at 60 BPM the window is 4.000s"}
+{"id": "16.12", "status": "pass", "note": "bar 2.00s, K3 opens to 60.00s, K3 back to 2.00s"}
+{"id": "16.13", "status": "pass", "note": "windows: first 3.14s, second 5.05s, undo 3.14s, undo again 5.05s"}
+{"id": "16.14", "status": "pass", "note": "take_len 0.0 after the erase, 0.1374444514513 after undo"}
+{"id": "16.15", "status": "you", "note": "needs a synth or a MIDI monitor on port 1"}
+{"id": "16.16", "status": "you", "note": "needs a crow"}
+{"id": "16.17", "status": "you", "note": "only a hand and an ear can judge this"}
+{"id": "17.1", "status": "pass", "note": "count 66; SuperCollider errors since start 0"}
+{"id": "17.2", "status": "measured", "note": "repeat node present while held; sounding share 0.26. On the beat: listen to 17.2_repeat.wav"}
+{"id": "17.3", "status": "measured", "note": "a 1/8 repeat over a tone: breaks []. Listen to 17.3_repeat_tone.wav"}
+{"id": "17.4", "status": "measured", "note": "a roll through 1/8, 1/16, 1/32: breaks [2.209]. Smear: listen to 17.4_roll.wav"}
+{"id": "17.5", "status": "pass", "note": "STOP -180.0 dB, node gone=True; erase, node gone=True"}
+{"id": "17.6", "status": "you", "note": "listen to a PRINT made with a repeat held"}
+{"id": "17.7", "status": "pass", "note": "rest (21.5, 21.9), held (21.4, 21.8), after (21.6, 22.3)"}
+{"id": "18.1", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.2", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.3", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.4", "status": "pass", "note": "frames per second by density {20: 14.4, 200: 14.6}; pictures in 18.4_cloud_*.png"}
+{"id": "18.5", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.6", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.7", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.8", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.9", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.10", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.11", "status": "pass", "note": "tap 1.00s to 60.00s, tap back 1.00s; second take 3.09s, held K3 undoes to 5.09s"}
+{"id": "18.12", "status": "pass", "note": "window unchanged by the aborted holds: (0.0, 0.084822222590446)"}
+{"id": "18.13", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.14", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.15", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}
+{"id": "18.16", "status": "you", "note": "tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device"}

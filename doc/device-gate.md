@@ -14,6 +14,10 @@ Each check says what PASS looks like and, when it fails, **which change to
 suspect**. That pointer is the part worth having: with a month of batched work,
 "something sounds wrong" is not a useful bug report.
 
+`tools/device/gate.py` runs what a computer can judge, on a connected device. The
+results from 2026-11-06 are in doc/measurements/2026-11-06/README.md. Those marked
+`measured` or `you` still need a person.
+
 **Work top to bottom. If a stage fails, stop there** — later stages assume the
 earlier ones held, and a false failure downstream will cost you an hour.
 
@@ -341,7 +345,7 @@ and that the engine polls behave as the stubs assume.
 | 16.5 | Sequencer on the clock | Run it with 1/16 steps and 5 of 8, change the tempo, then stop and start it | It stays on the beat through the tempo change, and starts again on the bar | The beat count in `Mseq.fire` |
 | 16.6 | Sequencer stop | While it plays, K1+K2 (STOP), then `sequencer run` off | Silence at once, no voice left hanging after the stop or the run off | `release()`, `Mseq.stop` |
 | 16.7 | **A modulator** | LFO 1 target cutoff, SINE, 1 BAR, depth 0.4. Turn cutoff by hand while it runs | The filter breathes once a bar, around where your hand leaves it; the knob does not move by itself. The header shows LF | `Mlfo.tick`, `ctx.eng_map` |
-| 16.8 | Ducking | LFO 2 target `eng level` (or reverb mix), ENV, depth -0.6, play the gear | The level dips while you play and comes back when you stop | The envelope in `Mlfo.tick`, the `amp_in` polls |
+| 16.8 | Ducking | LFO 2 target cutoff (or reverb mix), ENV, depth -0.6, play the gear | The level dips while you play and comes back when you stop | The envelope in `Mlfo.tick`, the `amp_in` polls |
 | 16.9 | Reverb on an LFO | LFO 2 target reverb mix with the mix at 0, SQUARE, 2 Hz, depth 0.4 | The reverb pulses with no clicks and no CPU climb; depth 0 frees it again (node list) | `FLOOR` in lib/mlfo.lua |
 | 16.10 | **A window on the bar** | A take in PLAY, `win length` 1 BAR, the delay synced to 1/4. Move the window start with E2 | The loop is exactly a bar and stays on the echoes. E2 slides it; the end follows. TAKE shows 1 BAR | `sync_window_len` |
 | 16.11 | Tempo change | With the window locked, change the clock tempo | The loop re-times to the new bar length without a click storm | The 0.5% write tolerance |
@@ -384,7 +388,7 @@ frame rate holds with the GRAIN cloud at its densest.
 | 18.6 | HELD | PV freeze on, then step VOICE through its modes | HELD is bright in PV and GRAIN, dim in PLAY and WARP, and does not touch the PV chip | `body_VOICE` |
 | 18.7 | One blink | Record on TAKE, TAPE, a layer and MOTION in turn, and run the orbit on SCENE | Only the header's write flags blink. TAPE's REC chip, the LAYERS dot, MOTION's REC chip and frame, the ORBIT chip and TAKE's WAIT are steady | the page chips |
 | 18.8 | Readable text | Look at PADS (PLAY>DRONE, the voice count), SCENE (NOW), TAPE (the seconds) and MOTION (LOOP) from playing distance | All of it reads; an empty page's invitation is as bright as TAKE's, and VOICE with no take says EMPTY - REC ON TAKE | the level floor of 5 |
-| 18.9 | Page dots in families | Step E1 through all the pages | The dots sit in five groups: TAKE VOICE, TAPE LAYERS, FILTER DELAY REVERB, MIX, PADS MOTION SCENE | `layout_dots` |
+| 18.9 | Page dots on one line | Step E1 through all the pages | The dots stay on one straight row at an even spacing. No dot moves. Only the bright bar moves from slot to slot | `layout_dots` |
 | 18.10 | The pattern on PADS | Open PADS with the sequencer stopped, then run it from the grid (PADS, row 6 pad 3); add and take hits with pads 6 and 5 | The pattern shows dim while stopped, bright with the moving step while it runs; the hits follow pads 5 and 6 | `body_PADS`, `pads_ws_key` |
 | 18.11 | TAKE K3: tap and hold | With a take, tap K3; tap again. Then record a second pass and hold K3 for a second | A tap snaps the window and TAKE's top row says so; a second tap puts it back. Held, the arc fills beside UNDO and the first take comes back AT the arc, with a message; letting go does not snap | `tick_keys`, `ctx.hold_frame` |
 | 18.12 | The abort zone | Hold K3 on TAKE for half a second and let go; hold it and turn E1 away and back; hold it and press K1 | Nothing happens any time, and no arc stays drawn | `st.fired`, `st.page` |

@@ -3403,6 +3403,56 @@ made from. Three new ones show the new screens: `motion-lfo.png` (the
 modulators on MOTION), `pads-seq.png` (the sequencer running) and
 `take-undo.png` (K3 held toward UNDO).
 
+Hundred-and-fourth change: **the device session, measured (tools and docs
+only)**. `tools/device/` now drives a connected norns: the REPLs, keys, JACK
+capture, a test signal, and audio measurements. The walkthrough ran on 2026-11-06
+at `count: 66`, and doc/measurements/2026-11-06/ holds the results. doc/norns-platform.md
+explains the platform and the costs. doc/tracks-plan.md no longer says that the
+decks cannot reach the engine, because `jack_connect` can patch them in.
+
+A correction: a first test reported that two servers carried 125% with no xruns.
+That result was false. Under JACK, a server's `avgCPU` is `jack_cpu_load`, the load
+of the whole cycle, so the second server never received its load. The new trial
+reads each thread with `top -H`, and it does not show a dependable gain.
+
+The code does not change. The session found these bugs and did not fix them: the
+GRAIN density dead zone (4.10), the first pass on an empty layer (11.1), the click
+when E2 moves the window (4.14), and CHOP stopping after eight hits (5.4).
+
+Hundred-and-fifth change: **the page dots on one straight line (Lua only)**.
+The user reported that the dots were not aligned. Three things moved them: every
+dot after the current page moved 2 px to the right, the current page was a
+taller block, and the family gaps made the spacing uneven. Each page now has a
+fixed slot on rows 4 and 5 at a 4 px pitch. The current page is a brighter, wider
+bar on the same rows. The family gaps are gone, so check 18.9 changes with them.
+tools/test_screen.lua now fails if a dot moves, leaves the row, or spaces
+unevenly on any page. The images in doc/ui still show the old dots.
+
+Hundred-and-sixth change: **the bugs that the device session found (ENGINE and
+Lua, no new command, the count stays 66)**. Each was reproduced on the device and
+then retested there.
+
+- **The first pass on an empty layer played silence.** Softcut moves a voice's write
+  index only while its rec flag is on. A head that played with the flag off wrote at
+  its last set position, so the pass landed outside its own loop. A punch in the
+  middle of a loop landed in the wrong place for the same reason. `Mdeck.update_rec`
+  now leaves the flag on, and rec 0 with pre 1 is the gate.
+- **An idle deck must not drift.** With the flag on, softcut's rec and pre ramp never
+  lands exactly: 30 s changed samples by up to 23 steps of 24 bits. A punch now ramps
+  over 5 ms, so that it prints no step (this was the break at each seam), and the
+  next phase event ends the ramp in `Mdeck.settle_rec`. A deck's region is then
+  identical, sample for sample, after minutes at rest.
+- **GRAIN's density crossed the dead zone of Clouds.** Density 13 to 16 was silent and
+  the default was about 20 dB down. It now stays on Clouds' random side, with a lift
+  at the sparse end. The spread across 1 to 200 went from 79 dB to about 4 dB.
+- **GRAIN's pitch spread did nothing with Clouds.** A noise on Clouds' pitch input now
+  gives a spread per grain.
+- **E2 clicked.** The window edges moved at control rate, one step per block. They now
+  move at audio rate through `Lag2` over 80 ms, so the window answers a little later.
+- **CHOP stopped after eight hits.** It now takes its slices evenly across the take.
+- **The erase left an echo.** `\clear` spawned the effects before the buffer's zero
+  landed, so they took in the last of the take. It now waits with `s.sync`.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

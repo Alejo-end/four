@@ -113,10 +113,35 @@ function M.update_rec(d)
   -- recording on START, like the engine's record head)
   local on = get(d, "rec", 0) == 1 and not frozen
     and pget("stop_all", 0) == 0
+  -- softcut's REC FLAG STAYS ON. A voice moves its write index only while the
+  -- flag is on, so a head that played with it off writes at its last set
+  -- position, not where it reads: the first pass on a fresh deck landed outside
+  -- its own loop and the deck played silence. Heard on the device, 2026-11-06.
+  -- These two levels are the gate: rec 0 and pre 1 write nothing, bit for bit.
+  local rec = on and 1 or 0
+  local pre = on and get(d, "pre", d.pre_default or 1) or 1
+  -- A punch ramps over 5ms, so it does not print a step into the audio. The ramp
+  -- never lands exactly, and an idle deck must not drift, so the next phase
+  -- event (settle_rec) turns it off and lands the levels.
+  local ramp = d.rec_on ~= nil and d.rec_on ~= on
+  d.rec_on = on
+  d.rec_lv, d.pre_lv = rec, pre
+  d.rec_settling = ramp
   both(d, function(v)
-    sc.rec_level(v, on and 1 or 0)
-    sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))
-    sc.rec(v, on and 1 or 0)
+    sc.recpre_slew_time(v, ramp and 0.005 or 0)
+    sc.rec(v, 1)
+    sc.rec_level(v, rec)
+    sc.pre_level(v, pre)
+  end)
+end
+
+function M.settle_rec(d)
+  if not d.rec_settling then return end
+  d.rec_settling = false
+  both(d, function(v)
+    sc.recpre_slew_time(v, 0)
+    sc.rec_level(v, d.rec_lv)
+    sc.pre_level(v, d.pre_lv)
   end)
 end
 
@@ -407,6 +432,7 @@ function M.on_phase(voice, pos)
     local d = M.decks[i]
     if d.va == voice then
       d.phase = clamp((pos - d.from) / d.len, 0, 1)
+      M.settle_rec(d)
       if get(d, "rec", 0) == 1 then
         M.track_extent(d, d.phase)
         local a = C.cut_rec_amp()   -- what softcut records: the shared law

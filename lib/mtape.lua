@@ -160,6 +160,7 @@ function M.init_tape()
   sc.event_phase(function(v, pos)
     if v == 1 then
       C.tape_phase = pos / TAPE_LEN
+      D.settle_rec(TAPE)
       -- the written stretch, from the same 25ms events the layers use
       if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
         D.track_extent(TAPE, C.tape_phase)

@@ -518,16 +518,23 @@ function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
   local peak = 0
   for j = 1, k do if env[j] > peak then peak = env[j] end end
   local floorlv = peak * 0.18
-  local cuts = { from01 }          -- the first slice always starts at the edge
+  local hits = {}
   local last = -99
   for j = 2, k do
     local prev = env[j - 1]
     if env[j] > floorlv and env[j] > prev * 2.2 and (j - last) > 3 then
       last = j
-      local f = from + (j - 1) * win
-      cuts[#cuts + 1] = f / total
-      if #cuts >= maxn then break end
+      hits[#hits + 1] = (from + (j - 1) * win) / total
     end
+  end
+  -- the first slice always starts at the edge. More hits than pads: take them
+  -- evenly across the whole take. Stopping at the first few gave the last pad
+  -- most of the take (the device: 3.5s of a 6s drum loop).
+  local cuts = { from01 }
+  local room = maxn - 1
+  for c = 1, math.min(#hits, room) do
+    local at = #hits <= room and c or floor((c - 1) * #hits / room) + 1
+    cuts[#cuts + 1] = hits[at]
   end
   return cuts
 end

@@ -13,11 +13,16 @@ the status block current, and add a change-log entry for every change.
   redesign, the 45th to 47th changes).
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 66`**.
+- **Device session 2026-11-06:** `main` plus the 104th to 106th changes are on the device
+  at `count: 66`. `tools/device/gate.py` ran the walkthrough with no ears:
+  doc/measurements/2026-11-06/README.md. It is NOT a pass: the `measured` and `you` rows
+  still need a person. Costs, budgets and platform traps: doc/norns-platform.md.
 - **The one walkthrough:** doc/device-gate.md, stages 0 to 18, top to bottom. When it
   passes, update this block with the date and the count.
-- **Latest change:** the 102nd, the screen work's review fixes. The 96th to
-  the 101st are the screen work of doc/tracks-plan.md (UI-a and UI-b): the
-  GRAIN cloud, the header flags, one blink, the page dot families, the
+- **Latest change:** the 106th, the bugs that the device session found. The 105th is the
+  page dots on one straight line. The 104th is the device session's tools and results. The 102nd is the screen work's review fixes. The
+  96th to the 101st are the screen work of doc/tracks-plan.md (UI-a and UI-b): the
+  GRAIN cloud, the header flags, one blink, the page dots, the
   sequencer on PADS, UNDO on a held TAKE K3, the beat repeat on the grid,
   the modulators on MOTION.
   Lua only, the count stays 66. `full-review` was merged into `main` on
@@ -145,6 +150,16 @@ add_text` are **not** mappable.
   identity and by name against `gg.device`). Symptom when this breaks: every pad
   press also slams `pitch` to an extreme (raw launchpad note numbers are far from
   root 60 and clamp to the 0.25–4 spec edges).
+- **A large system time jump makes sclang flood matron.** If sclang boots on a stale
+  clock and Wi-Fi then corrects the time, its polls try to catch up. On 2026-11-06, a
+  70-day jump gave about 24,000 `/poll/value` messages per second instead of 105. sclang
+  took about 94% of a core, matron about 90%, and the sclang REPL did not answer. After a
+  jump, restart and then measure. A device of our own needs a battery clock or must wait
+  for the time sync.
+- **The last SSH logout deletes the JACK sockets.** When user `we` logs out, systemd's
+  `RemoveIPC` default empties `/dev/shm`. Running audio continues, but `jack_lsp` and
+  `jack_connect` then fail with "server is not running". A restart repairs them. For JACK
+  work, open one SSH session, restart, and keep that session open to the end of the work.
 - **`clock.lua:62 bad argument #1 to 'resume' (thread expected)`** is a system-level race
   (a clock timer fires for an already-dead coroutine, often on script reload) and wedges
   clock state until restart. It is not specific to one script, but: keep mangler's clock
@@ -192,6 +207,12 @@ Each line was learned the hard way; the change log has the story.
 - A busy guard covers every reader of what it protects. `take_to_wav` holds `export_clock`
   until `done` returns, because the scans read the shared dump after it. A background job
   never refuses a performer's: a dump asked for during the strip repaint waits for it.
+- softcut's rec flag stays ON on every deck; rec 0 and pre 1 are the gate. With the flag
+  off, the write index does not follow the read head, and a pass lands somewhere else.
+  Its rec and pre ramp never lands exactly, so `Mdeck.settle_rec` ends every ramp.
+- Under JACK, a server's `avgCPU` is the load of the whole cycle (`jack_cpu_load`), not
+  that server's. Read one server's cost from its thread in `top -H`.
+- A second scsynth is not a dependable gain: see doc/norns-platform.md before trying again.
 - `include` has no module cache: a module that needs another module's state is handed
   the instance through `init` (mtape receives Mdeck), never includes it again.
 - Moving code into a module turns an assignment to a former upvalue into a write to a
@@ -261,6 +282,11 @@ lua tools/amalgamate.lua
 # the control map: doc/controls.md is GENERATED from ENC_MAP/VOICE_FACE/KEYS; rerun
 # after changing a page's knobs or keys (test_control fails on a stale one)
 lua tools/controls.lua
+
+# on a connected device: run the walkthrough and the measurements (doc/norns-platform.md
+# says how, and why one SSH session must stay open)
+python3 tools/device/gate.py 2 4:4.10,4.14
+python3 tools/device/measure.py states voices
 
 # deploy (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/

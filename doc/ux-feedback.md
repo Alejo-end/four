@@ -55,7 +55,10 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
 9. **Page dots: the row reads as a weird, unstraight line.**
    → **DONE**: every dot now sits on one pixel row (y=2); the current page is
    a wider bright bar on the same row instead of a 3×3 block. Family grouping
-   (source · shape · tape · fx) is kept.
+   (source · shape · tape · fx) is kept. Later the 4x4 block and the family
+   gaps came back, and the user reported the row as not aligned on 2026-11-06.
+   The 105th change put every dot on a fixed, evenly spaced slot, with no
+   family gaps.
 
 10. **Workflows: standalone-first.** The instrument must carry a full
     performance alone — plug a synth in, chop something, turn it into a

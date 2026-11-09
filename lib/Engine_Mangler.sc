@@ -293,7 +293,7 @@ Engine_Mangler : CroneEngine {
         // (a plain build-time function — each call emits the same UGens
         // inline, so the compiled graphs are unchanged; before this the same
         // 7 lines were copy-pasted five times and had already drifted once).
-        // window edges + scan are Lag'd ~20ms: pos_start/pos_end are
+        // window edges + scan are smoothed: pos_start/pos_end are
         // PERFORMANCE encoders (TAKE E2/E3) and an unsmoothed edge move
         // jumped the read head with a click per detent. pitchMul folds
         // varispeed into the phase rate (only \mangler_play passes it).
@@ -308,8 +308,13 @@ Engine_Mangler : CroneEngine {
         // shared by winRead and the erosion head.
         winBounds = { arg pos_start, pos_end;
             var lo, hi, span;
-            lo = Lag.kr(pos_start.min(pos_end), 0.02);
-            hi = Lag.kr(pos_start.max(pos_end), 0.02);
+            // AUDIO rate, two-pole: a control-rate lag moved the read head in one
+            // step per block, and each step broke the waveform. The device
+            // measured a click on every E2 detent over a sustained tone. Lag2
+            // starts at zero speed, so an edge move bends the sound briefly
+            // instead of kinking it.
+            lo = Lag2.ar(K2A.ar(pos_start.min(pos_end)), 0.08);
+            hi = Lag2.ar(K2A.ar(pos_start.max(pos_end)), 0.08);
             span = (hi - lo).max(0.001);
             [lo, span];
         };
@@ -497,8 +502,14 @@ Engine_Mangler : CroneEngine {
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                         pv_freeze = 0, erode = 0, wear = 0.5, level = 1;
-                    var winPos, phase, span, srcL, srcR, sig;
+                    var winPos, phase, span, srcL, srcR, sig, dens;
                     #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
+                    // Clouds' density is silent at 0.5: below it grains are
+                    // random, above it periodic. Mapping 1..200 across 0.5 made
+                    // density 13 to 16 silent and the default 20 about 20 dB
+                    // down. Stay on the random side (the drone's Dust law), and
+                    // lift the sparse end by the level the device measured.
+                    dens = density.explin(1, 200, 0.36, 0.05);
                     srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
                     srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
                     // POSITIONAL args (keyword args don't survive perform on a
@@ -506,12 +517,15 @@ Engine_Mangler : CroneEngine {
                     // in_gain, spread, rvb, fb, freeze, mode, lofi. our size/
                     // density/pitch remap to Clouds' 0..1 / semitone ranges.
                     sig = cc.ar([srcL, srcR],
-                        pitch.max(0.01).log2 * 12,
+                        // Clouds reads its pitch when a grain starts, so a noise
+                        // here is a pitch spread per grain, as in the GrainBuf drone
+                        (pitch.max(0.01).log2 * 12) + LFNoise0.kr(density.clip(4, 30), grain_pitch_spread),
                         clouds_pos,
                         size.linlin(0.01, 0.5, 0.1, 0.9),
-                        density.explin(1, 200, 0.05, 0.95),
+                        dens,
                         clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
                         pv_freeze, clouds_mode, clouds_lofi);
+                    sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp;
                     Out.ar(play_bus, sig);
                 }).add;
                 hasClouds = true;
@@ -966,11 +980,16 @@ Engine_Mangler : CroneEngine {
             // lives inside the spawn/free synths, so a free + respawn IS the
             // flush (the update methods re-spawn only if the mixes want them).
             delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
-            this.updateDelay;
             revSynth.notNil.if({ revSynth.free; revSynth = nil });
-            this.updateReverb(revMixV);
             // ...and a held repeat would go on playing the erased sound
             this.updateRepeat(0);
+            // the zero runs in the background: an effect spawned before it lands
+            // takes in the last of the take and echoes it (-54 dB on the device)
+            fork {
+                s.sync;
+                this.updateDelay;
+                this.updateReverb(revMixV);
+            };
             "mangler: engine buffer cleared".postln;
         });
 

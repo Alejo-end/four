@@ -237,6 +237,15 @@ do
 
   -- the whole file is 4s of a 60s buffer -> the window is 0 .. 4/60
   local hi = SECS / BUF
+  -- more hits than pads: the slices reach across the whole take, so the last
+  -- pad does not hold most of it
+  do
+    local few = M.transient_cuts(TMP .. "hits.wav", 0, hi, 3, BUF, nil)
+    ok(few and #few == 3, "a limit of 3 keeps 3 boundaries")
+    if few then
+      ok(few[3] * BUF > HITS[#HITS // 2], "the last chosen hit is past the middle of the hits")
+    end
+  end
   local cuts = M.transient_cuts(TMP .. "hits.wav", 0, hi, 8, BUF, nil)
   ok(cuts ~= nil, "transient_cuts reads the file")
   cuts = cuts or {}

@@ -165,6 +165,7 @@ defaults()
 -- ---- rec and overdub -----------------------------------------------------
 P.lay1_rec = 1; P.lay1_pre = 1
 calls = {}; Mdeck.update_rec(d1)
+near(last("rec", 3)[3], 1, 1e-6, "softcut's rec flag is on, so the write head follows the read head")
 near(last("rec_level", 3)[3], 1, 0.001, "arming opens the record level")
 near(last("pre_level", 3)[3], 1, 0.001, "pre 1 = OVERDUB: what is there survives")
 P.lay1_pre = 0
@@ -172,7 +173,16 @@ calls = {}; Mdeck.update_rec(d1)
 near(last("pre_level", 3)[3], 0, 0.001, "pre 0 = REPLACE")
 P.lay1_rec = 0
 calls = {}; Mdeck.update_rec(d1)
-near(last("rec", 3)[3], 0, 0.001, "disarming closes the head")
+near(last("rec_level", 3)[3], 0, 0.001, "disarming closes the head")
+near(last("pre_level", 3)[3], 1, 0.001, "...and pre 1 leaves the buffer untouched while the flag stays on")
+near(last("rec", 3)[3], 1, 0.001, "the flag stays on, so the write head keeps following")
+near(last("recpre_slew_time", 3)[3], 0.005, 1e-6, "a punch ramps, so it prints no step")
+calls = {}; Mdeck.settle_rec(d1)
+near(last("recpre_slew_time", 3)[3], 0, 1e-6, "the next phase event ends the ramp")
+near(last("pre_level", 3)[3], 1, 1e-6, "...and lands pre exactly, so an idle deck cannot drift")
+near(last("rec_level", 3)[3], 0, 1e-6, "...and rec exactly")
+calls = {}; Mdeck.settle_rec(d1)
+ok(last("pre_level", 3) == nil, "a settled deck sends nothing more")
 defaults()
 
 -- ---- the phase poll routes by VOICE --------------------------------------

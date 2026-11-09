@@ -518,6 +518,7 @@ function M.init_tape()
   sc.event_phase(function(v, pos)
     if v == 1 then
       C.tape_phase = pos / TAPE_LEN
+      D.settle_rec(TAPE)
       -- the written stretch, from the same 25ms events the layers use
       if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
         D.track_extent(TAPE, C.tape_phase)
@@ -695,10 +696,35 @@ function M.update_rec(d)
   -- recording on START, like the engine's record head)
   local on = get(d, "rec", 0) == 1 and not frozen
     and pget("stop_all", 0) == 0
+  -- softcut's REC FLAG STAYS ON. A voice moves its write index only while the
+  -- flag is on, so a head that played with it off writes at its last set
+  -- position, not where it reads: the first pass on a fresh deck landed outside
+  -- its own loop and the deck played silence. Heard on the device, 2026-11-06.
+  -- These two levels are the gate: rec 0 and pre 1 write nothing, bit for bit.
+  local rec = on and 1 or 0
+  local pre = on and get(d, "pre", d.pre_default or 1) or 1
+  -- A punch ramps over 5ms, so it does not print a step into the audio. The ramp
+  -- never lands exactly, and an idle deck must not drift, so the next phase
+  -- event (settle_rec) turns it off and lands the levels.
+  local ramp = d.rec_on ~= nil and d.rec_on ~= on
+  d.rec_on = on
+  d.rec_lv, d.pre_lv = rec, pre
+  d.rec_settling = ramp
   both(d, function(v)
-    sc.rec_level(v, on and 1 or 0)
-    sc.pre_level(v, frozen and 1 or get(d, "pre", d.pre_default or 1))
-    sc.rec(v, on and 1 or 0)
+    sc.recpre_slew_time(v, ramp and 0.005 or 0)
+    sc.rec(v, 1)
+    sc.rec_level(v, rec)
+    sc.pre_level(v, pre)
+  end)
+end
+
+function M.settle_rec(d)
+  if not d.rec_settling then return end
+  d.rec_settling = false
+  both(d, function(v)
+    sc.recpre_slew_time(v, 0)
+    sc.rec_level(v, d.rec_lv)
+    sc.pre_level(v, d.pre_lv)
   end)
 end
 
@@ -989,6 +1015,7 @@ function M.on_phase(voice, pos)
     local d = M.decks[i]
     if d.va == voice then
       d.phase = clamp((pos - d.from) / d.len, 0, 1)
+      M.settle_rec(d)
       if get(d, "rec", 0) == 1 then
         M.track_extent(d, d.phase)
         local a = C.cut_rec_amp()   -- what softcut records: the shared law
@@ -4747,16 +4774,23 @@ function M.transient_cuts(path, from01, to01, maxn, buf_secs, yield)
   local peak = 0
   for j = 1, k do if env[j] > peak then peak = env[j] end end
   local floorlv = peak * 0.18
-  local cuts = { from01 }          -- the first slice always starts at the edge
+  local hits = {}
   local last = -99
   for j = 2, k do
     local prev = env[j - 1]
     if env[j] > floorlv and env[j] > prev * 2.2 and (j - last) > 3 then
       last = j
-      local f = from + (j - 1) * win
-      cuts[#cuts + 1] = f / total
-      if #cuts >= maxn then break end
+      hits[#hits + 1] = (from + (j - 1) * win) / total
     end
+  end
+  -- the first slice always starts at the edge. More hits than pads: take them
+  -- evenly across the whole take. Stopping at the first few gave the last pad
+  -- most of the take (the device: 3.5s of a 6s drum loop).
+  local cuts = { from01 }
+  local room = maxn - 1
+  for c = 1, math.min(#hits, room) do
+    local at = #hits <= room and c or floor((c - 1) * #hits / room) + 1
+    cuts[#cuts + 1] = hits[at]
   end
   return cuts
 end
@@ -6838,23 +6872,19 @@ local function draw_hflags(x, lim, blink)
     end
   end
 end
--- path dots, top-right, current page a rounded 4x4 block. The wider current
--- dot nudges every dot after it 2px right so it gets matching breathing room.
--- The dots sit in the families the README names (the take, the decks, the
--- tone, the console, the performance pages): 3px apart inside a family and
--- 5px between families, so the row reads in groups (ux-feedback #9) and keeps
--- its width. The row is RIGHT-ANCHORED to end 2px clear of the screen edge
+-- path dots, top-right. Every page has a fixed slot on one straight row: all
+-- dots share rows y=4..5 and a 4px pitch, and no dot ever moves when the page
+-- changes. The current page is a brighter, wider bar centred on its own slot,
+-- so it stays on the row and clear of its neighbours. The row is RIGHT-ANCHORED
 -- whatever the page count (a fixed left origin cropped the last dot once the
 -- count reached twelve). Laid out once, in init.
-local FAMILY_END = { VOICE = true, LAYERS = true, REVERB = true, MIX = true }
+local DOT_PITCH = 4
 local DOT_OFF = {}
 local function layout_dots()
-  local off = 0
-  for i = 1, #PAGES do
-    DOT_OFF[i] = off
-    off = off + (FAMILY_END[PAGES[i]] and 5 or 3)
-  end
-  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 4)
+  for i = 1, #PAGES do DOT_OFF[i] = (i - 1) * DOT_PITCH end
+  -- the last dot ends 2px clear of the edge; its bar, 1px wider each way, ends
+  -- 1px clear, and at the first slot it stays clear of the header flags
+  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 2)
 end
 local function draw_header()
   local page, frame = C.page, C.frame
@@ -6895,22 +6925,15 @@ local function draw_header()
   HF.LF.on = C.lfo and C.lfo.active() or false
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
   for i = 1, #PAGES do
-    local dx = dx0 + DOT_OFF[i] + (i > page and 2 or 0)
+    local dx = dx0 + DOT_OFF[i]
     if i == page then
       screen.level(15)
-      screen.rect(dx, 3, 4, 4)
-      screen.fill()
-      screen.level(0)
-      screen.rect(dx, 3, 1, 1)
-      screen.rect(dx + 3, 3, 1, 1)
-      screen.rect(dx, 6, 1, 1)
-      screen.rect(dx + 3, 6, 1, 1)
-      screen.fill()
+      screen.rect(dx - 1, 4, 4, 2)
     else
       screen.level(3)
       screen.rect(dx, 4, 2, 2)
-      screen.fill()
     end
+    screen.fill()
   end
 end
 
