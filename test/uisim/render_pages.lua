@@ -1,29 +1,30 @@
 -- render_pages.lua — offscreen renderer for mangler's norns screen.
--- Stubs the norns Lua environment, loads the REAL mangler.lua, drives a
+-- Stubs the norns Lua environment, loads the REAL mangler2.lua, drives a
 -- believable performance scenario (a take, a tape loop, live FX), then
 -- exports every UI page as a PGM framebuffer (0..15 levels -> 0..255).
 --
--- usage: lua render_pages.lua <mangler.lua path> <outdir> <prefix> [variant]
+-- usage: lua render_pages.lua <mangler2.lua path> <outdir> <prefix> [variant]
 --   variant "empty": empty-buffer states (TAKE + VOICE with nothing recorded)
 --   variant "grain": VOICE in GRAIN mode across its param extremes (size/
 --                    density/spread/jitter/pan edges, mode OFF)
 --   variant "filter": FILTER page across its types and resonance extremes
 
-local MANGLER = arg[1] or "mangler.lua"
+local MANGLER = arg[1] or "mangler2.lua"
 local OUTDIR = arg[2] or "."
 local PREFIX = arg[3] or "shot"
 local VARIANT = arg[4]
 local EMPTY = VARIANT == "empty"
 local GRAINX = VARIANT == "grain"
 local FILTX = VARIANT == "filter"
+local TRACK2 = VARIANT == "track2"   -- mangler2: VOICE 2 and FILTER 2
 
 
 -- the offscreen norns lives in env.lua so more than one harness can use it.
 -- SCENARIO stays OUR local and env reads it through the getter — see the note
 -- at the top of env.lua for why that is not ceremony.
 local SCENARIO
-local REPO_DIR = (arg[0]:match("(.*)/tools/uisim/") or ".")
-local env = dofile(REPO_DIR .. "/tools/uisim/env.lua")
+local REPO_DIR = (arg[0]:match("(.*)/test/uisim/") or ".")
+local env = dofile(REPO_DIR .. "/test/uisim/env.lua")
 local _h = env.install{ dir = OUTDIR, scenario = function() return SCENARIO end }
 local export, run_ticks = _h.export, _h.run_ticks
 local push = _h.push
@@ -95,6 +96,10 @@ else
     local lo, hi = params:get("pos_start"), params:get("pos_end")
     if hi < lo then lo, hi = hi, lo end
     push("play_phase", lo + ((t * 0.013) % 1) * (hi - lo))
+    -- mangler2: track 2's head walks its own window
+    local l2, h2 = params:get("t2_pos_start"), params:get("t2_pos_end")
+    if h2 < l2 then l2, h2 = h2, l2 end
+    push("play_phase2", l2 + ((t * 0.017) % 1) * (h2 - l2))
     -- tape head via the softcut phase event (position in seconds, voice 1)
     if _h.has_phase() then
       local tl, th = params:get("loop_start"), params:get("loop_end")
@@ -145,7 +150,7 @@ local function goto_page(name)
   -- settled page, not the navigation chrome on top of it
   run_ticks(12)
 end
--- the script's own state table (a local of mangler.lua, reached through an
+-- the script's own state table (a local of mangler2.lua, reached through an
 -- upvalue of key()), for a state the params cannot set
 local function script_ctx()
   for i = 1, 255 do
@@ -194,6 +199,29 @@ elseif GRAINX then
     redraw()
     export(pfx("VOICE", "_" .. c[1]))
   end
+elseif TRACK2 then
+  -- mangler2: the pages on track 2. Track 1 stays in PLAY, so any grain or
+  -- spectral texture on VOICE 2 is track 2's own. The head reads play_phase2.
+  math.randomseed(1)
+  params:set("mode", 5)
+  params:set("t2_pos_start", 0.2); params:set("t2_pos_end", 0.5)
+  goto_page("VOICE")
+  key(3, 1); run_ticks(20); key(3, 0)        -- the hold: onto track 2
+  for m, label in ipairs({ "OFF", "GRAIN", "WARP", "PV", "PLAY" }) do
+    params:set("t2_mode", m)
+    run_ticks(30)
+    redraw()
+    export(pfx("VOICE", "_T2_" .. label))
+  end
+  goto_page("FILTER")
+  params:set("t2_filt_type", 2); params:set("t2_cutoff", 300); params:set("t2_resonance", 0.6)
+  run_ticks(5)
+  redraw()
+  export(pfx("FILTER", "_T2_HP"))
+  goto_page("TAKE")                          -- the "2" flag in the header
+  run_ticks(5)
+  redraw()
+  export(pfx("TAKE", "_T2_FLAG"))
 elseif FILTX then
   -- FILTER extremes: each type at a musical setting, plus the edges the
   -- curve math must survive (max resonance peak, fully open)

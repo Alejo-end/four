@@ -72,7 +72,7 @@
 -- the wav file reader). they share one `ctx` table and params are the single
 -- source of truth. full design: doc/spec.md.
 
-engine.name = "Mangler"
+engine.name = "Mangler2"
 
 -- bring-up diagnostics: load milestones in maiden. If "script file executed"
 -- appears without "init() called", the engine died in alloc — check the SC tab.
@@ -142,7 +142,8 @@ end
 local FINE_IDS = { pos_start = "win", pos_end = "win",
                    loop_start = "loop", loop_end = "loop",
                    lay1_start = "lay1", lay1_end = "lay1",
-                   lay2_start = "lay2", lay2_end = "lay2" }
+                   lay2_start = "lay2", lay2_end = "lay2",
+                   t2_pos_start = "t2_pos", t2_pos_end = "t2_pos" }
 
 -- interpolate between two values of one param in its controlspec's WARPED
 -- space (unmap, lerp, map): linear in the space the encoder moves in, so an
@@ -191,6 +192,7 @@ local ctx = {
   flash_until = 0,
   -- engine/system signals
   play_phase = 0,            -- engine poll: normalized playhead in the buffer
+  play_phase2 = 0,           -- the same for track 2 (mangler2)
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
@@ -258,19 +260,19 @@ function ctx.touch_input() ctx.last_input = ctx.frame end
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
--- Both are set by the ENGINE (lib/Engine_Mangler.sc allocates
+-- Both are set by the ENGINE (lib/Engine_Mangler2.sc allocates
 -- `s.sampleRate * bufSecs`, and norns runs its server at 48k) and lua cannot
 -- read either off the server — so they are mirrored ONCE here and shared
 -- through ctx. They used to be bare literals in several modules plus the .sc:
 -- miss one when the buffer length changes and PSET saves silently truncate the
 -- take, or every waveform, window bracket and pad slice draws against the
 -- wrong clock with no error anywhere.
-ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler.sc
+ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler2.sc
 -- How many bytes per sample `write_take` puts on disk. MUST match the format
 -- in that command (`int24`, so 3). The export works out how big the file
 -- should be from this and waits for it to get there, so a number that is too
 -- small calls the file finished while a third of it is still being written.
-ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Mangler.sc
+ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Mangler2.sc
 ctx.SERVER_SR = 48000    -- norns' scsynth sample rate
 local BUF_SECS, SERVER_SR = ctx.BUF_SECS, ctx.SERVER_SR
 Mwav.init(ctx)
@@ -602,13 +604,16 @@ end
 -- hand-written pair for exactly this and EROSION's HEAL/SCAR did not; keying
 -- the conflict on the PARAMS makes it automatic for every throw, present and
 -- future.
-local function throw(label, ids, apply)
+-- `key` (optional) names the snapshot when two throws share a word (OPEN on
+-- either track); it defaults to the label.
+local function throw(label, ids, apply, key)
+  key = key or label
   return {
     label = label,
-    lit = function() return throw_mem[label] ~= nil end,
+    lit = function() return throw_mem[key] ~= nil end,
     pon = function()
       for other, mem in pairs(throw_mem) do
-        if other ~= label then
+        if other ~= key then
           for k = 1, #ids do
             if mem[ids[k]] ~= nil then throw_restore(other); break end
           end
@@ -616,10 +621,10 @@ local function throw(label, ids, apply)
       end
       local mem = {}
       for k = 1, #ids do mem[ids[k]] = params:get(ids[k]) end
-      throw_mem[label] = mem
+      throw_mem[key] = mem
       apply()
     end,
-    poff = function() throw_restore(label) end,
+    poff = function() throw_restore(key) end,
   }
 end
 
@@ -681,6 +686,61 @@ local function snap_window()
   end
 end
 
+-- ---- the track switch (mangler2) ------------------------------------------
+-- VOICE and FILTER address one engine track at a time. `track_sel` picks it,
+-- and a HOLD of K3 on either page flips it (the tap keeps MODE / TYPE, as
+-- TAKE's K3 keeps SNAP under its UNDO hold). On track 2 the same knobs and
+-- keys reach the `t2_` params. What only track 1 has (the erosion) is out of
+-- reach there, and what both share (drive, dry/wet) stays the same param.
+local TRACK_PAGES = { VOICE = true, FILTER = true }
+local function track2() return math.floor(pget("track_sel", 1) + 0.5) == 2 end
+-- the selected track's id for a track 1 id: itself on track 1, or when
+-- track 2 has no such param
+-- (each "t2_" string is built once and cached: the redraw path reads this
+-- every frame and must not allocate)
+local T2ID = setmetatable({}, { __index = function(t, id)
+  local v = "t2_" .. id
+  t[id] = v
+  return v
+end })
+local function tid(id)
+  if id and track2() then
+    local t = T2ID[id]
+    if params.lookup[t] then return t end
+  end
+  return id
+end
+ctx.tid = tid
+local function switch_track()
+  params:set("track_sel", track2() and 1 or 2)
+  -- the proof it worked: the page name pops, now with its track
+  ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
+  print("mangler: VOICE and FILTER now on track " .. pget("track_sel", 1))
+end
+-- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
+-- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS). Track 2
+-- starts OFF, so its first tap lands on PLAY.
+local function cycle_mode(id)
+  local m = pget(id, 5)
+  params:set(id, m >= 5 and 2 or (m < 2 and 5 or m + 1))
+end
+local function cycle_type(id) params:set(id, (pget(id, 1) % 3) + 1) end
+local T2_KEYS = {
+  VOICE = {
+    k2 = pk("FRZ", "t2_pv_freeze"),
+    k3 = { label = "MODE", tap = function() cycle_mode("t2_mode") end,
+      hold = switch_track, hold_label = "TRK 1" },
+  },
+  FILTER = {
+    k2 = throw("OPEN", { "t2_cutoff", "t2_resonance" }, function()
+      params:set("t2_cutoff", filter_open_cutoff(pget("t2_filt_type", 1)))
+      params:set("t2_resonance", 0)
+    end, "OPEN2"),
+    k3 = { label = "TYPE", tap = function() cycle_type("t2_filt_type") end,
+      hold = switch_track, hold_label = "TRK 1" },
+  },
+}
+
 -- page key defs (+ each page's `erase`: what the K1+K3 arc wipes)
 local KEYS = {
   TAKE = {
@@ -693,13 +753,9 @@ local KEYS = {
   },
   VOICE = {
     k2 = pk("FRZ", "pv_freeze"),
-    -- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
-    -- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS)
-    k3 = { label = "MODE",
-      act = function()
-        local m = pget("mode", 5)
-        params:set("mode", m >= 5 and 2 or (m < 2 and 5 or m + 1))
-      end },
+    -- tap = MODE (cycle_mode), hold to the arc = the track switch
+    k3 = { label = "MODE", tap = function() cycle_mode("mode") end,
+      hold = switch_track, hold_label = "TRK 2" },
   },
   TAPE = {
     k2 = pk("REC", "tape_rec"),
@@ -722,10 +778,8 @@ local KEYS = {
       params:set("cutoff", filter_open_cutoff(pget("filt_type", 1)))
       params:set("resonance", 0)
     end),
-    k3 = { label = "TYPE",
-      act = function()
-        params:set("filt_type", (pget("filt_type", 1) % 3) + 1)
-      end },
+    k3 = { label = "TYPE", tap = function() cycle_type("filt_type") end,
+      hold = switch_track, hold_label = "TRK 2" },
   },
   DELAY = {
     -- INF pins the feedback near max (a dub hold); KILL cuts the echo send.
@@ -897,6 +951,9 @@ local function key_def(n)
     return n == 2 and ALT_STOP or ALT_DRY
   end
   local page = PAGES[ctx.page]
+  if TRACK_PAGES[page] and track2() then
+    return n == 2 and T2_KEYS[page].k2 or T2_KEYS[page].k3
+  end
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
     return VOICE_HEAL
@@ -971,15 +1028,16 @@ local function enc_param(n)
     end
   end
   if page == "VOICE" and not ctx.alt then
-    local f = VOICE_FACE[clamp(pget("mode", 5), 1, 5)]
-    return n == 2 and f[1] or f[2]
+    local f = VOICE_FACE[clamp(pget(tid("mode"), 5), 1, 5)]
+    return tid(n == 2 and f[1] or f[2])
   end
   -- VOICE's alt pair is mode-contextual too: in PLAY mode the face already IS
   -- scan/pitch, so the alt copy was redundant there — it now carries the
   -- EROSION controls, which only ever work in PLAY mode (the engine runs its
   -- erosion head in PLAY alone). every other mode keeps alt scan/pitch, so
   -- pitch stays reachable under a GRAIN or WARP face.
-  if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 then
+  -- (track 2 has no erosion: its alt pair stays scan/pitch, below)
+  if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 and not track2() then
     return n == 2 and "erode" or "wear"
   end
   local m = ENC_MAP[page]
@@ -987,14 +1045,14 @@ local function enc_param(n)
   -- explicit, NOT `alt and m[2] or m[1]`: a nil alt slot (MOTION/SCENE) must be
   -- a genuine no-op, not fall through to the base param and edit it while K1 is
   -- held (which could wipe the wrong MOTION lane and leak a value in the footer)
+  local id
   if n == 2 then
-    if ctx.alt then return m[2] end
-    return m[1]
+    id = ctx.alt and m[2] or m[1]
   elseif n == 3 then
-    if ctx.alt then return m[4] end
-    return m[3]
+    id = ctx.alt and m[4] or m[3]
   end
-  return nil
+  if id and TRACK_PAGES[page] then return tid(id) end
+  return id
 end
 
 -- compound encoder gesture: slide a lo/hi pair together, width preserved,
@@ -2606,6 +2664,47 @@ local function init_params()
   -- post-filter tanh saturation with makeup: louder AND dirtier up
   add_eng_control("drive", "drive", unit(0.0))
 
+  -- ---- track 2 (mangler2) ------------------------------------------------
+  -- a second engine drone on the same take: its own mode, window, pitch,
+  -- grain knobs, filter and level. Each id is track 1's with a `t2_` prefix,
+  -- with the same range, so a knob means the same thing on either track.
+  -- OFF by default: track 2 costs nothing until it is switched on.
+  params:add_group("grp_t2", "track 2", 27)
+  -- which track VOICE and FILTER address (K3 held on either page flips it)
+  params:add_number("track_sel", "track (voice, filter)", 1, 2, 1)
+  add_eng_option("t2_mode", "t2 mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 1)
+  add_eng_control("t2_level", "t2 level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+  add_eng_control("t2_pos_start", "t2 win start", fine_unit(0.0))
+  add_eng_control("t2_pos_end", "t2 win end", fine_unit(1.0))
+  add_eng_control("t2_scan", "t2 scan rate", controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
+  add_eng_control("t2_pitch", "t2 pitch", controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
+  add_eng_control("t2_pan", "t2 pan", controlspec.new(-1, 1, "lin", 0, 0.0, ""))
+  add_eng_control("t2_pos_jitter", "t2 jitter", unit(0.0))
+  add_eng_control("t2_size", "t2 size", controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
+  add_eng_control("t2_density", "t2 density", controlspec.new(1, 200, "exp", 0, 20, "hz"))
+  add_eng_control("t2_spread", "t2 spread", unit(0.5))
+  add_eng_control("t2_grain_jitter", "t2 grain jitter", unit(0.0))
+  add_eng_control("t2_grain_pitch_spread", "t2 pitch spread",
+    controlspec.new(0, 12, "lin", 0, 0.0, "st"))
+  add_eng_option("t2_grain_shape", "t2 grain shape", { "HANN", "WELCH", "PERC" }, 1)
+  add_eng_control("t2_clouds_pos", "t2 grain position", unit(0.5))
+  add_eng_control("t2_clouds_tex", "t2 grain texture", unit(0.5))
+  add_eng_control("t2_clouds_fb", "t2 grain feedback", unit(0.0))
+  add_eng_option("t2_clouds_mode", "t2 clouds mode",
+    { "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }, 1)
+  add_eng_control("t2_clouds_lofi", "t2 grain lofi", unit(0.0))
+  add_eng_control("t2_warp_window", "t2 warp window",
+    controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
+  params:add_number("t2_warp_overlaps", "t2 warp overlaps", 1, 8, 4)
+  params:set_action("t2_warp_overlaps", function(v)
+    if engine.t2_warp_overlaps then engine.t2_warp_overlaps(v) end
+  end)
+  add_eng_control("t2_warp_rand", "t2 warp rand", unit(0.0))
+  add_eng_binary("t2_pv_freeze", "t2 pv freeze")
+  add_eng_option("t2_filt_type", "t2 filter type", { "LP", "HP", "BP" }, 1)
+  add_eng_control("t2_cutoff", "t2 cutoff", controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
+  add_eng_control("t2_resonance", "t2 resonance", unit(0.0))
+
   params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 2, "exp", 0, 0.3, "s"))
@@ -2618,7 +2717,7 @@ local function init_params()
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback", unit(0.3), fb_curve)
   -- FX SEND response curve: the engine crossfades the wet with an equal-power
-  -- .sqrt (Engine_Mangler.sc), so a raw 3% knob already reads ~17% wet ("way too
+  -- .sqrt (Engine_Mangler2.sc), so a raw 3% knob already reads ~17% wet ("way too
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
   -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
@@ -2976,6 +3075,7 @@ function init()
     polls[#polls + 1] = p
   end
   watch("play_phase", function(v) ctx.play_phase = v end)
+  watch("play_phase2", function(v) ctx.play_phase2 = v end)
   watch("rec_phase", function(v) ctx.rec_phase = v end)
   watch("rec_amp", function(v) ctx.rec_amp = v end)
   watch("amp_in_l", function(v) ctx.amp_in[1] = v end)

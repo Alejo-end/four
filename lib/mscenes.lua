@@ -92,6 +92,12 @@ local TIMBRE_IDS = {
   "lay1_fade", "lay1_width",
   "lay2_level", "lay2_rate", "lay2_start", "lay2_end", "lay2_pre",
   "lay2_fade", "lay2_width",
+  -- track 2 (mangler2): the same knobs as track 1, so a scene keeps both
+  "t2_level", "t2_pos_start", "t2_pos_end", "t2_scan", "t2_pitch", "t2_pan",
+  "t2_pos_jitter", "t2_size", "t2_density", "t2_spread", "t2_grain_jitter",
+  "t2_grain_pitch_spread", "t2_clouds_pos", "t2_clouds_tex", "t2_clouds_fb",
+  "t2_clouds_lofi", "t2_warp_window", "t2_warp_overlaps", "t2_warp_rand",
+  "t2_cutoff", "t2_resonance",
   -- NB: seq_slice (the PADS edit cursor) is deliberately NOT captured — it's a
   -- UI selector like scene_slot / motion_lane, not sound; a scene shouldn't
   -- move your cursor, and a morph must never lerp it across slices.
@@ -114,6 +120,8 @@ local SWITCH_IDS = {
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's
   "vis_look",   -- the look the visuals show: a scene can bring its own
+  "t2_filt_type", "t2_clouds_mode", "t2_grain_shape", "t2_pv_freeze",
+  "t2_mode",   -- respawns track 2's voice
   "mode",   -- last of the last: this one respawns the voice
 }
 
@@ -157,6 +165,8 @@ local MORPH_EXCLUDE = {
   -- direction: also a hard event, not something to cross gradually. recall
   -- carries both; a morph leaves them (sweep to 1, then K2 RCL to land).
   mode = true, tape_reverse = true,
+  -- track 2's mode and hold, for the same reasons as track 1's
+  t2_mode = true, t2_pv_freeze = true,
   -- the window lock switching mid-sweep re-cuts the window in one frame
   win_beats = true,
   -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
@@ -191,7 +201,7 @@ append(SAFE_SNAPSHOT_IDS, SCENE_RECALL_IDS)
 -- sound.) this is a note to whoever adds the next param to the lists above.
 
 -- WHAT A SCENE DELIBERATELY LEAVES OUT — the other half of the recall list.
--- membership is TOTAL: tools/test_control.lua asserts every param in the
+-- membership is TOTAL: test/test_control.lua asserts every param in the
 -- paramset is in SCENE_RECALL_IDS or here, never neither and never both, so
 -- a NEW param cannot silently miss the decision (the defect that recurred:
 -- purity, FINE_IDS, RATE_IDS and these lists each missed a layers param).
@@ -213,6 +223,7 @@ local SCENE_EXCLUDE = {
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  "track_sel",   -- mangler2: which track VOICE and FILTER address
   -- config / keys
   "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
   -- the other machines' transports, and scene's own params (NEVER capture
@@ -376,7 +387,8 @@ end
 -- edge that widens the region FIRST, and every intermediate contains a real
 -- region instead of a bogus one. `start` key -> `end` key.
 local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
-                     lay1_start = "lay1_end", lay2_start = "lay2_end" }
+                     lay1_start = "lay1_end", lay2_start = "lay2_end",
+                     t2_pos_start = "t2_pos_end" }
 M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 
 -- A STORED window is clamped to the material before it is applied. Scenes
@@ -962,7 +974,7 @@ local function glide_tick()
   g.wrote = pget("scene_morph_amt", 0)
 end
 
--- one per redraw frame, from the existing 15fps clock in mangler.lua.
+-- one per redraw frame, from the existing 15fps clock in mangler2.lua.
 -- the target is simply the SELECTED slot — the same one K2 recalls and K3
 -- captures into. one selector, three jobs.
 function M.tick()
@@ -1080,7 +1092,7 @@ end
 -- persistence — rides along with the PSET
 -- ===========================================================================
 -- the scene bank + the safe snapshot save as a plain lua table next to the
--- pset, in the same data/ folder the tape audio uses. mangler.lua's
+-- pset, in the same data/ folder the tape audio uses. mangler2.lua's
 -- action_write/read/delete call BOTH modules (mtape does the audio, we do
 -- the state) — that hook is shared, never replaced.
 

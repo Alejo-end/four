@@ -5,9 +5,9 @@
 -- must not take the tape or the other layer with it. Those are exactly the
 -- failures that are silent until you have lost a loop.
 --
---   lua tools/test_deck.lua        # from the repo root
+--   lua test/test_deck.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- ---- a softcut that RECORDS what it was told, instead of making sound -------
@@ -45,7 +45,7 @@ local ctx = {
   pget = function(id, d) if P[id] ~= nil then return P[id] end return d end,
   clamp = function(x, lo, hi) return math.max(lo, math.min(hi, x)) end,
   amp_in = { 0.5, 0.5 }, amp_out = { 0.2, 0.2 },
-  -- the shared record-meter law from mangler.lua, over the amps above
+  -- the shared record-meter law from mangler2.lua, over the amps above
   cut_rec_amp = function()
     local cs = P.cut_source or 0
     return 0.5 * (1 - cs) + 0.2 * cs
@@ -54,7 +54,7 @@ local ctx = {
 }
 Mdeck.init(ctx)
 
--- the same layout mangler.lua builds: two decks after the tape's 0-60s
+-- the same layout mangler2.lua builds: two decks after the tape's 0-60s
 local d1 = Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 })
 local d2 = Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 })
 

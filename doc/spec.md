@@ -670,7 +670,7 @@ and with clock-quantized gestures.
 tables — the hot-path rule). Recording appends to lane arrays (amortized, user-driven, rare) — the
 only allocating path, and it is off the audio/redraw-critical loop.
 
-**Render suite.** Add MOTION shots (empty / armed / playing-with-lanes) to `tools/uisim`; eyeball
+**Render suite.** Add MOTION shots (empty / armed / playing-with-lanes) to `test/uisim`; eyeball
 before deploy (a redraw error is a silent black screen); rebuild `dist` and byte-verify the untouched
 shots.
 
@@ -1488,8 +1488,8 @@ rows in `pads_ws_key` (`:352-362`, keep slice-select y5 + voice y6), the step ro
 `body_PADS` step-row block (`:1226-1253`) + `sq`/`seq_play` firing refs (`:1188-1192, :1196`, keep the
 slice cells), the header running-triangle (`:1611-1616`); keep `slice` fmt (`:394-396`) + `SELECTOR_IDS`
 (`:458`) for the surviving selector. `lib/mscenes.lua` — remove `seq_euclid`/`seq_len`/`seq_slice`
-(`:86`) + `seq_div` (`:99`), keep the renamed selector id. `tools/amalgamate.lua:35` assert **9 → 8**.
-`tools/uisim/render_pages.lua` — remove the seq sets + `_EUCLID` shot (`:588, :596, :599-600`).
+(`:86`) + `seq_div` (`:99`), keep the renamed selector id. `test/amalgamate.lua:35` assert **9 → 8**.
+`test/uisim/render_pages.lua` — remove the seq sets + `_EUCLID` shot (`:588, :596, :599-600`).
 Docs: README / spec / redesign / this file's §28; regenerate `dist/` + `doc/ui/pads.png`. **Must
 stay:** all `ctx.pad_*` state + helpers (`pad_pos :534`, `pad_trigger :542`, `route_note :562`,
 `pads_all_off :571`, `pad_edit_sync :580`), the `pad_voice`/`pad_pitch` sound-lock editors, the
@@ -1539,9 +1539,9 @@ verify a fresh `rec` pass actually overwrites the buffer ("record over doesn't r
 #### Verification & gates
 
 - Static: `luac5.3 -p mangler.lua`; engine paren-balance if `.sc` touched.
-- Renders: `tools/uisim/render_pages.lua` — expect NEW `DELAY`/`REVERB` shots, changed `MOTION`/
+- Renders: `test/uisim/render_pages.lua` — expect NEW `DELAY`/`REVERB` shots, changed `MOTION`/
   `TAKE`/`PADS`; every other page differs ONLY by the 9→10 header-dot shift. Regenerate `doc/ui`.
-- Build: `tools/amalgamate.lua` (assert 9→8 after A6) → `dist/` byte-verify (source==dist).
+- Build: `test/amalgamate.lua` (assert 9→8 after A6) → `dist/` byte-verify (source==dist).
 - Batch A ships save + reload. **Batch B**: rsync `--delete` → SYSTEM > RESTART → confirm
   `Engine.register_commands; count: 63` (wrong count = a stray new command; fix before gating) →
   run the ear gate: STOP fully halts + START resumes cleanly (no click); erase clears audibly and a

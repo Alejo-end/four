@@ -5,15 +5,15 @@
 -- sample playing a semitone sharp. A rate error IS a pitch error, so these
 -- assert the VALUE at a wall-clock position, not just the frame count.
 --
---   lua tools/test_wav.lua        # from the repo root
+--   lua test/test_wav.lua        # from the repo root
 --
 -- It loads the real lib/mwav.lua and lib/mpages.lua (no copies) with a stub
 -- ctx and drives them over real files, with no norns and no hardware.
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
--- the real modules, initialised the way mangler.lua does it, minus the
+-- the real modules, initialised the way mangler2.lua does it, minus the
 -- screen. M answers for both: the file layer first, then the strips.
 local nop = function() end
 local W = dofile("lib/mwav.lua")
@@ -297,12 +297,12 @@ end
 
 -- ---- the pad slice model ---------------------------------------------------
 -- Which slice a pad plays, once a CHOP has found however many transients are
--- actually there. Lifted from mangler.lua so the real law is under test, not a
+-- actually there. Lifted from mangler2.lua so the real law is under test, not a
 -- copy of it.
 do
-  local msrc = io.open("mangler.lua"):read("a")
+  local msrc = io.open("mangler2.lua"):read("a")
   local fn = msrc:match("(local function pad_cut.-\nend)\n")
-  assert(fn, "could not lift pad_cut out of mangler.lua")
+  assert(fn, "could not lift pad_cut out of mangler2.lua")
   local fake = { pad_n = 8 }
   local pad_cut = load(fn .. "\nreturn pad_cut", "pc", "t",
     setmetatable({ ctx = fake }, { __index = _G }))()

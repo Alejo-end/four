@@ -2,7 +2,7 @@
 """Measure what mangler costs on a connected norns.
 
     export NORNS_CTL=<control socket>       # see norns.py
-    python3 tools/device/measure.py system states pages voices two_server patch soak
+    python3 test/device/measure.py system states pages voices two_server patch soak
 
 Each state settles, then reads over the same window: the main scsynth's average
 and peak CPU, xruns, screen frames per second, the system's idle share and the

@@ -71,7 +71,7 @@ end
 --
 -- The loop-pedal behaviour is a different matter. mdeck has a version of it
 -- (arm_loop / close_loop) and the tape has its own, written out by hand in
--- the tape_rec action in mangler.lua. That IS a duplicate, left in place on
+-- the tape_rec action in mangler2.lua. That IS a duplicate, left in place on
 -- purpose: the tape is one of the few parts of this instrument confirmed
 -- working on real hardware, and merging it would also mean keeping
 -- TAPE.phase up to date, which nothing does today. It waits for the same

@@ -1,7 +1,7 @@
 -- harness.lua — what every offscreen harness shares: the assertions, the page
 -- list exactly as the script declares it, and the summary that ends the run.
 --
---   local T = dofile("tools/harness.lua")
+--   local T = dofile("test/harness.lua")
 --   local ok, near = T.ok, T.near
 --   ...
 --   T.report("deck harness OK")
@@ -21,7 +21,7 @@ end
 -- (a hand-mirrored copy would drift and the renders would keep passing)
 function H.pages(path)
   local names = {}
-  local src = io.open(path or "mangler.lua"):read("a")
+  local src = io.open(path or "mangler2.lua"):read("a")
   for name in src:match("local PAGES = %{(.-)%}"):gmatch('"(%u+)"') do
     names[#names + 1] = name
   end

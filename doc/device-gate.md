@@ -14,7 +14,7 @@ Each check says what PASS looks like and, when it fails, **which change to
 suspect**. That pointer is the part worth having: with a month of batched work,
 "something sounds wrong" is not a useful bug report.
 
-`tools/device/gate.py` runs what a computer can judge, on a connected device. The
+`test/device/gate.py` runs what a computer can judge, on a connected device. The
 results from 2026-11-06 are in doc/measurements/2026-11-06/README.md. Those marked
 `measured` or `you` still need a person.
 
@@ -170,7 +170,7 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 | 6.9 | MOTION: record a sweep from a real **encoder** | It captures (polling, not call-interception) | `capture_poll` |
 | 6.10 | **MOTION overdub** | Arm again, move a *second* knob — **the first lane survives** | `last_val` readback |
 | 6.11 | MOTION with `motion_len` shortened | The **end** of the gesture still plays | `src_of` endpoints |
-| 6.12 | ◇ purity mark | Lights only at full wet on an unmangled take; dark at the 0.5 default, dark while the tape or a layer is audible, dark with pan off center | `purity()` — it is *supposed* to be rare now; tools/test_purity.lua walks every reason offscreen |
+| 6.12 | ◇ purity mark | Lights only at full wet on an unmangled take; dark at the 0.5 default, dark while the tape or a layer is audible, dark with pan off center | `purity()` — it is *supposed* to be rare now; test/test_purity.lua walks every reason offscreen |
 | 6.13 | Grid: hold a note pad, toggle note input off, release | **No stuck voice** | The press-only gate |
 | 6.14 | Grid: two-finger scene pads | One release doesn't kill the other's audition/peek | Per-pad ownership |
 | 6.15 | Launchpad colours | Semantic hues, no flicker | The reused SysEx buffer |
@@ -374,7 +374,7 @@ new command, `beat_repeat`. Do stage 0 again first: maiden must read
 
 ## Stage 18: the screen fixes (Lua only)
 
-No engine change. `tools/test_screen.lua` reads these off the offscreen
+No engine change. `test/test_screen.lua` reads these off the offscreen
 pixels. The device check is that the OLED shows the same, and that the
 frame rate holds with the GRAIN cloud at its densest.
 

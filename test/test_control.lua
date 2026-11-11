@@ -8,17 +8,17 @@
 --
 -- So this drives the REAL script through enc() and key() and asserts what
 -- reaches the params. It runs on the SAME offscreen norns as the render suite
--- (tools/uisim/env.lua), so the two can never disagree about what norns does;
+-- (test/uisim/env.lua), so the two can never disagree about what norns does;
 -- the screen is real and simply never read here, because drawing is the
 -- render suite's job.
 --
---   lua tools/test_control.lua        # from the repo root
+--   lua test/test_control.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- ---- the offscreen norns, shared with the render suite --------------------
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp" }
 
 -- the one thing the renderer does not need: a record of softcut calls, so an
@@ -42,11 +42,11 @@ include = function(m) return dofile(m .. ".lua") end
 local plist, lookup = params.list, params.lookup
 
 -- ---- load the instrument --------------------------------------------------
-dofile("mangler.lua")
+dofile("mangler2.lua")
 init()
 
 -- the script's own state table, read through an upvalue of key() (ctx is a
--- local of mangler.lua): what the params cannot show, the tests read here
+-- local of mangler2.lua): what the params cannot show, the tests read here
 local CTX
 for i = 1, 255 do
   local n, v = debug.getupvalue(key, i)
@@ -96,7 +96,7 @@ params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, 
 -- has a name). The layer targets shipped knowing only the first, which is
 -- invisible until you turn that knob on the device.
 do
-  local src = io.open("mangler.lua"):read("a")
+  local src = io.open("mangler2.lua"):read("a")
   local pages = io.open("lib/mpages.lua"):read("a")
   local encmap = src:match("local ENC_MAP = %{(.-)\n%}")
   ok(encmap ~= nil, "ENC_MAP is readable")
@@ -267,7 +267,7 @@ do
   -- SCENE's RCL only lights BETWEEN press and release, and PADS' pad is a gate
   -- — so it is asserted where it lives instead. The guard has to outlive the
   -- branch that needed it.
-  local src2 = io.open("mangler.lua"):read("a")
+  local src2 = io.open("mangler2.lua"):read("a")
   local keysrc = src2:match("local KEYS = %{.-\n%}")
   local both = 0
   for body in (keysrc or ""):gmatch("%b{}") do
@@ -549,7 +549,7 @@ do
 
   -- every *_start/*_end pair is a REGION: it must move widening-edge-first
   -- in the scenes (EDGE_PAIRS) and take the span-scaled fine step (FINE_IDS)
-  local src = io.open("mangler.lua"):read("a")
+  local src = io.open("mangler2.lua"):read("a")
   local fine = src:match("local FINE_IDS = %{(.-)%}") or ""
   local no_edge, no_fine = {}, {}
   for _, id in ipairs(MANGLER_IDS) do
@@ -610,11 +610,11 @@ do
   -- the beat-locked modulators run on (the paramset here is mangler's alone)
   local SYSTEM_IDS = { clock_tempo = true }
   local checked, dead = 0, {}
-  local sets = { "presets/mangler.pmap.example",
-    "presets/layers/layers.pmap.example" }
+  local sets = { "data/mangler.pmap.example",
+    "data/layers/layers.pmap.example" }
   for n = 1, 10 do
-    sets[#sets + 1] = string.format("presets/mangler-%02d.pset", n)
-    sets[#sets + 1] = string.format("presets/layers/layers-%02d.pset", n)
+    sets[#sets + 1] = string.format("data/mangler-%02d.pset", n)
+    sets[#sets + 1] = string.format("data/layers/layers-%02d.pset", n)
   end
   for _, path in ipairs(sets) do
     local ids = ids_in(path)
@@ -634,7 +634,7 @@ do
   -- the scene SIDECARS name params by id too, and a dead id there is even
   -- quieter: apply() skips unknown ids without a word. Scan every ["id"]= key.
   local sdead, schecked = {}, 0
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
@@ -658,7 +658,7 @@ do
   -- recalled over a short sample is the "long silence" trap (the runtime clamp
   -- guards live captures; the SHIPPED banks simply leave the window alone)
   local wnd = {}
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
@@ -700,7 +700,7 @@ end
 -- plus the playParams/revParams dictionaries plus the explicit addCommands)
 -- is parseable from the .sc, so the contract is checkable offscreen.
 do
-  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
   local cmds = {}
   for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do
     cmds[id] = true
@@ -712,7 +712,16 @@ do
     end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do cmds[id] = true end
+  -- mangler2's track 2 commands (built in a loop, so not literal)
+  local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
+  for id in (sc:match("playParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
+    if not skip[id] then cmds["t2_" .. id] = true end
+  end
+  for id in (sc:match("stripParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
+    cmds[id] = true
+  end
   ok(cmds.mode and cmds.rev_mix and cmds.erode, "the .sc command set parsed")
+  ok(cmds.t2_mode and cmds.t2_size and cmds.t2_cutoff, "...with track 2's commands")
   local used = {}
   local function collect(path)
     local s = io.open(path):read("a")
@@ -722,7 +731,7 @@ do
       if id ~= "name" then used[id] = true end
     end
   end
-  collect("mangler.lua")
+  collect("mangler2.lua")
   for _, f in ipairs({ "mtape", "mdeck", "mpages", "mwav", "mscenes", "mmotion",
                        "mgrid", "minput" }) do
     collect("lib/" .. f .. ".lua")
@@ -1170,13 +1179,13 @@ end
 -- and the tighten all read a part-written take. Nothing fails loudly, so the
 -- contract is asserted instead.
 do
-  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
   local fmt = sc:match('bufL%.write%(stem %+%+ "_L%.wav", "wav", "(%w+)"')
   ok(fmt ~= nil, "write_take's sample format is readable from the .sc")
   local bits = fmt and tonumber(fmt:match("(%d+)$"))
-  local lua = io.open("mangler.lua"):read("a")
+  local lua = io.open("mangler2.lua"):read("a")
   local declared = tonumber(lua:match("ctx%.TAKE_BYTES = (%d+)"))
-  ok(declared ~= nil, "...and mangler.lua declares the matching byte width")
+  ok(declared ~= nil, "...and mangler2.lua declares the matching byte width")
   ok(bits and declared and declared == bits // 8,
     string.format("write_take's %s matches ctx.TAKE_BYTES = %s",
       tostring(fmt), tostring(declared)))
@@ -1626,7 +1635,7 @@ do
   -- (a) the deploy FINGERPRINT: the command count maiden prints after a
   -- RESTART. Section 11 checks every Lua id lands on a command; this checks
   -- the total, so a stray new command fails here instead of on the device.
-  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
   local cmds, n = {}, 0
   local function add(id) if not cmds[id] then cmds[id] = true; n = n + 1 end end
   for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do add(id) end
@@ -1635,7 +1644,16 @@ do
         :gmatch("\\([%w_]+)%s*%->") do add(id) end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
-  ok(n == 66, "the engine command count is 66, the expected fingerprint (got " .. n .. ")")
+  -- mangler2's track 2: a `t2_` command per playParam but the five it does
+  -- not own, and the strip's four (stripParams)
+  local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
+  for id in (sc:match("playParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
+    if not skip[id] then add("t2_" .. id) end
+  end
+  for id in (sc:match("stripParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
+    add(id)
+  end
+  ok(n == 92, "the engine command count is 92, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -1647,10 +1665,10 @@ do
   -- pset line fires its action on load, so a 1 on print_take or chaos_throw
   -- goes off the moment the preset opens
   local bad = {}
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for k = 1, 10 do
       local path = string.format("%s%s-%02d.pset", dir,
-        dir == "presets/" and "mangler" or "layers", k)
+        dir == "data/" and "mangler" or "layers", k)
       local f = io.open(path)
       if f then
         for line in f:lines() do
@@ -1675,26 +1693,26 @@ do
   ok(#bad == 0, "every shipped preset value is in range, momentaries at 0 ("
     .. table.concat(bad, ",") .. ")")
 
-  -- (d) dist/mangler_single.lua is GENERATED; a stale one ships old code.
+  -- (d) dist/mangler2_single.lua is GENERATED; a stale one ships old code.
   -- The generators run on the interpreter running this harness (LUA53 under
-  -- tools/check.lua), not on whatever `lua` is on PATH.
+  -- test/check.lua), not on whatever `lua` is on PATH.
   local LUA = (arg and arg[-1]) or "lua"
   local tmp = os.tmpname()
-  local okb = os.execute(LUA .. " tools/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
+  local okb = os.execute(LUA .. " test/amalgamate.lua mangler2.lua " .. tmp .. " >/dev/null")
   local built = io.open(tmp) and io.open(tmp):read("a")
-  local shipped = io.open("dist/mangler_single.lua") and io.open("dist/mangler_single.lua"):read("a")
+  local shipped = io.open("dist/mangler2_single.lua") and io.open("dist/mangler2_single.lua"):read("a")
   os.remove(tmp)
   ok(okb and built and built == shipped,
-    "dist/mangler_single.lua is a fresh build (run: lua tools/amalgamate.lua)")
+    "dist/mangler2_single.lua is a fresh build (run: lua test/amalgamate.lua)")
 
   -- (e) doc/controls.md is GENERATED from the script's own tables too
   local ctmp = os.tmpname()
-  local okc = os.execute(LUA .. " tools/controls.lua " .. ctmp .. " >/dev/null")
+  local okc = os.execute(LUA .. " test/controls.lua " .. ctmp .. " >/dev/null")
   local cmap = io.open(ctmp) and io.open(ctmp):read("a")
   local cdoc = io.open("doc/controls.md") and io.open("doc/controls.md"):read("a")
   os.remove(ctmp)
   ok(okc and cmap and cmap == cdoc,
-    "doc/controls.md matches the code (run: lua tools/controls.lua)")
+    "doc/controls.md matches the code (run: lua test/controls.lua)")
 end
 
 
@@ -2051,9 +2069,9 @@ end
 -- source; (b) pins the Lua pass counter to the new head, which starts at the
 -- window's start each time erosion engages.
 do
-  local sc = io.open("lib/Engine_Mangler.sc"):read("a")
+  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
   local writers, defs = {}, 0
-  for name, body in sc:gmatch("SynthDef%(\\mangler_([%w_]+),(.-)}%)%.add;") do
+  for name, body in sc:gmatch("SynthDef%(\\mangler2_([%w_]+),(.-)}%)%.add;") do
     defs = defs + 1
     if body:find("BufWr", 1, true) then writers[#writers + 1] = name end
   end
@@ -3149,6 +3167,89 @@ do
   ok(CTX.enc_target("@mo_sel") == "mod_focus", "the footer reads the selection as the focus")
   params:set("mod_focus", 1); params:set("lfo1_period", 1)
   ok(CTX.enc_param(3) == "motion_depth", "with the lanes selected, E3 is the lanes' depth again")
+end
+
+-- ============================================================================
+-- mangler2 · the track switch: K3 held on VOICE or FILTER flips the track
+-- ============================================================================
+do
+  local Mp
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(redraw, i)
+    if n == nil then break end
+    if n == "Mpages" then Mp = v end
+  end
+  CTX.alt = false
+  params:set("track_sel", 1)
+  params:set("mode", 2)                      -- track 1 GRAIN
+  params:set("t2_mode", 1)
+  T.goto_page("VOICE")
+  -- a tap is still MODE, on track 1
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(params:get("mode") == 3 and params:get("t2_mode") == 1,
+    "VOICE K3 tapped cycles track 1's mode, not track 2's")
+  -- a hold to the arc switches the track and keeps the mode
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(params:get("track_sel") == 2 and params:get("mode") == 3,
+    "VOICE K3 held to the arc switches to track 2 and changes no mode")
+  ok(Mp and Mp.page_title() == "VOICE 2", "...and the title reads VOICE 2")
+  -- on track 2 the tap cycles track 2's mode: OFF lands on PLAY
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(params:get("t2_mode") == 5 and params:get("mode") == 3,
+    "on track 2 the tap cycles track 2's mode (OFF to PLAY)")
+  -- PLAY face: E2/E3 are track 2's scan and pitch, and K1 keeps them (no erosion)
+  ok(CTX.enc_param(2) == "t2_scan" and CTX.enc_param(3) == "t2_pitch",
+    "track 2's PLAY face is its own scan and pitch")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == "t2_scan" and CTX.enc_param(3) == "t2_pitch",
+    "...and K1 keeps them: track 2 has no erosion")
+  CTX.alt = false
+  params:set("t2_mode", 2)                   -- GRAIN
+  local s0, ts0 = params:get("size"), params:get("t2_size")
+  enc(2, 5)
+  ok(params:get("t2_size") > ts0 and params:get("size") == s0,
+    "track 2's GRAIN face moves t2_size, not track 1's size")
+  ok(CTX.key_def(2).label == "FRZ", "K2 on track 2 is its FRZ")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_pv_freeze") == 1 and params:get("pv_freeze") == 0,
+    "...and it holds track 2's freeze only")
+  key(2, 1); key(2, 0)
+  -- FILTER follows the same track
+  T.goto_page("FILTER")
+  ok(Mp.page_title() == "FILTER 2", "FILTER on track 2 reads FILTER 2")
+  ok(CTX.enc_param(2) == "t2_cutoff" and CTX.enc_param(3) == "t2_resonance",
+    "FILTER's E2/E3 are track 2's cutoff and resonance")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == "drive" and CTX.enc_param(3) == "dry_wet",
+    "...drive and dry/wet are shared, the same params on both tracks")
+  CTX.alt = false
+  local ft0 = params:get("filt_type")
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(params:get("t2_filt_type") == 2 and params:get("filt_type") == ft0,
+    "FILTER K3 tapped on track 2 cycles track 2's type")
+  params:set("t2_filt_type", 1)              -- LP: open means 20 kHz
+  params:set("cutoff", 2000); params:set("t2_cutoff", 500)
+  key(2, 1); key(2, 0)                       -- OPEN latched on track 2
+  ok(params:get("t2_cutoff") == 20000 and params:get("cutoff") == 2000,
+    "OPEN on track 2 opens track 2's filter only")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_cutoff") == 500, "...and a second tap puts it back")
+  -- hold again: back on track 1
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(params:get("track_sel") == 1 and Mp.page_title() == "FILTER",
+    "FILTER K3 held switches back to track 1")
+  ok(CTX.enc_param(2) == "cutoff", "...and the knobs are track 1's again")
+  -- the flag: track 2 sounding lights T2 in the header on any page
+  local HF2
+  for _, f in ipairs(Mp.HFLAGS) do if f.id == "T2" then HF2 = f end end
+  T.goto_page("TAKE")
+  redraw()
+  ok(HF2 and HF2.on, "track 2 playing lights the T2 flag")
+  params:set("t2_mode", 1)
+  redraw()
+  ok(not HF2.on, "...and OFF puts it out")
+  params:set("t2_filt_type", 1); params:set("t2_cutoff", 20000)
+  params:set("mode", 5)
 end
 
 T.report("control harness OK")

@@ -2,24 +2,24 @@
 --
 -- The render suite proves every page draws, and a person looks at the shots.
 -- Some promises are easy to miss by eye in 70 shots, so this harness reads
--- the screen the script really drew (tools/uisim/env.lua) and asserts them:
+-- the screen the script really drew (test/uisim/env.lua) and asserts them:
 --   the header: a lit flag never drops off, however long the title and
 --               however many flags are lit (the beat repeat's RP did)
 --   the footer: the erase arc clears the encoder words (it sat on "MOVE")
 --   VOICE:      the GRAIN cloud follows its knobs (it drew the same dots
 --               whatever size, density, spread, pan or jitter said)
 --
---   lua tools/test_screen.lua        # from the repo root
+--   lua test/test_screen.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok = T.ok
 
 local SCENARIO
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)
-dofile("mangler.lua")
+dofile("mangler2.lua")
 init()
 
 local CTX, Mp
@@ -82,6 +82,7 @@ do
     "tape_freeze", "beat_repeat", "step_run" }
   for _, id in ipairs(ON) do params:set(id, 1) end
   params:set("lfo1_target", 2); params:set("lfo1_depth", 0.5)
+  params:set("t2_mode", 5)   -- mangler2: track 2 sounding lights T2
   _h.run_ticks(1)
   while CTX.frame % 4 >= 2 do _h.run_ticks(1) end
   redraw()
@@ -105,6 +106,7 @@ do
   T.goto_page("TAKE")
   for _, id in ipairs(ON) do if id ~= "beat_repeat" then params:set(id, 0) end end
   params:set("lfo1_depth", 0)
+  params:set("t2_mode", 1)
   params:set("repeat_div", 4)
   redraw()
   ok(HF.RP.ch == "RP16" and HF.RP.full, "RP names the division it repeats (" .. HF.RP.ch .. ")")

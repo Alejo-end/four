@@ -68,10 +68,17 @@ local MOTION_IDS = {
   -- (and tells us it did, via M.account, so the sweep never punches forty
   -- lanes of its own). appended, so existing lane order is unchanged.
   "scene_morph_amt",
+  -- track 2 (mangler2), appended so the lane order above is unchanged.
+  -- The same choices as track 1: grain_shape and warp_overlaps stay out.
+  "t2_level", "t2_pos_start", "t2_pos_end", "t2_scan", "t2_pitch", "t2_pan",
+  "t2_pos_jitter", "t2_size", "t2_density", "t2_spread", "t2_grain_jitter",
+  "t2_grain_pitch_spread", "t2_clouds_pos", "t2_clouds_tex", "t2_clouds_fb",
+  "t2_clouds_lofi", "t2_clouds_mode", "t2_mode", "t2_warp_window",
+  "t2_warp_rand", "t2_pv_freeze", "t2_cutoff", "t2_resonance", "t2_filt_type",
 }
 
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
--- membership is TOTAL: tools/test_control.lua asserts every param sits in
+-- membership is TOTAL: test/test_control.lua asserts every param sits in
 -- MOTION_IDS or here, never neither and never both, so a new param cannot
 -- silently miss the decision. each line names its reason once.
 local MOTION_EXCLUDE = {
@@ -89,11 +96,13 @@ local MOTION_EXCLUDE = {
   "lay1_snap", "lay2_snap",   -- a gesture that MOVES the loop, like pad_chop
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade", "lay1_fade", "lay2_fade",
+  "t2_grain_shape", "t2_warp_overlaps",
   -- routing + structure (see the header: pad_input re-points the keyboard,
   -- the voices cap re-caps the allocator)
   "pad_input", "voices",
   -- UI cursors + the per-pad lock editors
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  "track_sel",   -- mangler2: which track VOICE and FILTER address
   -- a clock rule, set and left (a replayed one would jump the window)
   "win_beats",
   -- config / keys

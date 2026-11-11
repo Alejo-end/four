@@ -154,7 +154,7 @@ class Norns:
         # look only at text after this load: an older "init() done" in the same
         # connection would hand back the previous instance's ctx
         start = len(self.transcript("lua"))
-        out = self.lua('norns.script.load("code/mangler/mangler.lua")', timeout=5)
+        out = self.lua('norns.script.load("code/mangler2/mangler2.lua")', timeout=5)
         end = time.time() + wait
         while time.time() < end:
             if "init() done" in self.transcript("lua")[start:]:
@@ -212,7 +212,7 @@ class Norns:
         """Save the OLED as a PNG. Returns the path on the device."""
         self.lua(f'screen.export_screenshot("{name}")')
         time.sleep(0.4)
-        return f"/home/we/dust/data/mangler/{name}.png"
+        return f"/home/we/dust/data/mangler2/{name}.png"
 
     # ---- ssh and JACK ------------------------------------------------------
     def ssh(self, cmd, timeout=60, stdin=None):

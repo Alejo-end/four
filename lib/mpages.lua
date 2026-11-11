@@ -243,6 +243,16 @@ local SHORT = {
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
   pv_freeze = "PVFZ", tape_freeze = "TFRZ", tape_reverse = "TREV",
   clouds_mode = "CMOD",
+  -- track 2 (mangler2): the track 1 word after "T2"
+  t2_level = "T2 LV", t2_pos_start = "T2 ST", t2_pos_end = "T2 EN",
+  t2_scan = "T2 SPD", t2_pitch = "T2 PTCH", t2_pan = "T2 PAN",
+  t2_pos_jitter = "T2 JIT", t2_size = "T2 SIZE", t2_density = "T2 DENS",
+  t2_spread = "T2 SPRD", t2_grain_jitter = "T2 GJIT",
+  t2_grain_pitch_spread = "T2 DTUN", t2_clouds_pos = "T2 POS",
+  t2_clouds_tex = "T2 TEX", t2_clouds_fb = "T2 FB", t2_clouds_lofi = "T2 LOFI",
+  t2_clouds_mode = "T2 CMOD", t2_mode = "T2 MODE", t2_warp_window = "T2 WIN",
+  t2_warp_rand = "T2 RAND", t2_pv_freeze = "T2 PVFZ", t2_cutoff = "T2 CUT",
+  t2_resonance = "T2 RES", t2_filt_type = "T2 FILT",
 }
 
 -- the FULL word for a footer encoder label, shown at REST (you read "START",
@@ -292,19 +302,27 @@ local function value_norm(id, v) return pnorm(lookup_p(id), v) end
 -- a plain 0..1 linear control reads as a percentage; everything else falls
 -- back to the norns string.
 local RATE_IDS = { scan = true, tape_rate = true,
-                   lay1_rate = true, lay2_rate = true }
+                   lay1_rate = true, lay2_rate = true,
+                   t2_scan = true, t2_pitch = true }
+local T2_KEY = {}
+for k in pairs(SHORT) do
+  local b = k:match("^t2_(.+)$")
+  if b then T2_KEY[k] = b end
+end
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return "--" end
-  if id == "seq_slice" then
+  -- a track 2 id reads in its track 1 format (mangler2)
+  local key = T2_KEY[id] or id
+  if key == "seq_slice" then
     return tostring(floor(params:get(id) + 0.5) + 1)   -- slices read 1..8
   end
-  if id == "scene_slot" then
+  if key == "scene_slot" then
     local v = floor(params:get(id) + 0.5)
     return v < 1 and "<" or tostring(v)                -- 0 = the ◄ cell
   end
-  if id == "motion_lane" then
+  if key == "motion_lane" then
     -- show the SELECTED lane's param name (or "-" when none picked)
     local ids = C.motion and C.motion.lane_ids
     local n = ids and #ids or 0
@@ -312,52 +330,52 @@ local function fmt_value(id)
     if n == 0 or sel == 0 then return "-" end
     return SHORT[ids[sel]] or string.upper(ids[sel])
   end
-  if id == "pos_start" or id == "pos_end" then
+  if key == "pos_start" or key == "pos_end" then
     -- the window's edges in seconds of the buffer, not a percentage
     return string.format("%.2fS", params:get(id) * (C.BUF_SECS or 60))
   end
-  if id == "mod_focus" then
+  if key == "mod_focus" then
     return params:get(id) > 2.5 and "LFO2" or "LFO1"
   end
-  if id == "lfo1_target" or id == "lfo2_target" then
+  if key == "lfo1_target" or id == "lfo2_target" then
     local t = C.lfo and C.lfo.TARGETS[floor(params:get(id) + 0.5) - 1]
     return t and (SHORT[t] or string.upper(t)) or "OFF"
   end
-  if id == "lfo1_depth" or id == "lfo2_depth" then
+  if key == "lfo1_depth" or id == "lfo2_depth" then
     return string.format("%+d%%", floor(params:get(id) * 100 + 0.5))
   end
-  if id == "motion_len" then
+  if key == "motion_len" then
     local v = params:get(id)
     return v < 0.05 and "AUTO" or string.format("%.1fS", v)
   end
-  if id == "cut_source" then                    -- tape source: DRY .. WET blend
+  if key == "cut_source" then                    -- tape source: DRY .. WET blend
     local v = params:get(id)
     if v < 0.02 then return "DRY" end
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
   end
-  if id == "cutoff" then
+  if key == "cutoff" then
     local v = params:get(id)
     return v >= 1000 and string.format("%.1fKHZ", v / 1000)
       or string.format("%dHZ", floor(v + 0.5))
-  elseif id == "rev_decay" then
+  elseif key == "rev_decay" then
     return string.format("%.1fS", params:get(id))
-  elseif id == "rev_size" then
+  elseif key == "rev_size" then
     return string.format("%.1f", params:get(id))
-  elseif id == "pitch" then
+  elseif key == "pitch" then
     local st = floor(12 * log(params:get(id)) / log(2) + 0.5)
     return (st >= 0 and "+" or "") .. st .. "ST"
   elseif RATE_IDS[id] then
     return string.format("%+.2fX", params:get(id))
-  elseif id == "delay_time" then
+  elseif key == "delay_time" then
     local v = params:get(id)
     return v >= 0.9995 and string.format("%.2fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "size" then
+  elseif key == "size" then
     local v = params:get(id)
     return v >= 1 and string.format("%.1fS", v)
       or string.format("%dMS", floor(v * 1000 + 0.5))
-  elseif id == "density" then
+  elseif key == "density" then
     return tostring(floor(params:get(id) + 0.5))
   end
   local p = params:lookup_param(id)
@@ -431,8 +449,14 @@ end
 -- edge: a full word that would cross it drops to the abbreviation, so the
 -- row never overlaps.
 -- hoisted out of flabel_r so the draw path allocates no per-frame closures
+local T2_BASE = {}
+for k in pairs(SHORT) do
+  local b = k:match("^t2_(.+)$")
+  if b then T2_BASE[k] = b end
+end
 local function label_for(id, full)
   if not id then return "--" end
+  id = T2_BASE[id] or id
   if full then return FULL[id] or SHORT[id] or string.upper(id) end
   return SHORT[id] or "--"
 end
@@ -532,7 +556,7 @@ end
 -- FILTER: log-frequency axis 20Hz..20kHz over 128 columns, rail columns at
 -- 100Hz/1k/10k (labeled), the 0dB row, and a reusable response buffer (the
 -- curve approximates the engine's DFM1 build, see body_FILTER; the resonance
--- law mirrors Engine_Mangler.sc, keep them in sync)
+-- law mirrors Engine_Mangler2.sc, keep them in sync)
 local FILT_FREQ, FILT_Y = {}, {}
 for x = 0, 127 do
   FILT_FREQ[x + 1] = 20 * (1000 ^ (x / 127))
@@ -724,7 +748,7 @@ end
 -- referenced from there, and a later local would silently read as a global.
 local eros_gen, eros_acc, eros_live = 0, 0, false
 -- the one rule for "the erosion head is engaged": erode up, in PLAY. The
--- strip repaint (mangler.lua's take_writing) asks the same question.
+-- strip repaint (mangler2.lua's take_writing) asks the same question.
 function M.eroding()
   return pget("erode", 0) > 0 and pget("mode", 5) == 5
 end
@@ -751,6 +775,23 @@ function M.erosion_tick()
 end
 function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 
+-- mangler2: VOICE and FILTER draw the track they address (C.tid picks the
+-- id). tp reads the selected track's value of a track 1 id; the read head
+-- and the window follow the track too.
+local function on_t2() return C.tid ~= nil and C.tid("mode") ~= "mode" end
+local function tp(id, d) return pget(C.tid and C.tid(id) or id, d) end
+local function track_phase()
+  if on_t2() then return C.play_phase2 or 0 end
+  return C.play_phase
+end
+local function track_window()
+  if not on_t2() then return window_bounds() end
+  local a, b = pget("t2_pos_start", 0), pget("t2_pos_end", 1)
+  local lo, hi = min(a, b), max(a, b)
+  return lo, hi, max(hi - lo, 0.001)
+end
+M.on_t2 = on_t2
+
 -- GRAIN: the cloud the knobs make. Each grain is a short tick: DENSITY sets
 -- how many (3 to 40), SIZE how long each one is and how long it lives, and
 -- grain JITTER how much the lengths differ. The x axis is the buffer, as the
@@ -763,18 +804,18 @@ function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 -- so the orbit keeps its own sequence and a shot repeats.
 local GR_MAX, GR_MID, GR_HALF = 40, 34, 11
 local function grain_cloud(frame, scan)
-  local sn = value_norm("size", pget("size", 0.1))
-  local dn = value_norm("density", pget("density", 20))
-  local spread = clamp(pget("spread", 0.5), 0, 1)
-  local pan = clamp(pget("pan", 0), -1, 1)
-  local pj = clamp(pget("pos_jitter", 0), 0, 1)
-  local gj = clamp(pget("grain_jitter", 0), 0, 1)
-  local lo, hi = window_bounds()
+  local sn = value_norm("size", tp("size", 0.1))
+  local dn = value_norm("density", tp("density", 20))
+  local spread = clamp(tp("spread", 0.5), 0, 1)
+  local pan = clamp(tp("pan", 0), -1, 1)
+  local pj = clamp(tp("pos_jitter", 0), 0, 1)
+  local gj = clamp(tp("grain_jitter", 0), 0, 1)
+  local lo, hi = track_window()
   local n = 3 + floor(dn * (GR_MAX - 3) + 0.5)
   local life = 2 + floor(sn * 14 + 0.5)
   local reach = 3 + pj * (hi - lo) * 127
-  local cx = clamp(C.play_phase, 0, 1) * 127
-  local held = pget("freeze", 0) == 1 or pget("pv_freeze", 0) == 1
+  local cx = clamp(track_phase(), 0, 1) * 127
+  local held = pget("freeze", 0) == 1 or tp("pv_freeze", 0) == 1
   local drift = held and 0 or scan * 0.6
   for k = 1, n do
     local t = frame + floor(k * life / n)     -- the births are staggered
@@ -791,8 +832,8 @@ local function grain_cloud(frame, scan)
 end
 
 local function body_VOICE(frame)
-  local mode = pget("mode", 5)
-  local held_pv = pget("pv_freeze", 0) == 1
+  local mode = tp("mode", 5)
+  local held_pv = tp("pv_freeze", 0) == 1
   -- the mode rail: the active word inverted; OFF dims the whole rail
   local x = 4
   for _, m in ipairs(VOICE_RAIL) do
@@ -815,13 +856,14 @@ local function body_VOICE(frame)
   end
   -- the texture IS the mode, drawn from the playing motion (drifts with
   -- scan, stands still frozen, lies flat when the voice is freed/silent)
-  local scan = pget("scan", 1)
+  local scan = tp("scan", 1)
   local rate = max(abs(scan), 0.05)
   local ph = (held_pv and mode == 4) and 0 or frame * 0.8 * scan
   -- silent = nothing recorded, OR the engine deck is choked (STOP, or MIX
   -- thrown fully to tape): the engine halts the read head then, so the
   -- texture lies flat and the playhead goes, as everywhere else
   local silent = not C.wave_any or (C.mix_gains()) <= 0.001
+    or (on_t2() and pget("t2_level", 1) <= 0.001)
   if mode == 1 or silent then
     screen.level(1)
     screen.move(0, 33) screen.line(128, 33)
@@ -831,7 +873,7 @@ local function body_VOICE(frame)
   elseif mode == 2 then        -- GRAIN: the cloud (grain_cloud)
     grain_cloud(frame, scan)
   elseif mode == 3 then        -- WARP: an overlapped window ghosts behind
-    local off = 9 + sin(frame * 0.9) * 6 * pget("warp_rand", 0)
+    local off = 9 + sin(frame * 0.9) * 6 * tp("warp_rand", 0)
     screen.level(2)
     for gx = 0, 127 do
       screen.rect(gx, voice_wy(gx + off, ph, rate), 1, 1)
@@ -854,7 +896,7 @@ local function body_VOICE(frame)
     -- controls are this page's alt pair). two passes so every pixel fills at
     -- its own level: the base wave dims as erosion deepens, then the fuzz
     -- flecks eat into it. dormant at erode 0 — the wave is untouched.
-    local e = clamp(pget("erode", 0), 0, 1)
+    local e = on_t2() and 0 or clamp(pget("erode", 0), 0, 1)   -- track 1 only
     screen.level(9 - floor(e * 5))
     for gx = 0, 127 do
       if e <= 0 or hash(gx, frame % 8, 3) >= e * 0.7 then
@@ -885,7 +927,7 @@ local function body_VOICE(frame)
     end
   end
   -- window bar + the playhead (nothing moves that can't be heard)
-  local lo, hi = window_bounds()
+  local lo, hi = track_window()
   screen.level(2)
   screen.move(0, 48) screen.line(128, 48)
   screen.stroke()
@@ -894,7 +936,7 @@ local function body_VOICE(frame)
   screen.stroke()
   if mode ~= 1 and not silent then
     screen.level(15)
-    local phx = clamp(C.play_phase, 0, 1) * 127
+    local phx = clamp(track_phase(), 0, 1) * 127
     screen.move(phx, 24) screen.line(phx, 50)
     screen.stroke()
   end
@@ -1069,9 +1111,9 @@ end
 --     drive = grit on the line, not a number)
 -- ============================================================================
 local function body_FILTER(frame)
-  local cut = pget("cutoff", 20000)
-  local ft = pget("filt_type", 1)
-  local res = pget("resonance", 0)
+  local cut = tp("cutoff", 20000)
+  local ft = tp("filt_type", 1)
+  local res = tp("resonance", 0)
   local drv = pget("drive", 0)
   screen.level(2)
   for i = 1, 3 do
@@ -1144,7 +1186,7 @@ local function body_FILTER(frame)
   screen.level(15)
   screen.rect(nx - 1, FILT_Y[nx + 1] - 1, 3, 3)
   screen.fill()
-  chip(params.lookup["filt_type"] and params:string("filt_type") or "?", 2, 12)
+  chip(params:string(C.tid and C.tid("filt_type") or "filt_type"), 2, 12)
 end
 
 -- ============================================================================
@@ -1883,6 +1925,9 @@ local function purity()
   if not C.wave_any then return false end
   if pget("stop_all", 0) == 1 then return false end
   if pget("mode", 5) ~= 5 then return false end             -- PLAY only
+  -- track 2 is a second engine source: switched on and audible, the output
+  -- is not the take alone
+  if pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001 then return false end
   if abs(pget("pitch", 1) - 1) > 0.001 then return false end
   if abs(pget("scan", 1) - 1) > 0.001 then return false end
   -- pan reaches the PLAY voice's Balance2: off-center output is not the
@@ -1944,6 +1989,9 @@ local HFLAGS = {
   { ch = "M", write = true }, { ch = "L", write = true },
   { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
   { ch = "SQ", lvl = 7 }, { ch = "LF", lvl = 7 },
+  -- mangler2: track 2 is sounding ("T2", not "2": after a title a bare
+  -- digit read as part of the page name)
+  { ch = "T2", lvl = 9 },
 }
 M.HFLAGS = HFLAGS
 local HF = {}
@@ -2014,9 +2062,19 @@ local function layout_dots()
   -- 1px clear, and at the first slot it stays clear of the header flags
   M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 2)
 end
+-- the page's name, with its track on VOICE and FILTER while track 2 is
+-- selected (mangler2). Fixed strings: the redraw path allocates nothing.
+local TITLE2 = { VOICE = "VOICE 2", FILTER = "FILTER 2" }
+local function page_title()
+  local name = PAGES[C.page]
+  if TITLE2[name] and on_t2() then return TITLE2[name] end
+  return name
+end
+M.page_title = page_title
+
 local function draw_header()
   local page, frame = C.page, C.frame
-  local title = PAGES[page]
+  local title = page_title()
   local x
   if pget("stop_all", 0) == 1 then
     screen.level(15)
@@ -2051,6 +2109,7 @@ local function draw_header()
   HF.RP.ch, HF.RP.w = RP_CH[rd], RP_W[rd]
   HF.SQ.on = pget("step_run", 0) == 1
   HF.LF.on = C.lfo and C.lfo.active() or false
+  HF.T2.on = pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001
   draw_hflags(x, dx0 - 2, (frame % 4) < 2)
   for i = 1, #PAGES do
     local dx = dx0 + DOT_OFF[i]
@@ -2076,7 +2135,7 @@ local orig_level, dim_level
 -- legible over any body; transient chrome, gone by itself.
 local function draw_page_flash()
   if not (C.page_flash and C.frame < C.page_flash) then return end
-  local name = PAGES[C.page]
+  local name = page_title()
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 

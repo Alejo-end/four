@@ -4,10 +4,10 @@
 -- audio, clock, softcut, midi and the polls. Nothing here knows what it is used
 -- FOR: render_pages.lua draws pictures with it; other harnesses drive it.
 --
---   local env = dofile("tools/uisim/env.lua")
+--   local env = dofile("test/uisim/env.lua")
 --   local SCENARIO
 --   local h = env.install{ dir = "/tmp/shots", scenario = function() return SCENARIO end }
---   dofile("mangler.lua")
+--   dofile("mangler2.lua")
 --   SCENARIO = function(tick) ... end     -- runs once per frame
 --
 -- WHY THE SCENARIO ARRIVES AS A GETTER, which looks like ceremony: it used to be

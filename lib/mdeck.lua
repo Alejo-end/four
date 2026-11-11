@@ -12,7 +12,7 @@
 -- The tape (lib/mtape.lua) borrows these mechanics through a keymapped
 -- descriptor: rate, rec gating, loop bounds, the seam, clear and jump are
 -- this module's. Its level law, pset files, phase events and its own
--- loop-pedal law stay in mtape and mangler.lua (see the note there).
+-- loop-pedal law stay in mtape and mangler2.lua (see the note there).
 
 local sc = require "softcut"
 
@@ -85,7 +85,7 @@ local function both(d, fn) fn(d.va); fn(d.vb) end
 -- MUTE, not STOP, because that is what it does.
 function M.update_level(d)
   -- the master fold is computed here rather than read from C.mix_gains ON
-  -- PURPOSE: this module stays drivable standalone (tools/test_deck.lua stubs
+  -- PURPOSE: this module stays drivable standalone (test/test_deck.lua stubs
   -- a bare ctx), and the two-factor fold is the whole overlap
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local lv = get(d, "level", 0.8) * out * (get(d, "play", 1) == 1 and 1 or 0)

@@ -208,7 +208,7 @@ function M.init(ctx)
   pget, FPS = ctx.pget, ctx.FPS
 end
 
--- the params, added by mangler.lua's init_params after every target exists
+-- the params, added by mangler2.lua's init_params after every target exists
 -- (an option's names are the targets' own names)
 function M.add_params(add_group)
   local names = { "OFF" }

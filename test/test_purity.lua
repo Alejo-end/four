@@ -11,17 +11,17 @@
 -- the day it is born — the classification checks in test_control force the
 -- decision for params; this is the same forcing for the mark.
 --
---   lua tools/test_purity.lua        # from the repo root
+--   lua test/test_purity.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 local SCENARIO
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)
-dofile("mangler.lua")
+dofile("mangler2.lua")
 init()
 params:add_control("input_level", "in", controlspec.new(0, 1, "lin", 0, 0.8, ""))
 params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, ""))
@@ -56,6 +56,7 @@ local PURE = {
   mix = 0,           -- the tape holds audio: thrown fully away in the base
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
   stop_all = 0,
+  t2_mode = 1,       -- track 2 OFF (mangler2)
   step_run = 0,      -- the pad sequencer
   lfo1_depth = 0,    -- a modulator aimed at wear (below), at rest
 }
@@ -135,6 +136,7 @@ local MOVES = {
   { "resample writing the buffer", "resample", 0.3 },
   { "regen writing the buffer", "regen", 0.3 },
   { "erosion writing the buffer", "erode", 0.3 },
+  { "track 2 playing (mangler2)", "t2_mode", 5 },
   { "a freeze hold", "freeze", 1 },
   { "a pv freeze hold", "pv_freeze", 1 },
   { "live input mixed in (dry_wet)", "dry_wet", 0.5 },

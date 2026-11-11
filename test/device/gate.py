@@ -2,7 +2,7 @@
 """Run doc/device-gate.md on a connected norns and record each result.
 
     export NORNS_CTL=<control socket>       # see norns.py
-    python3 tools/device/gate.py 1 2 3      # run these stages, in order
+    python3 test/device/gate.py 1 2 3      # run these stages, in order
 
 A result is one of:
   pass      measured on the device, and the measurement decides the check
@@ -186,7 +186,7 @@ def set_mode(name):
 # ---- stage 0 ----------------------------------------------------------------
 def stage0():
     def c1():
-        out = n.ssh("find ~/dust/code -name 'Engine_Mangler.sc'").split()
+        out = n.ssh("find ~/dust/code -name 'Engine_Mangler2.sc'").split()
         return verdict(len(out) == 1, out)
 
     check("0.1", c1)
@@ -292,7 +292,7 @@ def stage2():
         time.sleep(4)
         n.helpers()
         loaded = num(n.ctx("c.take_len"))
-        secs = n.ssh(f"soxi -D ~/dust/data/mangler/take-{PSET}_L.wav").strip()
+        secs = n.ssh(f"soxi -D ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
         ok = loaded is not None and full and loaded >= full - 0.002 and float(secs) > 9
         return verdict(ok, f"take_len {full:.4f} before the punch, {after:.4f} after, {loaded:.4f} loaded; the file holds {secs}s")
 
@@ -405,7 +405,7 @@ def stage3():
         n.set("delay_mix", 0)
         n.lua(f'params:write({PSET}, "gate")')
         time.sleep(3)
-        had = n.ssh(f"ls ~/dust/data/mangler/take-{PSET}_L.wav 2>/dev/null").strip()
+        had = n.ssh(f"ls ~/dust/data/mangler2/take-{PSET}_L.wav 2>/dev/null").strip()
         n.goto("TAKE")
         n.key(1, 1)
         time.sleep(0.05)
@@ -416,7 +416,7 @@ def stage3():
         time.sleep(0.5)
         n.lua(f'params:write({PSET}, "gate")')
         time.sleep(3)
-        gone = n.ssh(f"ls ~/dust/data/mangler/take-{PSET}_L.wav 2>/dev/null").strip()
+        gone = n.ssh(f"ls ~/dust/data/mangler2/take-{PSET}_L.wav 2>/dev/null").strip()
         n.lua(f"params:read({PSET})")
         time.sleep(3)
         n.helpers()
@@ -1137,8 +1137,8 @@ def stage6():
     for cid, fn in (("6.1", c61), ("6.2", c62), ("6.3", c63), ("6.4", c64), ("6.5", c65), ("6.6", c66),
                     ("6.7", c67), ("6.8", c68), ("6.9", c69), ("6.10", c610)):
         check(cid, fn)
-    you("6.11", why="tools/test_control covers the lane ends offscreen. Needs a person to judge the gesture")
-    you("6.12", why="tools/test_purity covers every reason offscreen. Look at the mark on the OLED")
+    you("6.11", why="test/test_control covers the lane ends offscreen. Needs a person to judge the gesture")
+    you("6.12", why="test/test_purity covers every reason offscreen. Look at the mark on the OLED")
     grid = grid_state()
     you("6.13", "6.14", "6.15", why=f"needs a physical grid; connected: {grid}")
 
@@ -1248,8 +1248,8 @@ def stage7():
 
     def c74():
         n.load_script()
-        had = n.ssh("ls ~/dust/data/mangler/take-1_L.wav 2>/dev/null").strip()
-        named = n.ssh("grep -c sample_file ~/dust/data/mangler/mangler-02.pset; grep sample_file ~/dust/data/mangler/mangler-02.pset").strip()
+        had = n.ssh("ls ~/dust/data/mangler2/take-1_L.wav 2>/dev/null").strip()
+        named = n.ssh("grep -c sample_file ~/dust/data/mangler2/mangler2-02.pset; grep sample_file ~/dust/data/mangler2/mangler2-02.pset").strip()
         n.lua("params:read(2)")
         wait_save()
         n.helpers()
@@ -1450,7 +1450,7 @@ def stage9():
         record_layer(1, 3)
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        files = n.ssh(f"ls ~/dust/data/mangler | grep -E 'lay[12]-{PSET}' | tr '\\n' ' '").strip()
+        files = n.ssh(f"ls ~/dust/data/mangler2 | grep -E 'lay[12]-{PSET}' | tr '\\n' ' '").strip()
         a = level("9.6_before", 2, DECKS_OUT)
         n.load_script()
         n.lua(f"params:read({PSET})")
@@ -1864,7 +1864,7 @@ def stage11():
         before = num(n.ctx("c.take_len"))
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        bits = n.ssh(f"soxi -b ~/dust/data/mangler/take-{PSET}_L.wav").strip()
+        bits = n.ssh(f"soxi -b ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
         erase_page("TAKE")
         n.lua(f"params:read({PSET})")
         wait_save()
@@ -1946,7 +1946,7 @@ def stage12():
         snapped = (n.get("pos_end") - n.get("pos_start")) * 60
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        size = n.ssh(f"soxi -D ~/dust/data/mangler/take-{PSET}_L.wav").strip()
+        size = n.ssh(f"soxi -D ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
         return verdict(whole > 59 and 3.8 < snapped < 5 and float(size) < 6, f"first tap {whole:.2f}s, second tap back on the take {snapped:.2f}s; the PSET file holds {size}s")
 
     def c123():
@@ -2031,7 +2031,7 @@ def stage12():
     for cid, fn in (("12.1", c121), ("12.2", c122), ("12.3", c123), ("12.5", c125), ("12.6", c126), ("12.7", c127),
                     ("12.9", c129), ("12.10", c1210), ("12.14", c1214)):
         check(cid, fn)
-    you("12.4", "12.11", "12.12", "12.13", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("12.4", "12.11", "12.12", "12.13", why="test/test_control covers the logic offscreen. Try these by hand")
     you("12.8", why="needs a physical grid")
 
 
@@ -2105,7 +2105,7 @@ def stage13():
         record_layer(1, 4)
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        secs = n.ssh(f"soxi -D ~/dust/data/mangler/lay1-{PSET}.wav").strip()
+        secs = n.ssh(f"soxi -D ~/dust/data/mangler2/lay1-{PSET}.wav").strip()
         n.load_script()
         n.lua(f"params:read({PSET})")
         wait_save()
@@ -2115,7 +2115,7 @@ def stage13():
 
     for cid, fn in (("13.1", c131), ("13.2", c132), ("13.4", c134), ("13.5", c135)):
         check(cid, fn)
-    you("13.3", "13.6", "13.10", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("13.3", "13.6", "13.10", why="test/test_control covers the logic offscreen. Try these by hand")
     you("13.7", "13.8", "13.9", why="needs a Launchpad Mini MK3 or a grid")
 
 
@@ -2239,7 +2239,7 @@ def stage15():
     for cid, fn in (("15.1", c151), ("15.2", c152), ("15.8", c158)):
         check(cid, fn)
     you("15.3", why="needs a Launchpad")
-    you("15.4", "15.5", "15.6", "15.7", "15.9", "15.10", "15.11", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("15.4", "15.5", "15.6", "15.7", "15.9", "15.10", "15.11", why="test/test_control covers the logic offscreen. Try these by hand")
 
 
 # ---- stage 16 ----------------------------------------------------------------
@@ -2623,13 +2623,13 @@ def stage18():
         time.sleep(0.25)
         shot("18_" + page)
     you("18.1", "18.2", "18.3", "18.5", "18.6", "18.7", "18.8", "18.9", "18.10", "18.13", "18.14", "18.15", "18.16",
-        why="tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
+        why="test/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
 
 
 def cleanup():
     n.signal_quit()
-    n.ssh(f"rm -f ~/dust/data/mangler/mangler-{PSET}.pset ~/dust/data/mangler/*-{PSET}.lua "
-          f"~/dust/data/mangler/*-{PSET}*.wav ~/dust/data/mangler/mg_*.png")
+    n.ssh(f"rm -f ~/dust/data/mangler2/mangler2-{PSET}.pset ~/dust/data/mangler2/*-{PSET}.lua "
+          f"~/dust/data/mangler2/*-{PSET}*.wav ~/dust/data/mangler2/mg_*.png")
 
 
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,

@@ -3581,6 +3581,38 @@ Tests: 2 assertions in test_deck. All checks pass on Lua 5.3. On the device 2026
 compiles at `count: 66`, every def builds, modes cycle with no leftover synths, and CPU sits
 near 19%. Nobody has listened: each fix still needs an ear.
 
+mangler2, first change: **a second engine track (ENGINE and Lua, the count is 92, a new
+script)**. mangler2 is mangler forked into its own script (`mangler2.lua`, class
+`Engine_Mangler2`, SynthDefs `\mangler2_*`) so the S-4 tracks idea can be tested beside
+mangler without touching it. Engine: a second drone slot (`setMode2`, the same release law)
+on the same take, writing its own bus; a strip synth (`\mangler2_strip`) gives it io's
+filter (two DFM1s, the 20ms type crossfade) and a level; io adds it after its own filter, so
+drive, delay and reverb are shared. Track 2 shares level, rec and freeze with the take, so
+STOP halts it too, and it has no erosion head. Commands: `t2_` plus 21 drone args, the
+strip's four and `t2_mode`: 26 new, count 92. Lua: the "track 2" group of 26 params
+(PARAMS and MIDI only, no page yet), classified like track 1 in scenes, morph and motion,
+with SHORT words, the fine step, RATE_IDS and purity. Default OFF, so it costs nothing
+until switched on. Tests: the count and the id checks know track 2; one purity row.
+
+mangler2, second change: **fewer scripts in SELECT (folders only, no code change)**. norns lists every
+`.lua` under dust/code except in folders named lib, data, crow, test or docs. `tools/` is
+now `test/` and `presets/` is now `data/`, so the harnesses, the uisim and the scene and pad
+files no longer show as scripts. Every path in the scripts, tests and docs moved with them;
+the change log and the 2026-11-06 measurements keep their old paths as history. The
+rebuilt presets are byte-identical. All checks pass on Lua 5.3.
+
+mangler2, third change: **the track switch (Lua, and one engine poll; the count stays 92,
+needs a RESTART)**. VOICE and FILTER address one engine track at a time. K3 held to the arc
+on either page flips the track (the tap keeps MODE and TYPE, as TAKE's K3 keeps SNAP under
+UNDO); `track_sel` is the param, a UI cursor kept out of scenes and motion. On track 2 the
+title reads VOICE 2 or FILTER 2, every knob and key reaches the `t2_` twin (`ctx.tid`), and
+the page draws track 2's mode, texture, window and head (new poll `play_phase2`). Track 2 has
+no erosion, so VOICE in PLAY keeps scan and pitch on K1 and FRZ on K2; drive and dry/wet are
+shared. OPEN on track 2 is its own throw (`throw` takes a snapshot key). A header flag T2
+lights while track 2 sounds. The footer words and values of a `t2_` id read as track 1's.
+Tests: 26 assertions in test_control's last section, the T2 flag in test_screen, and a
+`track2` render variant in the check (81 shots).
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

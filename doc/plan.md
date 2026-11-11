@@ -133,7 +133,7 @@ no engine change and are tested offscreen:
 - Deck and tape PSET saves stop at the end of their material.
 - After regen or erosion stops, the take strip repaints.
 - doc/controls.md is generated from the code.
-- `tools/check.lua` runs every offline check. With a Lua 5.3 build set up, it
+- `test/check.lua` runs every offline check. With a Lua 5.3 build set up, it
   runs them on the norns version.
 
 Erosion as a spawn/free synth is also built (the 80th change). It went ahead
@@ -150,7 +150,7 @@ Stage 16 of doc/device-gate.md checks them on the device.
 
 The engine items below wait for Phase 1, one at a time, each with its own
 RESTART and listening test. A new command moves the count from 65, so the
-command count in CLAUDE.md, tools/test_control.lua and the deploy ritual move
+command count in CLAUDE.md, test/test_control.lua and the deploy ritual move
 with it.
 
 | Feature | Why | Design | Cost |
@@ -172,7 +172,7 @@ These are not code questions. Each one needs a yes or no.
 
 1. **Delete `CLAUDE_PLAN.md`?** It is the original S0 plan and nothing
    references it. Keeping it in git history loses nothing.
-2. **Delete `presets/layers/`?** It holds ten byte-identical copies of the
+2. **Delete `data/layers/`?** It holds ten byte-identical copies of the
    presets for the old `layers` branch build. If no device runs `layers.lua`
    any more, it doubles every preset change.
 3. **Rename one of the two SNAPs?** TAKE K3 SNAP fits the window to the take.
@@ -188,9 +188,9 @@ Every change follows the same loop. CLAUDE.md has the details and the rules.
 3. Render the four variants before and after, and compare the PGM files byte
    for byte. Only the screens you meant to change can differ. Compare renders
    made by the same Lua version.
-4. Rebuild the single file with `lua tools/amalgamate.lua`. If a page's knobs
-   or keys changed, also rebuild the control map with `lua tools/controls.lua`.
-5. Run `lua tools/check.lua` with `LUA53` set to a Lua 5.3 build. It runs the
+4. Rebuild the single file with `lua test/amalgamate.lua`. If a page's knobs
+   or keys changed, also rebuild the control map with `lua test/controls.lua`.
+5. Run `lua test/check.lua` with `LUA53` set to a Lua 5.3 build. It runs the
    syntax check, the five test scripts and the source-against-build renders on
    the version norns runs.
 6. Add an entry to doc/changelog.md, and a row to doc/device-gate.md for
