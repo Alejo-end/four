@@ -606,6 +606,9 @@ do
     f:close()
     return out
   end
+  -- the one system param a preset sets on purpose: the clock the sequencer and
+  -- the beat-locked modulators run on (the paramset here is mangler's alone)
+  local SYSTEM_IDS = { clock_tempo = true }
   local checked, dead = 0, {}
   local sets = { "presets/mangler.pmap.example",
     "presets/layers/layers.pmap.example" }
@@ -618,7 +621,9 @@ do
     if ids then
       checked = checked + 1
       for _, id in ipairs(ids) do
-        if not lookup[id] then dead[#dead + 1] = path:match("[^/]+$") .. ":" .. id end
+        if not lookup[id] and not SYSTEM_IDS[id] then
+          dead[#dead + 1] = path:match("[^/]+$") .. ":" .. id
+        end
       end
     end
   end
@@ -2865,6 +2870,119 @@ do
   params:set("scene_morph_amt", 0); _h.run_ticks(2)
   params:set("out_midi", 0)
   midi.connect = real_connect
+end
+
+-- 30a · the grid's visuals pads (main workspace, row 6: x6 back, x7 next, x8 flash)
+do
+  local g = _h.grid
+  T.goto_page("TAKE")
+  params:set("vis_look", 1)
+  g.key(7, 6, 1); g.key(7, 6, 0)
+  ok(params:get("vis_look") == 2, "grid x7 on row 6 steps the visuals look forward")
+  g.key(6, 6, 1); g.key(6, 6, 0); g.key(6, 6, 1); g.key(6, 6, 0)
+  ok(params:get("vis_look") == #CTX.osc.LOOKS, "grid x6 steps back and wraps to the last look")
+  g.key(8, 6, 1)
+  ok(params:get("vis_flash") == 1, "grid x8 on row 6 holds the visuals flash")
+  g.key(8, 6, 0)
+  ok(params:get("vis_flash") == 0, "releasing x8 ends the flash")
+  params:set("vis_look", 1)
+end
+
+-- ============================================================================
+-- 30b · the visuals link (OSC)
+-- ============================================================================
+-- The state goes out as one message per field, only on a change, and all of it
+-- again on a new address, a switch-on and every two seconds. Nothing is
+-- written to the instrument, and every field it names must still exist.
+do
+  local Mosc = CTX.osc
+  params:set("orbit_on", 0); params:set("motion_play", 0)
+  local sent = osc.sent
+  local function drain() for i = #sent, 1, -1 do sent[i] = nil end end
+  local function find(path)
+    for i = #sent, 1, -1 do if sent[i].path == path then return sent[i] end end
+  end
+  drain()
+  params:set("osc_on", 0); _h.run_ticks(3)
+  ok(#sent == 0, "OSC off sends nothing")
+  params:set("osc_host", "10.0.0.7"); params:set("osc_port", 9001)
+  params:set("osc_on", 1); _h.run_ticks(1)
+  ok(#sent >= #Mosc.FIELDS, "switching on sends every field once")
+  ok(sent[1] and sent[1].host == "10.0.0.7" and sent[1].port == 9001,
+    "...to the host and port in the params")
+  drain(); _h.run_ticks(2)
+  -- MIDI for the picture: a note, a CC (not repeated), a program change, the transport
+  drain()
+  Mosc.midi_in({ type = "note_on", ch = 3, note = 60, vel = 100 }, 1)
+  local n = find("/mangler/ev/note")
+  ok(n and n.v == 3 and n.a2 == 60 and n.a3 == 100, "a MIDI note goes out as /mangler/ev/note ch note vel")
+  Mosc.midi_in({ type = "cc", ch = 1, cc = 74, val = 20 }, 1)
+  ok(find("/mangler/ev/cc") ~= nil, "a CC goes out as /mangler/ev/cc")
+  drain()
+  Mosc.midi_in({ type = "cc", ch = 1, cc = 74, val = 20 }, 1)
+  ok(find("/mangler/ev/cc") == nil, "...and the same CC value is not sent again")
+  Mosc.midi_in({ type = "program_change", ch = 1, val = 17 }, 1)
+  ok(find("/mangler/ev/pc") and find("/mangler/ev/pc").a2 == 17, "a program change goes out as /mangler/ev/pc")
+  Mosc.midi_in({ type = "stop" }, 1)
+  ok(find("/mangler/ev/run") and find("/mangler/ev/run").v == 0, "STOP goes out as /mangler/ev/run 0")
+  Mosc.midi_in({ type = "clock" }, 1)
+  ok(find("/mangler/ev/clock") == nil, "the MIDI clock is never forwarded")
+  _h.run_ticks(1); drain()
+  for i = 1, 60 do Mosc.midi_in({ type = "note_on", ch = 1, note = i, vel = 90 }, 1) end
+  ok(#sent <= 24, "no more than 24 events leave in one frame")
+  params:set("vis_midi", 0); _h.run_ticks(1); drain()
+  Mosc.midi_in({ type = "note_on", ch = 1, note = 61, vel = 90 }, 1)
+  ok(#sent == 0, "midi to visuals off sends no event")
+  params:set("vis_midi", 1)
+  drain(); _h.run_ticks(2)
+  local param_msgs = 0
+  for _, m in ipairs(sent) do
+    local live = m.path:find("/in_") or m.path:find("/out_") or m.path:find("/env")
+      or m.path:find("/lfo") or m.path:find("/play") or m.path:find("/rec_phase")
+      or m.path:find("/beat")
+    if not live then param_msgs = param_msgs + 1 end
+  end
+  ok(param_msgs == 0, "a still instrument sends no param field again (got " .. param_msgs .. ")")
+  params:set("cutoff", 20000); _h.run_ticks(1); drain()
+  params:set("cutoff", 200); _h.run_ticks(1)
+  local m = find("/mangler/cutoff")
+  ok(m and m.v > 0 and m.v < 1, "a moved knob sends its field, normalised 0..1 (got " .. tostring(m and m.v) .. ")")
+  params:set("cutoff", 20000); _h.run_ticks(1)
+  m = find("/mangler/cutoff")
+  near(m and m.v or -1, 1, 1e-6, "...and the top of the knob is 1")
+  drain()
+  params:set("mode", params:get("mode") == 2 and 3 or 2); _h.run_ticks(1)
+  m = find("/mangler/mode")
+  ok(m and m.v == params:get("mode"), "an option goes out as its number")
+  drain()
+  params:set("osc_port", 9002); _h.run_ticks(1)
+  ok(#sent >= #Mosc.FIELDS and sent[1].port == 9002, "a new port resends every field to it")
+  drain()
+  _h.run_ticks(CTX.FPS * 2)
+  ok(find("/mangler/size") ~= nil, "every two seconds the whole state goes out again")
+  -- a send that fails is counted, never raised
+  local real_send = osc.send
+  osc.send = function() error("no route") end
+  params:set("size", 0.2); params:set("size", 0.7)
+  local okr = pcall(_h.run_ticks, 2)
+  ok(okr and Mosc.errors > 0, "a failing send is counted and the frame goes on")
+  osc.send = real_send
+  -- every field names a real param
+  for _, f in ipairs(Mosc.FIELDS) do
+    ok(f.read or params.lookup[f.id], "OSC field " .. f.key .. " names a real param (" .. tostring(f.id) .. ")")
+  end
+  -- the bridge's own list of fields is the same list
+  local fh = io.open("visuals/fields.json")
+  if fh then
+    local txt = fh:read("a"); fh:close()
+    for _, f in ipairs(Mosc.FIELDS) do
+      ok(txt:find('"' .. f.key .. '"', 1, true), "visuals/fields.json lists " .. f.key)
+    end
+  else
+    ok(false, "visuals/fields.json is missing")
+  end
+  params:set("osc_on", 0)
+  drain()
 end
 
 -- ============================================================================

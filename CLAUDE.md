@@ -27,6 +27,13 @@ the status block current, and add a change-log entry for every change.
   the modulators on MOTION.
   Lua only, the count stays 66. `full-review` was merged into `main` on
   2026-10-23, before the device session: `main` holds code not yet heard.
+- **The album set (107th and 108th changes):** presets/ holds twelve presets for one album (ten
+  half-songs walked in whole parts, and two album walks, ALBUM 1 and 2), built by `tools/make_set.lua` (the source of truth), with
+  loops from `tools/set_audio.py` and `tools/deploy_set.sh`. On the device 2026-11-10: loads,
+  scenes, levels, CPU and temperature measured; nobody has judged it by ear yet. After a
+  listen, fix the table in make_set.lua and rebuild.
+- **The visuals link (109th change):** lib/mosc.lua sends the state as OSC to visuals/bridge.js,
+  which feeds Hydra (visuals/hydra.js). Lua only, never run on the device.
 - **The sound fixes (114th change):** engine and Lua. Clicks at mode changes, punches, regen,
   loop seams, STOP and filter type changes; delay and limiter timing; the deck loop on a
   preset reload. On the device 2026-11-11: compiles, `count: 66`, all defs built, modes

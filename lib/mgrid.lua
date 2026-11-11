@@ -21,7 +21,8 @@
 --            recording) · row 4 tape loop slices (same gesture) · row 5
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
 --            pitch quantize x8 · row 6 the beat repeat, held: x1-5 = 1/2 to
---            1/32 (slide a finger across them for a roll)
+--            1/32 (slide a finger across them for a roll) · x6/x7 visuals look
+--            back/next · x8 visuals FLASH, held
 --     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
 --            row 6 voice type x1 · sequencer run x3, fewer/more hits x5/x6 ·
 --            notes->pads x8
@@ -35,6 +36,8 @@
 -- the scene selector (up/down), and the pad is picked up on hot-plug.
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
+-- the visuals look names (lib/mosc.lua owns the list; kept in step by test_control)
+local Mosc_LOOKS = { "AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS" }
 
 local M = { gg = nil, have_launchpad = false, midigrid_loaded = false,
             reconnect_due = false }
@@ -88,7 +91,7 @@ local LP_RGB_HDR = { 0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x03 }
 --  * LP_RGB — the fallback for pads drawn with NO hue (spatial things: piano
 --    keys, octave pads), coloured by plain brightness.
 local LP_HUE = {              -- indexed by LP_HUE_ID
-  { 127, 22, 16 },   -- 1  red     recording / write head (STOP pulses it)
+  { 118, 28, 30 },   -- 1  red     recording / write head (STOP pulses it); softer, rose-leaning
   { 28, 120, 42 },   -- 2  green   playing / running / placed step / capture
   { 30, 46, 122 },   -- 3  blue    available / empty / DRY
   { 120, 120, 120 }, -- 4  white   playhead / selection / cursor
@@ -97,10 +100,11 @@ local LP_HUE = {              -- indexed by LP_HUE_ID
   { 26, 112, 122 },  -- 7  cyan    frozen / held
   { 104, 26, 127 },  -- 8  purple  destructive (clear / chaos) / reverse
   { 26, 100, 104 },  -- 9  teal    active region (window / loop / morph travel)
+  { 52, 92, 127 },   -- 10 ice     frozen (a periwinkle blue, apart from the slate "available" blue)
 }
 local LP_HUE_ID = {
   red = 1, green = 2, blue = 3, white = 4, yellow = 5,
-  orange = 6, cyan = 7, purple = 8, teal = 9,
+  orange = 6, cyan = 7, purple = 8, teal = 9, ice = 10,
 }
 local LP_RGB = {              -- brightness-only fallback (uncoloured pads)
   [0] = { 0, 0, 0 },    [1] = { 7, 7, 13 },    [2] = { 14, 14, 28 },
@@ -424,7 +428,13 @@ end
 
 local function main_ws_key(x, y, z)
   if y == 6 then
-    if x <= 5 then repeat_key(x, z) end
+    if x <= 5 then repeat_key(x, z)
+    elseif x == 8 then params:set("vis_flash", z)          -- a hit on the visuals, held
+    elseif z == 1 then                                       -- x6 / x7: the visuals look, back / next
+      local n = #Mosc_LOOKS
+      local cur = floor(pget("vis_look", 1) + 0.5)
+      params:set("vis_look", (cur - 1 + (x == 7 and 1 or -1)) % n + 1)
+    end
     return
   end
   if y == 3 then
@@ -573,15 +583,15 @@ local function draw_spine()
       gg:led(x, 1, 1)
     end
   end
-  -- row 2: the state strip. RED = recording, GREEN = playing, CYAN = frozen,
+  -- row 2: the state strip. RED = recording, GREEN = playing, ICE BLUE = frozen,
   -- PURPLE = reverse, BLUE = DRY; STOP PULSES red so it reads apart from a
   -- steady recording-red. writes carry the fast blink (matching the header).
   local wblink = (C.frame % 4) < 2
   strip_led(1, pget("rec", 0) == 1, "red", wblink and 15 or 5)
   strip_led(2, pget("tape_rec", 0) == 1, "red", wblink and 15 or 5)
   strip_led(3, pget("tape_reverse", 0) == 1, "purple")
-  strip_led(4, pget("pv_freeze", 0) == 1, "cyan")
-  strip_led(5, pget("tape_freeze", 0) == 1, "cyan")
+  strip_led(4, pget("pv_freeze", 0) == 1, "ice")
+  strip_led(5, pget("tape_freeze", 0) == 1, "ice")
   strip_led(6, pget("pad_input", 0) == 1, "yellow")      -- notes routed to pads
   gg:led(7, 2, 7, "blue")                                -- DRY: an action
   local stopped = pget("stop_all", 0) == 1
@@ -657,6 +667,13 @@ local function draw_main_ws()
     elseif x == div then gg:led(x, 6, 5, "cyan")
     else gg:led(x, 6, 2) end
   end
+  -- x6 / x7 step the visuals look (violet, the brighter one lit while AUTO is off),
+  -- x8 is a held FLASH on the picture. Brightness follows the look's place in the list.
+  local look = floor(pget("vis_look", 1) + 0.5)
+  local lv = 3 + floor(9 * (look - 1) / math.max(1, #Mosc_LOOKS - 1))
+  gg:led(6, 6, look == 1 and 3 or lv, "purple")
+  gg:led(7, 6, look == 1 and 3 or lv, "purple")
+  gg:led(8, 6, pget("vis_flash", 0) == 1 and 15 or 4, "white")
 end
 
 -- Grid PADS LED map, in the colour language: row 3 = the 8 slice pads (ORANGE,

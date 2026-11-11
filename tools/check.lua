@@ -49,7 +49,7 @@ step("syntax: script, modules, single-file build",
 
 -- 2. the harnesses
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",
-                     "test_launchpad", "test_purity", "test_screen" }) do
+                     "test_launchpad", "test_purity", "test_screen", "test_set" }) do
   step("harness: " .. t, sh(LUA .. " tools/" .. t .. ".lua >/dev/null 2>&1"))
 end
 

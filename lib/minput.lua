@@ -32,6 +32,8 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
+  -- the picture hears every port (an Octatrack on the TRS input, for one)
+  if C.osc and C.osc.midi_in then C.osc.midi_in(msg, vport) end
   -- a mapped CC is a hand on the instrument too (idle dim); notes count
   -- through route_note. clock and other system messages do not.
   if msg.type == "cc" then C.touch_input() end

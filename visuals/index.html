@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mangler visuals</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  canvas { width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="news" playsinline muted crossorigin="anonymous"
+  style="position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none"></video>
+<script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.js"></script>
+<script>
+  // detectAudio asks for the browser's audio input. start.command opens this
+  // page with a flag that answers the question; the input is the computer's
+  // default input, which must be the norns return (see README.md).
+  // makeGlobal puts osc(), a, src() on window, which is what hydra.js expects.
+  // a page opened over the network has no microphone access, so no audio detection there
+  new Hydra({ canvas: document.getElementById("c"), detectAudio: window.isSecureContext, makeGlobal: true, numOutputs: 8 });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<script>
+  // The news: live HLS streams (24 hours a day, picture and sound together).
+  // The first is played; if it stops, the next one takes over, and the
+  // watchdog below moves on when the picture freezes. ?video=<url> plays one
+  // address only (.m3u8 or .mp4, cross-origin allowed), ?video=none turns the
+  // picture off. Started by start.command, the page may play with sound at
+  // once; opened by hand, it starts muted and a click unmutes it.
+  const STREAMS = [
+    { name: "DW NEWS", url: "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8" },
+    { name: "FRANCE 24", url: "https://live.france24.com/hls/live/2037218/F24_EN_HI_HLS/master_500.m3u8" },
+  ];
+  const news = document.getElementById("news");
+  const want = new URLSearchParams(location.search).get("video");
+  const list = want && want !== "none" ? [{ name: "VIDEO", url: want }] : STREAMS;
+  window.NEWS = { name: "", index: -1, fails: 0, since: Date.now() };
+  let hls = null, at = -1, lastTime = -1, lastMove = Date.now(), recoveries = 0;
+
+  function stop() {
+    if (hls) { hls.destroy(); hls = null; }
+  }
+  function startStream(i) {
+    stop();
+    at = (i + list.length) % list.length;
+    const st = list[at];
+    window.NEWS.name = st.name; window.NEWS.index = at; window.NEWS.since = Date.now();
+    lastTime = -1; lastMove = Date.now(); recoveries = 0;
+    if (/\.m3u8/.test(st.url) && window.Hls && Hls.isSupported()) {
+      hls = new Hls({ maxBufferLength: 12, liveSyncDurationCount: 3,
+        manifestLoadingMaxRetry: 4, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6 });
+      hls.on(Hls.Events.ERROR, (e, d) => {
+        if (!d.fatal) return;
+        if (d.type === Hls.ErrorTypes.MEDIA_ERROR && recoveries++ < 3) hls.recoverMediaError();
+        else if (d.type === Hls.ErrorTypes.NETWORK_ERROR && recoveries++ < 3) setTimeout(() => hls && hls.startLoad(), 2000);
+        else startStream(at + 1);
+      });
+      hls.loadSource(st.url);
+      hls.attachMedia(news);
+    } else {
+      news.src = st.url;
+    }
+    play();
+  }
+  function play() {
+    // sound if the browser allows it, otherwise muted until the first click
+    news.muted = false;
+    news.play().catch(() => { news.muted = true; news.play().catch(() => {}); });
+  }
+  if (want !== "none") {
+    news.dataset.on = "1";
+    news.loop = list[0].url.indexOf(".m3u8") < 0;
+    startStream(0);
+    document.body.addEventListener("click", () => { news.muted = false; news.play(); });
+    // the watchdog: a picture that has not moved for 20 seconds is replaced
+    setInterval(() => {
+      if (document.hidden) return;
+      if (Math.abs(news.currentTime - lastTime) > 0.01) { lastTime = news.currentTime; lastMove = Date.now(); window.NEWS.fails = 0; return; }
+      if (Date.now() - lastMove > 20000) {
+        window.NEWS.fails++;
+        startStream(list.length > 1 ? at + 1 : at);
+      } else if (news.paused) play();
+    }, 4000);
+  }
+  // the screen stays on
+  if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {});
+</script>
+<script src="hydra.js"></script>
+</body>
+</html>

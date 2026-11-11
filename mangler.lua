@@ -230,6 +230,7 @@ local Mmotion = include "lib/mmotion"
 local Mseq = include "lib/mseq"
 local Mlfo = include "lib/mlfo"
 local Mout = include "lib/mout"
+local Mosc = include "lib/mosc"
 local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
@@ -240,6 +241,7 @@ ctx.grid = Mgrid
 ctx.motion = Mmotion
 ctx.seq = Mseq
 ctx.lfo = Mlfo
+ctx.osc = Mosc
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -531,6 +533,7 @@ Mmotion.init(ctx)
 Mseq.init(ctx)
 Mlfo.init(ctx)
 Mout.init(ctx)
+Mosc.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -2878,6 +2881,7 @@ local function init_params()
   -- and the target option can carry the targets' own names.
   Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
   Mout.add_params()   -- ...and the modulation out, which reads them
+  Mosc.add_params()   -- ...and the visuals link (OSC), which reads the rest
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
@@ -2917,6 +2921,8 @@ local function init_params()
     -- norns saves a momentary binary like any other, so a PSET saved while
     -- a footswitch held the repeat loads it held, with no release to come
     if pget("beat_repeat", 0) == 1 then params:set("beat_repeat", 0) end
+    -- the OSC link is about this room, not a sound: a PSET never changes it
+    Mosc.cfg_reload()
     each_part(2, number)
   end
   params.action_delete = function(filename, name, number) each_part(3, number) end
@@ -2997,6 +3003,7 @@ function init()
     -- replayed a recorded scene_morph_amt move for us to act on.
     Mscenes.tick()
     Mout.tick()   -- after the morph and the LFOs moved: send what they are now
+    Mosc.tick()   -- the visuals link: the same frame's state, as OSC
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

@@ -1162,6 +1162,8 @@ end
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
+  -- the picture hears every port (an Octatrack on the TRS input, for one)
+  if C.osc and C.osc.midi_in then C.osc.midi_in(msg, vport) end
   -- a mapped CC is a hand on the instrument too (idle dim); notes count
   -- through route_note. clock and other system messages do not.
   if msg.type == "cc" then C.touch_input() end
@@ -1299,7 +1301,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 --            recording) · row 4 tape loop slices (same gesture) · row 5
 --            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
 --            pitch quantize x8 · row 6 the beat repeat, held: x1-5 = 1/2 to
---            1/32 (slide a finger across them for a roll)
+--            1/32 (slide a finger across them for a roll) · x6/x7 visuals look
+--            back/next · x8 visuals FLASH, held
 --     PADS   row 3 the 8 slice pads (finger-drum, held) · row 5 slice select ·
 --            row 6 voice type x1 · sequencer run x3, fewer/more hits x5/x6 ·
 --            notes->pads x8
@@ -1313,6 +1316,8 @@ local Mgrid = (function()  -- inlined lib/mgrid.lua
 -- the scene selector (up/down), and the pad is picked up on hot-plug.
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
+-- the visuals look names (lib/mosc.lua owns the list; kept in step by test_control)
+local Mosc_LOOKS = { "AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS" }
 
 local M = { gg = nil, have_launchpad = false, midigrid_loaded = false,
             reconnect_due = false }
@@ -1366,7 +1371,7 @@ local LP_RGB_HDR = { 0xF0, 0x00, 0x20, 0x29, 0x02, 0x0D, 0x03 }
 --  * LP_RGB — the fallback for pads drawn with NO hue (spatial things: piano
 --    keys, octave pads), coloured by plain brightness.
 local LP_HUE = {              -- indexed by LP_HUE_ID
-  { 127, 22, 16 },   -- 1  red     recording / write head (STOP pulses it)
+  { 118, 28, 30 },   -- 1  red     recording / write head (STOP pulses it); softer, rose-leaning
   { 28, 120, 42 },   -- 2  green   playing / running / placed step / capture
   { 30, 46, 122 },   -- 3  blue    available / empty / DRY
   { 120, 120, 120 }, -- 4  white   playhead / selection / cursor
@@ -1375,10 +1380,11 @@ local LP_HUE = {              -- indexed by LP_HUE_ID
   { 26, 112, 122 },  -- 7  cyan    frozen / held
   { 104, 26, 127 },  -- 8  purple  destructive (clear / chaos) / reverse
   { 26, 100, 104 },  -- 9  teal    active region (window / loop / morph travel)
+  { 52, 92, 127 },   -- 10 ice     frozen (a periwinkle blue, apart from the slate "available" blue)
 }
 local LP_HUE_ID = {
   red = 1, green = 2, blue = 3, white = 4, yellow = 5,
-  orange = 6, cyan = 7, purple = 8, teal = 9,
+  orange = 6, cyan = 7, purple = 8, teal = 9, ice = 10,
 }
 local LP_RGB = {              -- brightness-only fallback (uncoloured pads)
   [0] = { 0, 0, 0 },    [1] = { 7, 7, 13 },    [2] = { 14, 14, 28 },
@@ -1702,7 +1708,13 @@ end
 
 local function main_ws_key(x, y, z)
   if y == 6 then
-    if x <= 5 then repeat_key(x, z) end
+    if x <= 5 then repeat_key(x, z)
+    elseif x == 8 then params:set("vis_flash", z)          -- a hit on the visuals, held
+    elseif z == 1 then                                       -- x6 / x7: the visuals look, back / next
+      local n = #Mosc_LOOKS
+      local cur = floor(pget("vis_look", 1) + 0.5)
+      params:set("vis_look", (cur - 1 + (x == 7 and 1 or -1)) % n + 1)
+    end
     return
   end
   if y == 3 then
@@ -1851,15 +1863,15 @@ local function draw_spine()
       gg:led(x, 1, 1)
     end
   end
-  -- row 2: the state strip. RED = recording, GREEN = playing, CYAN = frozen,
+  -- row 2: the state strip. RED = recording, GREEN = playing, ICE BLUE = frozen,
   -- PURPLE = reverse, BLUE = DRY; STOP PULSES red so it reads apart from a
   -- steady recording-red. writes carry the fast blink (matching the header).
   local wblink = (C.frame % 4) < 2
   strip_led(1, pget("rec", 0) == 1, "red", wblink and 15 or 5)
   strip_led(2, pget("tape_rec", 0) == 1, "red", wblink and 15 or 5)
   strip_led(3, pget("tape_reverse", 0) == 1, "purple")
-  strip_led(4, pget("pv_freeze", 0) == 1, "cyan")
-  strip_led(5, pget("tape_freeze", 0) == 1, "cyan")
+  strip_led(4, pget("pv_freeze", 0) == 1, "ice")
+  strip_led(5, pget("tape_freeze", 0) == 1, "ice")
   strip_led(6, pget("pad_input", 0) == 1, "yellow")      -- notes routed to pads
   gg:led(7, 2, 7, "blue")                                -- DRY: an action
   local stopped = pget("stop_all", 0) == 1
@@ -1935,6 +1947,13 @@ local function draw_main_ws()
     elseif x == div then gg:led(x, 6, 5, "cyan")
     else gg:led(x, 6, 2) end
   end
+  -- x6 / x7 step the visuals look (violet, the brighter one lit while AUTO is off),
+  -- x8 is a held FLASH on the picture. Brightness follows the look's place in the list.
+  local look = floor(pget("vis_look", 1) + 0.5)
+  local lv = 3 + floor(9 * (look - 1) / math.max(1, #Mosc_LOOKS - 1))
+  gg:led(6, 6, look == 1 and 3 or lv, "purple")
+  gg:led(7, 6, look == 1 and 3 or lv, "purple")
+  gg:led(8, 6, pget("vis_flash", 0) == 1 and 15 or 4, "white")
 end
 
 -- Grid PADS LED map, in the colour language: row 3 = the 8 slice pads (ORANGE,
@@ -2220,6 +2239,8 @@ local MOTION_EXCLUDE = {
   "beat_repeat", "repeat_div",
   -- the modulation out: routing to other gear
   "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
+  -- the visuals link: routing to a computer, not sound
+  "osc_on", "osc_host", "osc_port", "vis_look", "vis_flash", "vis_midi",
   -- the modulators: a loop of their knobs would fight them
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
@@ -3119,6 +3140,267 @@ end
 return M
 
 end)()
+local Mosc = (function()  -- inlined lib/mosc.lua
+-- mosc: the visuals link. The instrument's state goes out as OSC (UDP, over
+-- Wi-Fi) to a computer running visuals/bridge.js, which hands it to Hydra.
+-- MIDI stays in lib/mout.lua: one CC carries one 7-bit value, this carries all
+-- of the fields below at full precision.
+--
+-- It writes nothing in the instrument. Every field is its own message,
+-- /mangler/<key> with one argument, sent only when its value changed. A new
+-- address, port or switch-on, and a refresh every two seconds, send every
+-- field again: UDP drops packets, and a visual that starts late must still
+-- learn the state. A param field goes out normalised 0..1 through its own
+-- controlspec, so the filter cutoff is a position on the knob, not a number
+-- of Hz. Floats are rounded to 3 decimals. The tick runs at the frame rate
+-- (15 Hz); the browser smooths between messages.
+
+local floor = math.floor
+
+local C, pget
+
+local REFRESH = 2          -- seconds between full resends
+local FIELDS = {}          -- { key, path, id | read, norm, last }
+
+local function add(key, id_or_fn, norm)
+  local f = { key = key, path = "/mangler/" .. key, norm = norm }
+  if type(id_or_fn) == "string" then f.id = id_or_fn else f.read = id_or_fn end
+  FIELDS[#FIELDS + 1] = f
+end
+
+-- the fields. A string is a param id (read through pget, normalised when
+-- `true`), a function reads anything else. The key is the OSC address.
+add("page", function() return C.page end)
+add("page_name", function() return C.PAGES[C.page] or "" end)
+add("scene", "scene_slot")
+add("look", "vis_look")
+add("flash", "vis_flash")
+add("mode", "mode")
+add("rec", "rec")
+add("freeze", "freeze")
+add("env", function() return C.lfo and C.lfo.env or 0 end)
+add("lfo1", function() return C.lfo and C.lfo.mods[1].out or 0 end)
+add("lfo2", function() return C.lfo and C.lfo.mods[2].out or 0 end)
+add("morph", "scene_morph_amt")
+add("in_l", function() return C.amp_in[1] end)
+add("in_r", function() return C.amp_in[2] end)
+add("out_l", function() return C.amp_out[1] end)
+add("out_r", function() return C.amp_out[2] end)
+add("beat", function()
+  local b = clock and clock.get_beats and clock.get_beats()
+  return b and (b % 1) or 0
+end)
+add("tempo", function() return C.tempo() end)
+add("play", function() return C.play_phase end)
+add("rec_phase", function() return C.rec_phase end)
+add("win_start", "pos_start")
+add("win_end", "pos_end")
+add("size", "size", true)
+add("density", "density", true)
+add("spread", "spread", true)
+add("jitter", "grain_jitter", true)
+add("pitch", "pitch", true)
+add("cutoff", "cutoff", true)
+add("resonance", "resonance", true)
+add("drive", "drive", true)
+add("dry_wet", "dry_wet", true)
+add("delay_mix", "delay_mix", true)
+add("rev_mix", "rev_mix", true)
+
+local M = { FIELDS = FIELDS, on = false, host = nil, port = nil, errors = 0 }
+
+-- A host given as a name (the computer's name.local) is resolved here, once a
+-- minute, and the number is what osc.send gets. osc.send looks a name up on
+-- every message, which would be 100 lookups a second on the frame clock. A
+-- name that cannot be resolved keeps the last number. A computer whose
+-- address changed overnight is found again within a minute.
+local RESOLVE_EVERY = 60   -- seconds
+local resolved, resolved_name, resolved_at = nil, nil, -1e9
+
+local function is_number_host(h)
+  return h:match("^%d+%.%d+%.%d+%.%d+$") ~= nil
+end
+
+local function resolve(h)
+  if is_number_host(h) then return h end
+  local now = C.frame / C.FPS
+  if resolved_name == h and now - resolved_at < RESOLVE_EVERY then return resolved end
+  resolved_name, resolved_at = h, now
+  local ok, p = pcall(io.popen, "getent ahostsv4 '" .. h:gsub("[^%w%.%-_]", "") .. "' 2>/dev/null")
+  if ok and p then
+    local line = p:read("l")
+    p:close()
+    local ip = line and line:match("^(%d+%.%d+%.%d+%.%d+)")
+    if ip then
+      if ip ~= resolved then print("mangler: osc host " .. h .. " is " .. ip) end
+      resolved = ip
+    end
+  end
+  return resolved
+end
+M.resolve = resolve
+
+local dest = { "", 0 }     -- handed to osc.send; rebuilt in place on a change
+local one = { 0 }          -- the argument list, reused for every message
+
+local function value(f)
+  local v
+  if f.id then
+    v = pget(f.id, 0)
+    if f.norm then
+      local p = params:lookup_param(f.id)
+      local cs = p and p.controlspec
+      if cs and cs.unmap then v = cs:unmap(v) end
+    end
+  else
+    v = f.read()
+  end
+  if type(v) == "number" and v ~= floor(v) then v = floor(v * 1000 + 0.5) / 1000 end
+  return v
+end
+
+function M.tick()
+  if pget("osc_on", 0) ~= 1 or not (osc and osc.send) then
+    M.on = false
+    return
+  end
+  local name = params:get("osc_host")
+  local port = floor(pget("osc_port", 9000) + 0.5)
+  local host = name ~= nil and name ~= "" and resolve(name) or nil
+  if host == nil then M.on = false; return end
+  local full = not M.on or host ~= M.host or port ~= M.port
+    or C.frame % (REFRESH * C.FPS) == 0
+  if host ~= M.host or port ~= M.port then
+    M.host, M.port = host, port
+    dest[1], dest[2] = host, port
+  end
+  M.on = true
+  sent_ev = 0
+  for i = 1, #FIELDS do
+    local f = FIELDS[i]
+    local v = value(f)
+    if full or v ~= f.last then
+      f.last = v
+      one[1] = v
+      if not pcall(osc.send, dest, f.path, one) then
+        M.errors = M.errors + 1
+        if M.errors == 1 then print("mangler: osc send failed to " .. host .. ":" .. port) end
+      end
+    end
+  end
+end
+
+function M.init(ctx)
+  C = ctx
+  pget = ctx.pget
+end
+
+-- MIDI events for the picture (an Octatrack on the TRS MIDI input, or any
+-- other MIDI source). lib/minput.lua hands every message of every port here.
+-- A note, a CC, a program change and the transport go out at once as
+-- /mangler/ev/<name> with integer arguments, so a hit lands on the beat
+-- instead of waiting for the next frame. A CC that did not change is not
+-- sent again. At most EVENT_CAP events leave per frame, so a knob sweep or a
+-- busy pattern cannot flood the Wi-Fi. Clock messages are never forwarded.
+local EVENT_CAP = 24
+local sent_ev = 0
+local last_cc = {}
+local evargs = { 0, 0, 0 }
+local evrun = { 0 }
+
+local function ev_send(name, args)
+  if sent_ev >= EVENT_CAP then return end
+  sent_ev = sent_ev + 1
+  if not pcall(osc.send, dest, "/mangler/ev/" .. name, args) then
+    M.errors = M.errors + 1
+  end
+end
+
+function M.midi_in(msg, vport)
+  if not (M.on and osc and osc.send) or pget("vis_midi", 1) ~= 1 then return end
+  local t = msg.type
+  if t == "note_on" and (msg.vel or 0) > 0 then
+    evargs[1], evargs[2], evargs[3] = msg.ch or 1, msg.note or 0, msg.vel or 0
+    ev_send("note", evargs)
+  elseif t == "cc" then
+    local key = (msg.ch or 1) * 128 + (msg.cc or 0)
+    if last_cc[key] == msg.val then return end
+    last_cc[key] = msg.val
+    evargs[1], evargs[2], evargs[3] = msg.ch or 1, msg.cc or 0, msg.val or 0
+    ev_send("cc", evargs)
+  elseif t == "program_change" then
+    evargs[1], evargs[2], evargs[3] = msg.ch or 1, msg.val or 0, 0
+    ev_send("pc", evargs)
+  elseif t == "start" or t == "continue" or t == "stop" then
+    evrun[1] = t == "stop" and 0 or 1
+    ev_send("run", evrun)
+  end
+end
+
+-- the look the visuals show. Option 1 lets the visuals pick one by the page.
+-- The order is mirrored by NAMES in visuals/hydra.js. It is a scene param
+-- (lib/mscenes.lua), so a scene or a preset can bring its own look.
+M.LOOKS = { "AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS" }
+
+-- The three connection params are remembered in a small file, so a norns that
+-- is switched on tomorrow sends to the same computer with no setup. A pset
+-- does not carry them: they are about this room, not about a sound.
+local function cfg_path()
+  return (_path and _path.data or "/home/we/dust/data/") .. "mangler/osc.cfg"
+end
+
+local loading, reading = false, false
+local function cfg_save()
+  if loading or reading then return end
+  local f = io.open(cfg_path(), "w")
+  if not f then return end
+  f:write(string.format("%d\n%s\n%d\n", pget("osc_on", 0), params:get("osc_host") or "",
+    floor(pget("osc_port", 9000) + 0.5)))
+  f:close()
+end
+
+local function cfg_load()
+  local f = io.open(cfg_path(), "r")
+  if not f then return end
+  local on, host, port = f:read("n"), nil, nil
+  f:read("l"); host = f:read("l"); port = f:read("n")
+  f:close()
+  loading = true
+  if host and host ~= "" then params:set("osc_host", host) end
+  if port then params:set("osc_port", port) end
+  if on then params:set("osc_on", on) end
+  loading = false
+end
+
+M.cfg_reload = cfg_load   -- after a PSET read, which would put the old values back
+
+function M.add_params()
+  params:add_group("grp_osc", "visuals out (osc)", 6)
+  params:add_option("vis_look", "visuals look", M.LOOKS, 1)
+  params:add_binary("vis_flash", "visuals flash", "momentary", 0)   -- a hit on the picture, held
+  params:add_binary("vis_midi", "midi to visuals", "toggle", 1)   -- notes, CCs, program changes, transport
+  params:add_binary("osc_on", "osc out", "toggle", 0)
+  params:add_text("osc_host", "osc host (ip or name.local)", "192.168.1.100")
+  params:add_number("osc_port", "osc port", 1, 65535, 9000)
+  for _, id in ipairs({ "osc_on", "osc_host", "osc_port" }) do params:set_action(id, cfg_save) end
+  -- a PSET read puts its own values in these params (one saved after this
+  -- change carries them): while it runs, nothing is written to the file, and
+  -- the action_read hook restores the file's values afterwards
+  local read = params.read
+  if read then
+    params.read = function(self, ...)
+      reading = true
+      local ok, err = pcall(read, self, ...)
+      reading = false
+      if not ok then error(err, 0) end
+    end
+  end
+  cfg_load()
+end
+
+return M
+
+end)()
 local Mscenes = (function()  -- inlined lib/mscenes.lua
 -- mscenes: scenes, scene morphing, and the safe-state snapshot — the
 -- "remember this / go back to that" layer.
@@ -3235,6 +3517,7 @@ local SWITCH_IDS = {
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's
+  "vis_look",   -- the look the visuals show: a scene can bring its own
   "mode",   -- last of the last: this one respawns the voice
 }
 
@@ -3280,6 +3563,8 @@ local MORPH_EXCLUDE = {
   mode = true, tape_reverse = true,
   -- the window lock switching mid-sweep re-cuts the window in one frame
   win_beats = true,
+  -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
+  vis_look = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -3347,6 +3632,8 @@ local SCENE_EXCLUDE = {
   "beat_repeat", "repeat_div",
   -- the modulation out: routing to other gear, not sound
   "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
+  -- the visuals link: routing to a computer, not sound
+  "osc_on", "osc_host", "osc_port", "vis_flash", "vis_midi",
   -- the modulators: machines too. A scene moves the knobs they ride on
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
@@ -7008,6 +7295,7 @@ ctx.grid = Mgrid
 ctx.motion = Mmotion
 ctx.seq = Mseq
 ctx.lfo = Mlfo
+ctx.osc = Mosc
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
@@ -7299,6 +7587,7 @@ Mmotion.init(ctx)
 Mseq.init(ctx)
 Mlfo.init(ctx)
 Mout.init(ctx)
+Mosc.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
 
@@ -9646,6 +9935,7 @@ local function init_params()
   -- and the target option can carry the targets' own names.
   Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
   Mout.add_params()   -- ...and the modulation out, which reads them
+  Mosc.add_params()   -- ...and the visuals link (OSC), which reads the rest
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
   -- the softcut buffers (mtape) AND the granular engine's record
@@ -9685,6 +9975,8 @@ local function init_params()
     -- norns saves a momentary binary like any other, so a PSET saved while
     -- a footswitch held the repeat loads it held, with no release to come
     if pget("beat_repeat", 0) == 1 then params:set("beat_repeat", 0) end
+    -- the OSC link is about this room, not a sound: a PSET never changes it
+    Mosc.cfg_reload()
     each_part(2, number)
   end
   params.action_delete = function(filename, name, number) each_part(3, number) end
@@ -9765,6 +10057,7 @@ function init()
     -- replayed a recorded scene_morph_amt move for us to act on.
     Mscenes.tick()
     Mout.tick()   -- after the morph and the LFOs moved: send what they are now
+    Mosc.tick()   -- the visuals link: the same frame's state, as OSC
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

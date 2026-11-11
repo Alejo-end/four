@@ -201,6 +201,12 @@ function M.install(opts)
     load = function(path) return dofile(path) end,
   }
 
+  -- osc: sends are recorded for a harness (osc_sent), nothing leaves the process
+  osc = { sent = {} }
+  function osc.send(to, path, args)
+    osc.sent[#osc.sent + 1] = { host = to[1], port = to[2], path = path, v = args[1], a2 = args[2], a3 = args[3] }
+  end
+
   midi = { vports = {} }
   for i = 1, 16 do midi.vports[i] = { name = "none", device = nil } end
   function midi.connect(i) return midi.vports[i or 1] end
@@ -296,6 +302,10 @@ function M.install(opts)
   end
   function params:add_number(id, name, minv, maxv, default, fmt)
     padd({ id = id, name = name, min = minv, max = maxv, value = default or minv, fmt = fmt })
+  end
+  -- a text param (the OSC host); the value is the string
+  function params:add_text(id, name, text)
+    padd({ id = id, name = name, value = text or "" })
   end
   -- S21: a file param (norns opens fileselect for it; the path rides the PSET)
   function params:add_file(id, name, path)

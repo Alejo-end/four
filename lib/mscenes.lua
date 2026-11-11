@@ -113,6 +113,7 @@ local SWITCH_IDS = {
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
   "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's
+  "vis_look",   -- the look the visuals show: a scene can bring its own
   "mode",   -- last of the last: this one respawns the voice
 }
 
@@ -158,6 +159,8 @@ local MORPH_EXCLUDE = {
   mode = true, tape_reverse = true,
   -- the window lock switching mid-sweep re-cuts the window in one frame
   win_beats = true,
+  -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
+  vis_look = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -225,6 +228,8 @@ local SCENE_EXCLUDE = {
   "beat_repeat", "repeat_div",
   -- the modulation out: routing to other gear, not sound
   "out_src", "out_midi", "out_ch", "out_cc", "out_crow",
+  -- the visuals link: routing to a computer, not sound
+  "osc_on", "osc_host", "osc_port", "vis_flash", "vis_midi",
   -- the modulators: machines too. A scene moves the knobs they ride on
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",

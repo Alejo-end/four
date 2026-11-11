@@ -3453,6 +3453,117 @@ then retested there.
 - **The erase left an echo.** `\clear` spawned the effects before the buffer's zero
   landed, so they took in the last of the take. It now waits with `s.sync`.
 
+Hundred-and-seventh change: **the album set, twelve new presets (presets and
+tools only, the engine and the script do not change)**. The ten shipped presets are
+replaced by a set for one album. `tools/make_set.lua` builds them as a
+chain (each preset is the one before it plus a short list of changes) and checks every value
+against the real paramset. `tools/set_audio.py` cuts the loops and `tools/deploy_set.sh` puts
+the set on a norns. The audio is not in the repo.
+
+- Nothing is chopped out of the middle of a song. A source holds 60 s, so a long stretch is cut
+  into consecutive parts of at most 60 s, kept whole and in order. Presets 1 to 10 are one half of
+  one song each, in album order: part 1 in the take, parts 2 and 3 in the layer decks, quiet. The
+  scene build brings the next part forward (a 2-part half at slot 4, a 3-part half at slots 3 and
+  5), at normal speed and forward, so the half plays through.
+- Presets 11 and 12 (ALBUM 1, ALBUM 2) walk songs 1 to 3 and songs 4 and 5: each source holds one
+  unbroken 60 s stretch, the stretch that follows is in the next source, and the tape stretch is
+  read from `tape-11.wav` and `tape-12.wav` beside the pset. A scene is a set of the four level
+  knobs (`sc_level`, `cut_level`, `lay1_level`, `lay2_level`), so a glide is a plain fade and no
+  window moves. `mix` stays at 0.5. For a manual crossfader, map `scene_morph_amt`.
+- Every scene names the same params, so it sounds the same whatever came before it, and the bank
+  builds in small steps (the orbit is off). Slot 8 is the next preset's sound.
+- The scene and pad files must be in norns' own table format (`tab.save`). A plain nested
+  `return {...}` makes `tab.load` return nil and the bank empty. The generator writes the right
+  format and tools/test_set.lua loads files with a copy of `tab.load`.
+- A preset sets `clock_tempo` (60). tools/test_control.lua allows that one system id.
+- `tools/test_set.lua` is a new harness: it loads every pset like norns, recalls all slots and
+  checks the files, the bridges, the steps between scenes, the part walk and the album levels.
+- MEASURED on the device (2026-11-10, `count: 66`): every preset loads, scenes load (8 of 8), the
+  tape wavs load for 11 and 12, the album levels land. No clipping. scsynth 17 to 26% of a core
+  (the budget is about 60%), 57 to 60 C, never throttled, 0 to 2 xruns per preset. Glide runs on
+  11 and 12 recorded from JACK: no clicks found, 0 xruns. On 11 the level stayed within 5 dB; on 12
+  it dipped 10 dB once, while deck 1 (the start of song 5, a quiet intro) faded in.
+- NOT heard by a person. Balances are measured, not judged by ear.
+
+Hundred-and-eighth change: **songs kept whole (presets and tools only)**. The user found the
+album presets chopped into too many small pieces. The 12 s medley (preset 11) and the 20 to 30 s
+take/tape crossfader (preset 12) were replaced. Presets 1 to 10 now play each half in whole,
+consecutive parts and bring the next part forward in the scene build, and presets 11 and 12 walk
+the album in unbroken 60 s stretches with one level knob per source. See the 107th change for the
+design and the measurements. A source holds 60 s and a preset holds 240 s, so the whole album
+(about 980 s) is covered by presets 1 to 10, and 11 and 12 are walks through it.
+
+Hundred-and-ninth change: **the visuals link (Lua only, the count stays 66)**. New
+`lib/mosc.lua` sends the instrument's state as OSC to a computer: one message per field,
+`/mangler/<key>`, only on a change, with a full resend on a new address and every two seconds.
+Param fields go out 0..1 through their own controlspec. Three new params (`osc_on`, `osc_host`,
+`osc_port`, group `grp_osc`) are in both exclude lists. It runs at the frame rate of 15 Hz, not
+the 10 to 60 Hz first planned, because the frame clock is the only clock and the browser
+smooths between messages. New folder `visuals/`: `bridge.js` (UDP OSC in, WebSocket on
+127.0.0.1 out, no packages), `hydra.js` (three looks chosen by the page), `index.html` (the bridge serves it with hydra.js
+at http://127.0.0.1:8080, so Chrome asks no local network permission), `fields.json` (the
+field list, checked against `lib/mosc.lua` by test_control), `test_bridge.js` (a fake norns and
+a fake page, 10 checks) and a README with the audio routing. `tools/uisim/env.lua` gained an
+`osc` recorder and `params:add_text`; `tools/amalgamate.lua` now expects 13 modules.
+The looks sit on slow voronoi blobs (their black is see-through), and the page plays a live news video (DW, HLS through hls.js) as worn tape (low resolution, faded warm colour, wobble, scanlines, grain, smear) under them. `?video=<url>` picks another stream, `?video=none` turns it off. A click on the page unmutes it. index.html asks Hydra for 6 outputs. Tested in Chrome with a fake norns: the link connects, the three looks draw and switch with the
+page. That test found that `solid(1,1,1,a)` adds white, so the looks use `solid(x,x,x,1)`, and
+that hydra.ojack.xyz waits on a Chrome permission to reach ws://127.0.0.1. Unverified: the
+audio input.
+
+Hundred-and-tenth change: **a look per scene (Lua, the presets and the visuals; the count stays 66)**.
+The bars were one look of seven. New param `vis_look` (AUTO, BARS, FILTER, SHAPES, RINGS, MOSAIC,
+TUNNEL, WAVES) sits in `SWITCH_IDS` and `MORPH_EXCLUDE` of lib/mscenes.lua (a scene or preset
+brings its own look, a morph never changes it) and in the motion exclude list. It goes out as
+the field `look`. `visuals/hydra.js` was rebuilt around a table of looks and two buffers, so a
+change of look is a dissolve. `tools/make_set.lua` gives each scene slot a look
+(`VIS_BY_SCENE`), so all twelve scene files changed by one line per slot. Checked on the device:
+a recall of scene 3 of preset 11 landed look 7. Open question: after hand-setting `vis_look` while scenes were recalling, three slots of the loaded bank held other looks than the file (slots 2 to 4); a clean reload and recall gave the file values, and I could not repeat it.
+
+
+Hundred-and-eleventh change: **concert ready, the plug and play pass (Lua, visuals, tools; the count stays 66)**.
+`lib/mosc.lua`: the connection params (`osc_on`, `osc_host`, `osc_port`) are remembered in
+`dust/data/mangler/osc.cfg`, written on a change and read at load, kept out of every pset (the
+generator skips them, the `params.read` wrapper stops a pset from writing the file, and
+`action_read` puts the file's values back). `osc_host` takes a name: it is resolved with
+`getent` once a minute and the number is sent to, because `osc.send` looks a name up on every
+message. Two new fields: `beat` (the clock's beat phase) and `tempo`. Ninth look FACETS (a low-poly
+shard version of the news). `visuals/`: `index.html` plays DW with a France 24 fallback, a
+watchdog for a frozen picture, hls.js error recovery, and a screen wake lock. `hydra.js` has a VHS
+layer (colour slip, a rolling tracking band, vignette, beat pulse) and a canvas on-screen display
+(PLAY, counter, date, source, look, scene, REC, link status). `start.command` (bridge restart
+loop, `caffeinate`, Chrome kiosk with autoplay and the audio input granted), `stop.command`,
+`doctor.command`. Fixed while testing: a Hydra chain changes when it is added to, so a reused
+chain made the shader grow without end; `news` clashed with the page's own constant.
+Looks reworked after a look at each: FILTER is a scanning beam at the playhead (a feedback that adds too much reaches white, so the add is 0.09 against a decay of 0.88), WAVES are thin rippling lines. Page reports (`/status`, `doctor.command`) carry one entry per page.
+`start.command` now starts the browser with a new profile each time: the browser restored the tabs of the last session, so after four starts four pages were drawing at once.
+The display shows FF or REW on a scene change, the page name on a page change, PAUSE with a shake on a freeze, and the mode; a page that grows past 700 MB reloads itself after an hour.
+Cold start tested twice on the device: after `sudo reboot` with the clean-shutdown flag false (a pulled plug) the norns shows NO SCRIPT and sends nothing (norns does not auto-load after an unclean shutdown); with the flag true (a normal SLEEP) it loaded mangler, read `osc.cfg` and the bridge saw OSC again within about 90 seconds, with no setting touched.
+Mistake: a test wrote `params:write(12)` on the device and replaced the files of preset 12
+(pset, scenes, padlock, tape, take, decks). They were restored from the repo and from the audio
+folder (tape-12.wav from set_alb2_tape.wav, no take or deck files, as the deploy script does).
+Use a slot above 12 for a test write.
+
+Hundred-and-twelfth change: **the grid drives the visuals, and the strip colours (Lua only,
+the count stays 66)**. Main workspace, row 6: x6 and x7 step the visuals look back and forward
+(wrapping, violet, brighter further down the list), x8 is a held FLASH. FLASH is the new
+momentary param `vis_flash` (scene and motion excluded, not in a pset), sent as OSC field
+`flash`; `hydra.js` keeps its scene flash alive while it is held. Row 2 colours: rec red is
+softer and leans rose ({118,28,30}), and the two freeze pads are a new hue ICE ({52,92,127}, a
+periwinkle blue) instead of cyan, so they read apart from rec and from the slate blue of
+"available". Tests: 4 assertions in section 30a.
+
+Hundred-and-thirteenth change: **MIDI to the picture, and a LAN mode (Lua and visuals, the
+count stays 66)**. `lib/minput.lua` hands every MIDI message of every port to `Mosc.midi_in`,
+which sends notes, changed CCs, program changes and start/stop at once as `/mangler/ev/<name>`
+with integer arguments (at most 24 per frame; the clock is never sent). New param `vis_midi`
+(on by default; scene, motion and pset excluded; group count 6). The bridge forwards an event as
+`{ev, a}` without keeping it as state. `hydra.js` has a doodle layer (shapes that draw
+themselves, words that type themselves: PTN A01, TRK 3 C4, CC74 20, PLAY, STOP, from an idea
+the user pasted) over the looks and under the display; a few ambient ones appear when nothing
+plays. `MANGLER_LAN=1` (`LAN=1 sh visuals/start.command`) opens the bridge to the local network;
+the page now connects to the host that served it and asks no microphone over the network. Tests: 8 assertions
+in section 30b, one in `test_bridge.js`. Not tried with an Octatrack.
+
 Hundred-and-fourteenth change: **the sound review's clicks and timing (ENGINE and Lua, the
 count stays 66, needs a RESTART)**. A review asked how to make mangler sound better; ten
 findings were confirmed, and this fixes all ten. Engine: a mode change RELEASES the drone
