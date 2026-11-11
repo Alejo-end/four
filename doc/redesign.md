@@ -1,7 +1,7 @@
 # MANGLER — UI/UX Redesign Specification
 
 **Status:** IMPLEMENTED through NU-4 (2026-07-16, stages in Appendix C) —
-renders verified in tools/uisim, dist byte-checked; the on-device gate is
+renders verified in test/uisim, dist byte-checked; the on-device gate is
 still pending (grid code and key-feel are untestable in the sim). Written
 2026-07-15, pre-release (no installed base — no compatibility constraints).
 
@@ -715,7 +715,7 @@ the next begins (device gate at NU-4). No engine changes; fingerprint stays
   Bodies may temporarily reuse old draws under the new chrome. Render suite
   re-pointed at the nine page names (goto_page is already name-based).
 - **NU-2 · bodies.** Port the nine dominant objects from
-  tools/uisim/proto_redesign.lua, bound to real state: take strip (+ ready
+  test/uisim/proto_redesign.lua, bound to real state: take strip (+ ready
   bracket, hatch on regen/resample), mode textures, the belt, curve + rails,
   scape + rails, console, slices + steps, motion curves (dynamic lanes),
   slots + rail.

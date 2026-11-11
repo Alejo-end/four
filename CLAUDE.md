@@ -14,7 +14,7 @@ the status block current, and add a change-log entry for every change.
 - **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
   has changed several times; after a RESTART maiden must read **`count: 66`**.
 - **Device session 2026-11-06:** `main` plus the 104th to 106th changes are on the device
-  at `count: 66`. `tools/device/gate.py` ran the walkthrough with no ears:
+  at `count: 66`. `test/device/gate.py` ran the walkthrough with no ears:
   doc/measurements/2026-11-06/README.md. It is NOT a pass: the `measured` and `you` rows
   still need a person. Costs, budgets and platform traps: doc/norns-platform.md.
 - **The one walkthrough:** doc/device-gate.md, stages 0 to 18, top to bottom. When it
@@ -27,9 +27,9 @@ the status block current, and add a change-log entry for every change.
   the modulators on MOTION.
   Lua only, the count stays 66. `full-review` was merged into `main` on
   2026-10-23, before the device session: `main` holds code not yet heard.
-- **The album set (107th and 108th changes):** presets/ holds twelve presets for one album (ten
-  half-songs walked in whole parts, and two album walks, ALBUM 1 and 2), built by `tools/make_set.lua` (the source of truth), with
-  loops from `tools/set_audio.py` and `tools/deploy_set.sh`. On the device 2026-11-10: loads,
+- **The album set (107th and 108th changes):** data/ holds twelve presets for one album (ten
+  half-songs walked in whole parts, and two album walks, ALBUM 1 and 2), built by `test/make_set.lua` (the source of truth), with
+  loops from `test/set_audio.py` and `test/deploy_set.sh`. On the device 2026-11-10: loads,
   scenes, levels, CPU and temperature measured; nobody has judged it by ear yet. After a
   listen, fix the table in make_set.lua and rebuild.
 - **The visuals link (109th change):** lib/mosc.lua sends the state as OSC to visuals/bridge.js,
@@ -45,7 +45,7 @@ the status block current, and add a change-log entry for every change.
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
 3. load the script and check `Engine.register_commands; count: 66` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
-   NOT move the count. tools/test_control.lua parses the command set and fails if the
+   NOT move the count. test/test_control.lua parses the command set and fails if the
    source no longer adds up to 66.
 
 Lua-only changes skip all this: save and reload the script.
@@ -151,6 +151,10 @@ add_text` are **not** mappable.
 - **norns calls `midi.remove(dev)` BEFORE it deletes `dev` from `midi.devices`** (read in
   lua/core/midi.lua). A search of the devices inside that callback still finds the device
   that is leaving, so `Mgrid.hotplug` is handed it and skips it.
+- **`sudo systemctl restart norns.target` restarts NOTHING.** The target only
+  Requires the services, so they keep running with the old class library. For a
+  RESTART over SSH use `sudo systemctl restart norns-jack norns-crone norns-sclang
+  norns-matron`, then check that the sclang log shows a fresh `compile done`.
 - **Editing a `.sc` file requires SYSTEM > RESTART** (sclang must recompile the class
   library); reloading the script is not enough.
 - **midi dispatch is dual-path: norns fires BOTH `midi.devices[id].event` (device
@@ -193,7 +197,7 @@ Each line was learned the hard way; the change log has the story.
 - Do not build on an engine command that has never been heard on the device
   (`note_one_shot` looked right and was silent).
 - Param ids are never renamed: PSETs and PMAPs name params by id. When a param is
-  deleted, grep `presets/` and the pmap for its id; norns drops unknown ids silently.
+  deleted, grep `data/` and the pmap for its id; norns drops unknown ids silently.
 - Every new param is CLASSIFIED: in `SCENE_RECALL_IDS` or `SCENE_EXCLUDE`, in `MOTION_IDS`
   or `MOTION_EXCLUDE`; a `*_start`/`*_end` pair joins `EDGE_PAIRS` and `FINE_IDS`; an
   x-rate joins `RATE_IDS`; an encoder target gets a `SHORT` word. Every `add_group` count
@@ -261,43 +265,43 @@ Each line was learned the hard way; the change log has the story.
 # and source == single-file build across all render variants. With LUA53 set to a
 # Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
 # it runs on 5.3, which is the only check of what the device actually accepts.
-LUA53=/path/to/lua-5.3.6/src/lua lua tools/check.lua
+LUA53=/path/to/lua-5.3.6/src/lua lua test/check.lua
 
 # static check alone (local luac is 5.5; norns runs 5.3, so without LUA53 this is
 # necessary, not sufficient)
 luac -p mangler.lua lib/*.lua
 
-# render every page to PGM with NO hardware (tools/uisim stubs norns and runs the REAL
+# render every page to PGM with NO hardware (test/uisim stubs norns and runs the REAL
 # redraw code). eyeball these before deploying a screen change: a redraw error on the
 # device is a silent black screen
-lua tools/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + states
-lua tools/uisim/render_pages.lua mangler.lua /tmp/shots empty empty # empty-buffer states
-python3 tools/uisim/pgm2png.py /tmp/shots/base_01_TAKE.pgm take.png 4
+lua test/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + states
+lua test/uisim/render_pages.lua mangler.lua /tmp/shots empty empty # empty-buffer states
+python3 test/uisim/pgm2png.py /tmp/shots/base_01_TAKE.pgm take.png 4
 
 # the harnesses. the render suite proves the instrument DRAWS; these drive it. Each
 # prints its assertion count and exits non-zero on any failure.
-lua tools/test_control.lua   # encoders, keys, grid, STOP, the erase arc, scenes, motion,
+lua test/test_control.lua   # encoders, keys, grid, STOP, the erase arc, scenes, motion,
                              # the classification checks, group counts, the engine
                              # command count, preset values, dist freshness
-lua tools/test_deck.lua      # the softcut loop decks and the tape's delegated mechanics
-lua tools/test_wav.lua       # the wav layer: resampling, headers, transients, onsets
-lua tools/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
-lua tools/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
-lua tools/test_screen.lua    # the screen's promises, read off the pixels: header
+lua test/test_deck.lua      # the softcut loop decks and the tape's delegated mechanics
+lua test/test_wav.lua       # the wav layer: resampling, headers, transients, onsets
+lua test/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
+lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
+lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
 
 # single-file build: inlines lib/*.lua into dist/mangler_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
-lua tools/amalgamate.lua
+lua test/amalgamate.lua
 
 # the control map: doc/controls.md is GENERATED from ENC_MAP/VOICE_FACE/KEYS; rerun
 # after changing a page's knobs or keys (test_control fails on a stale one)
-lua tools/controls.lua
+lua test/controls.lua
 
 # on a connected device: run the walkthrough and the measurements (doc/norns-platform.md
 # says how, and why one SSH session must stay open)
-python3 tools/device/gate.py 2 4:4.10,4.14
-python3 tools/device/measure.py states voices
+python3 test/device/gate.py 2 4:4.10,4.14
+python3 test/device/measure.py states voices
 
 # deploy (the repo IS the script; --delete kills stale engine copies)
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/

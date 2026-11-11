@@ -22,8 +22,8 @@ local FILTX = VARIANT == "filter"
 -- SCENARIO stays OUR local and env reads it through the getter — see the note
 -- at the top of env.lua for why that is not ceremony.
 local SCENARIO
-local REPO_DIR = (arg[0]:match("(.*)/tools/uisim/") or ".")
-local env = dofile(REPO_DIR .. "/tools/uisim/env.lua")
+local REPO_DIR = (arg[0]:match("(.*)/test/uisim/") or ".")
+local env = dofile(REPO_DIR .. "/test/uisim/env.lua")
 local _h = env.install{ dir = OUTDIR, scenario = function() return SCENARIO end }
 local export, run_ticks = _h.export, _h.run_ticks
 local push = _h.push

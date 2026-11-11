@@ -1,7 +1,7 @@
 -- harness.lua — what every offscreen harness shares: the assertions, the page
 -- list exactly as the script declares it, and the summary that ends the run.
 --
---   local T = dofile("tools/harness.lua")
+--   local T = dofile("test/harness.lua")
 --   local ok, near = T.ok, T.near
 --   ...
 --   T.report("deck harness OK")

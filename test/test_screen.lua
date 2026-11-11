@@ -2,20 +2,20 @@
 --
 -- The render suite proves every page draws, and a person looks at the shots.
 -- Some promises are easy to miss by eye in 70 shots, so this harness reads
--- the screen the script really drew (tools/uisim/env.lua) and asserts them:
+-- the screen the script really drew (test/uisim/env.lua) and asserts them:
 --   the header: a lit flag never drops off, however long the title and
 --               however many flags are lit (the beat repeat's RP did)
 --   the footer: the erase arc clears the encoder words (it sat on "MOVE")
 --   VOICE:      the GRAIN cloud follows its knobs (it drew the same dots
 --               whatever size, density, spread, pan or jitter said)
 --
---   lua tools/test_screen.lua        # from the repo root
+--   lua test/test_screen.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok = T.ok
 
 local SCENARIO
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)

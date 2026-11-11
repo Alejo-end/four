@@ -5,12 +5,12 @@
 -- sample playing a semitone sharp. A rate error IS a pitch error, so these
 -- assert the VALUE at a wall-clock position, not just the frame count.
 --
---   lua tools/test_wav.lua        # from the repo root
+--   lua test/test_wav.lua        # from the repo root
 --
 -- It loads the real lib/mwav.lua and lib/mpages.lua (no copies) with a stub
 -- ctx and drives them over real files, with no norns and no hardware.
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- the real modules, initialised the way mangler.lua does it, minus the

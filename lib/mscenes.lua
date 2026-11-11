@@ -191,7 +191,7 @@ append(SAFE_SNAPSHOT_IDS, SCENE_RECALL_IDS)
 -- sound.) this is a note to whoever adds the next param to the lists above.
 
 -- WHAT A SCENE DELIBERATELY LEAVES OUT — the other half of the recall list.
--- membership is TOTAL: tools/test_control.lua asserts every param in the
+-- membership is TOTAL: test/test_control.lua asserts every param in the
 -- paramset is in SCENE_RECALL_IDS or here, never neither and never both, so
 -- a NEW param cannot silently miss the decision (the defect that recurred:
 -- purity, FINE_IDS, RATE_IDS and these lists each missed a layers param).

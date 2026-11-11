@@ -5,9 +5,9 @@
 -- must not take the tape or the other layer with it. Those are exactly the
 -- failures that are silent until you have lost a loop.
 --
---   lua tools/test_deck.lua        # from the repo root
+--   lua test/test_deck.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- ---- a softcut that RECORDS what it was told, instead of making sound -------

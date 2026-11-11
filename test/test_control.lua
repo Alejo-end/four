@@ -8,17 +8,17 @@
 --
 -- So this drives the REAL script through enc() and key() and asserts what
 -- reaches the params. It runs on the SAME offscreen norns as the render suite
--- (tools/uisim/env.lua), so the two can never disagree about what norns does;
+-- (test/uisim/env.lua), so the two can never disagree about what norns does;
 -- the screen is real and simply never read here, because drawing is the
 -- render suite's job.
 --
---   lua tools/test_control.lua        # from the repo root
+--   lua test/test_control.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- ---- the offscreen norns, shared with the render suite --------------------
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp" }
 
 -- the one thing the renderer does not need: a record of softcut calls, so an
@@ -610,11 +610,11 @@ do
   -- the beat-locked modulators run on (the paramset here is mangler's alone)
   local SYSTEM_IDS = { clock_tempo = true }
   local checked, dead = 0, {}
-  local sets = { "presets/mangler.pmap.example",
-    "presets/layers/layers.pmap.example" }
+  local sets = { "data/mangler.pmap.example",
+    "data/layers/layers.pmap.example" }
   for n = 1, 10 do
-    sets[#sets + 1] = string.format("presets/mangler-%02d.pset", n)
-    sets[#sets + 1] = string.format("presets/layers/layers-%02d.pset", n)
+    sets[#sets + 1] = string.format("data/mangler-%02d.pset", n)
+    sets[#sets + 1] = string.format("data/layers/layers-%02d.pset", n)
   end
   for _, path in ipairs(sets) do
     local ids = ids_in(path)
@@ -634,7 +634,7 @@ do
   -- the scene SIDECARS name params by id too, and a dead id there is even
   -- quieter: apply() skips unknown ids without a word. Scan every ["id"]= key.
   local sdead, schecked = {}, 0
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
@@ -658,7 +658,7 @@ do
   -- recalled over a short sample is the "long silence" trap (the runtime clamp
   -- guards live captures; the SHIPPED banks simply leave the window alone)
   local wnd = {}
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for n = 1, 10 do
       local path = string.format("%sscenes-%02d.lua", dir, n)
       local f = io.open(path)
@@ -1647,10 +1647,10 @@ do
   -- pset line fires its action on load, so a 1 on print_take or chaos_throw
   -- goes off the moment the preset opens
   local bad = {}
-  for _, dir in ipairs({ "presets/", "presets/layers/" }) do
+  for _, dir in ipairs({ "data/", "data/layers/" }) do
     for k = 1, 10 do
       local path = string.format("%s%s-%02d.pset", dir,
-        dir == "presets/" and "mangler" or "layers", k)
+        dir == "data/" and "mangler" or "layers", k)
       local f = io.open(path)
       if f then
         for line in f:lines() do
@@ -1677,24 +1677,24 @@ do
 
   -- (d) dist/mangler_single.lua is GENERATED; a stale one ships old code.
   -- The generators run on the interpreter running this harness (LUA53 under
-  -- tools/check.lua), not on whatever `lua` is on PATH.
+  -- test/check.lua), not on whatever `lua` is on PATH.
   local LUA = (arg and arg[-1]) or "lua"
   local tmp = os.tmpname()
-  local okb = os.execute(LUA .. " tools/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
+  local okb = os.execute(LUA .. " test/amalgamate.lua mangler.lua " .. tmp .. " >/dev/null")
   local built = io.open(tmp) and io.open(tmp):read("a")
   local shipped = io.open("dist/mangler_single.lua") and io.open("dist/mangler_single.lua"):read("a")
   os.remove(tmp)
   ok(okb and built and built == shipped,
-    "dist/mangler_single.lua is a fresh build (run: lua tools/amalgamate.lua)")
+    "dist/mangler_single.lua is a fresh build (run: lua test/amalgamate.lua)")
 
   -- (e) doc/controls.md is GENERATED from the script's own tables too
   local ctmp = os.tmpname()
-  local okc = os.execute(LUA .. " tools/controls.lua " .. ctmp .. " >/dev/null")
+  local okc = os.execute(LUA .. " test/controls.lua " .. ctmp .. " >/dev/null")
   local cmap = io.open(ctmp) and io.open(ctmp):read("a")
   local cdoc = io.open("doc/controls.md") and io.open("doc/controls.md"):read("a")
   os.remove(ctmp)
   ok(okc and cmap and cmap == cdoc,
-    "doc/controls.md matches the code (run: lua tools/controls.lua)")
+    "doc/controls.md matches the code (run: lua test/controls.lua)")
 end
 
 

@@ -71,7 +71,7 @@ local MOTION_IDS = {
 }
 
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
--- membership is TOTAL: tools/test_control.lua asserts every param sits in
+-- membership is TOTAL: test/test_control.lua asserts every param sits in
 -- MOTION_IDS or here, never neither and never both, so a new param cannot
 -- silently miss the decision. each line names its reason once.
 local MOTION_EXCLUDE = {

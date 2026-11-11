@@ -1,6 +1,6 @@
 -- check.lua — every offline check in one command, with one verdict at the end.
 --
---   lua tools/check.lua                 # from the repo root
+--   lua test/check.lua                 # from the repo root
 --
 -- What it runs, in order:
 --   1. a syntax check of the script, the modules and the single-file build
@@ -50,7 +50,7 @@ step("syntax: script, modules, single-file build",
 -- 2. the harnesses
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",
                      "test_launchpad", "test_purity", "test_screen", "test_set" }) do
-  step("harness: " .. t, sh(LUA .. " tools/" .. t .. ".lua >/dev/null 2>&1"))
+  step("harness: " .. t, sh(LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
 end
 
 -- 3. the renders: source and build, four variants each, byte-compared
@@ -61,9 +61,9 @@ sh("mkdir -p " .. src_dir .. " " .. dist_dir)
 local rendered = true
 for _, v in ipairs({ "base", "empty", "grain", "filter" }) do
   rendered = rendered
-    and sh(LUA .. " tools/uisim/render_pages.lua mangler.lua " .. src_dir .. " "
+    and sh(LUA .. " test/uisim/render_pages.lua mangler.lua " .. src_dir .. " "
       .. v .. " " .. v .. " >/dev/null 2>&1")
-    and sh(LUA .. " tools/uisim/render_pages.lua dist/mangler_single.lua "
+    and sh(LUA .. " test/uisim/render_pages.lua dist/mangler_single.lua "
       .. dist_dir .. " " .. v .. " " .. v .. " >/dev/null 2>&1")
 end
 step("render suite runs (source and build)", rendered)

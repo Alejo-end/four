@@ -186,7 +186,7 @@ spread per grain.
 
 ## How to repeat this
 
-The tools are in `tools/device/` and need only the Python standard library:
+The tools are in `test/device/` and need only the Python standard library:
 
 | Tool | What it does |
 |---|---|
@@ -203,9 +203,9 @@ services after the session opens.
 ```sh
 ssh -M -S ctl we@norns.local 'sleep 21600' &
 export NORNS_CTL=$PWD/ctl
-python3 tools/device/gate.py 2 4:4.10,4.14      # stages, or chosen checks
-python3 tools/device/measure.py states voices
-python3 tools/device/report.py 2026-11-06
+python3 test/device/gate.py 2 4:4.10,4.14      # stages, or chosen checks
+python3 test/device/measure.py states voices
+python3 test/device/report.py 2026-11-06
 ```
 
 Stage 5 uploads the test files to `dust/audio/mangler_test`. Stages 8, 11, 12 and 15

@@ -2,7 +2,7 @@
 """Run doc/device-gate.md on a connected norns and record each result.
 
     export NORNS_CTL=<control socket>       # see norns.py
-    python3 tools/device/gate.py 1 2 3      # run these stages, in order
+    python3 test/device/gate.py 1 2 3      # run these stages, in order
 
 A result is one of:
   pass      measured on the device, and the measurement decides the check
@@ -1137,8 +1137,8 @@ def stage6():
     for cid, fn in (("6.1", c61), ("6.2", c62), ("6.3", c63), ("6.4", c64), ("6.5", c65), ("6.6", c66),
                     ("6.7", c67), ("6.8", c68), ("6.9", c69), ("6.10", c610)):
         check(cid, fn)
-    you("6.11", why="tools/test_control covers the lane ends offscreen. Needs a person to judge the gesture")
-    you("6.12", why="tools/test_purity covers every reason offscreen. Look at the mark on the OLED")
+    you("6.11", why="test/test_control covers the lane ends offscreen. Needs a person to judge the gesture")
+    you("6.12", why="test/test_purity covers every reason offscreen. Look at the mark on the OLED")
     grid = grid_state()
     you("6.13", "6.14", "6.15", why=f"needs a physical grid; connected: {grid}")
 
@@ -2031,7 +2031,7 @@ def stage12():
     for cid, fn in (("12.1", c121), ("12.2", c122), ("12.3", c123), ("12.5", c125), ("12.6", c126), ("12.7", c127),
                     ("12.9", c129), ("12.10", c1210), ("12.14", c1214)):
         check(cid, fn)
-    you("12.4", "12.11", "12.12", "12.13", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("12.4", "12.11", "12.12", "12.13", why="test/test_control covers the logic offscreen. Try these by hand")
     you("12.8", why="needs a physical grid")
 
 
@@ -2115,7 +2115,7 @@ def stage13():
 
     for cid, fn in (("13.1", c131), ("13.2", c132), ("13.4", c134), ("13.5", c135)):
         check(cid, fn)
-    you("13.3", "13.6", "13.10", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("13.3", "13.6", "13.10", why="test/test_control covers the logic offscreen. Try these by hand")
     you("13.7", "13.8", "13.9", why="needs a Launchpad Mini MK3 or a grid")
 
 
@@ -2239,7 +2239,7 @@ def stage15():
     for cid, fn in (("15.1", c151), ("15.2", c152), ("15.8", c158)):
         check(cid, fn)
     you("15.3", why="needs a Launchpad")
-    you("15.4", "15.5", "15.6", "15.7", "15.9", "15.10", "15.11", why="tools/test_control covers the logic offscreen. Try these by hand")
+    you("15.4", "15.5", "15.6", "15.7", "15.9", "15.10", "15.11", why="test/test_control covers the logic offscreen. Try these by hand")
 
 
 # ---- stage 16 ----------------------------------------------------------------
@@ -2623,7 +2623,7 @@ def stage18():
         time.sleep(0.25)
         shot("18_" + page)
     you("18.1", "18.2", "18.3", "18.5", "18.6", "18.7", "18.8", "18.9", "18.10", "18.13", "18.14", "18.15", "18.16",
-        why="tools/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
+        why="test/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
 
 
 def cleanup():

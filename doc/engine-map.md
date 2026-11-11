@@ -59,7 +59,7 @@ load. A missing plugin costs lushness, never the instrument.
 
 The command count printed at load is the deploy truth: it must read `count: 66`. Any other
 number means an old engine is running and nothing you test means anything
-(tools/test_control.lua parses the command set and fails if it is not 66). New args on
+(test/test_control.lua parses the command set and fails if it is not 66). New args on
 existing commands are preferred over new commands so the count moves rarely.
 
 The grain envelope buffers are filled before the server sync so the first grain that fires

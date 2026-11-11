@@ -11,9 +11,9 @@
 -- hardware, and picking the DAW port instead of the surface port gives you a
 -- grid that lights but never responds.
 --
---   lua tools/test_launchpad.lua        # from the repo root
+--   lua test/test_launchpad.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 -- lift the pure helpers out of mgrid rather than copying them

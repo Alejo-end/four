@@ -282,5 +282,5 @@ One SuperCollider engine (`lib/Engine_Mangler.sc`, exactly one copy on the devic
 recording, playback voices and effects. softcut runs the tape deck on its own core. The Lua
 side is `mangler.lua` plus modules in `lib/` sharing one context table, with the params
 system as the single source of truth for every value. `dist/mangler_single.lua` is a
-generated single file build; edit the modules, not that file. `tools/uisim/` renders every
+generated single file build; edit the modules, not that file. `test/uisim/` renders every
 page offscreen for testing without hardware.

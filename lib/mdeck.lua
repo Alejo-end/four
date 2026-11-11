@@ -85,7 +85,7 @@ local function both(d, fn) fn(d.va); fn(d.vb) end
 -- MUTE, not STOP, because that is what it does.
 function M.update_level(d)
   -- the master fold is computed here rather than read from C.mix_gains ON
-  -- PURPOSE: this module stays drivable standalone (tools/test_deck.lua stubs
+  -- PURPOSE: this module stays drivable standalone (test/test_deck.lua stubs
   -- a bare ctx), and the two-factor fold is the whole overlap
   local out = pget("out_level", 1) * (1 - pget("stop_all", 0))
   local lv = get(d, "level", 0.8) * out * (get(d, "play", 1) == 1 and 1 or 0)

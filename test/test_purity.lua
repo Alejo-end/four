@@ -11,13 +11,13 @@
 -- the day it is born — the classification checks in test_control force the
 -- decision for params; this is the same forcing for the mark.
 --
---   lua tools/test_purity.lua        # from the repo root
+--   lua test/test_purity.lua        # from the repo root
 
-local T = dofile("tools/harness.lua")
+local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
 local SCENARIO
-local env = dofile("tools/uisim/env.lua")
+local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)

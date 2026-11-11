@@ -1,6 +1,6 @@
 {
   "prefix": "/mangler/",
-  "note": "Every field is one OSC message with one argument. Floats from params are 0..1. Keep this list equal to FIELDS in lib/mosc.lua: tools/test_control.lua checks it.",
+  "note": "Every field is one OSC message with one argument. Floats from params are 0..1. Keep this list equal to FIELDS in lib/mosc.lua: test/test_control.lua checks it.",
   "events": [
     { "path": "/mangler/ev/note", "args": "channel note velocity (ints)" },
     { "path": "/mangler/ev/cc", "args": "channel cc value (ints), only when the value changed" },

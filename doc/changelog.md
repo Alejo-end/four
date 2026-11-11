@@ -3581,6 +3581,13 @@ Tests: 2 assertions in test_deck. All checks pass on Lua 5.3. On the device 2026
 compiles at `count: 66`, every def builds, modes cycle with no leftover synths, and CPU sits
 near 19%. Nobody has listened: each fix still needs an ear.
 
+Hundred-and-fifteenth change: **fewer scripts in SELECT (folders only, no code change)**. norns lists every
+`.lua` under dust/code except in folders named lib, data, crow, test or docs. `tools/` is
+now `test/` and `presets/` is now `data/`, so the harnesses, the uisim and the scene and pad
+files no longer show as scripts. Every path in the scripts, tests and docs moved with them;
+the change log and the 2026-11-06 measurements keep their old paths as history. The
+rebuilt presets are byte-identical. All checks pass on Lua 5.3.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)
