@@ -55,7 +55,16 @@ Engine_Mangler : CroneEngine {
     }
 
     setMode { arg i;
-        playSynth.notNil.if({ playSynth.free; playSynth = nil });
+        // a RELEASE, not a free: the old drone fades out over 20ms while the
+        // new one fades in, so a mode change no longer cuts the wave mid-cycle.
+        // The two overlap for 20ms only (the one-scsynth-core budget).
+        // `handover` 1 when a new drone follows: the old one then stops
+        // writing the phase bus. Into OFF it keeps writing to the end, so
+        // the bus holds the last position, as it did before.
+        playSynth.notNil.if({
+            playSynth.set(\gate, 0, \handover, if(i > 0, 1, 0));
+            playSynth = nil;
+        });
         modeV = i;
         (i > 0).if({
             var def;
@@ -202,7 +211,7 @@ Engine_Mangler : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
-        var winBounds, winRead;
+        var winBounds, winRead, drEnv, seam;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -318,15 +327,26 @@ Engine_Mangler : CroneEngine {
             span = (hi - lo).max(0.001);
             [lo, span];
         };
-        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1;
+        // `run` goes through the SAME 50ms Lag io puts on `level`: the head
+        // stops only once io's fade is down at -60dB. On the raw level it
+        // stopped first, and the fade then played one held sample (a thump).
+        // `quiet` 1 (a drone fading out under the next one) stops writing
+        // the phase bus, so the screen follows the new drone alone.
+        // drEnv is the drone's own 10ms in, 20ms out, which frees it.
+        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0;
             var lo, span, incr, phase, winPos;
             #lo, span = winBounds.(pos_start, pos_end);
-            incr = Lag.kr(scan, 0.02) * pitchMul * (run > 0.001)
+            incr = Lag.kr(scan, 0.02) * pitchMul * (Lag.kr(run, 0.05) > 0.001)
                 * SampleDur.ir / (BufDur.kr(buf) * span);
             phase = Phasor.ar(0, incr, 0, 1);
             winPos = lo + (phase * span);
-            Out.kr(phase_out, A2K.kr(winPos));
+            Out.kr(phase_out, A2K.kr(winPos) * (1 - quiet));
             [winPos, phase, span];
+        };
+        drEnv = { arg gate; EnvGen.kr(Env.asr(0.01, 1, 0.02), gate, doneAction: 2) };
+        // the loop seam fade PLAY has always had (~5ms, buffer-time referenced)
+        seam = { arg phase, span, buf;
+            (phase.min(1 - phase) * span * BufDur.kr(buf) / 0.005).clip(0, 1)
         };
 
         SynthDef(\mangler_grain, {
@@ -338,11 +358,11 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
             var winPos, phase, span, look;
             var trigL, trigR, posL, posR, panL, panR, sig, comp;
             var durL, durR, pchL, pchR, envSel;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
             look = (0.25 / BufDur.kr(buf_l)) * rec * (1 - freeze);
             // Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
             // kr quantized grain onsets to the ~1.3ms control block, which
@@ -370,7 +390,7 @@ Engine_Mangler : CroneEngine {
             comp = (density * size).clip(0.25, 16).sqrt.reciprocal;
             sig = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, posL.wrap(0, 1), 4, panL, envSel)
                 + GrainBuf.ar(2, trigR, durR, buf_r, pchR, posR.wrap(0, 1), 4, panR, envSel)) * comp;
-            Out.ar(play_bus, sig);
+            Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
         SynthDef(\mangler_warp, {
@@ -382,14 +402,14 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
             var winPos, phase, span, ptr, l, r, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
             ptr = A2K.kr(winPos);
             l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
             r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
-            sig = Balance2.ar(l, r, pan);
-            Out.ar(play_bus, sig);
+            sig = Balance2.ar(l, r, pan.lag(0.03));
+            Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
         SynthDef(\mangler_pv, {
@@ -401,21 +421,24 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1;
-            var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+            var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig, edge;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
-            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
-            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
+            // the seam fade before the FFT: a wrap click fed to MagFreeze
+            // is held as a steady hiss
+            edge = seam.(phase, span, buf_l);
+            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4) * edge;
+            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4) * edge;
             chainL = FFT(LocalBuf(2048), sigL);
             chainR = FFT(LocalBuf(2048), sigR);
             chainL = PV_MagFreeze(chainL, pv_freeze);
             chainR = PV_MagFreeze(chainR, pv_freeze);
             l = IFFT(chainL);
             r = IFFT(chainR);
-            sig = Balance2.ar(l, r, pan);
-            Out.ar(play_bus, sig);
+            sig = Balance2.ar(l, r, pan.lag(0.03));
+            Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
         // ---- CLEAN PLAY drone — a straight loop of the window, the EXACT
@@ -432,19 +455,18 @@ Engine_Mangler : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1;
-            var winPos, phase, span, bufDur, sigL, sigR, edge, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch, level);
-            bufDur = BufDur.kr(buf_l);
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+            var winPos, phase, span, sigL, sigR, edge, sig;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover);
             sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
             sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
             // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
             // with rate): the rec-stop window almost never lands on a zero
             // crossing, so the bare loop CLICKED every pass — the one blemish
             // on "the exact recorded sample". the body of the take is untouched.
-            edge = (phase.min(1 - phase) * span * bufDur / 0.005).clip(0, 1);
-            sig = Balance2.ar(sigL, sigR, pan) * edge;
-            Out.ar(play_bus, sig);
+            edge = seam.(phase, span, buf_l);
+            sig = Balance2.ar(sigL, sigR, pan.lag(0.03)) * edge;
+            Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
         // ---- EROSION: the window rewriting itself, in its own synth
@@ -501,17 +523,18 @@ Engine_Mangler : CroneEngine {
                         clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
-                        pv_freeze = 0, erode = 0, wear = 0.5, level = 1;
-                    var winPos, phase, span, srcL, srcR, sig, dens;
-                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level);
+                        pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                    var winPos, phase, span, srcL, srcR, sig, dens, edge;
+                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
                     // Clouds' density is silent at 0.5: below it grains are
                     // random, above it periodic. Mapping 1..200 across 0.5 made
                     // density 13 to 16 silent and the default 20 about 20 dB
                     // down. Stay on the random side (the drone's Dust law), and
                     // lift the sparse end by the level the device measured.
                     dens = density.explin(1, 200, 0.36, 0.05);
-                    srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
-                    srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
+                    edge = seam.(phase, span, buf_l);
+                    srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4) * edge;
+                    srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4) * edge;
                     // POSITIONAL args (keyword args don't survive perform on a
                     // var-held class): in, pit, pos, size, dens, tex, drywet,
                     // in_gain, spread, rvb, fb, freeze, mode, lofi. our size/
@@ -526,7 +549,7 @@ Engine_Mangler : CroneEngine {
                         clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
                         pv_freeze, clouds_mode, clouds_lofi);
                     sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp;
-                    Out.ar(play_bus, sig);
+                    Out.ar(play_bus, sig * drEnv.(gate));
                 }).add;
                 hasClouds = true;
             } { arg err;
@@ -625,7 +648,7 @@ Engine_Mangler : CroneEngine {
                 rev_mix = 0.0, rev_send = 0, rev_ret = 0;
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, pre, dlyRet, rvRet, dfmClass, mmFilter;
-            var regenRun, runW, srcL, srcR, recLvl, preLvl;
+            var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
@@ -633,10 +656,10 @@ Engine_Mangler : CroneEngine {
             // gain in the play defs — PLAY at pan 0 with no FX now lands at
             // EXACT unity vs the raw take (the "exact recorded sample"
             // claim, previously +0.5dB into the limiter).
-            wet = In.ar(play_bus, 2) * grain_level * 2.sqrt;
+            wet = In.ar(play_bus, 2) * grain_level.lag(0.03) * 2.sqrt;
 
             // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
-            // if sc3-plugins is absent. One DFM1: LP for LP+BP, HP for HP; BP
+            // if sc3-plugins is absent. Two DFM1s: LP for LP+BP, HP for HP; BP
             // high-passes the resonant LP peak into a band. filt_type 0=LP 1=HP 2=BP.
             cf = cutoff.clip(20, 20000).lag(0.05);
             // lag the resonance like cutoff: a stepped CC/encoder jump on a
@@ -647,11 +670,19 @@ Engine_Mangler : CroneEngine {
             // clip below DFM1's self-oscillation onset (~0.95) so max resonance
             // is very resonant but STABLE; raise toward 0.95 to let it self-osc.
             res = resonance.clip(0, 0.9);
+            // a TYPE change is a 20ms CROSSFADE: every type runs all the
+            // time and these weights glide. Lag is linear in its input, so
+            // the three still add up to 1 mid-glide. A switched type popped,
+            // because the output and the ladder's state both jumped. The
+            // cost is a second DFM1, always on (CPU sat near 30%).
+            wLp = Lag.kr(filt_type < 0.5, 0.02);
+            wHp = Lag.kr((filt_type > 0.5) * (filt_type < 1.5), 0.02);
+            wBp = Lag.kr(filt_type > 1.5, 0.02);
             mmFilter = {
                 var rq = (1 - (resonance * 0.92)).max(0.05);
-                (RLPF.ar(wet, cf, rq) * (filt_type < 0.5))
-                    + (RHPF.ar(wet, cf, rq) * ((filt_type > 0.5) * (filt_type < 1.5)))
-                    + (BPF.ar(wet, cf, rq) * (1 + resonance) * (filt_type > 1.5))
+                (RLPF.ar(wet, cf, rq) * wLp)
+                    + (RHPF.ar(wet, cf, rq) * wHp)
+                    + (BPF.ar(wet, cf, rq) * (1 + resonance) * wBp)
             };
             dfmClass = "DFM1".asSymbol.asClass;
             wet = dfmClass.notNil.if({
@@ -664,9 +695,11 @@ Engine_Mangler : CroneEngine {
                     // LINEAR biquads never did. half in / double out keeps
                     // the loudness and stays clean until `drive` asks for
                     // dirt. the 0.5/2 pair is the device-tunable knob here.
-                    var d = dfmClass.ar(wet, cf, res, 0.5,
-                        (filt_type > 0.5) * (filt_type < 1.5), 0) * 2;
-                    Select.ar(filt_type > 1.5, [d, HPF.ar(d, (cf * 0.5).clip(20, 20000))])
+                    // two ladders, LP and HP; BP is the LP peak high-passed
+                    var lp = dfmClass.ar(wet, cf, res, 0.5, 0, 0) * 2;
+                    var hp = dfmClass.ar(wet, cf, res, 0.5, 1, 0) * 2;
+                    (lp * wLp) + (hp * wHp)
+                        + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
                 } { |e| mmFilter.value }
             }, { mmFilter.value });
 
@@ -686,8 +719,8 @@ Engine_Mangler : CroneEngine {
             // the delay runs in \mangler_delay (spawn/free — alive while
             // delay_mix > 0 or the feedback is a near-infinite hold). io
             // sends the post-drive wet and reads the echo back via InFeedback
-            // (one block late; the regeneration spacing itself lives inside
-            // the delay synth and is exact). the mix law stays the equal-power
+            // (one block late; the delay synth's line is one block short to
+            // pay for it, and for its own LocalIn block on each repeat). the mix law stays the equal-power
             // CROSSFADE — a dub throw wants the direct to duck — and the lag
             // keeps a CC step from zippering it. at rest the synth is gone
             // and the return reads 0: this stage is a multiply by zero.
@@ -719,15 +752,18 @@ Engine_Mangler : CroneEngine {
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
             sig = sig * Lag.kr(level, 0.05);
             // What gets RECORDED is tapped here, before the master limiter.
-            // The limiter looks 10 ms ahead, which means its output comes out
-            // 10 ms late. `resample` mixes the input with the output, so with
+            // The limiter delays its output by twice its lookahead (6 ms
+            // here; it was 20 ms). `resample` mixes the input with the output, so with
             // the old tap that mix was the signal plus a 10 ms copy of itself:
             // a hollow, phasey colour, printed into the buffer for good.
             // Nothing is less safe for taking it from here. The 0.99 limiter
             // further down still catches anything hot before it reaches the
             // buffer, and the two regen record levels still add up to 1.
             preLim = sig;
-            sig = Limiter.ar(sig, 0.92, 0.01);  // DAC headroom
+            // DAC headroom. Lookahead 3ms, so the output is 6ms late: at
+            // 0.01 the whole output, dry monitor included, came 20ms late,
+            // and with the norns monitor up the input was heard twice.
+            sig = Limiter.ar(sig, 0.92, 0.003);
             recRun = rec * (1 - freeze);
             // regen: run the record head continuously and crossfade the OUTPUT
             // back into the buffer (self-mangle). BOUNDED (convex crossfade +
@@ -736,7 +772,14 @@ Engine_Mangler : CroneEngine {
             // (STOP / mix thrown fully to tape -> level ~0) PAUSES it — else a
             // stopped minute of regen crossfades SILENCE over the whole take.
             regenRun = (regen > 0) * (1 - rec) * (1 - freeze) * (level > 0.001);
-            runW = recRun.max(regenRun);
+            // recG and regG are the two writes' gates, ramped linearly over
+            // 10ms (Slew reaches 0 exactly). The head keeps running until the
+            // ramp is down, so a punch-out, a punch-in and a regen start fade
+            // the write instead of printing a step into the take. Each ramp
+            // starts from rec 0, pre 1: a write that does nothing.
+            recG = Slew.kr(recRun, 100, 100);
+            regG = Slew.kr(regenRun, 100, 100);
+            runW = recRun.max(regenRun).max(recG > 0).max(regG > 0);
             // the polled write-head phase advances with the SAME run signal
             // RecordBuf gets (rec OR regen): driven by rec alone, a regen pass
             // walked the real head while rec_phase stayed parked, so the next
@@ -751,18 +794,19 @@ Engine_Mangler : CroneEngine {
             resample = resample.lag(0.02);
             recL = (LeakDC.ar(inL) * (1 - resample)) + (preLim[0] * resample);
             recR = (LeakDC.ar(inR) * (1 - resample)) + (preLim[1] * resample);
-            srcL = (recL * (1 - regenRun)) + (LeakDC.ar(preLim[0]) * regenRun);
-            srcR = (recR * (1 - regenRun)) + (LeakDC.ar(preLim[1]) * regenRun);
+            srcL = (recL * (1 - regG)) + (LeakDC.ar(preLim[0]) * regG);
+            srcR = (recR * (1 - regG)) + (LeakDC.ar(preLim[1]) * regG);
             // record-safety limiter: transparent below 0.99, stops a hot take
             // hard-clipping into the buffer.
             srcL = Limiter.ar(srcL, 0.99, 0.002);
             srcR = Limiter.ar(srcR, 0.99, 0.002);
-            // ~10ms lag on the write levels: punch-IN fades instead of stepping,
-            // and mid-take rec_level/pre_level/regen moves stop printing steps
-            // into the buffer. (run stays binary — punch position is sample-
-            // exact, and punch-OUT just pauses the head as before.)
-            recLvl = Lag.kr((rec_level * (1 - regenRun)) + (regen * regenRun), 0.01);
-            preLvl = Lag.kr((pre_level * (1 - regenRun)) + ((1 - regen) * regenRun), 0.01);
+            // the knobs keep their ~10ms lag, so a mid-take move of
+            // rec_level, pre_level or regen does not print a step either.
+            // With both gates at 0 this is rec 0, pre 1. The gates never sum
+            // past 1 (a rec to regen hand-over crosses them), so pre stays >= 0.
+            recLvl = (Lag.kr(rec_level, 0.01) * recG) + (Lag.kr(regen, 0.01) * regG);
+            preLvl = 1 - (recG * (1 - Lag.kr(pre_level, 0.01)))
+                - (regG * Lag.kr(regen, 0.01));
             RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
             RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
             Out.kr(rec_amp_out,
@@ -818,7 +862,12 @@ Engine_Mangler : CroneEngine {
             dIn = sig + (fbIn * delay_fb);
             // 2s line: a half-note sync below 120 BPM needs more than 1s,
             // and the extra second costs ~0.75 MB of server memory
-            dOut = DelayC.ar(dIn, 2.0, delay_time.clip(0.01, 2.0).lag(0.2));
+            // minus one block: LocalIn hands each repeat back one block late,
+            // and io reads the return one block late, so the line itself is
+            // one block short. Every echo, the first included, lands on time.
+            // (Without it a synced delay drifted 1.33ms per repeat.)
+            dOut = DelayC.ar(dIn, 2.0,
+                delay_time.clip(0.01, 2.0).lag(0.2) - ControlDur.ir);
             // tanh, not softclip, for the signal that goes back round the
             // loop. softclip bends sharply at the point it starts limiting,
             // and every repeat bends it again, so the distortion piles up

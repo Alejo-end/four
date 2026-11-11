@@ -1050,6 +1050,20 @@ function M.pset_write(number)
   end
 end
 
+-- true when pset `number` stores `id`. A preset may leave a deck's loop out on
+-- purpose (the album set does: the file's length decides it). Then a
+-- reload of the same file must snap the loop, or the deck keeps whatever slice
+-- the player left it on.
+local function pset_stores(number, id)
+  if not (norns.state and norns.state.shortname) then return true end
+  local f = io.open(string.format("%s%s-%02d.pset", norns.state.data,
+    norns.state.shortname, number), "r")
+  if not f then return true end
+  local text = f:read("a") or ""
+  f:close()
+  return text:find('"' .. id .. '":', 1, true) ~= nil
+end
+
 function M.pset_read(number)
   for i = 1, #M.decks do
     local d = M.decks[i]
@@ -1082,13 +1096,14 @@ function M.pset_read(number)
       local fp = pget(p(d, "file"), "")
       if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
           and util.file_exists(fp) then
-        -- keep_loop: the pset's loop points are already restored and are
-        -- authoritative — reloading the audio must not re-snap them. Through
+        -- keep_loop: when the pset stores loop points they are already
+        -- restored and are authoritative — reloading the audio must not re-snap them. Through
         -- layer_load when it is there, so an off-rate file is converted here
         -- too instead of coming back a semitone sharp (layer_load clears the
         -- deck while it converts).
-        if C.layer_load then C.layer_load(d, fp, true)
-        else M.load_file(d, fp, nil, true) end
+        local keep = pset_stores(number, p(d, "start"))
+        if C.layer_load then C.layer_load(d, fp, keep)
+        else M.load_file(d, fp, nil, keep) end
       else
         M.clear(d)
       end

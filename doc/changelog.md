@@ -3453,6 +3453,23 @@ then retested there.
 - **The erase left an echo.** `\clear` spawned the effects before the buffer's zero
   landed, so they took in the last of the take. It now waits with `s.sync`.
 
+Hundred-and-fourteenth change: **the sound review's clicks and timing (ENGINE and Lua, the
+count stays 66, needs a RESTART)**. A review asked how to make mangler sound better; ten
+findings were confirmed, and this fixes all ten. Engine: a mode change RELEASES the drone
+(10ms in, 20ms out, `gate` and `handover` args, no new command) instead of freeing it. The
+record write has two 10ms linear gates (`recG`, `regG`), and the head runs until they are
+down, so punch-in, punch-out and a regen start fade instead of printing a step into the take.
+PV and the Clouds source get PLAY's seam fade (`seam`). The drone head stops on the same 50ms
+lag as io's level, so STOP fades instead of thumping. A filter type change is a 20ms crossfade: LP
+and HP each have a DFM1, always running (one more DFM1 of CPU; the device sits near 30%). `grain_level`, the drone `pan` and PLAY's `pitch` are lagged.
+The delay line is one control block short, so every echo lands on time (it drifted 1.33ms a
+repeat). The master limiter's lookahead is 3ms, not 10ms, so the output is 6ms late, not
+20ms. Lua: `Mdeck.pset_read` snaps a deck's loop when the pset stores no loop points (the
+album set), so reloading the same file no longer keeps the player's last slice.
+Tests: 2 assertions in test_deck. All checks pass on Lua 5.3. On the device 2026-11-11 it
+compiles at `count: 66`, every def builds, modes cycle with no leftover synths, and CPU sits
+near 19%. Nobody has listened: each fix still needs an ear.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

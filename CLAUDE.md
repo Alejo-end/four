@@ -27,6 +27,10 @@ the status block current, and add a change-log entry for every change.
   the modulators on MOTION.
   Lua only, the count stays 66. `full-review` was merged into `main` on
   2026-10-23, before the device session: `main` holds code not yet heard.
+- **The sound fixes (114th change):** engine and Lua. Clicks at mode changes, punches, regen,
+  loop seams, STOP and filter type changes; delay and limiter timing; the deck loop on a
+  preset reload. On the device 2026-11-11: compiles, `count: 66`, all defs built, modes
+  cycle with no leftover synths, CPU about 19%. Nobody has listened yet.
 - **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**

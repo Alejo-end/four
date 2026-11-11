@@ -319,6 +319,23 @@ do
   ok(asked and asked[1] == d1 and asked[2] == "/tmp/bed.wav" and asked[3] == true,
     "a named file reloads through layer_load, keeping the loop")
   near(P.lay1_start, 0.1, 1e-9, "...with the pset's loop untouched")
+  -- a pset that leaves the loop out (the album set) snaps it: the
+  -- same file reloaded must not keep the slice the player left the deck on
+  norns.state.shortname = "mangler_test"
+  local f = assert(io.open("/tmp/mangler_test-03.pset", "w"))
+  f:write('"lay1_file": /tmp/bed.wav\n"lay1_level": 0.8\n')
+  f:close()
+  asked = nil
+  Mdeck.pset_read(3)
+  ok(asked and asked[3] == false, "a pset without loop points snaps the loop on reload")
+  f = assert(io.open("/tmp/mangler_test-03.pset", "w"))
+  f:write('"lay1_file": /tmp/bed.wav\n"lay1_start": 0.1\n"lay1_end": 0.3\n')
+  f:close()
+  asked = nil
+  Mdeck.pset_read(3)
+  ok(asked and asked[3] == true, "...and one that stores them keeps them")
+  os.remove("/tmp/mangler_test-03.pset")
+  norns.state.shortname = nil
   ctx.layer_load = nil
   util.file_exists = function() return false end
   P.lay1_file = nil
