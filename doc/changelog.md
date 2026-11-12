@@ -3588,6 +3588,14 @@ files no longer show as scripts. Every path in the scripts, tests and docs moved
 the change log and the 2026-11-06 measurements keep their old paths as history. The
 rebuilt presets are byte-identical. All checks pass on Lua 5.3.
 
+Hundred-and-sixteenth change: **the visuals over the network, and track 2 (visuals only)**.
+A page opened from another computer (LAN mode) halted at once: Hydra makes no `a` without an
+audio input, and a page over plain http gets none, so `a.setBins` threw before anything drew.
+It now gets a silent stand-in. The page that hears the norns return sends its four audio
+bands through the bridge 20 times a second, and network pages react to those. The visuals
+also accept mangler2's track 2 fields (a blue column at track 2's head, its mode in the
+display, BARS for its page in AUTO); mangler never sends them, so that layer stays dark here.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)
