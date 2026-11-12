@@ -7,7 +7,7 @@
 --   local env = dofile("test/uisim/env.lua")
 --   local SCENARIO
 --   local h = env.install{ dir = "/tmp/shots", scenario = function() return SCENARIO end }
---   dofile("mangler2.lua")
+--   dofile("four.lua")
 --   SCENARIO = function(tick) ... end     -- runs once per frame
 --
 -- WHY THE SCENARIO ARRIVES AS A GETTER, which looks like ceremony: it used to be

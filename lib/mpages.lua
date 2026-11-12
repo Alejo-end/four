@@ -21,7 +21,7 @@ local amp_in, amp_out
 
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
--- (mangler2) one strip per track, its own material; `wave` is the focused
+-- (four) one strip per track, its own material; `wave` is the focused
 -- track's, swapped by M.focus_wave
 local waves = {}
 for n = 1, 4 do
@@ -243,7 +243,7 @@ local SHORT = {
   lfo2_depth = "DPT", lfo2_period = "PER", lfo2_target = "TGT",
   lfo3_depth = "DPT", lfo3_period = "PER", lfo3_target = "TGT",
   lfo4_depth = "DPT", lfo4_period = "PER", lfo4_target = "TGT",
-  -- COLOR and SPACE (mangler2): the crush, and each track's FX sends
+  -- COLOR and SPACE (four): the crush, and each track's FX sends
   crush = "CRSH", fx_dly = "1>DLY", fx_rev = "1>REV",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
@@ -262,7 +262,7 @@ local SHORT = {
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
   pv_freeze = "PVFZ", tape_freeze = "TFRZ", tape_reverse = "TREV",
   clouds_mode = "CMOD",
-  -- track 2 (mangler2): the track 1 word after "T2"
+  -- track 2 (four): the track 1 word after "T2"
   t2_level = "T2 LV", t2_pos_start = "T2 ST", t2_pos_end = "T2 EN",
   t2_scan = "T2 SPD", t2_pitch = "T2 PTCH", t2_pan = "T2 PAN",
   t2_pos_jitter = "T2 JIT", t2_size = "T2 SIZE", t2_density = "T2 DENS",
@@ -278,7 +278,7 @@ local SHORT = {
   route_sel = "SEND", ["@route_amt"] = "AMT",
   track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
 }
--- tracks 3 and 4 (mangler2): track 2's words with the number changed, and the
+-- tracks 3 and 4 (four): track 2's words with the number changed, and the
 -- sends as "2>3" (from track 2 into track 3). Built once, at load.
 do
   local add = {}
@@ -372,7 +372,7 @@ local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
   if not (id and params.lookup[id]) then return "--" end
-  -- a track 2 id reads in its track 1 format (mangler2)
+  -- a track 2 id reads in its track 1 format (four)
   local key = T2_KEY[id] or id
   if key == "route_sel" then                    -- the cell: from > to
     local r = C.route_cur and C.route_cur()
@@ -627,7 +627,7 @@ end
 -- FILTER: log-frequency axis 20Hz..20kHz over 128 columns, rail columns at
 -- 100Hz/1k/10k (labeled), the 0dB row, and a reusable response buffer (the
 -- curve approximates the engine's DFM1 build, see body_FILTER; the resonance
--- law mirrors Engine_Mangler2.sc, keep them in sync)
+-- law mirrors Engine_Four.sc, keep them in sync)
 local FILT_FREQ, FILT_Y = {}, {}
 for x = 0, 127 do
   FILT_FREQ[x + 1] = 20 * (1000 ^ (x / 127))
@@ -689,7 +689,7 @@ local function take_top_row(frame, rec)
   end
 end
 
--- mangler2: VOICE and FILTER draw the track they address (C.tid picks the
+-- four: VOICE and FILTER draw the track they address (C.tid picks the
 -- id). tp reads the selected track's value of a track 1 id; the read head
 -- and the window follow the track too.
 -- each extra track's ids, built once (the redraw path must not allocate)
@@ -736,7 +736,7 @@ local function body_TAKE(frame)
     take_top_row(frame, rec)
     return
   end
-  -- the window of the FOCUSED track (mangler2): TAKE 2 edits track 2's
+  -- the window of the FOCUSED track (four): TAKE 2 edits track 2's
   local lo, hi = track_window()
   local wx = clamp(C.rec_phase, 0, 1) * 127
   -- marked for erase: K1+K3 held past the tap window on this page
@@ -830,7 +830,7 @@ local function body_TAKE(frame)
   -- WRITE head. distinct SHAPE, not just tone: a
   -- DASHED column + a caret above the strip vs the write head's solid line +
   -- comet-tail glow — so even when they cross you can tell read from write.
-  -- (mangler2) every sounding track's head: the focused one with the caret,
+  -- (four) every sounding track's head: the focused one with the caret,
   -- the others as short dim ticks above the strip, and the other tracks'
   -- windows as dim marks along the top edge
   local focus = cur_track()
@@ -879,7 +879,7 @@ end
 -- referenced from there, and a later local would silently read as a global.
 local eros_gen, eros_acc, eros_live = 0, 0, false
 -- the one rule for "the erosion head is engaged": erode up, in PLAY. The
--- strip repaint (mangler2.lua's take_writing) asks the same question.
+-- strip repaint (four.lua's take_writing) asks the same question.
 function M.eroding()
   return pget("erode", 0) > 0 and pget("mode", 5) == 5
 end
@@ -1072,7 +1072,7 @@ local function body_VOICE(frame)
 end
 
 -- ============================================================================
--- TRACKS (mangler2): the hub. At rest, the four tracks in a list: the focus
+-- TRACKS (four): the hub. At rest, the four tracks in a list: the focus
 -- marked, each track's mode, its window on the take with its head, and its
 -- level. With K1 held, the sends as a grid, the S-4's routing: a row is
 -- where a sound comes FROM, a column where it goes TO; the diagonal is the
@@ -2295,7 +2295,7 @@ local HFLAGS = {
   { ch = "M", write = true }, { ch = "L", write = true },
   { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
   { ch = "SQ", lvl = 7 }, { ch = "LF", lvl = 7 },
-  -- mangler2: the other tracks that sound: T2, T3, T23 ... T234 ("T" and the
+  -- four: the other tracks that sound: T2, T3, T23 ... T234 ("T" and the
   -- numbers, not bare digits: after a title a digit read as the page name)
   { ch = "T2", lvl = 9 },
 }
@@ -2323,7 +2323,7 @@ end
 -- the width of a flag whole, and short (a writer's letter, or a bar)
 local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 -- (a bar's pip is 3: the 2px bar and a 1px gap, and a writer's letter keeps
--- a 1px gap too. They were 4 and 2, but mangler2's thirteen page dots and its
+-- a 1px gap too. They were 4 and 2, but four's thirteen page dots and its
 -- track flag left the worst case short of the dots.)
 local function hflag_pip(f) return f.write and f.w + 1 or 3 end
 local function any_layer_rec()
@@ -2382,8 +2382,8 @@ local function layout_dots()
   M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 2)
 end
 -- the page's name, with its track on VOICE and FILTER while track 2 is
--- selected (mangler2). Fixed strings: the redraw path allocates nothing.
--- (mangler2) the pages that belong to a track: their header starts with the
+-- selected (four). Fixed strings: the redraw path allocates nothing.
+-- (four) the pages that belong to a track: their header starts with the
 -- track's number as an inverted badge, S-4 style (track, then device), and
 -- their name is the device's: [2] TAKE, [2] VOICE, [2] FILTER. TRACKS shows
 -- the badge too: it is the focused track's row the keys act on.

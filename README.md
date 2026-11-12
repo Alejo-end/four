@@ -1,6 +1,8 @@
-# mangler
+# four
 
-A live stereo sampler for [norns](https://monome.org/norns/). Record anything line level,
+A live stereo sampler for [norns](https://monome.org/norns/) with four tracks. Each track
+records or loads its own material and has its own voice, filter, colour and effect sends;
+tracks can feed each other. It was called mangler. Record anything line level,
 loop it back exactly as recorded, then process it: time stretch, granular, tape varispeed,
 filter, delay, reverb, playable slices, a gesture looper, scene morphing, and controlled
 decay. Three keys and three encoders run everything. A grid is optional. Every parameter is
@@ -25,16 +27,16 @@ through [midigrid](https://github.com/jaggednz/midigrid)). JPverb (sc3-plugins) 
 ## Install
 
 ```sh
-rsync -av --delete --exclude='.git' ./ we@norns.local:~/dust/code/mangler/
+rsync -av --delete --exclude='.git' ./ we@norns.local:~/dust/code/four/
 ```
 
-Then SYSTEM > RESTART on the norns and pick mangler in SELECT. Two rules:
+Then SYSTEM > RESTART on the norns and pick four in SELECT. Two rules:
 
-1. `--delete` matters. A stale second copy of `Engine_Mangler.sc` anywhere under
+1. `--delete` matters. A stale second copy of `Engine_Four.sc` anywhere under
    `dust/code` hangs every norns script on LOADING.
 2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
    reload. After a restart the maiden log prints the engine command count. It must read
-   `count: 66`; any other number means an old engine is still running.
+   `count: 173`; any other number means an old engine is still running.
 
 ## First session
 
@@ -280,7 +282,7 @@ loaded. In pad mode the piano rows light the keys whose pad is sounding. Details
 
 One SuperCollider engine (`lib/Engine_Mangler.sc`, exactly one copy on the device) does
 recording, playback voices and effects. softcut runs the tape deck on its own core. The Lua
-side is `mangler.lua` plus modules in `lib/` sharing one context table, with the params
+side is `four.lua` plus modules in `lib/` sharing one context table, with the params
 system as the single source of truth for every value. `dist/mangler_single.lua` is a
 generated single file build; edit the modules, not that file. `test/uisim/` renders every
 page offscreen for testing without hardware.

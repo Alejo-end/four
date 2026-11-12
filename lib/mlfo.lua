@@ -28,7 +28,7 @@
 -- The TARGETS list is APPEND-ONLY: the target param stores an index into it,
 -- so a PSET or a PMAP names a target by its position here.
 --
--- PER TRACK (mangler2, the S-4's modulators): each modulator also has a
+-- PER TRACK (four, the S-4's modulators): each modulator also has a
 -- track (`lfo<i>_track`). A target names track 1's knob; on track n it
 -- moves `t<n>_<target>` (track 1's `grain_level` is `t<n>_level`). A knob
 -- every track shares (the delay, the reverb, dry/wet) is the same knob on
@@ -43,7 +43,7 @@ local TARGETS = {
   "delay_mix", "delay_fb", "rev_mix", "rev_size", "shimmer",
   "scan", "size", "density", "spread", "pan", "grain_jitter",
   "pos_jitter", "warp_window", "clouds_pos", "clouds_tex", "wear",
-  -- mangler2: the COLOR and SPACE of a track, and its level
+  -- four: the COLOR and SPACE of a track, and its level
   "crush", "fx_dly", "fx_rev", "grain_level",
 }
 -- the knobs all four tracks share: the same id whatever the track
@@ -262,7 +262,7 @@ function M.init(ctx)
   pget, FPS = ctx.pget, ctx.FPS
 end
 
--- the params, added by mangler2.lua's init_params after every target exists
+-- the params, added by four.lua's init_params after every target exists
 -- (an option's names are the targets' own names)
 function M.add_params(add_group)
   local names = { "OFF" }

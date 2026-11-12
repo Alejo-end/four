@@ -19,7 +19,7 @@ local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)
-dofile("mangler2.lua")
+dofile("four.lua")
 init()
 
 local CTX, Mp
@@ -82,7 +82,7 @@ do
     "tape_freeze", "beat_repeat", "step_run" }
   for _, id in ipairs(ON) do params:set(id, 1) end
   params:set("lfo1_target", 2); params:set("lfo1_depth", 0.5)
-  params:set("t2_mode", 5)   -- mangler2: track 2 sounding lights T2
+  params:set("t2_mode", 5)   -- four: track 2 sounding lights T2
   _h.run_ticks(1)
   while CTX.frame % 4 >= 2 do _h.run_ticks(1) end
   redraw()

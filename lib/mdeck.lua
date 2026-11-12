@@ -12,7 +12,7 @@
 -- The tape (lib/mtape.lua) borrows these mechanics through a keymapped
 -- descriptor: rate, rec gating, loop bounds, the seam, clear and jump are
 -- this module's. Its level law, pset files, phase events and its own
--- loop-pedal law stay in mtape and mangler2.lua (see the note there).
+-- loop-pedal law stay in mtape and four.lua (see the note there).
 
 local sc = require "softcut"
 

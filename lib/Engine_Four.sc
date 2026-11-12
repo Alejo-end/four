@@ -1,8 +1,8 @@
-// Engine_Mangler2.sc — THE ONLY engine file for the `mangler2` norns script.
+// Engine_Four.sc — THE ONLY engine file for the `four` norns script.
 //
-// mangler2 is mangler with FOUR engine tracks. Tracks 2 to 4 are more drones
+// four is mangler with FOUR engine tracks. Tracks 2 to 4 are more drones
 // (any mode) on the same take, each with its own window, pitch, grain knobs,
-// its own filter (\mangler2_strip) and its own level. They join track 1
+// its own filter (\four_strip) and its own level. They join track 1
 // after io's filter, so the delay and reverb are shared. Their commands
 // are the drone's own names with a `t2_`, `t3_` or `t4_` prefix, plus the
 // strip's level, cutoff, resonance and filt_type, and the mode: 26 a track.
@@ -20,7 +20,7 @@
 // pair the buffer commands use. Count: 66 + 3 (crush, fx_dly, fx_rev)
 // + 3 x 30 + 12 + 2 = 173.
 //
-// HARD RULE: exactly one `Engine_Mangler2` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
+// HARD RULE: exactly one `Engine_Four` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
 //
 // Architecture: one persistent `io` synth (input, record head, dry/wet mix,
@@ -40,7 +40,7 @@
 // SYSTEM > RESTART (sclang recompiles at startup); confirm the command count in
 // the load log after.
 
-Engine_Mangler2 : CroneEngine {
+Engine_Four : CroneEngine {
     var <ioSynth, <playSynth;
     var <playGroup;
     var <bufL, <bufR;
@@ -90,14 +90,14 @@ Engine_Mangler2 : CroneEngine {
     }
 
     // the drone def for mode i (1=GRAIN 2=WARP 3=PV 4=PLAY 5=CLOUD). GRAIN is
-    // the granulator that reads the window itself (\mangler2_grain). CLOUD
-    // is MiClouds on the playing window (it was GRAIN until mangler2's tenth
+    // the granulator that reads the window itself (\four_grain). CLOUD
+    // is MiClouds on the playing window (it was GRAIN until four's tenth
     // change), and falls back to the granulator when mi-UGens are absent.
     // PLAY is the clean straight loop.
     droneDef { arg i;
-        (i == 4).if({ ^\mangler2_play });
-        (i == 5).if({ ^hasClouds.if({ \mangler2_clouds }, { \mangler2_grain }) });
-        ^[\mangler2_grain, \mangler2_warp, \mangler2_pv].at(i - 1);
+        (i == 4).if({ ^\four_play });
+        (i == 5).if({ ^hasClouds.if({ \four_clouds }, { \four_grain }) });
+        ^[\four_grain, \four_warp, \four_pv].at(i - 1);
     }
 
     // an extra track's mode: the same release law as setMode. It shares the
@@ -174,7 +174,7 @@ Engine_Mangler2 : CroneEngine {
     updateReverb { arg mix;
         (mix > 0).if({
             revSynth.isNil.if({
-                revSynth = Synth.new(\mangler2_reverb, [
+                revSynth = Synth.new(\four_reverb, [
                     \in_bus, revSendBus, \out_bus, revRetBus,
                 ] ++ revParams.getPairs, ioSynth, \addAfter);
             });
@@ -195,7 +195,7 @@ Engine_Mangler2 : CroneEngine {
         var want = (delayParams[\delay_mix] > 0) or: { delayParams[\delay_fb] > 0.9 };
         want.if({
             delaySynth.isNil.if({
-                delaySynth = Synth.new(\mangler2_delay, [
+                delaySynth = Synth.new(\four_delay, [
                     \in_bus, dlySendBus, \out_bus, dlyRetBus,
                 ] ++ delayParams.getPairs, ioSynth, \addAfter);
             });
@@ -213,7 +213,7 @@ Engine_Mangler2 : CroneEngine {
             eroSynth.isNil.if({
                 args = [\buf_l, bufL, \buf_r, bufR];
                 eroKeys.do({ arg k; args = args ++ [k, playParams[k]] });
-                eroSynth = Synth.new(\mangler2_erode, args, playGroup, \addToHead);
+                eroSynth = Synth.new(\four_erode, args, playGroup, \addToHead);
             });
         }, {
             eroSynth.notNil.if({ eroSynth.set(\gate, 0); eroSynth = nil });
@@ -228,7 +228,7 @@ Engine_Mangler2 : CroneEngine {
         repSynth.notNil.if({ repSynth.set(\gate, 0); repSynth = nil });
         (len > 0).if({
             repIdx = (repIdx + 1) % 3;
-            repSynth = Synth.new(\mangler2_repeat, [
+            repSynth = Synth.new(\four_repeat, [
                 \out, context.out_b.index, \buf, repBufs[repIdx], \len, len.min(2),
             ], ioSynth, \addAfter);
         });
@@ -268,7 +268,7 @@ Engine_Mangler2 : CroneEngine {
             old.notNil.if({ old.set(\gate, 0) });
             activeVoices.removeAt(oldId);
         });
-        def = (type > 0.5).if({ \mangler2_voice_slice }, { \mangler2_voice_grain });
+        def = (type > 0.5).if({ \four_voice_slice }, { \four_voice_grain });
         syn = Synth.new(def, this.voiceArgs(pos, pitch, 0, amp, len), playGroup);
         activeVoices[id] = syn;
         voiceOrder = voiceOrder.add(id);
@@ -284,7 +284,7 @@ Engine_Mangler2 : CroneEngine {
     }
 
     noteOneShot { arg pos, pitch, type, amp, len;
-        var def = (type > 0.5).if({ \mangler2_voice_slice }, { \mangler2_voice_grain });
+        var def = (type > 0.5).if({ \four_voice_slice }, { \four_voice_grain });
         // fire-and-forget: internal gate self-terminates, synth self-frees
         Synth.new(def, this.voiceArgs(pos, pitch, 1, amp, len), playGroup);
     }
@@ -353,7 +353,7 @@ Engine_Mangler2 : CroneEngine {
             // which simply ignore them)
             \clouds_pos -> 0.5, \clouds_tex -> 0.5, \clouds_fb -> 0.0,
             \clouds_mode -> 0, \clouds_lofi -> 0.0,
-            // erosion: read by \mangler2_erode (eroKeys below); every drone
+            // erosion: read by \four_erode (eroKeys below); every drone
             // def takes and ignores them
             \erode -> 0.0, \wear -> 0.5
         ];
@@ -378,8 +378,8 @@ Engine_Mangler2 : CroneEngine {
             });
             e
         });
-        // reverb params live in revParams (routed to \mangler2_reverb) and the
-        // delay's in delayParams (routed to \mangler2_delay); io keeps the two
+        // reverb params live in revParams (routed to \four_reverb) and the
+        // delay's in delayParams (routed to \four_delay); io keeps the two
         // MIX knobs it needs for its own crossfade/add. (ioKeys U revParams U
         // delayParams) is the original ioKeys -> the command set is unchanged.
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
@@ -410,7 +410,7 @@ Engine_Mangler2 : CroneEngine {
         // window edges + scan are smoothed: pos_start/pos_end are
         // PERFORMANCE encoders (TAKE E2/E3) and an unsmoothed edge move
         // jumped the read head with a click per detent. pitchMul folds
-        // varispeed into the phase rate (only \mangler2_play passes it).
+        // varispeed into the phase rate (only \four_play passes it).
         // `run` is the deck LEVEL (every def passes it): a SILENCED engine
         // deck freezes its read head, so STOP truly halts — the on-screen
         // head stops sweeping and START resumes from the exact spot. this is
@@ -470,7 +470,7 @@ Engine_Mangler2 : CroneEngine {
         //     after), and the whole grain stays inside the window: it never
         //     reads the empty buffer past the take.
         //   pv_freeze holds the head where it is while grains keep coming.
-        SynthDef(\mangler2_grain, {
+        SynthDef(\four_grain, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
                 size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
@@ -527,7 +527,7 @@ Engine_Mangler2 : CroneEngine {
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
-        SynthDef(\mangler2_warp, {
+        SynthDef(\four_warp, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
                 size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
@@ -546,7 +546,7 @@ Engine_Mangler2 : CroneEngine {
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
-        SynthDef(\mangler2_pv, {
+        SynthDef(\four_pv, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
                 size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
@@ -580,7 +580,7 @@ Engine_Mangler2 : CroneEngine {
         // default mode so a fresh take plays back untouched; GRAIN/WARP/PV are
         // switched on when you want them. scan sets loop speed, pitch resamples
         // it (varispeed, like a sampler/tape). all core UGens — can't brick.
-        SynthDef(\mangler2_play, {
+        SynthDef(\four_play, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
                 size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
@@ -621,7 +621,7 @@ Engine_Mangler2 : CroneEngine {
         // heads never fight over the buffer. `gate` fades the write in and
         // out over 50ms and frees the synth: a write that began or ended at
         // full strength would print a step into the take.
-        SynthDef(\mangler2_erode, {
+        SynthDef(\four_erode, {
             arg buf_l, buf_r, gate = 1, pos_start = 0, pos_end = 1,
                 erode = 0, wear = 0.5, level = 1, rec = 0, freeze = 0;
             var lo, span, run, head, idx, env, eff, wearF, rawL, rawR;
@@ -648,7 +648,7 @@ Engine_Mangler2 : CroneEngine {
         "MiClouds".asSymbol.asClass.notNil.if({
             try {
                 var cc = "MiClouds".asSymbol.asClass;
-                SynthDef(\mangler2_clouds, {
+                SynthDef(\four_clouds, {
                     arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                         pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
                         size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
@@ -704,7 +704,7 @@ Engine_Mangler2 : CroneEngine {
         // internal gate held high for `sustain` then released, so the asr
         // env's doneAction:2 frees the synth. env-driven free means sparse
         // grain gaps never premature-free a held voice.
-        SynthDef(\mangler2_voice_grain, {
+        SynthDef(\four_voice_grain, {
             arg buf_l, buf_r, play_bus,
                 gate = 1, one_shot = 0, sustain = 0.05,
                 note_pos = 0, note_pitch = 1, amp = 0.5, pan = 0,
@@ -742,7 +742,7 @@ Engine_Mangler2 : CroneEngine {
             Out.ar(play_bus, sig);
         }).add;
 
-        SynthDef(\mangler2_voice_slice, {
+        SynthDef(\four_voice_slice, {
             arg buf_l, buf_r, play_bus,
                 gate = 1, one_shot = 0, sustain = 0.05,
                 note_pos = 0, note_pitch = 1, amp = 0.5, pan = 0,
@@ -800,7 +800,7 @@ Engine_Mangler2 : CroneEngine {
             LinXFade2.ar(sig, cr, (xf * 2 - 1))
         };
 
-        SynthDef(\mangler2_strip, {
+        SynthDef(\four_strip, {
             arg in_bus, out_bus, own_out, level = 1.0, cutoff = 20000,
                 resonance = 0, filt_type = 0,
                 // COLOR and SPACE: its drive and crush, and how much of it
@@ -848,7 +848,7 @@ Engine_Mangler2 : CroneEngine {
 
         // ---- io: input, record head (with resample feedback), dry/wet, out
 
-        SynthDef(\mangler2_io, {
+        SynthDef(\four_io, {
             arg in1, in2, out, buf_l, buf_r, play_bus, rec_phase_out, rec_amp_out,
                 level = 1.0, rec = 0, rec_level = 1.0, pre_level = 0.0,
                 freeze = 0, dry_wet = 0.5, resample = 0.0, regen = 0.0,
@@ -934,7 +934,7 @@ Engine_Mangler2 : CroneEngine {
             // tracks 2 to 4 join here, after their own filter and colour
             others = In.ar(t2_ret, 2);
 
-            // the delay runs in \mangler2_delay (spawn/free: alive while
+            // the delay runs in \four_delay (spawn/free: alive while
             // delay_mix > 0 or the feedback is a near-infinite hold). SPACE:
             // what goes in is each track's own send (fx_dly, 1 by default,
             // which is everything, as before). The echo comes back through
@@ -947,7 +947,7 @@ Engine_Mangler2 : CroneEngine {
             Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(t_dly, 2));
             dlyRet = InFeedback.ar(dly_ret, 2);
 
-            // reverb + shimmer run in a spawn/free synth (\mangler2_reverb, only
+            // reverb + shimmer run in a spawn/free synth (\four_reverb, only
             // while rev_mix > 0). It gets each track's own reverb send through
             // the delay's crossfade (so at fx_rev 1 it is the post-delay wet,
             // as before), and the tail comes back one block late.
@@ -1040,7 +1040,7 @@ Engine_Mangler2 : CroneEngine {
         // crossfades in over 5ms and back to the live output over 10ms, then
         // frees the synth. It sits after the record tap, so resample, regen
         // and PRINT never record it: a performance effect on what you hear.
-        SynthDef(\mangler2_repeat, {
+        SynthDef(\four_repeat, {
             arg out, buf, len = 0.25, gate = 1;
             var src, l, frames, firstK, first, phase, fade, rep, env;
             src = In.ar(out, 2);
@@ -1068,7 +1068,7 @@ Engine_Mangler2 : CroneEngine {
         // all core UGens. delay_mix is accepted and unused: the generic
         // command handler sets every delayParams key on the live synth, and
         // an unknown control name would be a server complaint per knob move.
-        SynthDef(\mangler2_delay, {
+        SynthDef(\four_delay, {
             arg in_bus, out_bus, delay_time = 0.3, delay_fb = 0.3, delay_mix = 0;
             var sig, fbIn, dIn, dOut;
             sig = In.ar(in_bus, 2);
@@ -1100,7 +1100,7 @@ Engine_Mangler2 : CroneEngine {
         // reverb + shimmer synth (spawned by updateReverb while rev_mix > 0).
         // reads io's post-delay wet, returns the JPverb tail; shimmer recirculates
         // through this synth's own LocalIn/LocalOut. JPverb guarded -> FreeVerb.
-        SynthDef(\mangler2_reverb, {
+        SynthDef(\four_reverb, {
             arg in_bus, out_bus,
                 rev_size = 1.0, rev_decay = 2.0, rev_damp = 0.3, rev_early = 0.7,
                 rev_moddepth = 0.1, rev_modfreq = 2.0,
@@ -1155,7 +1155,7 @@ Engine_Mangler2 : CroneEngine {
         playGroup = Group.new(context.xg);
         sendV = Array.fill(4, { Array.fill(4, 0) });
         extra.do({ arg tr;
-            tr[\strip] = Synth.new(\mangler2_strip, [
+            tr[\strip] = Synth.new(\four_strip, [
                 \in_bus, tr[\bus], \out_bus, tRetBus,
                 \own_out, outBuses[tr[\n] - 1],
                 \dly_out, tDlyBus, \rev_out, tRevBus,
@@ -1166,7 +1166,7 @@ Engine_Mangler2 : CroneEngine {
         // every strip starts paused: no extra track plays and nothing is sent
         // (the run message follows its /s_new in order, no sync needed)
         extra.do({ arg tr; tr[\strip].run(false) });
-        ioSynth = Synth.new(\mangler2_io, [
+        ioSynth = Synth.new(\four_io, [
             \in1, context.in_b[0].index,
             \in2, context.in_b[1].index,
             \out, context.out_b.index,
@@ -1186,8 +1186,8 @@ Engine_Mangler2 : CroneEngine {
         ], playGroup, \addAfter);
 
         // every float control as one command; rec/freeze/level fan out to both
-        // synths; revParams route to \mangler2_reverb and delayParams to
-        // \mangler2_delay; eroKeys also reach \mangler2_erode; the mix/fb knobs
+        // synths; revParams route to \four_reverb and delayParams to
+        // \four_delay; eroKeys also reach \four_erode; the mix/fb knobs
         // and erode also spawn/free their synths.
         allKeys = (ioKeys ++ playParams.keys.asArray ++ revParams.keys.asArray
             ++ delayParams.keys.asArray).asSet;
@@ -1357,7 +1357,7 @@ Engine_Mangler2 : CroneEngine {
         // round trip through a 16-bit file quantised the take again. This is
         // also what the EXPORT is built on, so a bounced wav carries the depth
         // too. The lua reader already decodes 16/24/32.
-        // IF YOU CHANGE THIS FORMAT, change `ctx.TAKE_BYTES` in mangler2.lua
+        // IF YOU CHANGE THIS FORMAT, change `ctx.TAKE_BYTES` in four.lua
         // to match. The export works out how big these files should be from
         // that number and waits for them to get there. Set too low, it stops
         // waiting early and hands on a file that is still being written.

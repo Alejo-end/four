@@ -41,7 +41,7 @@
 --          drive/clouds-fb zero, filter open. HELD ~1s = the ERASER: an arc
 --          fills, and at the ring the page's material is wiped (take / tape
 --          loop / lane / slot). GLOBAL, every page.
---   K1+E1  (mangler2) the TRACK, from anywhere; the morph is on SCENE. was: the MORPH: sweep toward the selected scene; back
+--   K1+E1  (four) the TRACK, from anywhere; the morph is on SCENE. was: the MORPH: sweep toward the selected scene; back
 --          to zero lands exactly home
 --
 -- SCENE   8 slots + the ◄ cell. K3 captures, K2 recalls (HOLD = peek: borrow
@@ -72,7 +72,7 @@
 -- the wav file reader). they share one `ctx` table and params are the single
 -- source of truth. full design: doc/spec.md.
 
-engine.name = "Mangler2"
+engine.name = "Four"
 
 -- bring-up diagnostics: load milestones in maiden. If "script file executed"
 -- appears without "init() called", the engine died in alloc — check the SC tab.
@@ -127,7 +127,7 @@ local function pget(id, default)
 end
 
 -- current window edges (sorted) and span
--- (mangler2) the take window is the FOCUSED track's: its own material and
+-- (four) the take window is the FOCUSED track's: its own material and
 -- its own window. ctx.focus_take rewrites WIN.
 local WIN = { "pos_start", "pos_end" }
 local function window_bounds()
@@ -197,7 +197,7 @@ local ctx = {
   flash_until = 0,
   -- engine/system signals
   play_phase = 0,            -- engine poll: normalized playhead in the buffer
-  play_phase2 = 0,           -- the same for tracks 2 to 4 (mangler2)
+  play_phase2 = 0,           -- the same for tracks 2 to 4 (four)
   play_phases = { 0, 0, 0, 0 },
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
@@ -266,19 +266,19 @@ function ctx.touch_input() ctx.last_input = ctx.frame end
 
 -- THE TIMEBASE. These two numbers place everything in the instrument: every
 -- window edge, pad slice, waveform bin and PSET bound is a fraction of them.
--- Both are set by the ENGINE (lib/Engine_Mangler2.sc allocates
+-- Both are set by the ENGINE (lib/Engine_Four.sc allocates
 -- `s.sampleRate * bufSecs`, and norns runs its server at 48k) and lua cannot
 -- read either off the server — so they are mirrored ONCE here and shared
 -- through ctx. They used to be bare literals in several modules plus the .sc:
 -- miss one when the buffer length changes and PSET saves silently truncate the
 -- take, or every waveform, window bracket and pad slice draws against the
 -- wrong clock with no error anywhere.
-ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Mangler2.sc
+ctx.BUF_SECS = 60        -- must match `bufSecs` in lib/Engine_Four.sc
 -- How many bytes per sample `write_take` puts on disk. MUST match the format
 -- in that command (`int24`, so 3). The export works out how big the file
 -- should be from this and waits for it to get there, so a number that is too
 -- small calls the file finished while a third of it is still being written.
-ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Mangler2.sc
+ctx.TAKE_BYTES = 3       -- must match write_take's format in Engine_Four.sc
 ctx.SERVER_SR = 48000    -- norns' scsynth sample rate
 local BUF_SECS, SERVER_SR = ctx.BUF_SECS, ctx.SERVER_SR
 Mwav.init(ctx)
@@ -695,7 +695,7 @@ local function snap_window()
   end
 end
 
--- ---- the tracks (mangler2) ------------------------------------------------
+-- ---- the tracks (four) ------------------------------------------------
 -- Four engine tracks and ONE focus. `track_sel` is the focused track, and
 -- TAKE, VOICE and FILTER all edit it: their titles read TAKE 2, VOICE 2 ...
 -- and the same knobs and keys reach the `t<n>_` params. TRACKS is the hub:
@@ -843,7 +843,7 @@ for n = 1, NTRACKS do
   end }
 end
 
--- ---- the routing (mangler2) -------------------------------------------------
+-- ---- the routing (four) -------------------------------------------------
 -- The S-4's sends: each track's filtered output can feed any other track's
 -- filter, `send_<from>_<to>`, twelve in all. SPACE: each track also has its
 -- own send into the shared delay (to = 5, `fx_dly` / `t<n>_fx_dly`) and
@@ -1131,7 +1131,7 @@ end
 local ENC_MAP = {
   TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
-  -- mangler2: the TRACKS hub. E2 the focus, E3 its level; K1 held, its
+  -- four: the TRACKS hub. E2 the focus, E3 its level; K1 held, its
   -- sends: K1+E2 where to, K1+E3 how much
   TRACKS = { "track_sel", "@route_to", "@trk_level", "@route_amt" },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
@@ -1780,7 +1780,7 @@ end
 -- CONTENT (ctx.wave_any — the has-a-take signal that also draws
 -- "EMPTY - K2 REC"), so the write is gated on it: an empty take never leaves a
 -- multi-MB silence file behind, and a fresh pset never resurrects one.
--- (mangler2) track 1 keeps mangler's name, so a mangler pset still loads
+-- (four) track 1 keeps mangler's name, so a mangler pset still loads
 -- its take; tracks 2 to 4 save as take2-NN, take3-NN, take4-NN
 local FOCUS = 1
 local function take_stem(number, n)
@@ -1797,7 +1797,7 @@ local function take_frames(len)
   return (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
 end
 
--- (mangler2) every track's take: the focused one from ctx, the others from
+-- (four) every track's take: the focused one from ctx, the others from
 -- their kept state (TAKES). buf_track points the engine's buffer commands at
 -- a track's pair for one write or read, then back at the focus.
 local TAKES = {}
@@ -1963,7 +1963,7 @@ function ctx.take_undo()
 end
 
 -- ============================================================================
--- the focus (mangler2): own material per track
+-- the focus (four): own material per track
 -- ============================================================================
 -- Each track records and plays its own 60s. The FOCUSED track is the one REC
 -- writes, TAKE draws and edits, the pads play, and UNDO, CLEAR, LOAD, PRINT
@@ -2332,7 +2332,7 @@ end
 -- the browsable EXPORT: the same dump, into dust/audio under a name you can
 -- find, as one stereo wav that reloads through `load sample`.
 function ctx.export_take(name)
-  name = name or next_audio_name("mangler")
+  name = name or next_audio_name("four")
   if not name then
     print("mangler: 999 exports in dust/audio — clear some out first")
     return
@@ -2560,7 +2560,7 @@ local function fine_unit(default)
 end
 
 local function init_params()
-  params:add_separator("mangler")
+  params:add_separator("four")
 
   -- group ids must differ from every param id, and the declared count MUST
   -- match the adds that follow (a refused/missing add corrupts the paramset)
@@ -2619,7 +2619,7 @@ local function init_params()
       engine.rec(pget("stop_all", 0) == 1 and 0 or v)
     end
     if v == 1 then
-      -- (mangler2) a track you record into plays: an OFF track goes to PLAY
+      -- (four) a track you record into plays: an OFF track goes to PLAY
       if FOCUS > 1 and pget("t" .. FOCUS .. "_mode", 1) == 1 then
         params:set("t" .. FOCUS .. "_mode", 5)
       end
@@ -2676,7 +2676,7 @@ local function init_params()
   -- START ON SOUND: an arm records at once, and the take starts where the
   -- sound first crosses the threshold (see tick_rec_wait). The level is
   -- what is being written (the engine's rec_amp), so a resample counts too.
-  -- (mangler2) what a pass does at the end of its track's 60s: LOOP records
+  -- (four) what a pass does at the end of its track's 60s: LOOP records
   -- over the start, ONE-SHOT ends the take and records on into the next track
   params:add_option("rec_end", "rec end", { "LOOP", "ONE-SHOT" }, 1)
   params:add_binary("rec_wait", "start on sound", "toggle", 0)
@@ -2967,7 +2967,7 @@ local function init_params()
   -- COLOR: sample rate and bit reduction, after the drive (0 = bypass)
   add_eng_control("crush", "crush", unit(0.0))
 
-  -- ---- tracks 2 to 4 (mangler2) -------------------------------------------
+  -- ---- tracks 2 to 4 (four) -------------------------------------------
   -- more engine drones on the same take: each its own mode, window, pitch,
   -- grain knobs, filter and level. Each id is track 1's with a `t<n>_`
   -- prefix, with the same range, so a knob means the same thing on every
@@ -3045,7 +3045,7 @@ local function init_params()
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback", unit(0.3), fb_curve)
   -- FX SEND response curve: the engine crossfades the wet with an equal-power
-  -- .sqrt (Engine_Mangler2.sc), so a raw 3% knob already reads ~17% wet ("way too
+  -- .sqrt (Engine_Four.sc), so a raw 3% knob already reads ~17% wet ("way too
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
   -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
@@ -3495,7 +3495,7 @@ function enc(n, d)
   ctx.last_input = ctx.frame
   if n == 1 then
     if ctx.alt then
-      -- (mangler2) K1+E1 picks the TRACK from any page, the S-4's track
+      -- (four) K1+E1 picks the TRACK from any page, the S-4's track
       -- buttons on a knob: the badge in the header and the page name pop
       -- show where you landed. The scene morph lives on SCENE (E3).
       params:delta("track_sel", d)

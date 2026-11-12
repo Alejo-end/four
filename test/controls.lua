@@ -1,5 +1,5 @@
 -- controls.lua — write doc/controls.md, the page-by-page control map, out of
--- the script itself. It loads the real mangler2.lua offscreen and asks the
+-- the script itself. It loads the real four.lua offscreen and asks the
 -- same functions the footer asks (ctx.enc_param, ctx.key_def), page by page
 -- and VOICE mode by mode, so the map cannot drift from the code the way the
 -- hand-written tables did. test_control fails when doc/controls.md is stale.
@@ -14,7 +14,7 @@ env.install{ dir = os.getenv("TMPDIR") or "/tmp" }
 include = function(m) return dofile(m .. ".lua") end
 local real_print = print
 print = function() end
-dofile("mangler2.lua")
+dofile("four.lua")
 init()
 print = real_print
 
@@ -56,7 +56,7 @@ local out = {
   "level and rate. `@mo_sel` walks MOTION's rows: the lanes, then the two",
   "modulators; with a modulator selected the other knobs are its own.",
   "",
-  "Tracks (mangler2): four engine tracks and one focus. On TRACKS, E2 picks the",
+  "Tracks (four): four engine tracks and one focus. On TRACKS, E2 picks the",
   "focused track and E3 sets its level; K2 turns it on and off, K3 cycles its",
   "mode. Hold K1 there for its sends: K1+E2 picks the track it sends to, K1+E3",
   "how much. TAKE, VOICE and FILTER then edit the focused track (TAKE 2, VOICE 2",

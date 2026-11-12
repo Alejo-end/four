@@ -1,22 +1,22 @@
 -- render_pages.lua — offscreen renderer for mangler's norns screen.
--- Stubs the norns Lua environment, loads the REAL mangler2.lua, drives a
+-- Stubs the norns Lua environment, loads the REAL four.lua, drives a
 -- believable performance scenario (a take, a tape loop, live FX), then
 -- exports every UI page as a PGM framebuffer (0..15 levels -> 0..255).
 --
--- usage: lua render_pages.lua <mangler2.lua path> <outdir> <prefix> [variant]
+-- usage: lua render_pages.lua <four.lua path> <outdir> <prefix> [variant]
 --   variant "empty": empty-buffer states (TAKE + VOICE with nothing recorded)
 --   variant "grain": VOICE in GRAIN mode across its param extremes (size/
 --                    density/spread/jitter/pan edges, mode OFF)
 --   variant "filter": FILTER page across its types and resonance extremes
 
-local MANGLER = arg[1] or "mangler2.lua"
+local MANGLER = arg[1] or "four.lua"
 local OUTDIR = arg[2] or "."
 local PREFIX = arg[3] or "shot"
 local VARIANT = arg[4]
 local EMPTY = VARIANT == "empty"
 local GRAINX = VARIANT == "grain"
 local FILTX = VARIANT == "filter"
-local TRACK2 = VARIANT == "track2"   -- mangler2: VOICE 2 and FILTER 2
+local TRACK2 = VARIANT == "track2"   -- four: VOICE 2 and FILTER 2
 
 
 -- the offscreen norns lives in env.lua so more than one harness can use it.
@@ -96,7 +96,7 @@ else
     local lo, hi = params:get("pos_start"), params:get("pos_end")
     if hi < lo then lo, hi = hi, lo end
     push("play_phase", lo + ((t * 0.013) % 1) * (hi - lo))
-    -- mangler2: track 2's head walks its own window
+    -- four: track 2's head walks its own window
     local l2, h2 = params:get("t2_pos_start"), params:get("t2_pos_end")
     if h2 < l2 then l2, h2 = h2, l2 end
     push("play_phase2", l2 + ((t * 0.017) % 1) * (h2 - l2))
@@ -155,7 +155,7 @@ local function goto_page(name)
   -- settled page, not the navigation chrome on top of it
   run_ticks(12)
 end
--- the script's own state table (a local of mangler2.lua, reached through an
+-- the script's own state table (a local of four.lua, reached through an
 -- upvalue of key()), for a state the params cannot set
 local function script_ctx()
   for i = 1, 255 do
@@ -205,7 +205,7 @@ elseif GRAINX then
     export(pfx("VOICE", "_" .. c[1]))
   end
 elseif TRACK2 then
-  -- mangler2: the pages on track 2. Track 1 stays in PLAY, so any grain or
+  -- four: the pages on track 2. Track 1 stays in PLAY, so any grain or
   -- spectral texture on VOICE 2 is track 2's own. The head reads play_phase2.
   math.randomseed(1)
   params:set("mode", 5)

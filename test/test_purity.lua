@@ -21,7 +21,7 @@ local env = dofile("test/uisim/env.lua")
 local _h = env.install{ dir = "/tmp", scenario = function() return SCENARIO end }
 include = function(p) return dofile(p .. ".lua") end
 math.randomseed(1)
-dofile("mangler2.lua")
+dofile("four.lua")
 init()
 params:add_control("input_level", "in", controlspec.new(0, 1, "lin", 0, 0.8, ""))
 params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, ""))
@@ -56,7 +56,7 @@ local PURE = {
   mix = 0,           -- the tape holds audio: thrown fully away in the base
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
   stop_all = 0,
-  t2_mode = 1,       -- tracks 2 to 4 OFF, no sends (mangler2)
+  t2_mode = 1,       -- tracks 2 to 4 OFF, no sends (four)
   t4_mode = 1, send_1_3 = 0,
   step_run = 0,      -- the pad sequencer
   lfo1_depth = 0,    -- a modulator aimed at wear (below), at rest
@@ -130,7 +130,7 @@ local MOVES = {
   { "scan off unity", "scan", 0.5 },
   { "pan off center", "pan", 0.5 },
   { "drive", "drive", 0.3 },
-  { "crush (mangler2)", "crush", 0.3 },
+  { "crush (four)", "crush", 0.3 },
   { "delay", "delay_mix", 0.3 },
   { "reverb", "rev_mix", 0.3 },
   { "shimmer", "shimmer", 0.3 },
@@ -138,9 +138,9 @@ local MOVES = {
   { "resample writing the buffer", "resample", 0.3 },
   { "regen writing the buffer", "regen", 0.3 },
   { "erosion writing the buffer", "erode", 0.3 },
-  { "track 2 playing (mangler2)", "t2_mode", 5 },
-  { "track 4 playing (mangler2)", "t4_mode", 5 },
-  { "a send between tracks (mangler2)", "send_1_3", 0.5 },
+  { "track 2 playing (four)", "t2_mode", 5 },
+  { "track 4 playing (four)", "t4_mode", 5 },
+  { "a send between tracks (four)", "send_1_3", 0.5 },
   { "a freeze hold", "freeze", 1 },
   { "a pv freeze hold", "pv_freeze", 1 },
   { "live input mixed in (dry_wet)", "dry_wet", 0.5 },
@@ -168,7 +168,7 @@ clock.run = real_run
 -- the SPACE sends only scale what the delay and reverb mixes let through:
 -- with both mixes at 0, a send turned down leaves the take as it is
 params:set("fx_dly", 0); params:set("t3_fx_rev", 0.2)
-ok(lit(), "a track's delay or reverb send alone leaves the mark (mangler2)")
+ok(lit(), "a track's delay or reverb send alone leaves the mark (four)")
 params:set("fx_dly", 1); params:set("t3_fx_rev", 1)
 
 -- a pad voice sounds on top of the take: a held one kills the mark

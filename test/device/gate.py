@@ -186,7 +186,7 @@ def set_mode(name):
 # ---- stage 0 ----------------------------------------------------------------
 def stage0():
     def c1():
-        out = n.ssh("find ~/dust/code -name 'Engine_Mangler2.sc'").split()
+        out = n.ssh("find ~/dust/code -name 'Engine_Four.sc'").split()
         return verdict(len(out) == 1, out)
 
     check("0.1", c1)
@@ -292,7 +292,7 @@ def stage2():
         time.sleep(4)
         n.helpers()
         loaded = num(n.ctx("c.take_len"))
-        secs = n.ssh(f"soxi -D ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
+        secs = n.ssh(f"soxi -D ~/dust/data/four/take-{PSET}_L.wav").strip()
         ok = loaded is not None and full and loaded >= full - 0.002 and float(secs) > 9
         return verdict(ok, f"take_len {full:.4f} before the punch, {after:.4f} after, {loaded:.4f} loaded; the file holds {secs}s")
 
@@ -405,7 +405,7 @@ def stage3():
         n.set("delay_mix", 0)
         n.lua(f'params:write({PSET}, "gate")')
         time.sleep(3)
-        had = n.ssh(f"ls ~/dust/data/mangler2/take-{PSET}_L.wav 2>/dev/null").strip()
+        had = n.ssh(f"ls ~/dust/data/four/take-{PSET}_L.wav 2>/dev/null").strip()
         n.goto("TAKE")
         n.key(1, 1)
         time.sleep(0.05)
@@ -416,7 +416,7 @@ def stage3():
         time.sleep(0.5)
         n.lua(f'params:write({PSET}, "gate")')
         time.sleep(3)
-        gone = n.ssh(f"ls ~/dust/data/mangler2/take-{PSET}_L.wav 2>/dev/null").strip()
+        gone = n.ssh(f"ls ~/dust/data/four/take-{PSET}_L.wav 2>/dev/null").strip()
         n.lua(f"params:read({PSET})")
         time.sleep(3)
         n.helpers()
@@ -1248,8 +1248,8 @@ def stage7():
 
     def c74():
         n.load_script()
-        had = n.ssh("ls ~/dust/data/mangler2/take-1_L.wav 2>/dev/null").strip()
-        named = n.ssh("grep -c sample_file ~/dust/data/mangler2/mangler2-02.pset; grep sample_file ~/dust/data/mangler2/mangler2-02.pset").strip()
+        had = n.ssh("ls ~/dust/data/four/take-1_L.wav 2>/dev/null").strip()
+        named = n.ssh("grep -c sample_file ~/dust/data/four/four-02.pset; grep sample_file ~/dust/data/four/four-02.pset").strip()
         n.lua("params:read(2)")
         wait_save()
         n.helpers()
@@ -1450,7 +1450,7 @@ def stage9():
         record_layer(1, 3)
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        files = n.ssh(f"ls ~/dust/data/mangler2 | grep -E 'lay[12]-{PSET}' | tr '\\n' ' '").strip()
+        files = n.ssh(f"ls ~/dust/data/four | grep -E 'lay[12]-{PSET}' | tr '\\n' ' '").strip()
         a = level("9.6_before", 2, DECKS_OUT)
         n.load_script()
         n.lua(f"params:read({PSET})")
@@ -1864,7 +1864,7 @@ def stage11():
         before = num(n.ctx("c.take_len"))
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        bits = n.ssh(f"soxi -b ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
+        bits = n.ssh(f"soxi -b ~/dust/data/four/take-{PSET}_L.wav").strip()
         erase_page("TAKE")
         n.lua(f"params:read({PSET})")
         wait_save()
@@ -1946,7 +1946,7 @@ def stage12():
         snapped = (n.get("pos_end") - n.get("pos_start")) * 60
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        size = n.ssh(f"soxi -D ~/dust/data/mangler2/take-{PSET}_L.wav").strip()
+        size = n.ssh(f"soxi -D ~/dust/data/four/take-{PSET}_L.wav").strip()
         return verdict(whole > 59 and 3.8 < snapped < 5 and float(size) < 6, f"first tap {whole:.2f}s, second tap back on the take {snapped:.2f}s; the PSET file holds {size}s")
 
     def c123():
@@ -2105,7 +2105,7 @@ def stage13():
         record_layer(1, 4)
         n.lua(f'params:write({PSET}, "gate")')
         wait_save()
-        secs = n.ssh(f"soxi -D ~/dust/data/mangler2/lay1-{PSET}.wav").strip()
+        secs = n.ssh(f"soxi -D ~/dust/data/four/lay1-{PSET}.wav").strip()
         n.load_script()
         n.lua(f"params:read({PSET})")
         wait_save()
@@ -2628,8 +2628,8 @@ def stage18():
 
 def cleanup():
     n.signal_quit()
-    n.ssh(f"rm -f ~/dust/data/mangler2/mangler2-{PSET}.pset ~/dust/data/mangler2/*-{PSET}.lua "
-          f"~/dust/data/mangler2/*-{PSET}*.wav ~/dust/data/mangler2/mg_*.png")
+    n.ssh(f"rm -f ~/dust/data/four/four-{PSET}.pset ~/dust/data/four/*-{PSET}.lua "
+          f"~/dust/data/four/*-{PSET}*.wav ~/dust/data/four/mg_*.png")
 
 
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,

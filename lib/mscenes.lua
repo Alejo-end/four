@@ -92,7 +92,7 @@ local TIMBRE_IDS = {
   "lay1_fade", "lay1_width",
   "lay2_level", "lay2_rate", "lay2_start", "lay2_end", "lay2_pre",
   "lay2_fade", "lay2_width",
-  -- track 2 (mangler2): the same knobs as track 1, so a scene keeps both
+  -- track 2 (four): the same knobs as track 1, so a scene keeps both
   "t2_level", "t2_pos_start", "t2_pos_end", "t2_scan", "t2_pitch", "t2_pan",
   "t2_pos_jitter", "t2_size", "t2_density", "t2_spread", "t2_grain_jitter",
   "t2_grain_pitch_spread", "t2_clouds_pos", "t2_clouds_tex", "t2_clouds_fb",
@@ -110,7 +110,7 @@ local SPACE_IDS = {
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix",
   "shimmer", "shimmer_pitch", "shimmer_tone",
-  -- COLOR and SPACE (mangler2): each track's drive and crush, and its sends
+  -- COLOR and SPACE (four): each track's drive and crush, and its sends
   -- into the delay and the reverb
   "crush", "fx_dly", "fx_rev",
   "t2_drive", "t2_crush", "t2_fx_dly", "t2_fx_rev",
@@ -142,7 +142,7 @@ local function append(dst, src)
   for i = 1, #src do dst[#dst + 1] = src[i] end
 end
 
--- mangler2: tracks 3 and 4 are classified exactly like track 2. Their ids
+-- four: tracks 3 and 4 are classified exactly like track 2. Their ids
 -- are track 2's with the number changed, appended (TIMBRE) or put beside
 -- track 2's (SWITCH, so `mode` stays last of the last).
 local function more_tracks(list)
@@ -246,7 +246,7 @@ local SCENE_EXCLUDE = {
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
-  "t2_file", "t3_file", "t4_file",   -- mangler2: each track's own material
+  "t2_file", "t3_file", "t4_file",   -- four: each track's own material
   "rec_wait", "rec_thresh", "rec_end",
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
@@ -257,8 +257,8 @@ local SCENE_EXCLUDE = {
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
-  "track_sel",   -- mangler2: which track VOICE and FILTER address
-  "route_sel",   -- mangler2: the ROUTE grid's cursor
+  "track_sel",   -- four: which track VOICE and FILTER address
+  "route_sel",   -- four: the ROUTE grid's cursor
   -- config / keys
   "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
   -- the other machines' transports, and scene's own params (NEVER capture
@@ -1013,7 +1013,7 @@ local function glide_tick()
   g.wrote = pget("scene_morph_amt", 0)
 end
 
--- one per redraw frame, from the existing 15fps clock in mangler2.lua.
+-- one per redraw frame, from the existing 15fps clock in four.lua.
 -- the target is simply the SELECTED slot — the same one K2 recalls and K3
 -- captures into. one selector, three jobs.
 function M.tick()
@@ -1131,7 +1131,7 @@ end
 -- persistence — rides along with the PSET
 -- ===========================================================================
 -- the scene bank + the safe snapshot save as a plain lua table next to the
--- pset, in the same data/ folder the tape audio uses. mangler2.lua's
+-- pset, in the same data/ folder the tape audio uses. four.lua's
 -- action_write/read/delete call BOTH modules (mtape does the audio, we do
 -- the state) — that hook is shared, never replaced.
 

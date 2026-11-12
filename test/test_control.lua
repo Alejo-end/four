@@ -42,11 +42,11 @@ include = function(m) return dofile(m .. ".lua") end
 local plist, lookup = params.list, params.lookup
 
 -- ---- load the instrument --------------------------------------------------
-dofile("mangler2.lua")
+dofile("four.lua")
 init()
 
 -- the script's own state table, read through an upvalue of key() (ctx is a
--- local of mangler2.lua): what the params cannot show, the tests read here
+-- local of four.lua): what the params cannot show, the tests read here
 local CTX
 for i = 1, 255 do
   local n, v = debug.getupvalue(key, i)
@@ -96,7 +96,7 @@ params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, 
 -- has a name). The layer targets shipped knowing only the first, which is
 -- invisible until you turn that knob on the device.
 do
-  local src = io.open("mangler2.lua"):read("a")
+  local src = io.open("four.lua"):read("a")
   local pages = io.open("lib/mpages.lua"):read("a")
   local encmap = src:match("local ENC_MAP = %{(.-)\n%}")
   ok(encmap ~= nil, "ENC_MAP is readable")
@@ -169,7 +169,7 @@ do
       ok(#moved > 0,
         string.format("%s E%d moves a param (moved: %s)", name, e,
           #moved > 0 and table.concat(moved, ",") or "NOTHING"))
-      -- (mangler2) TRACKS's E2 moves the focus, which every later page
+      -- (four) TRACKS's E2 moves the focus, which every later page
       -- follows: put it back on track 1, where the rest of the file expects it
       params:set("track_sel", 1)
     end
@@ -270,7 +270,7 @@ do
   -- SCENE's RCL only lights BETWEEN press and release, and PADS' pad is a gate
   -- — so it is asserted where it lives instead. The guard has to outlive the
   -- branch that needed it.
-  local src2 = io.open("mangler2.lua"):read("a")
+  local src2 = io.open("four.lua"):read("a")
   local keysrc = src2:match("local KEYS = %{.-\n%}")
   local both = 0
   for body in (keysrc or ""):gmatch("%b{}") do
@@ -297,7 +297,7 @@ do
         .. (okp and "" or (" — " .. tostring(err))))
     end
   end
-  -- (mangler2) TRACKS's K2/K3 switch track 1 on and off and cycle its mode
+  -- (four) TRACKS's K2/K3 switch track 1 on and off and cycle its mode
   params:set("track_sel", 1)
 end
 
@@ -554,7 +554,7 @@ do
 
   -- every *_start/*_end pair is a REGION: it must move widening-edge-first
   -- in the scenes (EDGE_PAIRS) and take the span-scaled fine step (FINE_IDS)
-  local src = io.open("mangler2.lua"):read("a")
+  local src = io.open("four.lua"):read("a")
   local fine = src:match("local FINE_IDS = %{(.-)%}") or ""
   local no_edge, no_fine = {}, {}
   for _, id in ipairs(MANGLER_IDS) do
@@ -615,10 +615,10 @@ do
   -- the beat-locked modulators run on (the paramset here is mangler's alone)
   local SYSTEM_IDS = { clock_tempo = true }
   local checked, dead = 0, {}
-  local sets = { "data/mangler.pmap.example",
+  local sets = { "data/four.pmap.example",
     "data/layers/layers.pmap.example" }
   for n = 1, 10 do
-    sets[#sets + 1] = string.format("data/mangler-%02d.pset", n)
+    sets[#sets + 1] = string.format("data/four-%02d.pset", n)
     sets[#sets + 1] = string.format("data/layers/layers-%02d.pset", n)
   end
   for _, path in ipairs(sets) do
@@ -704,11 +704,11 @@ end
 -- and only on the device. The command set the engine builds at alloc (ioKeys
 -- plus the playParams/revParams dictionaries plus the explicit addCommands)
 -- is parseable from the .sc, so the contract is checkable offscreen.
--- mangler2's extra-track and routing commands, built in loops in the .sc
+-- four's extra-track and routing commands, built in loops in the .sc
 -- (so not literal): per track 2 to 4, a `t<n>_` command per playParam but
 -- the five it does not own, one per strip key, and `t<n>_mode`; and the
 -- twelve `send_<from>_<to>`
-local function mangler2_cmds(sc, add)
+local function four_cmds(sc, add)
   local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
   local strip = {}
   for id in (sc:match("stripKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do strip[#strip + 1] = id end
@@ -727,7 +727,7 @@ local function mangler2_cmds(sc, add)
 end
 
 do
-  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
+  local sc = io.open("lib/Engine_Four.sc"):read("a")
   local cmds = {}
   for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do
     cmds[id] = true
@@ -739,7 +739,7 @@ do
     end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do cmds[id] = true end
-  mangler2_cmds(sc, function(id) cmds[id] = true end)
+  four_cmds(sc, function(id) cmds[id] = true end)
   ok(cmds.mode and cmds.rev_mix and cmds.erode, "the .sc command set parsed")
   ok(cmds.t2_mode and cmds.t3_size and cmds.t4_cutoff and cmds.send_3_1,
     "...with the other tracks' and the routing commands")
@@ -752,7 +752,7 @@ do
       if id ~= "name" then used[id] = true end
     end
   end
-  collect("mangler2.lua")
+  collect("four.lua")
   for _, f in ipairs({ "mtape", "mdeck", "mpages", "mwav", "mscenes", "mmotion",
                        "mgrid", "minput" }) do
     collect("lib/" .. f .. ".lua")
@@ -1225,13 +1225,13 @@ end
 -- and the tighten all read a part-written take. Nothing fails loudly, so the
 -- contract is asserted instead.
 do
-  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
+  local sc = io.open("lib/Engine_Four.sc"):read("a")
   local fmt = sc:match('bufLs%[opIdx%]%.write%(stem %+%+ "_L%.wav", "wav", "(%w+)"')
   ok(fmt ~= nil, "write_take's sample format is readable from the .sc")
   local bits = fmt and tonumber(fmt:match("(%d+)$"))
-  local lua = io.open("mangler2.lua"):read("a")
+  local lua = io.open("four.lua"):read("a")
   local declared = tonumber(lua:match("ctx%.TAKE_BYTES = (%d+)"))
-  ok(declared ~= nil, "...and mangler2.lua declares the matching byte width")
+  ok(declared ~= nil, "...and four.lua declares the matching byte width")
   ok(bits and declared and declared == bits // 8,
     string.format("write_take's %s matches ctx.TAKE_BYTES = %s",
       tostring(fmt), tostring(declared)))
@@ -1681,7 +1681,7 @@ do
   -- (a) the deploy FINGERPRINT: the command count maiden prints after a
   -- RESTART. Section 11 checks every Lua id lands on a command; this checks
   -- the total, so a stray new command fails here instead of on the device.
-  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
+  local sc = io.open("lib/Engine_Four.sc"):read("a")
   local cmds, n = {}, 0
   local function add(id) if not cmds[id] then cmds[id] = true; n = n + 1 end end
   for id in (sc:match("ioKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do add(id) end
@@ -1690,7 +1690,7 @@ do
         :gmatch("\\([%w_]+)%s*%->") do add(id) end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
-  mangler2_cmds(sc, add)
+  four_cmds(sc, add)
   ok(n == 173, "the engine command count is 173, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
@@ -1731,17 +1731,17 @@ do
   ok(#bad == 0, "every shipped preset value is in range, momentaries at 0 ("
     .. table.concat(bad, ",") .. ")")
 
-  -- (d) dist/mangler2_single.lua is GENERATED; a stale one ships old code.
+  -- (d) dist/four_single.lua is GENERATED; a stale one ships old code.
   -- The generators run on the interpreter running this harness (LUA53 under
   -- test/check.lua), not on whatever `lua` is on PATH.
   local LUA = (arg and arg[-1]) or "lua"
   local tmp = os.tmpname()
-  local okb = os.execute(LUA .. " test/amalgamate.lua mangler2.lua " .. tmp .. " >/dev/null")
+  local okb = os.execute(LUA .. " test/amalgamate.lua four.lua " .. tmp .. " >/dev/null")
   local built = io.open(tmp) and io.open(tmp):read("a")
-  local shipped = io.open("dist/mangler2_single.lua") and io.open("dist/mangler2_single.lua"):read("a")
+  local shipped = io.open("dist/four_single.lua") and io.open("dist/four_single.lua"):read("a")
   os.remove(tmp)
   ok(okb and built and built == shipped,
-    "dist/mangler2_single.lua is a fresh build (run: lua test/amalgamate.lua)")
+    "dist/four_single.lua is a fresh build (run: lua test/amalgamate.lua)")
 
   -- (e) doc/controls.md is GENERATED from the script's own tables too
   local ctmp = os.tmpname()
@@ -2107,9 +2107,9 @@ end
 -- source; (b) pins the Lua pass counter to the new head, which starts at the
 -- window's start each time erosion engages.
 do
-  local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
+  local sc = io.open("lib/Engine_Four.sc"):read("a")
   local writers, defs = {}, 0
-  for name, body in sc:gmatch("SynthDef%(\\mangler2_([%w_]+),(.-)}%)%.add;") do
+  for name, body in sc:gmatch("SynthDef%(\\four_([%w_]+),(.-)}%)%.add;") do
     defs = defs + 1
     if body:find("BufWr", 1, true) then writers[#writers + 1] = name end
   end
@@ -2634,7 +2634,7 @@ do
 end
 
 -- ============================================================================
--- 27b · mangler2: modulators per track, COLOR and SPACE per track
+-- 27b · four: modulators per track, COLOR and SPACE per track
 -- ============================================================================
 -- A modulator on track n moves t<n>_<target>; a knob the tracks share stays
 -- the shared knob; a knob track n lacks moves nothing. Every track has its
@@ -3313,7 +3313,7 @@ do
 end
 
 -- ============================================================================
--- mangler2 · the track switch: K3 held on VOICE or FILTER flips the track
+-- four · the track switch: K3 held on VOICE or FILTER flips the track
 -- ============================================================================
 do
   local Mp
@@ -3403,7 +3403,7 @@ do
 end
 
 -- ============================================================================
--- mangler2 · the TRACKS hub and the focus
+-- four · the TRACKS hub and the focus
 -- ============================================================================
 do
   local Mp
@@ -3498,7 +3498,7 @@ do
 end
 
 -- ============================================================================
--- mangler2 · own material per track: the focus, the saves, ONE-SHOT
+-- four · own material per track: the focus, the saves, ONE-SHOT
 -- ============================================================================
 do
   local calls, writes = {}, {}

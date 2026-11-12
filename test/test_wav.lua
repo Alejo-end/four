@@ -13,7 +13,7 @@
 local T = dofile("test/harness.lua")
 local ok, near = T.ok, T.near
 
--- the real modules, initialised the way mangler2.lua does it, minus the
+-- the real modules, initialised the way four.lua does it, minus the
 -- screen. M answers for both: the file layer first, then the strips.
 local nop = function() end
 local W = dofile("lib/mwav.lua")
@@ -297,12 +297,12 @@ end
 
 -- ---- the pad slice model ---------------------------------------------------
 -- Which slice a pad plays, once a CHOP has found however many transients are
--- actually there. Lifted from mangler2.lua so the real law is under test, not a
+-- actually there. Lifted from four.lua so the real law is under test, not a
 -- copy of it.
 do
-  local msrc = io.open("mangler2.lua"):read("a")
+  local msrc = io.open("four.lua"):read("a")
   local fn = msrc:match("(local function pad_cut.-\nend)\n")
-  assert(fn, "could not lift pad_cut out of mangler2.lua")
+  assert(fn, "could not lift pad_cut out of four.lua")
   local fake = { pad_n = 8 }
   local pad_cut = load(fn .. "\nreturn pad_cut", "pc", "t",
     setmetatable({ ctx = fake }, { __index = _G }))()

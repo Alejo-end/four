@@ -63,7 +63,7 @@ add("drive", "drive", true)
 add("dry_wet", "dry_wet", true)
 add("delay_mix", "delay_mix", true)
 add("rev_mix", "rev_mix", true)
--- track 2 (mangler2): on = switched on and audible, then its own head,
+-- track 2 (four): on = switched on and audible, then its own head,
 -- window and knobs, so the visuals can give it a layer of its own
 add("t2_on", function()
   return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001) and 1 or 0

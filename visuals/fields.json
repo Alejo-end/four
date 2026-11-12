@@ -41,7 +41,7 @@
     { "key": "dry_wet", "type": "float" },
     { "key": "delay_mix", "type": "float" },
     { "key": "rev_mix", "type": "float" },
-    { "key": "t2_on", "type": "int", "note": "mangler2 only, as are the t2_ fields below" },
+    { "key": "t2_on", "type": "int", "note": "four only, as are the t2_ fields below" },
     { "key": "t2_mode", "type": "int" },
     { "key": "t2_level", "type": "float" },
     { "key": "t2_play", "type": "float" },

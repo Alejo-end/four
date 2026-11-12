@@ -3762,3 +3762,15 @@ Rationale: softcut (separate audio core, near-free) does everything it can; scsy
 only what softcut cannot (granular, time-stretch, custom filter/delay/reverb). GRAIN/WARP/PV
 are a **mode switch** on a single SC voice, never run together (Pi4 = one scsynth core,
 xruns past ~60%).
+
+four, first change: **mangler2 becomes the instrument, named four (names only, the count
+stays 173, needs a RESTART)**. The one-track mangler retires; it stays in git as the tag
+`mangler-1`. main's 115th and 116th changes (the folder rename and the visuals over the
+network) were already here as mangler2's second and fourth, so the merge kept this tree.
+The new names: script `four.lua`, class `Engine_Four` in `lib/Engine_Four.sc`,
+`engine.name = 'Four'`, SynthDefs `\four_*`, `dist/four_single.lua`, and the presets
+`data/four-NN.pset` with `four.pmap.example`. On the norns it lives in `dust/code/four` and
+`dust/data/four`; the data folder starts as a copy of `dust/data/mangler2`, with
+`mangler2-NN.pset` renamed `four-NN.pset` and `mangler2.pmap` renamed `four.pmap`. The PARAMS
+separator and exported takes say `four`. The OSC addresses stay `/mangler/...` (the visuals
+read them), and the log lines still start with `mangler:`.

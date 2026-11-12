@@ -12,7 +12,7 @@ selected layer's loop, `@lay_level` and `@lay_rate` set the selected layer's
 level and rate. `@mo_sel` walks MOTION's rows: the lanes, then the two
 modulators; with a modulator selected the other knobs are its own.
 
-Tracks (mangler2): four engine tracks and one focus. On TRACKS, E2 picks the
+Tracks (four): four engine tracks and one focus. On TRACKS, E2 picks the
 focused track and E3 sets its level; K2 turns it on and off, K3 cycles its
 mode. Hold K1 there for its sends: K1+E2 picks the track it sends to, K1+E3
 how much. TAKE, VOICE and FILTER then edit the focused track (TAKE 2, VOICE 2

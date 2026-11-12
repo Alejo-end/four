@@ -68,18 +68,18 @@ local MOTION_IDS = {
   -- (and tells us it did, via M.account, so the sweep never punches forty
   -- lanes of its own). appended, so existing lane order is unchanged.
   "scene_morph_amt",
-  -- track 2 (mangler2), appended so the lane order above is unchanged.
+  -- track 2 (four), appended so the lane order above is unchanged.
   -- The same choices as track 1: grain_shape and warp_overlaps stay out.
   "t2_level", "t2_pos_start", "t2_pos_end", "t2_scan", "t2_pitch", "t2_pan",
   "t2_pos_jitter", "t2_size", "t2_density", "t2_spread", "t2_grain_jitter",
   "t2_grain_pitch_spread", "t2_clouds_pos", "t2_clouds_tex", "t2_clouds_fb",
   "t2_clouds_lofi", "t2_clouds_mode", "t2_mode", "t2_warp_window",
   "t2_warp_rand", "t2_pv_freeze", "t2_cutoff", "t2_resonance", "t2_filt_type",
-  -- COLOR and SPACE (mangler2), appended: each track's drive and crush and
+  -- COLOR and SPACE (four), appended: each track's drive and crush and
   -- its sends into the delay and the reverb
   "crush", "fx_dly", "fx_rev", "t2_drive", "t2_crush", "t2_fx_dly", "t2_fx_rev",
 }
--- mangler2: tracks 3 and 4 the same as track 2 (appended, lane order kept),
+-- four: tracks 3 and 4 the same as track 2 (appended, lane order kept),
 -- then the twelve sends
 do
   local t2 = {}
@@ -110,7 +110,7 @@ local MOTION_EXCLUDE = {
   "rec_wait", "rec_thresh", "rec_end",
   "take_undo", "undo_keep",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
-  "t2_file", "t3_file", "t4_file",   -- mangler2: each track's own material
+  "t2_file", "t3_file", "t4_file",   -- four: each track's own material
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
   "lay1_file", "lay2_file", "layer_wet",
@@ -124,8 +124,8 @@ local MOTION_EXCLUDE = {
   "pad_input", "voices",
   -- UI cursors + the per-pad lock editors
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
-  "track_sel",   -- mangler2: which track VOICE and FILTER address
-  "route_sel",   -- mangler2: the ROUTE grid's cursor
+  "track_sel",   -- four: which track VOICE and FILTER address
+  "route_sel",   -- four: the ROUTE grid's cursor
   -- a clock rule, set and left (a replayed one would jump the window)
   "win_beats",
   -- config / keys

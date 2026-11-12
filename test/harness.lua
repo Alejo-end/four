@@ -21,7 +21,7 @@ end
 -- (a hand-mirrored copy would drift and the renders would keep passing)
 function H.pages(path)
   local names = {}
-  local src = io.open(path or "mangler2.lua"):read("a")
+  local src = io.open(path or "four.lua"):read("a")
   for name in src:match("local PAGES = %{(.-)%}"):gmatch('"([%u%d]+)"') do
     names[#names + 1] = name
   end

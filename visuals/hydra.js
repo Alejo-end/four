@@ -19,7 +19,7 @@ const m = { page: 1, page_name: "TAKE", scene: 1, look: 1, flash: 0, mode: 5, re
   play: 0, rec_phase: 0, win_start: 0, win_end: 1, size: 0.5, density: 0.5,
   spread: 0.5, jitter: 0, pitch: 0.5, cutoff: 1, resonance: 0, drive: 0,
   dry_wet: 0.5, delay_mix: 0, rev_mix: 0,
-  // track 2 (mangler2 only; mangler never sends these, so the layer stays dark)
+  // track 2 (four only; mangler never sends these, so the layer stays dark)
   t2_on: 0, t2_mode: 1, t2_level: 1, t2_play: 0, t2_win_start: 0, t2_win_end: 1,
   t2_size: 0.5, t2_density: 0.5, t2_pitch: 0.5, t2_cutoff: 1 };
 const s = Object.assign({}, m);          // smoothed copy
@@ -91,7 +91,7 @@ const newsPic = () => HAVE_VIDEO ? src(s0) : osc(8, 0.05, 1).color(0.6, 0.6, 0.7
 const NAMES = ["AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS"];
 const AUTO_BY_PAGE = { TAKE: 5, VOICE: 2, TAPE: 5, LAYERS: 5, PADS: 2,
   FILTER: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4,
-  TRACK2: 2, TRACKS: 4 };   // mangler2: its track pages
+  TRACK2: 2, TRACKS: 4 };   // four: its track pages
 
 const LOOKS = {
   // BARS: size and density of the grains. density = how many, size = how
@@ -210,7 +210,7 @@ src(o1).mult(grey(() => wb[0]))
   .scale(() => 1 - m.freeze * 0.03)
   .out(o5);
 
-// track 2's layer, in o7 (mangler2): a second voice gets a second mark. A
+// track 2's layer, in o7 (four): a second voice gets a second mark. A
 // cold blue column stands where track 2's head plays; its width is track 2's
 // window, its grain is its density and size, its tint its cutoff. It fades in
 // when track 2 sounds and out when it stops, over the look and under the display.

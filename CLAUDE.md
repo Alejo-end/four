@@ -1,29 +1,34 @@
-# CLAUDE.md — mangler
+# CLAUDE.md — four
 
-Agent manual for **mangler**, a norns live stereo sample-mangling instrument. Read this
-first: the status, the hard rules, and the lessons the project paid for. The per-change
-history is in **doc/changelog.md** (oldest first; the newest entry is at the end). Keep
-the status block current, and add a change-log entry for every change.
+Agent manual for **four** (it was mangler, then mangler2), a norns live stereo
+sample-mangling instrument with four engine tracks. Read this first: the status, the
+hard rules, and the lessons the project paid for. The per-change history is in
+**doc/changelog.md** (oldest first; the newest entry is at the end). Keep the status
+block current, and add a change-log entry for every change.
 
 ---
 
-## THIS IS MANGLER2
+## STATUS
 
-mangler2 is a fork of mangler (branch `mangler2`, folder `../mangler2`, a git
-worktree of the mangler repo) with FOUR ENGINE TRACKS and track-to-track sends: step 2 of the
-S-4 tracks idea. Track 2 is a second drone on the same take with its own
-mode, window, pitch, grain knobs, filter and level (the `t2_*` params, the
-"track 2" group). Names here: script `mangler2.lua`, class `Engine_Mangler2`,
-file `lib/Engine_Mangler2.sc`, `engine.name = 'Mangler2'`, SynthDefs
-`\mangler2_*`, deploy to `~/dust/code/mangler2/`. After a RESTART maiden must
-read **`count: 173`** (mangler's 66, crush and the two FX sends of track 1, 30 for each of tracks 2 to 4, 12 sends, rec_track and buf_track). Each track has its own COLOR (drive, crush), SPACE (its delay and reverb sends, on the TRACKS grid) and the four modulators can sit on any track (ninth change). On the device 2026-11-12: `count: 173`, worst case 45% of the scsynth thread, 0 xruns over 60 s. GRAIN is now a granulator that reads the take (stereo grain pairs, spray, regular to Poisson timing); Clouds is the sixth mode, CLOUD (tenth change, doc/measurements/2026-11-12/grain.md). Each track has its OWN material (four 60s buffers); K1+E1 picks the track. On the device 2026-11-11: loads at
-`count: 92`, every def builds, two GRAIN tracks with reverb, shimmer and delay take
-30% of the scsynth thread with 0 xruns (doc/measurements/2026-11-11/mangler2-tracks.md).
-Nobody has listened yet. On VOICE and FILTER, K3 held flips the page between
-track 1 and track 2 (doc/controls.md). TRACKS (after VOICE) is the hub: E2 picks
-the focused track, which TAKE, VOICE and FILTER then edit; K1 held shows its sends. The rules below are
-mangler's and hold here with these names. mangler itself stays at 66.
-
+- **Names:** script `four.lua`, class `Engine_Four`, file `lib/Engine_Four.sc`,
+  `engine.name = 'Four'`, SynthDefs `\four_*`. It deploys to `~/dust/code/four/`, and its
+  data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The one-track
+  mangler is retired: git tag `mangler-1`. The OSC addresses stay `/mangler/...`, because
+  the visuals bridge reads them. The log lines still start with `mangler:`.
+- **The fingerprint:** after a RESTART maiden must read **`count: 173`**. That is
+  mangler's 66, plus crush and the two FX sends of track 1, 30 for each of tracks 2 to 4,
+  12 sends, rec_track and buf_track.
+- **The instrument:** four tracks, each with its OWN material (four 60 s buffers). K1+E1
+  picks the track. Each track has its own voice (OFF GRAIN WARP PV PLAY CLOUD), window,
+  filter, COLOR (drive, crush) and SPACE (delay and reverb sends, on the TRACKS grid).
+  The four modulators can sit on any track. GRAIN is a granulator that reads the take
+  (stereo grain pairs, spray, regular to Poisson timing); CLOUD is MiClouds.
+- **TRACKS** (after VOICE) is the hub: E2 picks the focused track, which TAKE, VOICE and
+  FILTER then edit; K1 held shows its sends.
+- **On the device 2026-11-12:** `count: 173`. The worst case takes 45% of the scsynth
+  thread, with 0 xruns over 60 s (doc/measurements/2026-11-12/). Nobody has listened yet.
+- The history below the line is mangler's, from before the merge; where it says 66 or
+  `Engine_Mangler`, read 173 and `Engine_Four`.
 
 - **Last device-confirmed:** 2026-07-16 at `count: 63` (S21, S22 Phase A, the NU-1..4
   redesign, the 45th to 47th changes).
@@ -59,7 +64,7 @@ mangler's and hold here with these names. mangler itself stays at 66.
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 66` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 173` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
    source no longer adds up to 66.
@@ -90,18 +95,18 @@ voice, never run together: a Pi 4 has one scsynth core, and it xruns past about 
 
 ## The four hard invariants
 
-1. **One engine file only.** A second `Engine_Mangler` class anywhere under `~/dust/code/`
+1. **One engine file only.** A second `Engine_Four` class anywhere under `~/dust/code/`
    makes *every* norns script hang forever on "LOADING" (SuperCollider refuses to compile a
-   duplicate class). Ship exactly one `lib/Engine_Mangler.sc`. Deploy with `rsync --delete`
+   duplicate class). Ship exactly one `lib/Engine_Four.sc`. Deploy with `rsync --delete`
    so an old copy can never linger on the device.
 
 2. **Name consistency — change these four together, always:**
    | thing            | value                       |
    |------------------|-----------------------------|
-   | SC class         | `Engine_Mangler`            |
-   | SC file          | `lib/Engine_Mangler.sc`     |
-   | Lua engine name  | `engine.name = 'Mangler'`   (norns prepends `Engine_`) |
-   | SynthDef names   | namespaced, e.g. `\mangler_*` |
+   | SC class         | `Engine_Four`               |
+   | SC file          | `lib/Engine_Four.sc`        |
+   | Lua engine name  | `engine.name = 'Four'`      (norns prepends `Engine_`) |
+   | SynthDef names   | namespaced, e.g. `\four_*`    |
 
 3. **No SuperCollider compiler in this dev environment.** The only static check available is
    `luac -p` (Lua syntax). The local luac is 5.5 and norns runs Lua 5.3, so a clean parse
@@ -122,7 +127,7 @@ voice, never run together: a Pi 4 has one scsynth core, and it xruns past about 
 
 norns auto-maps **every** parameter added via `params:add_control / add_taper / add_number /
 add_option / add_binary` to MIDI-learn from the PARAMS menu, persisting it per-script in a
-**PMAP** file (`data/mangler/mangler.pmap`). `add_separator / add_group / add_trigger /
+**PMAP** file (`data/four/four.pmap`). `add_separator / add_group / add_trigger /
 add_text` are **not** mappable.
 
 ⇒ The rule that gives "MIDI for every parameter" for free:
@@ -288,13 +293,13 @@ LUA53=/path/to/lua-5.3.6/src/lua lua test/check.lua
 
 # static check alone (local luac is 5.5; norns runs 5.3, so without LUA53 this is
 # necessary, not sufficient)
-luac -p mangler.lua lib/*.lua
+luac -p four.lua lib/*.lua
 
 # render every page to PGM with NO hardware (test/uisim stubs norns and runs the REAL
 # redraw code). eyeball these before deploying a screen change: a redraw error on the
 # device is a silent black screen
-lua test/uisim/render_pages.lua mangler.lua /tmp/shots base        # all pages + states
-lua test/uisim/render_pages.lua mangler.lua /tmp/shots empty empty # empty-buffer states
+lua test/uisim/render_pages.lua four.lua /tmp/shots base           # all pages + states
+lua test/uisim/render_pages.lua four.lua /tmp/shots empty empty # empty-buffer states
 python3 test/uisim/pgm2png.py /tmp/shots/base_01_TAKE.pgm take.png 4
 
 # the harnesses. the render suite proves the instrument DRAWS; these drive it. Each
@@ -309,7 +314,7 @@ lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills 
 lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
 
-# single-file build: inlines lib/*.lua into dist/mangler_single.lua. GENERATED, never
+# single-file build: inlines lib/*.lua into dist/four_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
 lua test/amalgamate.lua
 
@@ -323,11 +328,11 @@ python3 test/device/gate.py 2 4:4.10,4.14
 python3 test/device/measure.py states voices
 
 # deploy (the repo IS the script; --delete kills stale engine copies)
-rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
+rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/four/
 ```
 
 To prove a refactor changes nothing: render all four variants (base, empty, grain,
-filter) before and after and byte-compare the PGMs, then render `dist/mangler_single.lua`
+filter) before and after and byte-compare the PGMs, then render `dist/four_single.lua`
 the same way. Compare renders made by the SAME interpreter: `math.random` differs between
 Lua 5.3 and 5.5, so the orbit's shot differs across them by design.
 
