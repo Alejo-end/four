@@ -169,6 +169,9 @@ do
       ok(#moved > 0,
         string.format("%s E%d moves a param (moved: %s)", name, e,
           #moved > 0 and table.concat(moved, ",") or "NOTHING"))
+      -- (mangler2) TRACKS's E2 moves the focus, which every later page
+      -- follows: put it back on track 1, where the rest of the file expects it
+      params:set("track_sel", 1)
     end
   end
 end
@@ -294,6 +297,8 @@ do
         .. (okp and "" or (" — " .. tostring(err))))
     end
   end
+  -- (mangler2) TRACKS's K2/K3 switch track 1 on and off and cycle its mode
+  params:set("track_sel", 1)
 end
 
 
@@ -1196,7 +1201,7 @@ end
 -- contract is asserted instead.
 do
   local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
-  local fmt = sc:match('bufL%.write%(stem %+%+ "_L%.wav", "wav", "(%w+)"')
+  local fmt = sc:match('bufLs%[opIdx%]%.write%(stem %+%+ "_L%.wav", "wav", "(%w+)"')
   ok(fmt ~= nil, "write_take's sample format is readable from the .sc")
   local bits = fmt and tonumber(fmt:match("(%d+)$"))
   local lua = io.open("mangler2.lua"):read("a")
@@ -1661,7 +1666,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   mangler2_cmds(sc, add)
-  ok(n == 156, "the engine command count is 156, the expected fingerprint (got " .. n .. ")")
+  ok(n == 158, "the engine command count is 158, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -3200,7 +3205,7 @@ do
   key(3, 1); _h.run_ticks(20); key(3, 0)
   ok(params:get("track_sel") == 2 and params:get("mode") == 3,
     "VOICE K3 held to the arc switches to track 2 and changes no mode")
-  ok(Mp and Mp.page_title() == "VOICE 2", "...and the title reads VOICE 2")
+  ok(Mp and Mp.page_title() == "VOICE" and CTX.tsel() == 2, "...and the title reads VOICE 2")
   -- on track 2 the tap cycles track 2's mode: OFF lands on PLAY
   key(3, 1); _h.run_ticks(1); key(3, 0)
   ok(params:get("t2_mode") == 5 and params:get("mode") == 3,
@@ -3224,7 +3229,7 @@ do
   key(2, 1); key(2, 0)
   -- FILTER follows the same track
   T.goto_page("FILTER")
-  ok(Mp.page_title() == "FILTER 2", "FILTER on track 2 reads FILTER 2")
+  ok(Mp.page_title() == "FILTER" and CTX.tsel() == 2, "FILTER on track 2 reads FILTER 2")
   ok(CTX.enc_param(2) == "t2_cutoff" and CTX.enc_param(3) == "t2_resonance",
     "FILTER's E2/E3 are track 2's cutoff and resonance")
   CTX.alt = true
@@ -3244,14 +3249,14 @@ do
   ok(params:get("t2_cutoff") == 500, "...and a second tap puts it back")
   -- hold again: on to track 3, then 4, then round to track 1
   key(3, 1); _h.run_ticks(20); key(3, 0)
-  ok(params:get("track_sel") == 3 and Mp.page_title() == "FILTER 3",
+  ok(params:get("track_sel") == 3 and Mp.page_title() == "FILTER" and CTX.tsel() == 3,
     "FILTER K3 held again steps on to track 3")
   ok(CTX.enc_param(2) == "t3_cutoff", "...and the knobs are track 3's")
   key(3, 1); _h.run_ticks(20); key(3, 0)
   ok(params:get("track_sel") == 4 and CTX.enc_param(3) == "t4_resonance",
     "...then track 4")
   key(3, 1); _h.run_ticks(20); key(3, 0)
-  ok(params:get("track_sel") == 1 and Mp.page_title() == "FILTER",
+  ok(params:get("track_sel") == 1 and Mp.page_title() == "FILTER" and CTX.tsel() == 1,
     "...and round to track 1")
   ok(CTX.enc_param(2) == "cutoff", "...with track 1's knobs again")
   -- the flag: track 2 sounding lights T2 in the header on any page
@@ -3268,7 +3273,7 @@ do
 end
 
 -- ============================================================================
--- mangler2 · the TRACK 2 page
+-- mangler2 · the TRACKS hub and the focus
 -- ============================================================================
 do
   local Mp
@@ -3278,51 +3283,136 @@ do
     if n == "Mpages" then Mp = v end
   end
   CTX.alt = false
-  params:set("t2_mode", 1)
-  T.goto_page("TRACK")
-  ok(Mp.page_title() == "TRACK 2", "the page reads TRACK 2")
-  ok(CTX.enc_param(2) == "t2_pos_start" and CTX.enc_param(3) == "t2_pos_end",
-    "E2 and E3 are track 2's window")
+  params:set("track_sel", 1)
+  params:set("t2_mode", 1); params:set("t3_mode", 1); params:set("t4_mode", 1)
+  T.goto_page("TRACKS")
+  ok(Mp.page_title() == "TRACKS", "the hub reads TRACKS")
+  ok(CTX.enc_param(2) == "track_sel" and CTX.enc_param(3) == "@trk_level",
+    "E2 picks the focus, E3 its level")
+  ok(CTX.enc_target("@trk_level") == "grain_level", "track 1's level is the engine's grain level")
+  enc(2, 1)
+  ok(params:get("track_sel") == 2, "E2 moves the focus to track 2")
+  ok(CTX.enc_target("@trk_level") == "t2_level", "...and E3 is now track 2's level")
+  local l0, g0 = params:get("t2_level"), params:get("grain_level")
+  enc(3, -5)
+  ok(params:get("t2_level") < l0 and params:get("grain_level") == g0, "E3 turns track 2's level only")
+  -- K2 ON and K3 MODE follow the focus
+  params:set("pos_start", 0.2); params:set("pos_end", 0.5)
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 5 and params:get("mode") ~= 1, "K2 turns the focused track on (PLAY the first time)")
+  ok(math.abs(params:get("t2_pos_start") - 0.2) < 1e-9 and math.abs(params:get("t2_pos_end") - 0.5) < 1e-9,
+    "...on track 1's window, not the whole empty buffer")
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  key(3, 1); key(3, 0)
+  ok(params:get("t2_mode") == 2, "K3 cycles its mode (PLAY to GRAIN)")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 1, "K2 again turns it off")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 2, "...and on brings back GRAIN")
+  key(2, 1); _h.run_ticks(10); key(2, 0)
+  ok(params:get("t2_mode") == 1, "K2 held plays it only while held")
+  redraw()
+  -- K1 held: the sends of the focused track
   CTX.alt = true
-  ok(CTX.enc_param(2) == "t2_level" and CTX.enc_param(3) == "t2_pitch",
-    "K1+E2 and K1+E3 are its level and pitch")
+  ok(CTX.enc_param(2) == "@route_to" and CTX.enc_param(3) == "@route_amt",
+    "K1 held, E2 picks where the focus sends, E3 how much")
+  ok(CTX.route_cur().from == 2, "the cursor sits in the focused track's row")
+  enc(2, 1)
+  ok(CTX.route_cur().id == "send_2_3", "K1+E2 steps to track 2 into track 3")
+  enc(2, 5)
+  ok(CTX.route_cur().id == "send_2_4", "...and stops at the row's end")
+  enc(3, 10)
+  ok(params:get("send_2_4") > 0 and params:get("send_2_3") == 0, "K1+E3 sets that send only")
+  redraw()
   CTX.alt = false
+  params:set("send_2_4", 0)
+  -- the focus carries to TAKE, VOICE and FILTER
+  T.goto_page("TAKE")
+  ok(Mp.page_title() == "TAKE" and CTX.tsel() == 2, "TAKE follows the focus: TAKE 2")
+  ok(CTX.enc_param(2) == "t2_pos_start" and CTX.enc_param(3) == "t2_pos_end",
+    "...its E2/E3 are track 2's window")
   params:set("t2_pos_start", 0.5); params:set("t2_pos_end", 0.6)
   local a0 = params:get("t2_pos_start")
   enc(2, -1)
   ok(params:get("t2_pos_start") < a0 and a0 - params:get("t2_pos_start") < 0.01,
     "a tight track 2 window moves by a fine step")
-  -- K2: on and off, remembering the mode
-  key(2, 1); key(2, 0)
-  ok(params:get("t2_mode") == 5, "K2 tapped turns track 2 on, in PLAY the first time")
-  key(3, 1); key(3, 0)
-  ok(params:get("t2_mode") == 2, "K3 cycles its mode (PLAY to GRAIN)")
-  key(2, 1); key(2, 0)
-  ok(params:get("t2_mode") == 1, "K2 tapped again turns it off")
-  key(2, 1); key(2, 0)
-  ok(params:get("t2_mode") == 2, "...and on again brings back GRAIN")
-  key(2, 1); _h.run_ticks(10); key(2, 0)
-  ok(params:get("t2_mode") == 1, "K2 held while on plays it only while held: off at the release")
+  CTX.alt = true
+  local p0, q0 = params:get("t2_pos_start"), params:get("t2_pos_end")
+  enc(2, 1)
+  ok(params:get("t2_pos_start") > p0 and params:get("t2_pos_end") > q0,
+    "K1+E2 slides track 2's window, both edges")
+  CTX.alt = false
+  -- SNAP on track 2: onto track 1's window, and back
+  params:set("pos_start", 0.1); params:set("pos_end", 0.4)
+  local s0, e0 = params:get("t2_pos_start"), params:get("t2_pos_end")
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(math.abs(params:get("t2_pos_start") - 0.1) < 1e-9 and math.abs(params:get("t2_pos_end") - 0.4) < 1e-9,
+    "SNAP on TAKE 2 puts track 2's window on track 1's")
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(math.abs(params:get("t2_pos_start") - s0) < 1e-9 and math.abs(params:get("t2_pos_end") - e0) < 1e-9,
+    "...and a second SNAP puts it back")
+  ok(params:get("pos_start") == 0.1, "...track 1's window is untouched")
   redraw()
-  params:set("t2_mode", 1)
-  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
-  -- K3 held steps the page to track 3, and its knobs and keys follow
-  key(3, 1); _h.run_ticks(20); key(3, 0)
-  ok(Mp.page_title() == "TRACK 3" and CTX.enc_param(2) == "t3_pos_start",
-    "K3 held on TRACK steps to track 3, and E2 is its window")
-  key(2, 1); key(2, 0)
-  ok(params:get("t3_mode") == 5 and params:get("t2_mode") == 1, "K2 there turns track 3 on")
-  redraw()
-  key(2, 1); key(2, 0)
-  key(3, 1); _h.run_ticks(20); key(3, 0)
-  key(3, 1); _h.run_ticks(20); key(3, 0)
-  ok(Mp.page_title() == "TRACK 2", "...on to 4, and round to 2 (track 1 is VOICE's)")
+  T.goto_page("VOICE")
+  ok(Mp.page_title() == "VOICE" and CTX.tsel() == 2, "VOICE follows the focus")
+  -- back to track 1
   params:set("track_sel", 1)
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1); params:set("t2_level", 1)
+  T.goto_page("TAKE")
+  ok(Mp.page_title() == "TAKE" and CTX.tsel() == 1 and CTX.enc_param(2) == "pos_start",
+    "on track 1 TAKE edits track 1 again")
 end
 
 -- ============================================================================
--- mangler2 · the ROUTE page: the sends as a grid
+-- mangler2 · own material per track: the focus, the saves, ONE-SHOT
 -- ============================================================================
+do
+  local calls, writes = {}, {}
+  local saved = { engine.rec_track, engine.buf_track, engine.write_take }
+  engine.rec_track = function(i) calls[#calls + 1] = "rec" .. i end
+  engine.buf_track = function(i) calls[#calls + 1] = "buf" .. i end
+  engine.write_take = function(stem) writes[#writes + 1] = stem end
+  params:set("rec", 0)
+  params:set("track_sel", 1)
+  CTX.wave_any, CTX.take_len = true, 0.5
+  params:set("track_sel", 2)
+  ok(CTX.focus() == 2, "the focus follows track_sel")
+  ok(CTX.wave_any == false and CTX.take_len == 0, "track 2 starts with no material of its own")
+  local joined = table.concat(calls, ",")
+  ok(joined:find("rec1", 1, true) and joined:find("buf1", 1, true),
+    "the engine records into and works on track 2's buffer")
+  CTX.wave_any, CTX.take_len = true, 0.25
+  params:set("track_sel", 1)
+  ok(CTX.wave_any == true and CTX.take_len == 0.5, "back on track 1, its take is still there")
+  params:set("track_sel", 2)
+  ok(CTX.take_len == 0.25, "...and track 2's is kept too")
+  -- a save writes every track that has material, each under its own name
+  CTX.take_pset_write(97)
+  local all = table.concat(writes, " ")
+  ok(all:find("take-97", 1, true) and all:find("take2-97", 1, true)
+    and not all:find("take3-97", 1, true),
+    "a PSET save writes track 1 and track 2's takes, not the empty ones (" .. all .. ")")
+  -- ONE-SHOT: a pass that fills the 60s ends whole and records on into the next track
+  params:set("rec_end", 2)
+  params:set("t3_mode", 1)
+  CTX.rec_phase = 0.3
+  params:set("rec", 1)
+  ok(params:get("t2_mode") ~= 1, "recording into an OFF track switches it on (PLAY)")
+  CTX.rec_phase = 0.25; _h.run_ticks(1)     -- 0.95 of the way round
+  CTX.rec_phase = 0.31; _h.run_ticks(1)     -- ...and past the start: full
+  ok(CTX.focus() == 3 and params:get("rec") == 1, "ONE-SHOT: the full track hands on to track 3, still recording")
+  ok(params:get("t2_pos_start") == 0 and params:get("t2_pos_end") == 1, "...and track 2's take is the whole 60s")
+  ok(params:get("t3_mode") == 5, "...and track 3 plays what it records")
+  params:set("rec", 0)
+  params:set("rec_end", 1)
+  params:set("track_sel", 1)
+  params:set("t2_mode", 1); params:set("t3_mode", 1)
+  params:set("t3_pos_start", 0); params:set("t3_pos_end", 1)
+  engine.rec_track, engine.buf_track, engine.write_take = saved[1], saved[2], saved[3]
+end
+
 do
   local Mp
   for i = 1, 255 do
@@ -3330,40 +3420,16 @@ do
     if n == nil then break end
     if n == "Mpages" then Mp = v end
   end
-  CTX.alt = false
-  T.goto_page("ROUTE")
-  params:set("route_sel", 1)
-  ok(CTX.route_cur().id == "send_1_2", "the first cell is track 1 into track 2")
-  ok(CTX.enc_param(2) == "route_sel" and CTX.enc_param(3) == "@route_amt",
-    "E2 walks the cells, E3 sets the cell's send")
-  CTX.alt = true
-  ok(CTX.enc_param(2) == nil and CTX.enc_param(3) == nil,
-    "K1 held, the encoders address nothing (an empty alt slot is a no-op)")
-  CTX.alt = false
-  enc(2, 4)
-  ok(CTX.route_cur().id == "send_2_3", "four cells on is track 2 into track 3")
-  local v0 = params:get("send_2_3")
-  enc(3, 10)
-  ok(params:get("send_2_3") > v0 and params:get("send_1_2") == 0,
-    "E3 raises the selected send only")
-  -- K2 PATCH: off and back
-  local v1 = params:get("send_2_3")
-  key(2, 1); key(2, 0)
-  ok(params:get("send_2_3") == 0, "K2 cuts the selected send")
-  key(2, 1); key(2, 0)
-  ok(math.abs(params:get("send_2_3") - v1) < 1e-9, "...and brings it back at its level")
-  params:set("route_sel", 7)                  -- send_3_1
-  key(2, 1); key(2, 0)
-  ok(math.abs(params:get("send_3_1") - 0.5) < 1e-9, "K2 on an unused send patches it at half")
-  -- K3: tap = the next row, hold = clear all
-  key(3, 1); _h.run_ticks(1); key(3, 0)
-  ok(CTX.route_cur().from == 4, "K3 tapped jumps to the next row (track 4)")
-  key(3, 1); _h.run_ticks(20); key(3, 0)
-  local any = false
-  for _, r in ipairs(CTX.ROUTES) do if params:get(r.id) > 0 then any = true end end
-  ok(not any, "K3 held to the arc clears every send")
+  params:set("track_sel", 1)
+  T.goto_page("FILTER")
+  local m0 = params:get("scene_morph_amt")
+  key(1, 1); enc(1, 2); key(1, 0)
+  ok(params:get("track_sel") == 3 and params:get("scene_morph_amt") == m0,
+    "K1+E1 picks the track from any page (and no longer morphs)")
+  ok(Mp.page_title() == "FILTER" and CTX.enc_param(2) == "t3_cutoff",
+    "...the page stays, now on track 3's filter")
   redraw()
-  params:set("route_sel", 1)
+  params:set("track_sel", 1)
 end
 
 T.report("control harness OK")

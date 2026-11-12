@@ -91,7 +91,7 @@ const newsPic = () => HAVE_VIDEO ? src(s0) : osc(8, 0.05, 1).color(0.6, 0.6, 0.7
 const NAMES = ["AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS"];
 const AUTO_BY_PAGE = { TAKE: 5, VOICE: 2, TAPE: 5, LAYERS: 5, PADS: 2,
   FILTER: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4,
-  TRACK2: 2 };   // mangler2's track 2 page
+  TRACK2: 2, TRACKS: 4 };   // mangler2: its track pages
 
 const LOOKS = {
   // BARS: size and density of the grains. density = how many, size = how

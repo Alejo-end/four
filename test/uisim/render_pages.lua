@@ -100,6 +100,11 @@ else
     local l2, h2 = params:get("t2_pos_start"), params:get("t2_pos_end")
     if h2 < l2 then l2, h2 = h2, l2 end
     push("play_phase2", l2 + ((t * 0.017) % 1) * (h2 - l2))
+    for k = 3, 4 do
+      local lk, hk = params:get("t" .. k .. "_pos_start"), params:get("t" .. k .. "_pos_end")
+      if hk < lk then lk, hk = hk, lk end
+      push("play_phase" .. k, lk + ((t * (0.011 + k * 0.003)) % 1) * (hk - lk))
+    end
     -- tape head via the softcut phase event (position in seconds, voice 1)
     if _h.has_phase() then
       local tl, th = params:get("loop_start"), params:get("loop_end")
@@ -218,28 +223,26 @@ elseif TRACK2 then
   run_ticks(5)
   redraw()
   export(pfx("FILTER", "_T2_HP"))
-  goto_page("TRACK")                         -- the track page, playing
+  -- the TRACKS hub: four tracks, track 3 focused, then its sends under K1
   params:set("t2_mode", 2); params:set("t2_level", 1.2)
-  run_ticks(10)
-  redraw()
-  export(pfx("TRACK", "_ON"))
-  params:set("t2_mode", 1)                   -- ...and off
-  run_ticks(5)
-  redraw()
-  export(pfx("TRACK", "_OFF"))
-  params:set("t2_mode", 2); params:set("t2_level", 1)
   params:set("t3_mode", 4); params:set("t3_pos_start", 0.05); params:set("t3_pos_end", 0.2)
-  params:set("track_sel", 3)                 -- TRACK 3, with track 2 ticking above
+  params:set("t4_mode", 1); params:set("t4_pos_start", 0.6); params:set("t4_pos_end", 0.9)
+  params:set("track_sel", 3)
+  goto_page("TRACKS")
   run_ticks(10)
   redraw()
-  export(pfx("TRACK", "_T3"))
-  params:set("track_sel", 1)
-  goto_page("ROUTE")                         -- the routing grid
-  params:set("send_1_2", 0.8); params:set("send_2_3", 0.4); params:set("send_3_1", 0.25)
-  params:set("route_sel", 4)
-  run_ticks(5)
+  export(pfx("TRACKS", ""))
+  params:set("send_1_2", 0.8); params:set("send_3_1", 0.4); params:set("send_3_4", 0.25)
+  key(1, 1)
+  run_ticks(3)
   redraw()
-  export(pfx("ROUTE", ""))
+  export(pfx("TRACKS", "_SENDS"))
+  key(1, 0)
+  goto_page("TAKE")                          -- TAKE 3: track 3's window, the others marked
+  run_ticks(10)
+  redraw()
+  export(pfx("TAKE", "_T3"))
+  params:set("track_sel", 1)
   goto_page("TAKE")                          -- the track flag in the header
   run_ticks(5)
   redraw()

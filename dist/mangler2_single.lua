@@ -51,7 +51,7 @@
 --          drive/clouds-fb zero, filter open. HELD ~1s = the ERASER: an arc
 --          fills, and at the ring the page's material is wiped (take / tape
 --          loop / lane / slot). GLOBAL, every page.
---   K1+E1  the MORPH, from anywhere: sweep toward the selected scene; back
+--   K1+E1  (mangler2) the TRACK, from anywhere; the morph is on SCENE. was: the MORPH: sweep toward the selected scene; back
 --          to zero lands exactly home
 --
 -- SCENE   8 slots + the ◄ cell. K3 captures, K2 recalls (HOLD = peek: borrow
@@ -106,7 +106,7 @@ local min, max = math.min, math.max
 -- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
 -- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "TRACK", "ROUTE", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "TAKE", "VOICE", "TRACKS", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
 }
 
@@ -137,9 +137,12 @@ local function pget(id, default)
 end
 
 -- current window edges (sorted) and span
+-- (mangler2) the take window is the FOCUSED track's: its own material and
+-- its own window. ctx.focus_take rewrites WIN.
+local WIN = { "pos_start", "pos_end" }
 local function window_bounds()
-  local a = pget("pos_start", 0)
-  local b = pget("pos_end", 1)
+  local a = pget(WIN[1], 0)
+  local b = pget(WIN[2], 1)
   local lo, hi = min(a, b), max(a, b)
   return lo, hi, max(hi - lo, 0.001)
 end
@@ -2234,9 +2237,10 @@ local MOTION_EXCLUDE = {
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
-  "rec_wait", "rec_thresh",
+  "rec_wait", "rec_thresh", "rec_end",
   "take_undo", "undo_keep",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
+  "t2_file", "t3_file", "t4_file",   -- mangler2: each track's own material
   "print_len", "pad_chop", "pad_even",
   "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
   "lay1_file", "lay2_file", "layer_wet",
@@ -3691,7 +3695,8 @@ local SCENE_EXCLUDE = {
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
-  "rec_wait", "rec_thresh",
+  "t2_file", "t3_file", "t4_file",   -- mangler2: each track's own material
+  "rec_wait", "rec_thresh", "rec_end",
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
@@ -5283,8 +5288,14 @@ local amp_in, amp_out
 
 -- waveform display: 128 amplitude bins over the buffer, filled as the write
 -- head passes; pre_level decides how much of the old picture survives overdub
-local wave = {}
-for i = 1, 128 do wave[i] = 0 end
+-- (mangler2) one strip per track, its own material; `wave` is the focused
+-- track's, swapped by M.focus_wave
+local waves = {}
+for n = 1, 4 do
+  waves[n] = {}
+  for i = 1, 128 do waves[n][i] = 0 end
+end
+local wave = waves[1]
 local wave_bin = 0
 
 -- same idea for the tape loop: bins indexed by the tape head while recording
@@ -5369,6 +5380,15 @@ end
 
 -- wipe the engine's picture (the engine `clear` command): the buffer is gone, so the strip
 -- must go with it — every page that draws the take goes back to inviting one.
+-- the focus moved to track n: its strip becomes the one TAKE draws and the
+-- record head paints
+function M.focus_wave(n)
+  wave = waves[n] or waves[1]
+  wave_bin = 0
+end
+-- track n's strip, for a restore that lands while another track is focused
+function M.track_wave(n) return waves[n] end
+
 function M.clear_wave()
   M.clear_bins(wave)  -- stops an in-flight TAKE fill first
   wave_bin = 0
@@ -5517,6 +5537,7 @@ local SHORT = {
   t2_resonance = "T2 RES", t2_filt_type = "T2 FILT",
   -- the ROUTE page: its cursor and the selected send's amount
   route_sel = "SEND", ["@route_amt"] = "AMT",
+  track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
 }
 -- tracks 3 and 4 (mangler2): track 2's words with the number changed, and the
 -- sends as "2>3" (from track 2 into track 3). Built once, at load.
@@ -5683,7 +5704,7 @@ end
 -- selector pages are the one exception to numbers-only-while-turning:
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
-  route_sel = true,
+  route_sel = true, track_sel = true, ["@route_to"] = true,
   seq_slice = true, motion_lane = true, scene_slot = true, layer_sel = true,
   ["@mo_sel"] = true,
 }
@@ -5907,6 +5928,42 @@ local function take_top_row(frame, rec)
   end
 end
 
+-- mangler2: VOICE and FILTER draw the track they address (C.tid picks the
+-- id). tp reads the selected track's value of a track 1 id; the read head
+-- and the window follow the track too.
+-- each extra track's ids, built once (the redraw path must not allocate)
+local TK = {}
+for n = 2, 4 do
+  local pre = "t" .. n .. "_"
+  TK[n] = { mode = pre .. "mode", level = pre .. "level",
+    pos_start = pre .. "pos_start", pos_end = pre .. "pos_end" }
+end
+local function cur_track() return C.tsel and C.tsel() or 1 end
+local function on_t2() return cur_track() > 1 end
+local function tp(id, d) return pget(C.tid and C.tid(id) or id, d) end
+local function track_phase()
+  local n = cur_track()
+  if n > 1 then return C.play_phases and C.play_phases[n] or 0 end
+  return C.play_phase
+end
+local function track_window_n(n)
+  if n < 2 then
+    -- track 1's own window (window_bounds is the FOCUSED track's)
+    local a, b = pget("pos_start", 0), pget("pos_end", 1)
+    local lo, hi = min(a, b), max(a, b)
+    return lo, hi, max(hi - lo, 0.001)
+  end
+  local a, b = pget(TK[n].pos_start, 0), pget(TK[n].pos_end, 1)
+  local lo, hi = min(a, b), max(a, b)
+  return lo, hi, max(hi - lo, 0.001)
+end
+local function track_window() return track_window_n(cur_track()) end
+-- an extra track is sounding: switched on and its level up
+local function track_live(n)
+  return pget(TK[n].mode, 1) ~= 1 and pget(TK[n].level, 1) > 0.001
+end
+M.on_t2 = on_t2
+
 local function body_TAKE(frame)
   local rec = pget("rec", 0) == 1 and pget("freeze", 0) == 0
   if not C.wave_any and not rec then
@@ -5918,7 +5975,8 @@ local function body_TAKE(frame)
     take_top_row(frame, rec)
     return
   end
-  local lo, hi = window_bounds()
+  -- the window of the FOCUSED track (mangler2): TAKE 2 edits track 2's
+  local lo, hi = track_window()
   local wx = clamp(C.rec_phase, 0, 1) * 127
   -- marked for erase: K1+K3 held past the tap window on this page
   local marked = C.k13_frame ~= nil
@@ -6011,8 +6069,31 @@ local function body_TAKE(frame)
   -- WRITE head. distinct SHAPE, not just tone: a
   -- DASHED column + a caret above the strip vs the write head's solid line +
   -- comet-tail glow — so even when they cross you can tell read from write.
-  if C.wave_any and pget("mode", 5) ~= 1 then
-    local phx = clamp(C.play_phase, 0, 1) * 127
+  -- (mangler2) every sounding track's head: the focused one with the caret,
+  -- the others as short dim ticks above the strip, and the other tracks'
+  -- windows as dim marks along the top edge
+  local focus = cur_track()
+  local audible = (C.mix_gains()) > 0.001
+  for n = 1, 4 do
+    if n ~= focus then
+      local on = n == 1 and pget("mode", 5) ~= 1 or (n > 1 and track_live(n))
+      if on then
+        local l, h = track_window_n(n)
+        screen.level(3)
+        screen.rect(floor(l * 127), TK_MID - TK_HALF - 6, max(1, floor((h - l) * 127)), 1)
+        screen.fill()
+        if audible and C.wave_any then
+          local p = n == 1 and C.play_phase or (C.play_phases[n] or 0)
+          screen.level(6)
+          screen.rect(floor(clamp(p, 0, 1) * 127), TK_MID - TK_HALF - 5, 1, 3)
+          screen.fill()
+        end
+      end
+    end
+  end
+  local fmode = focus == 1 and pget("mode", 5) or pget(TK[focus].mode, 1)
+  if C.wave_any and fmode ~= 1 then
+    local phx = clamp(track_phase(), 0, 1) * 127
     screen.level(15)
     for y = TK_MID - TK_HALF, TK_MID + TK_HALF, 2 do screen.rect(phx, y, 1, 1) end
     screen.rect(phx, TK_MID - TK_HALF - 3, 1, 1)          -- caret stem
@@ -6054,7 +6135,7 @@ function M.erosion_tick()
   -- counter must not keep counting through a STOP or a full mix throw).
   if live and pget("rec", 0) == 0 and pget("freeze", 0) == 0
       and (C.mix_gains()) > 0.001 then
-    local _, _, span = window_bounds()
+    local _, _, span = track_window_n(1)   -- the erosion is track 1's
     eros_acc = eros_acc + (1 / FPS) / (span * C.BUF_SECS)
     if eros_acc >= 1 then
       eros_gen = eros_gen + 1
@@ -6064,36 +6145,6 @@ function M.erosion_tick()
 end
 function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 
--- mangler2: VOICE and FILTER draw the track they address (C.tid picks the
--- id). tp reads the selected track's value of a track 1 id; the read head
--- and the window follow the track too.
--- each extra track's ids, built once (the redraw path must not allocate)
-local TK = {}
-for n = 2, 4 do
-  local pre = "t" .. n .. "_"
-  TK[n] = { mode = pre .. "mode", level = pre .. "level",
-    pos_start = pre .. "pos_start", pos_end = pre .. "pos_end" }
-end
-local function cur_track() return C.tsel and C.tsel() or 1 end
-local function on_t2() return cur_track() > 1 end
-local function tp(id, d) return pget(C.tid and C.tid(id) or id, d) end
-local function track_phase()
-  local n = cur_track()
-  if n > 1 then return C.play_phases and C.play_phases[n] or 0 end
-  return C.play_phase
-end
-local function track_window_n(n)
-  if n < 2 then return window_bounds() end
-  local a, b = pget(TK[n].pos_start, 0), pget(TK[n].pos_end, 1)
-  local lo, hi = min(a, b), max(a, b)
-  return lo, hi, max(hi - lo, 0.001)
-end
-local function track_window() return track_window_n(cur_track()) end
--- an extra track is sounding: switched on and its level up
-local function track_live(n)
-  return pget(TK[n].mode, 1) ~= 1 and pget(TK[n].level, 1) > 0.001
-end
-M.on_t2 = on_t2
 
 -- GRAIN: the cloud the knobs make. Each grain is a short tick: DENSITY sets
 -- how many (3 to 40), SIZE how long each one is and how long it lives, and
@@ -6250,103 +6301,14 @@ local function body_VOICE(frame)
 end
 
 -- ============================================================================
--- TRACK (mangler2): the page's track (2 to 4) on the one take, with the
--- others for reference. The material lies dim; track 1's window is a dim band
--- with its dashed head, the other sounding tracks' heads are short dim ticks
--- above the strip, and this track's window is bright with brackets and a
--- solid head. The rail is its mode, the bar its level. OFF, STOP or a level
--- of 0 lays it flat and dim, like every silent thing on this screen.
--- ============================================================================
-local T2_MID, T2_HALF = 34, 8
-local function body_TRACK(frame)
-  local n = C.page_track and C.page_track() or 2
-  local ids = TK[n]
-  local mode = pget(ids.mode, 1)
-  mode_rail(mode)
-  if mode == 1 then ptext_r("OFF", 126, 13, 1, 8) end
-  if not C.wave_any then
-    screen.level(3)
-    for x = 2, 125, 3 do screen.rect(x, T2_MID, 1, 1) end
-    screen.fill()
-    ptext_c("EMPTY - REC ON TAKE", 64, 24, 1, 10)
-    return
-  end
-  local level = pget(ids.level, 1)
-  local audible = (C.mix_gains()) > 0.001
-  local live = audible and track_live(n)
-  local lo1, hi1 = window_bounds()
-  local lo, hi = track_window_n(n)
-  local run = 0
-  for x = 0, 127 do
-    local amp = wave[x + 1]
-    if amp > 0.002 then
-      local h = clamp(sqrt(min(amp * 2, 1)) * T2_HALF, 1, T2_HALF)
-      local nx = x / 127
-      local lvl = 2
-      if nx >= lo1 and nx <= hi1 then lvl = 4 end
-      if nx >= lo and nx <= hi then lvl = live and 12 or 6 end
-      if lvl ~= run then
-        if run ~= 0 then screen.stroke() end
-        screen.level(lvl)
-        run = lvl
-      end
-      screen.move(x, T2_MID - h)
-      screen.line(x, T2_MID + h)
-    end
-  end
-  if run ~= 0 then screen.stroke() end
-  -- this track's brackets
-  screen.level(live and 15 or 6)
-  for k = 1, 2 do
-    local e = (k == 1 and lo or hi) * 127
-    screen.move(e, T2_MID - T2_HALF - 2)
-    screen.line(e, T2_MID + T2_HALF + 2)
-  end
-  screen.stroke()
-  -- track 1's head: dashed and dim, as a reference
-  if pget("mode", 5) ~= 1 and audible then
-    local p1 = clamp(C.play_phase, 0, 1) * 127
-    screen.level(5)
-    for y = T2_MID - T2_HALF, T2_MID + T2_HALF, 2 do screen.rect(p1, y, 1, 1) end
-    screen.fill()
-  end
-  -- the other extra tracks' heads: short dim ticks above the strip
-  for m = 2, 4 do
-    if m ~= n and audible and track_live(m) then
-      local pm = clamp(C.play_phases[m] or 0, 0, 1) * 127
-      screen.level(4)
-      screen.rect(pm, T2_MID - T2_HALF - 4, 1, 3)
-      screen.fill()
-    end
-  end
-  -- this track's head: solid and bright while it sounds
-  if live then
-    local p2 = clamp(C.play_phases[n] or 0, 0, 1) * 127
-    screen.level(15)
-    screen.move(p2, T2_MID - T2_HALF - 2)
-    screen.line(p2, T2_MID + T2_HALF + 2)
-    screen.stroke()
-  end
-  -- the level bar (0 to 1.5, unity marked)
-  ptext("LV", 2, 47, 1, 5)
-  screen.level(1)
-  screen.rect(12, 48, 60, 3)
-  screen.fill()
-  screen.level(live and 11 or 4)
-  screen.rect(12, 48, floor(clamp(level / 1.5, 0, 1) * 60), 3)
-  screen.fill()
-  screen.level(8)
-  screen.rect(52, 47, 1, 5)
-  screen.fill()
-end
-
--- ============================================================================
--- ROUTE (mangler2): the sends as a grid, the S-4's routing page. A row is
+-- TRACKS (mangler2): the hub. At rest, the four tracks in a list: the focus
+-- marked, each track's mode, its window on the take with its head, and its
+-- level. With K1 held, the sends as a grid, the S-4's routing: a row is
 -- where a sound comes FROM, a column where it goes TO; the diagonal is the
--- track itself. A cell fills with its send level and the cursor's cell is
--- framed bright. A row's label is bright while that track sounds (track 1:
--- its mode is on). On the right, the cursor's route in words. Every send
--- dims while STOP or the MIX throw silences the engine.
+-- track itself. A cell fills with its send level, the focused track's row is
+-- the one the encoders reach, and the cursor's cell is framed bright. On the
+-- right, the cursor's route in words. A label is bright while its track
+-- sounds; everything dims while STOP or the MIX throw silences the engine.
 -- ============================================================================
 local RT_X0, RT_Y0, RT_CW, RT_RH = 22, 19, 18, 8
 local RT_ROW = { "T1", "T2", "T3", "T4" }
@@ -6362,7 +6324,7 @@ local function track_sounds(n)
   if n == 1 then return pget("mode", 5) ~= 1 end
   return track_live(n)
 end
-local function body_ROUTE(frame)
+local function route_grid(frame)
   local audible = (C.mix_gains()) > 0.001
   local cur = C.route_cur and C.route_cur()
   ptext("TO", 6, 12, 1, 3)       -- columns: where a send goes
@@ -6372,6 +6334,7 @@ local function body_ROUTE(frame)
   for r = 1, 4 do
     local y = RT_Y0 + (r - 1) * RT_RH
     ptext(RT_ROW[r], 6, y, 1, (audible and track_sounds(r)) and 13 or 4)
+    if r == cur_track() then ptext(">", 1, y, 1, 15) end
     for c = 1, 4 do
       local x = RT_X0 + (c - 1) * RT_CW
       if r == c then
@@ -6403,6 +6366,60 @@ local function body_ROUTE(frame)
     ptext_c(RT_ROW[cur.to], 110, 35, 1, 12)
     local v = clamp(pget(cur.id, 0), 0, 1)
     ptext_c(v > 0.001 and PCT[floor(v * 100 + 0.5)] or "OFF", 110, 45, 1, v > 0.001 and 10 or 4)
+  end
+end
+
+local TR_MODE = { "OFF", "GRAIN", "WARP", "PV", "PLAY" }
+local TR_EMPTY = "EMPTY"
+local TR_Y0, TR_RH = 12, 10
+local TR_SX, TR_SW = 46, 52          -- the window strip
+local TR_LX, TR_LW = 102, 24         -- the level bar
+local function body_TRACKS(frame)
+  if C.alt then route_grid(frame); return end
+  local audible = (C.mix_gains()) > 0.001
+  local focus = cur_track()
+  for n = 1, 4 do
+    local y = TR_Y0 + (n - 1) * TR_RH
+    local mode = clamp(floor(pget(C.MODE_ID[n], 1) + 0.5), 1, 5)
+    local sounds = audible and track_sounds(n)
+    if n == focus then
+      screen.level(2)
+      screen.rect(0, y - 2, 128, TR_RH - 1)
+      screen.fill()
+      ptext(">", 1, y, 1, 15)
+    end
+    ptext(RT_ROW[n], 7, y, 1, sounds and 15 or 5)
+    ptext(TR_MODE[mode], 20, y, 1, mode == 1 and 3 or (sounds and 12 or 6))
+    -- the window on the take, and the head while it sounds
+    local lo, hi = track_window_n(n)
+    screen.level(1)
+    screen.rect(TR_SX, y + 2, TR_SW, 1)
+    screen.fill()
+    if not C.track_has(n) then
+      ptext(TR_EMPTY, TR_SX + 14, y, 1, 3)   -- no material of its own yet
+    else
+      screen.level(mode == 1 and 4 or (n == focus and 12 or 8))
+      screen.rect(TR_SX + floor(lo * (TR_SW - 1)), y + 1,
+        max(1, floor((hi - lo) * (TR_SW - 1) + 0.5)), 3)
+      screen.fill()
+      if sounds then
+        local ph = n == 1 and C.play_phase or (C.play_phases[n] or 0)
+        screen.level(15)
+        screen.rect(TR_SX + floor(clamp(ph, 0, 1) * (TR_SW - 1)), y - 1, 1, 7)
+        screen.fill()
+      end
+    end
+    -- the level (0 to 1.5, unity marked)
+    local lv = clamp(pget(C.LEVEL_ID[n], 1) / 1.5, 0, 1)
+    screen.level(1)
+    screen.rect(TR_LX, y + 1, TR_LW, 3)
+    screen.fill()
+    screen.level(sounds and 11 or 4)
+    screen.rect(TR_LX, y + 1, floor(lv * TR_LW + 0.5), 3)
+    screen.fill()
+    screen.level(7)
+    screen.rect(TR_LX + 16, y, 1, 5)
+    screen.fill()
   end
 end
 
@@ -7375,7 +7392,7 @@ local BODY = {
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
-  TRACK = body_TRACK, ROUTE = body_ROUTE,
+  TRACKS = body_TRACKS,
 }
 
 local function draw_body()
@@ -7551,35 +7568,42 @@ local function layout_dots()
 end
 -- the page's name, with its track on VOICE and FILTER while track 2 is
 -- selected (mangler2). Fixed strings: the redraw path allocates nothing.
-local TITLE_N = {
-  VOICE = { "VOICE", "VOICE 2", "VOICE 3", "VOICE 4" },
-  FILTER = { "FILTER", "FILTER 2", "FILTER 3", "FILTER 4" },
-  TRACK = { "TRACK 2", "TRACK 2", "TRACK 3", "TRACK 4" },
-}
+-- (mangler2) the pages that belong to a track: their header starts with the
+-- track's number as an inverted badge, S-4 style (track, then device), and
+-- their name is the device's: [2] TAKE, [2] VOICE, [2] FILTER. TRACKS shows
+-- the badge too: it is the focused track's row the keys act on.
+local TRACK_PAGE = { TAKE = true, VOICE = true, FILTER = true, TRACKS = true }
+local BADGE = { "1", "2", "3", "4" }
 local function page_title()
-  local name = PAGES[C.page]
-  local t = TITLE_N[name]
-  if t then
-    if name == "TRACK" then return t[C.page_track and C.page_track() or 2] end
-    return t[cur_track()]
-  end
-  return name
+  return PAGES[C.page]
 end
+-- the badge, drawn at x; returns the x after it
+local function draw_badge(x, y)
+  local n = cur_track()
+  screen.level(15)
+  screen.rect(x, y - 1, 7, 8)
+  screen.fill()
+  ptext(BADGE[n], x + 2, y, 1, 0)
+  return x + 10
+end
+M.draw_badge = draw_badge
 M.page_title = page_title
 
 local function draw_header()
   local page, frame = C.page, C.frame
   local title = page_title()
   local x
+  local x0 = 2
+  if TRACK_PAGE[PAGES[page]] then x0 = draw_badge(0, 1) end
   if pget("stop_all", 0) == 1 then
     screen.level(15)
-    screen.rect(0, 0, text_w(title, 1) + 5, 8)
+    screen.rect(x0 - 2, 0, text_w(title, 1) + 5, 8)
     screen.fill()
-    ptext(title, 2, 2, 1, 0)
-    x = text_w(title, 1) + 9
+    ptext(title, x0, 2, 1, 0)
+    x = x0 - 2 + text_w(title, 1) + 9
   else
-    ptext(title, 2, 1, 1, 8)
-    x = 2 + text_w(title, 1) + 4
+    ptext(title, x0, 1, 1, 8)
+    x = x0 + text_w(title, 1) + 4
   end
   if purity() then
     screen.level(15)
@@ -7631,9 +7655,17 @@ local orig_level, dim_level
 -- faster than the 1x title reads, and finding the page mid-set should not
 -- need squinting. Same framed-box idiom as the footer value swell, so it is
 -- legible over any body; transient chrome, gone by itself.
+-- the pop on a track page names the track first: "2 VOICE" (not on TRACKS,
+-- where "2 TRACKS" read as a count)
+local FLASH_N = {}
+for _, p in ipairs({ "TAKE", "VOICE", "FILTER" }) do
+  FLASH_N[p] = {}
+  for n = 1, 4 do FLASH_N[p][n] = n .. " " .. p end
+end
 local function draw_page_flash()
   if not (C.page_flash and C.frame < C.page_flash) then return end
   local name = page_title()
+  if FLASH_N[name] then name = FLASH_N[name][cur_track()] end
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
@@ -7783,7 +7815,7 @@ end
 -- the footer dial each need the same answer and two of them used to not have it
 -- (the layer targets read "--" and drew no pointer).
 function ctx.enc_target(id)
-  if id == "@win_move" then return "pos_start" end
+  if id == "@win_move" then return WIN[1] end
   if id == "@mo_sel" then
     return pget("mod_focus", 1) > 1.5 and "mod_focus" or "motion_lane"
   end
@@ -7791,6 +7823,8 @@ function ctx.enc_target(id)
   if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
   if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
   if id == "@route_amt" then return ctx.route_cur().id end
+  if id == "@route_to" then return "route_sel" end
+  if id == "@trk_level" then return ctx.LEVEL_ID[ctx.tsel()] end
   return id
 end
 
@@ -8124,14 +8158,16 @@ local function snap_window()
 end
 
 -- ---- the tracks (mangler2) ------------------------------------------------
--- Four engine tracks. VOICE and FILTER address one at a time: `track_sel`
--- picks it, and a HOLD of K3 on either page steps it 1 > 2 > 3 > 4 > 1 (the
--- tap keeps MODE / TYPE, as TAKE's K3 keeps SNAP under its UNDO hold). On
--- track n the same knobs and keys reach the `t<n>_` params. What only track 1
--- has (the erosion) is out of reach there, and what all share (drive,
--- dry/wet) stays the same param. The TRACK page plays tracks 2 to 4 directly.
+-- Four engine tracks and ONE focus. `track_sel` is the focused track, and
+-- TAKE, VOICE and FILTER all edit it: their titles read TAKE 2, VOICE 2 ...
+-- and the same knobs and keys reach the `t<n>_` params. TRACKS is the hub:
+-- the four tracks in a list, E2 picks the focus, and with K1 held the
+-- focused track's sends. A HOLD of K3 on VOICE or FILTER also steps the
+-- focus 1 > 2 > 3 > 4 > 1 (the tap keeps MODE / TYPE). What only track 1 has
+-- (the erosion) is out of reach on the others, and what all share (drive,
+-- dry/wet) stays the same param.
 local NTRACKS = 4
-local TRACK_PAGES = { VOICE = true, FILTER = true }
+local TRACK_PAGES = { TAKE = true, VOICE = true, FILTER = true }
 local function tsel() return clamp(math.floor(pget("track_sel", 1) + 0.5), 1, NTRACKS) end
 local function track2() return tsel() > 1 end   -- any track but track 1
 -- TID[n][id] = "t<n>_<id>", each string built once and cached: the redraw
@@ -8155,10 +8191,12 @@ local function tid_n(n, id)
 end
 local function tid(id) return tid_n(tsel(), id) end
 ctx.tid, ctx.tid_n, ctx.tsel = tid, tid_n, tsel
--- the TRACK page's track: the selected one, or track 2 while track 1 is
--- selected (the page plays the OTHER tracks)
-local function page_track() local n = tsel(); return n > 1 and n or 2 end
-ctx.page_track = page_track
+-- each track's mode and level (track 1's level is the engine's grain_level)
+local MODE_ID, LEVEL_ID = { "mode" }, { "grain_level" }
+for n = 2, NTRACKS do
+  MODE_ID[n], LEVEL_ID[n] = "t" .. n .. "_mode", "t" .. n .. "_level"
+end
+ctx.MODE_ID, ctx.LEVEL_ID = MODE_ID, LEVEL_ID
 local function flash_page()
   -- the proof it worked: the page name pops, now with its track
   ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
@@ -8166,13 +8204,7 @@ end
 local function switch_track()
   params:set("track_sel", tsel() % NTRACKS + 1)
   flash_page()
-  print("mangler: VOICE and FILTER now on track " .. tsel())
-end
-local function next_extra()
-  local n = page_track()
-  params:set("track_sel", n < NTRACKS and n + 1 or 2)
-  flash_page()
-  print("mangler: TRACK now on track " .. tsel())
+  print("mangler: the focus is track " .. tsel())
 end
 -- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
 -- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS). Tracks 2
@@ -8182,52 +8214,102 @@ local function cycle_mode(id)
   params:set(id, m >= 5 and 2 or (m < 2 and 5 or m + 1))
 end
 local function cycle_type(id) params:set(id, (pget(id, 1) % 3) + 1) end
--- per track: VOICE/FILTER keys on track n, the TRACK page's K2 (ON) and K3.
--- ON: a tap latches, a hold plays the track only while held (the punch law
--- of every key). Off remembers the mode, so on brings back the voice you
--- had; the first on is PLAY.
-local T_KEYS, T_ON, T_K3 = {}, {}, {}
+-- TAKE's SNAP on tracks 2 to 4: the track's window onto track 1's (the take
+-- as you recorded it), and back. Through set_pair, widening edge first.
+local snap_n = {}
+local function snap_track(n)
+  local a, b = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  local lo, hi = pget(a, 0), pget(b, 1)
+  if hi < lo then lo, hi = hi, lo end
+  local l1, h1 = pget("pos_start", 0), pget("pos_end", 1)
+  if h1 < l1 then l1, h1 = h1, l1 end
+  if snap_n[n] and math.abs(lo - l1) < 1e-6 and math.abs(hi - h1) < 1e-6 then
+    Mdeck.set_pair(a, b, snap_n[n][1], snap_n[n][2])
+    snap_n[n] = nil
+    take_say("SNAP - WINDOW BACK")
+  else
+    snap_n[n] = { lo, hi }
+    Mdeck.set_pair(a, b, l1, h1)
+    take_say("SNAP - ON TRACK 1")
+  end
+end
+-- a track switched on with its window still at the default (the whole
+-- 60s buffer) would play the empty buffer past the take for half its loop
+-- (seen on the device): it starts on track 1's window instead
+local function fit_new_track(n)
+  if n < 2 then return end
+  local a, b = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  if pget(a, 0) <= 1e-6 and pget(b, 1) >= 1 - 1e-6 then
+    local l1, h1 = pget("pos_start", 0), pget("pos_end", 1)
+    if h1 < l1 then l1, h1 = h1, l1 end
+    if h1 - l1 < 0.999 then Mdeck.set_pair(a, b, l1, h1) end
+  end
+end
+local TAKE_REC = pk("REC", "rec")
+local TAKE_UNDO = function() ctx.take_undo() end
+-- per track: TAKE, VOICE and FILTER keys on track n, and the TRACKS page's
+-- K2 (ON) and K3 (MODE) for the focus. ON: a tap latches, a hold plays the
+-- track only while held (the punch law of every key). Off remembers the
+-- mode, so on brings back the voice you had; the first on is PLAY.
+local T_KEYS, T_ON, T_MODE = {}, {}, {}
 local last_mode = {}
-for n = 2, NTRACKS do
-  local pre = "t" .. n .. "_"
-  local nxt = "TRK " .. (n % NTRACKS + 1)
-  T_KEYS[n] = {
-    VOICE = {
-      k2 = pk("FRZ", pre .. "pv_freeze"),
-      k3 = { label = "MODE", tap = function() cycle_mode(pre .. "mode") end,
-        hold = switch_track, hold_label = nxt },
-    },
-    FILTER = {
-      k2 = throw("OPEN", { pre .. "cutoff", pre .. "resonance" }, function()
-        params:set(pre .. "cutoff", filter_open_cutoff(pget(pre .. "filt_type", 1)))
-        params:set(pre .. "resonance", 0)
-      end, "OPEN" .. n),
-      k3 = { label = "TYPE", tap = function() cycle_type(pre .. "filt_type") end,
-        hold = switch_track, hold_label = nxt },
-    },
-  }
+for n = 1, NTRACKS do
+  local mid = MODE_ID[n]
+  if n > 1 then
+    local pre = "t" .. n .. "_"
+    local nxt = "TRK " .. (n % NTRACKS + 1)
+    T_KEYS[n] = {
+      TAKE = {
+        k2 = TAKE_REC,
+        k3 = { label = "SNAP", tap = function() snap_track(n) end,
+          hold = TAKE_UNDO, hold_label = "UNDO" },
+      },
+      VOICE = {
+        k2 = pk("FRZ", pre .. "pv_freeze"),
+        k3 = { label = "MODE", tap = function()
+            if pget(mid, 1) == 1 then fit_new_track(n) end
+            cycle_mode(mid)
+          end, hold = switch_track, hold_label = nxt },
+      },
+      FILTER = {
+        k2 = throw("OPEN", { pre .. "cutoff", pre .. "resonance" }, function()
+          params:set(pre .. "cutoff", filter_open_cutoff(pget(pre .. "filt_type", 1)))
+          params:set(pre .. "resonance", 0)
+        end, "OPEN" .. n),
+        k3 = { label = "TYPE", tap = function() cycle_type(pre .. "filt_type") end,
+          hold = switch_track, hold_label = nxt },
+      },
+    }
+  end
   last_mode[n] = 5
   T_ON[n] = {
     label = "ON",
-    lit = function() return pget(pre .. "mode", 1) ~= 1 end,
-    pon = function() params:set(pre .. "mode", last_mode[n]) end,
+    lit = function() return pget(mid, 1) ~= 1 end,
+    pon = function()
+      if pget(mid, 1) == 1 then fit_new_track(n) end
+      params:set(mid, last_mode[n])
+    end,
     poff = function()
-      local m = pget(pre .. "mode", 1)
+      local m = pget(mid, 1)
       if m ~= 1 then last_mode[n] = m end
-      params:set(pre .. "mode", 1)
+      params:set(mid, 1)
     end,
   }
-  T_K3[n] = { label = "MODE", tap = function() cycle_mode(pre .. "mode") end,
-    hold = next_extra, hold_label = "TRK " .. (n < NTRACKS and n + 1 or 2) }
+  T_MODE[n] = { label = "MODE", act = function()
+    if pget(mid, 1) == 1 then fit_new_track(n) end
+    cycle_mode(mid)
+  end }
 end
 
 -- ---- the routing (mangler2) -------------------------------------------------
 -- The S-4's sends: each track's filtered output can feed any other track's
--- filter, `send_<from>_<to>`, twelve in all. ROUTES walks them in the order
--- the ROUTE page's grid reads (row = from, column = to). `route_sel` is the
--- cell under the cursor.
-local ROUTES = {}
+-- filter, `send_<from>_<to>`, twelve in all. ROUTES walks them row by row
+-- (row = from, column = to). On TRACKS with K1 held, the grid shows and the
+-- encoders reach the FOCUSED track's row: K1+E2 picks where it sends
+-- (`route_sel`), K1+E3 how much.
+local ROUTES, ROW_FIRST = {}, {}
 for from = 1, NTRACKS do
+  ROW_FIRST[from] = #ROUTES + 1
   for to = 1, NTRACKS do
     if from ~= to then
       ROUTES[#ROUTES + 1] = { from = from, to = to, id = "send_" .. from .. "_" .. to }
@@ -8235,45 +8317,29 @@ for from = 1, NTRACKS do
   end
 end
 ctx.ROUTES = ROUTES
-local function route_cur() return ROUTES[clamp(math.floor(pget("route_sel", 1) + 0.5), 1, #ROUTES)] end
-ctx.route_cur = route_cur
--- K2 PATCH: the selected send between off and its last level (half, the
--- first time). K3 tapped jumps to the next track's row; held to the arc it
--- clears every send.
-local patch_mem = {}
-local ROUTE_PATCH = {
-  label = "PATCH",
-  act = function()
-    local r = route_cur()
-    local v = pget(r.id, 0)
-    if v > 0.001 then
-      patch_mem[r.id] = v
-      params:set(r.id, 0)
-    else
-      params:set(r.id, patch_mem[r.id] or 0.5)
-    end
-  end,
-}
-local function route_clear()
-  for _, r in ipairs(ROUTES) do params:set(r.id, 0) end
-  print("mangler: every send cleared")
+-- the cell under the cursor, always in the focused track's row
+local function route_idx()
+  local k = clamp(math.floor(pget("route_sel", 1) + 0.5), 1, #ROUTES)
+  if ROUTES[k].from ~= tsel() then k = ROW_FIRST[tsel()] end
+  return k
 end
-local ROUTE_K3 = { label = "ROW",
-  tap = function()
-    local k = clamp(math.floor(pget("route_sel", 1) + 0.5), 1, #ROUTES)
-    local row = math.floor((k - 1) / (NTRACKS - 1))
-    params:set("route_sel", ((row + 1) % NTRACKS) * (NTRACKS - 1) + 1)
-  end,
-  hold = route_clear, hold_label = "CLEAR" }
+local function route_cur() return ROUTES[route_idx()] end
+ctx.route_cur = route_cur
+-- K1+E2 on TRACKS: the next or previous destination in the focus's row
+local function route_step(d)
+  local first = ROW_FIRST[tsel()]
+  local k = clamp(route_idx() + (d > 0 and 1 or -1), first, first + NTRACKS - 2)
+  params:set("route_sel", k)
+end
 
 -- page key defs (+ each page's `erase`: what the K1+K3 arc wipes)
 local KEYS = {
   TAKE = {
-    k2 = pk("REC", "rec"),
+    k2 = TAKE_REC,
     -- tap = SNAP, hold to the arc = UNDO (the eraser's gesture, without K1).
     -- SNAP moved from the press to the release, so a hold never snaps first
     k3 = { label = "SNAP", tap = snap_window,
-      hold = function() ctx.take_undo() end, hold_label = "UNDO" },
+      hold = TAKE_UNDO, hold_label = "UNDO" },
     erase = function() pulse("clear_rec") end,   -- audio: NOT undoable
   },
   VOICE = {
@@ -8282,10 +8348,9 @@ local KEYS = {
     k3 = { label = "MODE", tap = function() cycle_mode("mode") end,
       hold = switch_track, hold_label = "TRK 2" },
   },
-  -- (the TRACK page's keys follow its track: key_def picks T_ON / T_K3;
-  -- these are track 2's, the shape doc/controls.md documents)
-  TRACK = { k2 = T_ON[2], k3 = T_K3[2] },
-  ROUTE = { k2 = ROUTE_PATCH, k3 = ROUTE_K3 },
+  -- (TRACKS's keys follow the focus: key_def picks T_ON / T_MODE; these
+  -- are track 1's, the shape doc/controls.md documents)
+  TRACKS = { k2 = T_ON[1], k3 = T_MODE[1] },
   TAPE = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
@@ -8484,9 +8549,9 @@ local function key_def(n)
     local tk = T_KEYS[tsel()][page]
     return n == 2 and tk.k2 or tk.k3
   end
-  if page == "TRACK" then
-    local t = page_track()
-    return n == 2 and T_ON[t] or T_K3[t]
+  if page == "TRACKS" then
+    local t = tsel()
+    return n == 2 and T_ON[t] or T_MODE[t]
   end
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
@@ -8516,10 +8581,9 @@ end
 local ENC_MAP = {
   TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
-  -- mangler2: the TRACK page (its track's window, K1 its level and pitch;
-  -- enc_param maps them onto the page's track) and the ROUTE grid
-  TRACK = { "t2_pos_start", "t2_level", "t2_pos_end", "t2_pitch" },
-  ROUTE = { "route_sel", nil, "@route_amt", nil },
+  -- mangler2: the TRACKS hub. E2 the focus, E3 its level; K1 held, its
+  -- sends: K1+E2 where to, K1+E3 how much
+  TRACKS = { "track_sel", "@route_to", "@trk_level", "@route_amt" },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
@@ -8577,12 +8641,6 @@ local function enc_param(n)
   -- (track 2 has no erosion: its alt pair stays scan/pitch, below)
   if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 and not track2() then
     return n == 2 and "erode" or "wear"
-  end
-  if page == "TRACK" then
-    local t = page_track()
-    if n == 2 then return tid_n(t, ctx.alt and "level" or "pos_start") end
-    if n == 3 then return tid_n(t, ctx.alt and "pitch" or "pos_end") end
-    return nil
   end
   local m = ENC_MAP[page]
   if not m then return nil end
@@ -8783,8 +8841,7 @@ function ctx.take_tighten()
       return
     end
     -- both edges move INWARD (a >= lo, b <= hi), so the pair cannot cross
-    params:set("pos_start", a)
-    params:set("pos_end", b)
+    Mdeck.set_pair(WIN[1], WIN[2], a, b)
     print(string.format("mangler: TIGHTEN — window is %.2fs of sound (was %.2fs)",
       (b - a) * BUF_SECS, (hi - lo) * BUF_SECS))
   end)
@@ -9041,8 +9098,7 @@ function ctx.clear_recording()
   -- restore it on load — putting back the very sample you erased. "" is a
   -- no-op through load_sample's own guard.
   if params:get("sample_file") ~= "" then params:set("sample_file", "") end
-  params:set("pos_start", 0)
-  params:set("pos_end", 1)
+  Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
   ctx.undo_mark()   -- empty is a state UNDO can go back from
   print("mangler: recording cleared")
 end
@@ -9057,8 +9113,7 @@ local function read_into_buffer(path, shown)
   local dur = Mpages.load_wave(path, BUF_SECS)
   buffer_replaced(dur)   -- the loaded length bounds a PSET save
   if dur then
-    params:set("pos_start", 0)
-    params:set("pos_end", clamp(dur / BUF_SECS, 0.002, 1))
+    Mdeck.set_pair(WIN[1], WIN[2], 0, clamp(dur / BUF_SECS, 0.002, 1))
     print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
       shown or path, dur))
   else
@@ -9165,56 +9220,91 @@ end
 -- CONTENT (ctx.wave_any — the has-a-take signal that also draws
 -- "EMPTY - K2 REC"), so the write is gated on it: an empty take never leaves a
 -- multi-MB silence file behind, and a fresh pset never resurrects one.
-local function take_stem(number)
-  return norns.state.data .. "take-" .. number
+-- (mangler2) track 1 keeps mangler's name, so a mangler pset still loads
+-- its take; tracks 2 to 4 save as take2-NN, take3-NN, take4-NN
+local FOCUS = 1
+local function take_stem(number, n)
+  n = n or FOCUS
+  return norns.state.data .. (n == 1 and "take-" or ("take" .. n .. "-")) .. number
 end
 
 -- how many frames of the buffer a write should cover: the take_len high-water
 -- mark (from frame 0), +50ms margin so rounding at the take boundary never clips
 -- the tail, capped at the 60s buffer; take_len 0 (empty) -> the full buffer.
-local function take_frames()
+local function take_frames(len)
   local total = SERVER_SR * BUF_SECS
-  local tl = ctx.take_len or 1
+  local tl = len or ctx.take_len or 1
   return (tl > 0) and math.min(total, math.ceil(tl * total) + 2400) or total
 end
 
+-- (mangler2) every track's take: the focused one from ctx, the others from
+-- their kept state (TAKES). buf_track points the engine's buffer commands at
+-- a track's pair for one write or read, then back at the focus.
+local TAKES = {}
+for n = 1, 4 do TAKES[n] = { wave_any = false, take_len = 0 } end
+local function take_of(n)
+  if n == FOCUS then return ctx.wave_any, ctx.take_len end
+  return TAKES[n].wave_any, TAKES[n].take_len
+end
+local function buf_track(n) if engine.buf_track then engine.buf_track(n - 1) end end
+-- does track n hold material of its own (TRACKS draws EMPTY where not)
+function ctx.track_has(n) return (take_of(n)) and true or false end
+
 function ctx.take_pset_write(number)
   if not engine.write_take then return end   -- old engine: no-op (like read_file)
-  if not ctx.wave_any then
-    -- nothing recorded: DELETE any take saved into this slot before, so a
-    -- session the performer cleared and re-saved as empty can't resurrect the
-    -- old audio on load (norns overwrite-save never calls action_delete).
-    ctx.take_pset_delete(number)
-    return
+  for n = 1, 4 do
+    local any, len = take_of(n)
+    if not any then
+      -- nothing recorded: DELETE any take saved into this slot before, so a
+      -- session the performer cleared and re-saved as empty can't resurrect
+      -- the old audio on load (norns overwrite-save never calls action_delete).
+      os.remove(take_stem(number, n) .. "_L.wav")
+      os.remove(take_stem(number, n) .. "_R.wav")
+    else
+      -- bound the write to the TAKE, not the full 60s buffer of mostly silence.
+      buf_track(n)
+      engine.write_take(take_stem(number, n), take_frames(len))
+    end
   end
-  -- bound the write to the TAKE, not the full 60s buffer of mostly silence.
-  engine.write_take(take_stem(number), take_frames())
+  buf_track(FOCUS)
 end
 
 function ctx.take_pset_read(number)
   if not engine.read_take then return end
-  local stem = take_stem(number)
-  -- no take file (a pset from before S22, or one saved with an empty buffer):
-  -- leave the buffer alone, exactly like mtape when there's no wav — the
-  -- pset's own params (window included) still load. BOTH halves must exist:
-  -- /b_write is async, so an interrupted save can leave _L without _R, and
-  -- reading that would zero both buffers then restore a left-only take.
-  if not (util.file_exists(stem .. "_L.wav")
-      and util.file_exists(stem .. "_R.wav")) then return end
-  engine.read_take(stem)
-  -- repaint from the file or the restored take is INVISIBLE (audio you can hear
-  -- over "EMPTY - K2 REC"). do NOT snap the window — params:read already
-  -- restored the saved pos_start/pos_end.
-  local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
-  buffer_replaced(dur)  -- padlock_pset_read restores the pset's own cuts next
-  ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
-  ctx.undo_mark()
+  for n = 1, 4 do
+    local stem = take_stem(number, n)
+    -- no take file (a pset from before S22, or one saved with an empty buffer):
+    -- leave the buffer alone, exactly like mtape when there's no wav — the
+    -- pset's own params (window included) still load. BOTH halves must exist:
+    -- /b_write is async, so an interrupted save can leave _L without _R, and
+    -- reading that would zero both buffers then restore a left-only take.
+    if util.file_exists(stem .. "_L.wav") and util.file_exists(stem .. "_R.wav") then
+      buf_track(n)
+      engine.read_take(stem)
+      if n == FOCUS then
+        -- repaint from the file or the restored take is INVISIBLE (audio you
+        -- can hear over "EMPTY - K2 REC"). do NOT snap the window — params:read
+        -- already restored the saved pos_start/pos_end.
+        local dur = Mpages.load_wave(stem .. "_L.wav", BUF_SECS)
+        buffer_replaced(dur)  -- padlock_pset_read restores the pset's own cuts next
+        ctx.wave_any = true   -- audio is in the buffer whether or not we could draw it
+        ctx.undo_mark()
+      else
+        local dur = Mpages.fill_wave_bins(stem .. "_L.wav", Mpages.track_wave(n), BUF_SECS)
+        TAKES[n].wave_any = true
+        TAKES[n].take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
+      end
+    end
+  end
+  buf_track(FOCUS)
 end
 
 function ctx.take_pset_delete(number)
-  local stem = take_stem(number)
-  os.remove(stem .. "_L.wav")
-  os.remove(stem .. "_R.wav")
+  for n = 1, 4 do
+    local stem = take_stem(number, n)
+    os.remove(stem .. "_L.wav")
+    os.remove(stem .. "_R.wav")
+  end
 end
 
 -- ============================================================================
@@ -9239,7 +9329,9 @@ end
 -- `undo_keep` off writes nothing and forgets the kept states, so UNDO never
 -- offers a take older than the last one you made.
 local undo_cur, undo_prev     -- { slot, empty, lo, hi, take_len }
-local function undo_stem(slot) return norns.state.data .. "undo-" .. slot end
+local function undo_stem(slot)
+  return norns.state.data .. (FOCUS == 1 and "undo-" or ("undo" .. FOCUS .. "-")) .. slot
+end
 local function free_slot()
   for k = 1, 3 do
     if not ((undo_cur and undo_cur.slot == k) or (undo_prev and undo_prev.slot == k)) then
@@ -9259,7 +9351,7 @@ function ctx.undo_mark()
   end
   local k = free_slot()
   engine.write_take(undo_stem(k), take_frames())
-  undo_cur = { slot = k, lo = pget("pos_start", 0), hi = pget("pos_end", 1),
+  undo_cur = { slot = k, lo = pget(WIN[1], 0), hi = pget(WIN[2], 1),
     take_len = ctx.take_len }
 end
 -- a fresh session: an undo pair left on the card by the last one is not
@@ -9294,7 +9386,7 @@ function ctx.take_undo()
     engine.clear()
     Mpages.clear_wave()
     buffer_cleared()
-    Mdeck.set_pair("pos_start", "pos_end", 0, 1)
+    Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
     -- as a clear does: a PSET saved now must not bring the loaded file back
     if params:get("sample_file") ~= "" then params:set("sample_file", "") end
     ctx.take_say("UNDO - EMPTY AGAIN", "UNDO — back to the empty buffer")
@@ -9305,9 +9397,101 @@ function ctx.take_undo()
   buffer_replaced(dur)
   ctx.wave_any = true
   ctx.take_len = back.take_len
-  Mdeck.set_pair("pos_start", "pos_end", back.lo, back.hi)
+  Mdeck.set_pair(WIN[1], WIN[2], back.lo, back.hi)
   ctx.take_say("UNDO - THE TAKE BEFORE",
     "UNDO — the take before the last change is back (UNDO again to return)")
+end
+
+-- ============================================================================
+-- the focus (mangler2): own material per track
+-- ============================================================================
+-- Each track records and plays its own 60s. The FOCUSED track is the one REC
+-- writes, TAKE draws and edits, the pads play, and UNDO, CLEAR, LOAD, PRINT
+-- and EXPORT act on. Moving the focus keeps the old track's take state
+-- (TAKES), brings back the new one's, and points the engine at its buffer.
+-- A pass that is recording when the focus moves ends on the old track and a
+-- new one opens on the new track, so a take never spans two tracks.
+function ctx.focus_take(n)
+  n = clamp(math.floor(n + 0.5), 1, NTRACKS)
+  if n == FOCUS then return end
+  local recording = pget("rec", 0) == 1
+  if recording then params:set("rec", 0) end
+  local t = TAKES[FOCUS]
+  t.wave_any, t.take_len = ctx.wave_any, ctx.take_len
+  t.undo_cur, t.undo_prev, t.snap_mem = undo_cur, undo_prev, snap_mem
+  FOCUS = n
+  local u = TAKES[n]
+  ctx.wave_any, ctx.take_len = u.wave_any, u.take_len
+  undo_cur, undo_prev, snap_mem = u.undo_cur, u.undo_prev, u.snap_mem
+  WIN[1], WIN[2] = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  take_gen = take_gen + 1     -- a job for the old track's buffer must not land here
+  Mpages.focus_wave(n)
+  if engine.rec_track then engine.rec_track(n - 1) end
+  buf_track(n)
+  if recording then params:set("rec", 1) end
+end
+function ctx.focus() return FOCUS end
+
+-- LOAD A FILE INTO TRACK n (its `t<n>_file` param, and the presets): the
+-- focused track loads exactly as the take does; another track loads into its
+-- own buffer through buf_track, draws its own strip, keeps its own take state,
+-- and its window snaps to the file. Off-rate files convert first, like the take.
+local track_gen = { 0, 0, 0, 0 }
+function ctx.track_load(n, path)
+  if n == FOCUS then return ctx.load_sample(path) end
+  if path and path ~= "" and path ~= "-" and not engine.read_file then
+    print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
+    return
+  end
+  track_gen[n] = track_gen[n] + 1
+  load_at_rate(path, norns.state.data .. "t" .. n .. "-srconv.wav", BUF_SECS + 1,
+    "track " .. n,
+    function(file, shown)
+      if n == FOCUS then read_into_buffer(file, shown); return end
+      buf_track(n)
+      engine.read_file(file)
+      buf_track(FOCUS)
+      local dur = Mpages.fill_wave_bins(file, Mpages.track_wave(n), BUF_SECS)
+      local t = TAKES[n]
+      t.wave_any = true
+      t.take_len = dur and clamp(dur / BUF_SECS, 0.002, 1) or 1
+      t.undo_cur, t.undo_prev, t.snap_mem = nil, nil, nil
+      if dur then
+        Mdeck.set_pair(tid_n(n, "pos_start"), tid_n(n, "pos_end"), 0, t.take_len)
+      end
+      print(string.format("mangler: %s -> track %d%s", shown or file, n,
+        dur and string.format(" (%.1fs)", dur) or ""))
+    end,
+    function() return track_gen[n] end)
+end
+
+-- REC END: what a pass does when it has filled the 60s. LOOP goes on round
+-- and records over the start (as mangler always did). ONE-SHOT ends the take
+-- there, whole, and recording carries on into the next track, so a long
+-- performance lays itself across the four tracks. On track 4 it stops.
+local rec_prev_el = 0
+local function tick_rec_end()
+  if pget("rec", 0) ~= 1 or pget("rec_end", 1) ~= 2 or not ctx.rec_arm_phase then
+    rec_prev_el = 0
+    return
+  end
+  local el = (ctx.rec_phase - ctx.rec_arm_phase) % 1
+  if rec_prev_el > 0.9 and el < 0.1 then
+    rec_prev_el = 0
+    params:set("rec", 0)
+    Mdeck.set_pair(WIN[1], WIN[2], 0, 1)    -- the whole 60s is the take
+    ctx.take_len = 1
+    if FOCUS < NTRACKS then
+      local from = FOCUS
+      params:set("track_sel", FOCUS + 1)
+      params:set("rec", 1)
+      take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS)
+    else
+      take_say("TRACK 4 FULL - REC STOPPED")
+    end
+  else
+    rec_prev_el = el
+  end
 end
 
 -- SOUND-LOCKS ride the PSET like the take + scenes: the 8 per-pad voice+pitch
@@ -9857,7 +10041,7 @@ local function init_params()
     if engine.rec then engine.rec(v == 1 and 0 or pget("rec", 0)) end
   end)
 
-  params:add_group("grp_rec", "take - record", 17)
+  params:add_group("grp_rec", "take - record", 18)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
@@ -9870,6 +10054,10 @@ local function init_params()
       engine.rec(pget("stop_all", 0) == 1 and 0 or v)
     end
     if v == 1 then
+      -- (mangler2) a track you record into plays: an OFF track goes to PLAY
+      if FOCUS > 1 and pget("t" .. FOCUS .. "_mode", 1) == 1 then
+        params:set("t" .. FOCUS .. "_mode", 5)
+      end
       rec_open = true
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
@@ -9895,16 +10083,16 @@ local function init_params()
       -- started on sound: a hit stopped soon after is still a take (at least
       -- the 0.3s floor below), not the previous take's window over silence
       local a = ctx.rec_arm_phase
-      Mdeck.set_pair("pos_start", "pos_end", a, max(ctx.rec_phase, min(1, a + 0.005)))
+      Mdeck.set_pair(WIN[1], WIN[2], a, max(ctx.rec_phase, min(1, a + 0.005)))
     elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
-      Mdeck.set_pair("pos_start", "pos_end", ctx.rec_arm_phase, ctx.rec_phase)
+      Mdeck.set_pair(WIN[1], WIN[2], ctx.rec_arm_phase, ctx.rec_phase)
     elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
       -- the write head wrapped past the buffer end mid-take. a wrapped
       -- window (start > end) would be SORTED into the wrong slice by
       -- window_bounds, so fall back to the whole buffer — the take is in
       -- there, just split across the seam. (proper wrap-around windows
       -- need engine support.)
-      Mdeck.set_pair("pos_start", "pos_end", 0, 1)
+      Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
     end
     rec_moved = false
     -- the take bounds what a PSET save writes (the write head runs
@@ -9915,7 +10103,7 @@ local function init_params()
     -- that narrow pos_end, so the next PSET save wrote a few seconds and the
     -- rest of the take was gone on reload, with no error anywhere. Fresh
     -- material resets the mark on purpose (clear/load/print), never a punch.
-    local bound = pget("regen", 0) > 0 and 1 or pget("pos_end", 1)
+    local bound = pget("regen", 0) > 0 and 1 or pget(WIN[2], 1)
     if bound > (ctx.take_len or 0) then ctx.take_len = bound end
     apply_window_len()   -- a locked length: the new take is that long
     ctx.undo_mark()
@@ -9923,6 +10111,9 @@ local function init_params()
   -- START ON SOUND: an arm records at once, and the take starts where the
   -- sound first crosses the threshold (see tick_rec_wait). The level is
   -- what is being written (the engine's rec_amp), so a resample counts too.
+  -- (mangler2) what a pass does at the end of its track's 60s: LOOP records
+  -- over the start, ONE-SHOT ends the take and records on into the next track
+  params:add_option("rec_end", "rec end", { "LOOP", "ONE-SHOT" }, 1)
   params:add_binary("rec_wait", "start on sound", "toggle", 0)
   params:add_control("rec_thresh", "sound threshold",
     controlspec.new(0.002, 0.5, "exp", 0, 0.02, ""),
@@ -10216,11 +10407,15 @@ local function init_params()
   params:add_group("grp_tracks", "tracks", 2)
   -- which track VOICE and FILTER address (K3 held on either page steps it),
   -- and the ROUTE grid's cursor
-  params:add_number("track_sel", "track (voice, filter)", 1, NTRACKS, 1)
+  params:add_number("track_sel", "track (focus)", 1, NTRACKS, 1)
+  params:set_action("track_sel", function(v) ctx.focus_take(v) end)
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
-    params:add_group("grp_t" .. n, "track " .. n, 26)
+    params:add_group("grp_t" .. n, "track " .. n, 27)
+    -- its own material from a file (the take of track n), like `sample_file`
+    params:add_file(pre .. "file", lab .. "load file", _path.audio)
+    params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
     add_eng_option(pre .. "mode", lab .. "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 1)
     add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
     add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
@@ -10648,6 +10843,7 @@ function init()
     sync_delay_time()    -- keep a synced delay on the clock (writes when off)
     sync_window_len()    -- ...and a locked window's length, on a tempo move
     tick_rec_wait()        -- a start-on-sound take begins at the sound
+    tick_rec_end()         -- ONE-SHOT: a full track hands on to the next
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
@@ -10722,23 +10918,25 @@ function enc(n, d)
   ctx.last_input = ctx.frame
   if n == 1 then
     if ctx.alt then
-      -- K1+E1 = the everything-knob: morph toward the selected scene from
-      -- ANY page (sweeping home to 0 lands exactly where you started)
-      if params.lookup["scene_morph_amt"] then
-        params:delta("scene_morph_amt", d)
-        ctx.flash_id = "scene_morph_amt"
-        ctx.flash_until = ctx.frame + math.floor(FPS * 1.2)
-      end
+      -- (mangler2) K1+E1 picks the TRACK from any page, the S-4's track
+      -- buttons on a knob: the badge in the header and the page name pop
+      -- show where you landed. The scene morph lives on SCENE (E3).
+      params:delta("track_sel", d)
+      ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
     else
       ctx.step_page(d)
     end
   else
     local id = enc_param(n)
     if id == "@win_move" then
-      move_pair("pos_start", "pos_end", d)
+      -- the focused track's window (TAKE follows the focus)
+      move_pair(tid("pos_start"), tid("pos_end"), d)
+    elseif id == "@route_to" then
+      route_step(d)
     -- the LAYERS encoders address whichever deck is selected, so they resolve
     -- to a param id at turn time rather than being fixed in ENC_MAP
-    elseif id == "@lay_level" or id == "@lay_rate" or id == "@route_amt" then
+    elseif id == "@lay_level" or id == "@lay_rate" or id == "@route_amt"
+        or id == "@trk_level" then
       -- delta the REAL param, but keep `id` as the compound target: the footer
       -- matches its flash against the slot's id, and the resolver turns it back
       -- into a value for display. (@win_move works for exactly this reason.)

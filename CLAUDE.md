@@ -16,12 +16,12 @@ mode, window, pitch, grain knobs, filter and level (the `t2_*` params, the
 "track 2" group). Names here: script `mangler2.lua`, class `Engine_Mangler2`,
 file `lib/Engine_Mangler2.sc`, `engine.name = 'Mangler2'`, SynthDefs
 `\mangler2_*`, deploy to `~/dust/code/mangler2/`. After a RESTART maiden must
-read **`count: 156`** (mangler's 66, 26 for each of tracks 2 to 4, and 12 sends). On the device 2026-11-11: loads at
+read **`count: 158`** (mangler's 66, 26 for each of tracks 2 to 4, 12 sends, rec_track and buf_track). Each track has its OWN material (four 60s buffers); K1+E1 picks the track. On the device 2026-11-11: loads at
 `count: 92`, every def builds, two GRAIN tracks with reverb, shimmer and delay take
 30% of the scsynth thread with 0 xruns (doc/measurements/2026-11-11/mangler2-tracks.md).
 Nobody has listened yet. On VOICE and FILTER, K3 held flips the page between
-track 1 and track 2 (doc/controls.md). The TRACK2 page (after VOICE) shows both
-tracks on the take and plays track 2 directly. The rules below are
+track 1 and track 2 (doc/controls.md). TRACKS (after VOICE) is the hub: E2 picks
+the focused track, which TAKE, VOICE and FILTER then edit; K1 held shows its sends. The rules below are
 mangler's and hold here with these names. mangler itself stays at 66.
 
 

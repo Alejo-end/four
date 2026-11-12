@@ -3649,6 +3649,47 @@ are 1px gap now (thirteen page dots). On the device: count 156, every def builds
 tracks with FX, all sends and resonant filters at 48% of the thread, 0 xruns over 60 s
 (doc/measurements/2026-11-12/four-tracks.md). Nobody has listened.
 
+mangler2, sixth change: **one focus and the TRACKS hub (Lua only, the count stays 156)**. The
+user found four tracks hard to reach with three knobs: only TRACK reached tracks 2 to 4, and
+routing was a page of its own. Now `track_sel` is THE focus and TAKE, VOICE and FILTER all
+follow it (titles TAKE 2, VOICE 2 ...; `TRACK_PAGES` gained TAKE). TAKE on track n edits its
+window (E2/E3, K1+E2 slides it, K1+E3 its jitter), draws the other tracks' windows as dim marks
+along the top and their heads as ticks, and SNAP puts the track's window on track 1's and back.
+TRACK and ROUTE became one page, TRACKS: the four tracks as rows (mode, window with head,
+level); E2 the focus, E3 its level (track 1's is grain_level), K2 ON, K3 MODE; with K1 held,
+the send grid, and K1+E2/E3 pick and set the focused track's sends (`@route_to`, `@route_amt`;
+the cursor stays in the focus's row). 12 pages. A track turned on with its window still at
+the default (the whole 60s buffer) starts on track 1's window: on the device track 2 played
+the empty buffer past a 32s take for half of every loop. The test page walks now put the focus back on
+track 1, since TRACKS's E2 moves it.
+
+mangler2, seventh change: **own material per track, the S-4 way (ENGINE and Lua, the count
+is 158, needs a RESTART)**. Each track records and plays its own 60s: the engine has four
+buffer pairs (`bufLs`, `bufRs`; bufL/bufR are track 1's), each extra track's drone reads its
+own, and two commands point the rest: `rec_track` (the pair io records, regens and prints
+into) and `buf_track` (the pair clear, read_file, write_take, read_take and the pad voices
+use). Lua: `track_sel` is the FOCUS, and `ctx.focus_take` keeps each track's take state
+(TAKES: wave_any, take_len, undo, SNAP memory), swaps the focused one in, rewrites the window
+ids (`WIN`, so window_bounds and every take gesture are the focused track's), swaps the
+waveform strip (`Mpages.focus_wave`) and moves the engine. A pass recording when the focus
+moves ends on the old track and opens on the new one. Recording into an OFF track switches it
+to PLAY. REC END (`rec_end`, take - record): LOOP records over the start as before; ONE-SHOT
+ends a full 60s take and records on into the next track (on track 4 it stops). PSETs save and
+restore every track's take: track 1 as `take-NN` (mangler's name, so a mangler pset still
+loads), tracks 2 to 4 as `take2-NN` ..., undo as `undo2-` ... NAVIGATION: K1+E1 picks the
+track from any page (the scene morph stays on SCENE's E3); the track pages (TAKE, VOICE,
+FILTER, TRACKS) carry an inverted badge with the track number before the device name, and the
+page pop reads "2 VOICE". TRACKS shows EMPTY for a track with no material.
+
+mangler2, eighth change: **the presets carry four tracks (Lua and presets; the count stays
+158)**. Each track 2 to 4 gets a `t<n>_file` param (its own material from a file, scene and
+motion excluded; group counts 27): `ctx.track_load` loads the focused track exactly as the
+take, and another track into its own buffer through buf_track, with its own strip, take state
+and a window snapped to the file. `test/make_set.lua` now gives every preset four tracks of
+material: track 2 deck 1's part, track 3 deck 2's, track 4 the take again (1 to 10) or the
+tape's stretch (11, 12). They load OFF, so each preset sounds as it did; TRACKS (K2) brings one
+in as an engine track. The tracks' windows stay out of the pset: the file snaps them.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

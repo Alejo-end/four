@@ -9,7 +9,9 @@
 // ROUTING (the S-4's sends): `send_<from>_<to>` sends one track's filtered
 // output into another track's filter, 12 sends in all. A send arrives one
 // block late (InFeedback) and goes through a tanh, so a ring of sends can
-// feed back but never runs away. Count: 66 + 3 x 26 + 12 = 156.
+// feed back but never runs away. OWN MATERIAL: each track plays its own
+// 60s buffer pair; rec_track picks the pair io records into, buf_track the
+// pair the buffer commands use. Count: 66 + 3 x 26 + 12 + 2 = 158.
 //
 // HARD RULE: exactly one `Engine_Mangler2` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
@@ -35,6 +37,12 @@ Engine_Mangler2 : CroneEngine {
     var <ioSynth, <playSynth;
     var <playGroup;
     var <bufL, <bufR;
+    // OWN MATERIAL PER TRACK (the S-4 way): four buffer pairs, one per track.
+    // bufL/bufR are track 1's. recIdx is the pair io records into (rec_track),
+    // opIdx the pair clear, read_file, write_take, read_take and the pad
+    // voices act on (buf_track); the Lua side sets both to the focused track
+    // and moves opIdx alone to save or restore the other tracks.
+    var <bufLs, <bufRs, <recIdx = 0, <opIdx = 0;
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
@@ -115,7 +123,7 @@ Engine_Mangler2 : CroneEngine {
         });
         (i > 0).if({
             tr[\synth] = Synth.new(this.droneDef(i), [
-                \buf_l, bufL, \buf_r, bufR,
+                \buf_l, bufLs[tr[\n] - 1], \buf_r, bufRs[tr[\n] - 1],
                 \play_bus, tr[\bus], \phase_out, tr[\phase],
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
                 \level, playParams[\level], \rec, playParams[\rec],
@@ -218,7 +226,7 @@ Engine_Mangler2 : CroneEngine {
     // params so a grain-cloud voice tracks the drone's character.
     voiceArgs { arg pos, pitch, oneShot, amp, len;
         ^[
-            \buf_l, bufL, \buf_r, bufR, \play_bus, playBus,
+            \buf_l, bufLs[opIdx], \buf_r, bufRs[opIdx], \play_bus, playBus,
             \note_pos, pos, \note_pitch, pitch,
             // how long the slice IS, as a fraction of the buffer. nil (an old
             // caller) -> 0 -> unbounded, the previous behaviour.
@@ -278,8 +286,10 @@ Engine_Mangler2 : CroneEngine {
         // together, or positions drift with no error anywhere.
         var bufSecs = 60;
 
-        bufL = Buffer.alloc(s, s.sampleRate * bufSecs, 1);
-        bufR = Buffer.alloc(s, s.sampleRate * bufSecs, 1);
+        bufLs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
+        bufRs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
+        bufL = bufLs[0];
+        bufR = bufRs[0];
 
         // grain envelope buffers. shape 0 uses built-in Hann (envbufnum
         // -1) and never touches these. filled BEFORE the s.sync below so
@@ -1146,6 +1156,16 @@ Engine_Mangler2 : CroneEngine {
             this.setMode(msg[1]);
         });
 
+        // own material per track: which pair io records into (and regen and
+        // PRINT write), and which pair the buffer commands and pads act on
+        this.addCommand(\rec_track, "i", { arg msg;
+            recIdx = msg[1].asInteger.clip(0, 3);
+            ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx]);
+        });
+        this.addCommand(\buf_track, "i", { arg msg;
+            opIdx = msg[1].asInteger.clip(0, 3);
+        });
+
         // ---- tracks 2 to 4: `t<n>_<drone arg>` for each of its drone
         // values, `t<n>_<strip key>` for its strip, and `t<n>_mode`
         extra.do({ arg tr;
@@ -1215,8 +1235,8 @@ Engine_Mangler2 : CroneEngine {
         // clear/load act on the SAME bufL/bufR the synths hold (Buffer:zero and
         // instance readChannel into the existing buffer) — no bufnum ever changes.
         this.addCommand(\clear, "", { arg msg;
-            bufL.zero;
-            bufR.zero;
+            bufLs[opIdx].zero;
+            bufRs[opIdx].zero;
             // a clear must be SILENCE: the delay line and the reverb/shimmer
             // recirculation still ring with the erased material. their state
             // lives inside the spawn/free synths, so a free + respawn IS the
@@ -1243,12 +1263,13 @@ Engine_Mangler2 : CroneEngine {
             sf.openRead(path).if({
                 var nch = sf.numChannels;
                 var frames = sf.numFrames.min(s.sampleRate * bufSecs);
+                var bl = bufLs[opIdx], br = bufRs[opIdx];
                 sf.close;
-                bufL.zero;
-                bufR.zero;
-                bufL.readChannel(path, 0, frames, 0, false, [0]);
+                bl.zero;
+                br.zero;
+                bl.readChannel(path, 0, frames, 0, false, [0]);
                 // a mono file feeds BOTH sides from channel 0
-                bufR.readChannel(path, 0, frames, 0, false, [(nch - 1).min(1)]);
+                br.readChannel(path, 0, frames, 0, false, [(nch - 1).min(1)]);
                 ("mangler: loaded " ++ path ++ " — " ++ frames ++ " frames, "
                     ++ nch ++ "ch").postln;
             }, {
@@ -1272,8 +1293,8 @@ Engine_Mangler2 : CroneEngine {
             var stem = msg[1].asString;
             var n = (msg.size > 2).if({ msg[2].asInteger }, { -1 });
             if(n <= 0, { n = -1 });
-            bufL.write(stem ++ "_L.wav", "wav", "int24", n);
-            bufR.write(stem ++ "_R.wav", "wav", "int24", n);
+            bufLs[opIdx].write(stem ++ "_L.wav", "wav", "int24", n);
+            bufRs[opIdx].write(stem ++ "_R.wav", "wav", "int24", n);
             ("mangler: wrote take " ++ stem ++ " ("
                 ++ (n < 0).if("full", { n.asString ++ " frames" }) ++ ")").postln;
         });
@@ -1289,11 +1310,12 @@ Engine_Mangler2 : CroneEngine {
             var sf = SoundFile.new;
             sf.openRead(pathL).if({
                 var frames = sf.numFrames.min(s.sampleRate * bufSecs);
+                var bl = bufLs[opIdx], br = bufRs[opIdx];
                 sf.close;
-                bufL.zero;
-                bufR.zero;
-                bufL.readChannel(pathL, 0, frames, 0, false, [0]);
-                bufR.readChannel(pathR, 0, frames, 0, false, [0]);
+                bl.zero;
+                br.zero;
+                bl.readChannel(pathL, 0, frames, 0, false, [0]);
+                br.readChannel(pathR, 0, frames, 0, false, [0]);
                 ("mangler: restored take " ++ stem ++ " — "
                     ++ frames ++ " frames").postln;
             }, {
@@ -1335,8 +1357,8 @@ Engine_Mangler2 : CroneEngine {
         repBufs.notNil.if({ repBufs.do({ arg b; b.free }) });
         ioSynth.free;
         playGroup.free;
-        bufL.free;
-        bufR.free;
+        bufLs.notNil.if({ bufLs.do({ arg b; b.free }) });
+        bufRs.notNil.if({ bufRs.do({ arg b; b.free }) });
         grainEnv1.free;
         grainEnv2.free;
         playBus.free;

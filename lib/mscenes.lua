@@ -240,7 +240,8 @@ local SCENE_EXCLUDE = {
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
-  "rec_wait", "rec_thresh",
+  "t2_file", "t3_file", "t4_file",   -- mangler2: each track's own material
+  "rec_wait", "rec_thresh", "rec_end",
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
