@@ -25,16 +25,16 @@ K1 and FRZ on K2 there. Drive and dry/wet are shared by every track.
 |---|---|---|---|---|---|---|---|
 | TAKE | `pos_start` | `pos_end` | `@win_move` | `pos_jitter` | REC | SNAP, hold UNDO | yes |
 | VOICE (PLAY) | `scan` | `pitch` | `erode` | `wear` | HEAL | MODE, hold TRK 2 | no |
-| VOICE (GRAIN) | `size` | `density` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
+| VOICE (GRAIN) | `size` | `density` | `pos_jitter` | `grain_pitch_spread` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (WARP) | `warp_window` | `warp_rand` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (PV) | `scan` | `pitch` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | TRACKS | `track_sel` | `@trk_level` | `@route_to` | `@route_amt` | ON | MODE | no |
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
 | LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
-| FILTER | `cutoff` | `resonance` | `drive` | `dry_wet` | OPEN | TYPE, hold TRK 2 | no |
+| FILTER | `cutoff` | `resonance` | `drive` | `crush` | OPEN | TYPE, hold TRK 2 | no |
 | DELAY | `delay_mix` | `delay_fb` | `delay_time` | `delay_sync` | INF | KILL | no |
 | REVERB | `rev_mix` | `rev_decay` | `rev_size` | `rev_damp` | WASH | BLOOM | no |
-| MIX | `mix` | `out_level` | `input_level` | `monitor_level` | ENG | TAPE | no |
+| MIX | `mix` | `out_level` | `input_level` | `dry_wet` | ENG | TAPE | no |
 | PADS | `seq_slice` | `pad_pitch` | `pad_voice` | `voice_rel` | PAD | ROUTE | no |
 | MOTION (lanes) | `@mo_sel` | `motion_depth` | `motion_len` | none | REC | PLAY | yes |
 | MOTION (LFO 1) | `@mo_sel` | `lfo1_depth` | `lfo1_period` | `lfo1_target` | REC | PLAY | yes |

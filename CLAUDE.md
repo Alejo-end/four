@@ -16,7 +16,7 @@ mode, window, pitch, grain knobs, filter and level (the `t2_*` params, the
 "track 2" group). Names here: script `mangler2.lua`, class `Engine_Mangler2`,
 file `lib/Engine_Mangler2.sc`, `engine.name = 'Mangler2'`, SynthDefs
 `\mangler2_*`, deploy to `~/dust/code/mangler2/`. After a RESTART maiden must
-read **`count: 158`** (mangler's 66, 26 for each of tracks 2 to 4, 12 sends, rec_track and buf_track). Each track has its OWN material (four 60s buffers); K1+E1 picks the track. On the device 2026-11-11: loads at
+read **`count: 173`** (mangler's 66, crush and the two FX sends of track 1, 30 for each of tracks 2 to 4, 12 sends, rec_track and buf_track). Each track has its own COLOR (drive, crush), SPACE (its delay and reverb sends, on the TRACKS grid) and the four modulators can sit on any track (ninth change). On the device 2026-11-12: `count: 173`, worst case 45% of the scsynth thread, 0 xruns over 60 s. GRAIN is now a granulator that reads the take (stereo grain pairs, spray, regular to Poisson timing); Clouds is the sixth mode, CLOUD (tenth change, doc/measurements/2026-11-12/grain.md). Each track has its OWN material (four 60s buffers); K1+E1 picks the track. On the device 2026-11-11: loads at
 `count: 92`, every def builds, two GRAIN tracks with reverb, shimmer and delay take
 30% of the scsynth thread with 0 xruns (doc/measurements/2026-11-11/mangler2-tracks.md).
 Nobody has listened yet. On VOICE and FILTER, K3 held flips the page between
@@ -171,6 +171,9 @@ add_text` are **not** mappable.
   Requires the services, so they keep running with the old class library. For a
   RESTART over SSH use `sudo systemctl restart norns-jack norns-crone norns-sclang
   norns-matron`, then check that the sclang log shows a fresh `compile done`.
+  Load the script only after the log also shows the `engines: [...]` line: a
+  load sent between the two hung on the engine for good (2026-11-12), and only
+  another restart cleared it.
 - **Editing a `.sc` file requires SYSTEM > RESTART** (sclang must recompile the class
   library); reloading the script is not enough.
 - **midi dispatch is dual-path: norns fires BOTH `midi.devices[id].event` (device

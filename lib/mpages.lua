@@ -241,6 +241,10 @@ local SHORT = {
   ["@mo_sel"] = "LANE", mod_focus = "LANE",
   lfo1_depth = "DPT", lfo1_period = "PER", lfo1_target = "TGT",
   lfo2_depth = "DPT", lfo2_period = "PER", lfo2_target = "TGT",
+  lfo3_depth = "DPT", lfo3_period = "PER", lfo3_target = "TGT",
+  lfo4_depth = "DPT", lfo4_period = "PER", lfo4_target = "TGT",
+  -- COLOR and SPACE (mangler2): the crush, and each track's FX sends
+  crush = "CRSH", fx_dly = "1>DLY", fx_rev = "1>REV",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
@@ -268,6 +272,8 @@ local SHORT = {
   t2_clouds_mode = "T2 CMOD", t2_mode = "T2 MODE", t2_warp_window = "T2 WIN",
   t2_warp_rand = "T2 RAND", t2_pv_freeze = "T2 PVFZ", t2_cutoff = "T2 CUT",
   t2_resonance = "T2 RES", t2_filt_type = "T2 FILT",
+  t2_drive = "T2 DRV", t2_crush = "T2 CRSH",
+  t2_fx_dly = "2>DLY", t2_fx_rev = "2>REV",
   -- the ROUTE page: its cursor and the selected send's amount
   route_sel = "SEND", ["@route_amt"] = "AMT",
   track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
@@ -286,6 +292,10 @@ do
   for from = 1, 4 do
     for to = 1, 4 do
       if from ~= to then add["send_" .. from .. "_" .. to] = from .. ">" .. to end
+    end
+    if from > 1 then
+      add["t" .. from .. "_fx_dly"] = from .. ">DLY"
+      add["t" .. from .. "_fx_rev"] = from .. ">REV"
     end
   end
   for k, v in pairs(add) do SHORT[k] = v end
@@ -311,6 +321,9 @@ local FULL = {
   motion_depth = "DEPTH", motion_len = "LENGTH",
   lfo1_depth = "DEPTH", lfo1_period = "PERIOD", lfo1_target = "TARGET",
   lfo2_depth = "DEPTH", lfo2_period = "PERIOD", lfo2_target = "TARGET",
+  lfo3_depth = "DEPTH", lfo3_period = "PERIOD", lfo3_target = "TARGET",
+  lfo4_depth = "DEPTH", lfo4_period = "PERIOD", lfo4_target = "TARGET",
+  crush = "CRUSH",
   pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_morph_amt = "MORPH",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE",
@@ -342,6 +355,14 @@ local RATE_IDS = { scan = true, tape_rate = true,
                    t2_scan = true, t2_pitch = true,
                    t3_scan = true, t3_pitch = true,
                    t4_scan = true, t4_pitch = true }
+-- the modulators' params, for their footer values: LFO_OF[id] = { i, word }
+local LFO_OF, LFO_NAME = {}, {}
+for i = 1, 4 do
+  LFO_NAME[i + 1] = "LFO" .. i
+  for _, w in ipairs({ "target", "depth" }) do
+    LFO_OF["lfo" .. i .. "_" .. w] = { i, w }
+  end
+end
 local T2_KEY = {}
 for k in pairs(SHORT) do
   local b = k:match("^t%d_(.+)$")
@@ -355,7 +376,7 @@ local function fmt_value(id)
   local key = T2_KEY[id] or id
   if key == "route_sel" then                    -- the cell: from > to
     local r = C.route_cur and C.route_cur()
-    return r and (r.from .. ">" .. r.to) or "-"
+    return r and SHORT[r.id] or "-"
   end
   if key == "seq_slice" then
     return tostring(floor(params:get(id) + 0.5) + 1)   -- slices read 1..8
@@ -377,14 +398,21 @@ local function fmt_value(id)
     return string.format("%.2fS", params:get(id) * (C.BUF_SECS or 60))
   end
   if key == "mod_focus" then
-    return params:get(id) > 2.5 and "LFO2" or "LFO1"
+    return LFO_NAME[floor(params:get(id) + 0.5)] or "LANES"
   end
-  if key == "lfo1_target" or id == "lfo2_target" then
-    local t = C.lfo and C.lfo.TARGETS[floor(params:get(id) + 0.5) - 1]
-    return t and (SHORT[t] or string.upper(t)) or "OFF"
-  end
-  if key == "lfo1_depth" or id == "lfo2_depth" then
-    return string.format("%+d%%", floor(params:get(id) * 100 + 0.5))
+  if LFO_OF[key] then
+    local i, w = LFO_OF[key][1], LFO_OF[key][2]
+    if w == "target" then
+      -- the knob it moves, on its track: "CUT", "T2 CUT", or "--" when
+      -- that track has no such knob
+      local L = C.lfo
+      if not (L and L.TARGETS[floor(params:get(id) + 0.5) - 1]) then return "OFF" end
+      local t = L.target_of(i)
+      return t and (SHORT[t] or string.upper(t)) or "--"
+    end
+    if w == "depth" then
+      return string.format("%+d%%", floor(params:get(id) * 100 + 0.5))
+    end
   end
   if key == "motion_len" then
     local v = params:get(id)
@@ -839,7 +867,7 @@ end
 -- ============================================================================
 -- 2 · VOICE — how the take plays (mode rail + the mode's own texture)
 -- ============================================================================
-local VOICE_RAIL = { { "PLAY", 5 }, { "GRAIN", 2 }, { "WARP", 3 }, { "PV", 4 } }
+local VOICE_RAIL = { { "PLAY", 5 }, { "GRAIN", 2 }, { "WARP", 3 }, { "PV", 4 }, { "CLOUD", 6 } }
 
 local function voice_wy(x, ph, rate)
   return 33 + sin((x + ph) * 0.35 * rate) * 8
@@ -888,9 +916,12 @@ function M.erosion_reset() eros_gen, eros_acc = 0, 0 end
 -- out over its life and drifts the way SPEED reads, except while a freeze
 -- holds the read point (FREEZE, or the PV freeze that Clouds takes as its
 -- own). The randoms come from `hash` on the frame, never from math.random,
--- so the orbit keeps its own sequence and a shot repeats.
+-- so the orbit keeps its own sequence and a shot repeats. `pairs` (GRAIN):
+-- the grains are stereo pairs, so half sit toward the left and half toward
+-- the right, 1 - SPREAD from the middle (the engine's law); CLOUD scatters
+-- each grain around the pan.
 local GR_MAX, GR_MID, GR_HALF = 40, 34, 11
-local function grain_cloud(frame, scan)
+local function grain_cloud(frame, scan, pairs)
   local sn = value_norm("size", tp("size", 0.1))
   local dn = value_norm("density", tp("density", 20))
   local spread = clamp(tp("spread", 0.5), 0, 1)
@@ -910,7 +941,8 @@ local function grain_cloud(frame, scan)
     local age = t - e * life
     local len = max(1, floor((1 + sn * 10) * (1 + gj * (hash(k, e, 3) * 2 - 1)) + 0.5))
     local x = (cx + (hash(k, e, 1) * 2 - 1) * reach + age * drift) % 128
-    local y = GR_MID + floor(clamp(pan + (hash(k, e, 2) * 2 - 1) * spread, -1, 1)
+    local side = pairs and (k % 2 == 0 and 1 or -1) * (1 - spread) or 0
+    local y = GR_MID + floor(clamp(pan + side + (hash(k, e, 2) * 2 - 1) * spread, -1, 1)
       * GR_HALF + 0.5)
     screen.level(3 + floor(sin(PI * (age + 0.5) / life) * 12 + 0.5))
     screen.rect(floor(x - len / 2), y, len, 1)
@@ -920,7 +952,11 @@ end
 
 -- the mode rail: the active word inverted; OFF dims the whole rail
 local function mode_rail(mode)
-  local x = 4
+  -- five words on 128px: the gap is what the words leave, at most 8
+  local tw = 0
+  for i = 1, #VOICE_RAIL do tw = tw + text_w(VOICE_RAIL[i][1], 1) end
+  local gap = min(8, floor((122 - tw) / (#VOICE_RAIL - 1)))
+  local x = 3
   for _, m in ipairs(VOICE_RAIL) do
     local w = text_w(m[1], 1)
     if m[2] == mode then
@@ -931,7 +967,7 @@ local function mode_rail(mode)
     else
       ptext(m[1], x, 13, 1, mode == 1 and 2 or 5)
     end
-    x = x + w + 8
+    x = x + w + gap
   end
 end
 
@@ -939,11 +975,13 @@ local function body_VOICE(frame)
   local mode = tp("mode", 5)
   local held_pv = tp("pv_freeze", 0) == 1
   mode_rail(mode)
-  -- HELD: the PV freeze is heard in PV, and in GRAIN on the Clouds voice
-  -- (it doubles as the Clouds freeze). In PLAY and WARP it waits, dim.
-  if mode == 1 then ptext_r("OFF", 126, 13, 1, 8)
+  -- HELD: the PV freeze is heard in PV, in GRAIN (the head stops, the
+  -- grains go on) and in CLOUD (the Clouds freeze). In PLAY and WARP it
+  -- waits, dim.
+  -- (under the rail's right end: the five words fill its row)
+  if mode == 1 then ptext_r("OFF", 126, 22, 1, 8)
   elseif held_pv then
-    ptext_r("HELD", 126, 13, 1, (mode == 4 or mode == 2) and 12 or 4)
+    ptext_r("HELD", 126, 22, 1, (mode == 4 or mode == 2 or mode == 6) and 12 or 4)
   end
   -- the texture IS the mode, drawn from the playing motion (drifts with
   -- scan, stands still frozen, lies flat when the voice is freed/silent)
@@ -961,8 +999,8 @@ local function body_VOICE(frame)
     screen.stroke()
     -- nothing to play: the invitation, in TAKE's voice (K2 here is a freeze)
     if not C.wave_any then ptext_c("EMPTY - REC ON TAKE", 64, 24, 1, 10) end
-  elseif mode == 2 then        -- GRAIN: the cloud (grain_cloud)
-    grain_cloud(frame, scan)
+  elseif mode == 2 or mode == 6 then   -- GRAIN and CLOUD: the cloud (grain_cloud)
+    grain_cloud(frame, scan, mode == 2)
   elseif mode == 3 then        -- WARP: an overlapped window ghosts behind
     local off = 9 + sin(frame * 0.9) * 6 * tp("warp_rand", 0)
     screen.level(2)
@@ -1043,14 +1081,20 @@ end
 -- right, the cursor's route in words. A label is bright while its track
 -- sounds; everything dims while STOP or the MIX throw silences the engine.
 -- ============================================================================
-local RT_X0, RT_Y0, RT_CW, RT_RH = 22, 19, 18, 8
+-- The last two columns are SPACE: how much of the track goes into the
+-- shared delay (D) and reverb (R), full by default.
+local RT_X0, RT_Y0, RT_CW, RT_RH = 20, 19, 14, 8
+local RT_CELL = 12
 local RT_ROW = { "T1", "T2", "T3", "T4" }
-local RT_COL = { "1", "2", "3", "4" }
+local RT_COL = { "1", "2", "3", "4", "D", "R" }
+local RT_TO = { "T1", "T2", "T3", "T4", "DLY", "REV" }
 -- the send ids and the percent words, built once (no allocation per frame)
 local RID, PCT = {}, {}
 for r = 1, 4 do
   RID[r] = {}
   for c = 1, 4 do RID[r][c] = "send_" .. r .. "_" .. c end
+  RID[r][5] = r == 1 and "fx_dly" or ("t" .. r .. "_fx_dly")
+  RID[r][6] = r == 1 and "fx_rev" or ("t" .. r .. "_fx_rev")
 end
 for v = 0, 100 do PCT[v] = v .. "%" end
 local function track_sounds(n)
@@ -1061,32 +1105,36 @@ local function route_grid(frame)
   local audible = (C.mix_gains()) > 0.001
   local cur = C.route_cur and C.route_cur()
   ptext("TO", 6, 12, 1, 3)       -- columns: where a send goes
-  for c = 1, 4 do
-    ptext_c(RT_COL[c], RT_X0 + (c - 1) * RT_CW + 7, 12, 1, 5)
+  for c = 1, 6 do
+    ptext_c(RT_COL[c], RT_X0 + (c - 1) * RT_CW + RT_CELL / 2, 12, 1, c > 4 and 7 or 5)
   end
+  -- the line between the tracks and the FX
+  screen.level(1)
+  screen.rect(RT_X0 + 4 * RT_CW - 2, RT_Y0 - 1, 1, 4 * RT_RH)
+  screen.fill()
   for r = 1, 4 do
     local y = RT_Y0 + (r - 1) * RT_RH
     ptext(RT_ROW[r], 6, y, 1, (audible and track_sounds(r)) and 13 or 4)
     if r == cur_track() then ptext(">", 1, y, 1, 15) end
-    for c = 1, 4 do
+    for c = 1, 6 do
       local x = RT_X0 + (c - 1) * RT_CW
       if r == c then
         screen.level(2)
-        screen.rect(x + 6, y + 2, 2, 1)
+        screen.rect(x + RT_CELL / 2 - 1, y + 2, 2, 1)
         screen.fill()
       else
         local v = clamp(pget(RID[r][c], 0), 0, 1)
         screen.level(2)
-        screen.rect(x, y, 15, 6)
+        screen.rect(x, y, RT_CELL, 6)
         screen.stroke()
         if v > 0.001 then
           screen.level(audible and 11 or 4)
-          screen.rect(x + 1, y + 1, max(1, floor(v * 13 + 0.5)), 4)
+          screen.rect(x + 1, y + 1, max(1, floor(v * (RT_CELL - 2) + 0.5)), 4)
           screen.fill()
         end
         if cur and cur.from == r and cur.to == c then
           screen.level(15)
-          screen.rect(x - 1, y - 1, 17, 8)
+          screen.rect(x - 1, y - 1, RT_CELL + 2, 8)
           screen.stroke()
         end
       end
@@ -1094,18 +1142,18 @@ local function route_grid(frame)
   end
   -- the cursor's route, in words, on the right
   if cur then
-    ptext_c(RT_ROW[cur.from], 110, 19, 1, 12)
-    ptext_c(">", 110, 27, 1, 6)
-    ptext_c(RT_ROW[cur.to], 110, 35, 1, 12)
+    ptext_c(RT_ROW[cur.from], 116, 19, 1, 12)
+    ptext_c(">", 116, 27, 1, 6)
+    ptext_c(RT_TO[cur.to], 116, 35, 1, 12)
     local v = clamp(pget(cur.id, 0), 0, 1)
-    ptext_c(v > 0.001 and PCT[floor(v * 100 + 0.5)] or "OFF", 110, 45, 1, v > 0.001 and 10 or 4)
+    ptext_c(v > 0.001 and PCT[floor(v * 100 + 0.5)] or "OFF", 116, 45, 1, v > 0.001 and 10 or 4)
   end
 end
 
-local TR_MODE = { "OFF", "GRAIN", "WARP", "PV", "PLAY" }
+local TR_MODE = { "OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD" }
 local TR_EMPTY = "EMPTY"
 local TR_Y0, TR_RH = 12, 10
-local TR_SX, TR_SW = 46, 52          -- the window strip
+local TR_SX, TR_SW = 46, 49          -- the window strip
 local TR_LX, TR_LW = 102, 24         -- the level bar
 local function body_TRACKS(frame)
   if C.alt then route_grid(frame); return end
@@ -1113,7 +1161,7 @@ local function body_TRACKS(frame)
   local focus = cur_track()
   for n = 1, 4 do
     local y = TR_Y0 + (n - 1) * TR_RH
-    local mode = clamp(floor(pget(C.MODE_ID[n], 1) + 0.5), 1, 5)
+    local mode = clamp(floor(pget(C.MODE_ID[n], 1) + 0.5), 1, 6)
     local sounds = audible and track_sounds(n)
     if n == focus then
       screen.level(2)
@@ -1123,6 +1171,17 @@ local function body_TRACKS(frame)
     end
     ptext(RT_ROW[n], 7, y, 1, sounds and 15 or 5)
     ptext(TR_MODE[mode], 20, y, 1, mode == 1 and 3 or (sounds and 12 or 6))
+    -- a modulator moves one of this track's knobs: a small wave between
+    -- the window strip and the level bar
+    if C.lfo and C.lfo.moves_track(n) then
+      screen.level(sounds and 12 or 4)
+      screen.rect(96, y + 2, 1, 1)
+      screen.rect(97, y + 1, 1, 1)
+      screen.rect(98, y + 2, 1, 1)
+      screen.rect(99, y + 3, 1, 1)
+      screen.rect(100, y + 2, 1, 1)
+      screen.fill()
+    end
     -- the window on the take, and the head while it sounds
     local lo, hi = track_window_n(n)
     screen.level(1)
@@ -1328,7 +1387,8 @@ local function body_FILTER(frame)
   local cut = tp("cutoff", 20000)
   local ft = tp("filt_type", 1)
   local res = tp("resonance", 0)
-  local drv = pget("drive", 0)
+  local drv = tp("drive", 0)
+  local crush = tp("crush", 0)
   screen.level(2)
   for i = 1, 3 do
     for y = FILT_TOP, FILT_BOT, 2 do
@@ -1381,11 +1441,23 @@ local function body_FILTER(frame)
   end
   screen.fill()
   screen.level(10)
-  for x = 1, 127 do
-    screen.move(x - 1, FILT_Y[x])
-    screen.line(x, FILT_Y[x + 1])
+  if crush > 0.005 then
+    -- CRUSH draws the curve as stairs: held in steps as wide as the rate
+    -- falls, and in rows as coarse as the bits fall
+    local sx = 1 + floor(crush * 7)
+    local sy = 1 + floor(crush * 3)
+    for x = 0, 127, sx do
+      local y = floor(FILT_Y[x + 1] / sy + 0.5) * sy
+      screen.rect(x, y, min(sx, 128 - x), 1)
+    end
+    screen.fill()
+  else
+    for x = 1, 127 do
+      screen.move(x - 1, FILT_Y[x])
+      screen.line(x, FILT_Y[x + 1])
+    end
+    screen.stroke()
   end
-  screen.stroke()
   if drv > 0.005 then          -- saturation as texture: grit flecks the curve
     screen.level(7)
     for x = 0, 127, 2 do
@@ -1733,25 +1805,34 @@ end
 -- where the wave is now. ENV draws the input's envelope as a bar. A
 -- modulator that also goes out to other gear says where on the right (>CC
 -- the MIDI CC, >CV crow, >OUT both). Dim and flat while it moves nothing.
+local LFO_N = 4
 local LFO_PID = {}
-for k = 1, 2 do
+for k = 1, LFO_N do
   LFO_PID[k] = { target = "lfo" .. k .. "_target", depth = "lfo" .. k .. "_depth",
     shape = "lfo" .. k .. "_shape" }
 end
-local LFO_TAG = { "1>", "2>" }
-local LFO_OFF = { "1 OFF", "2 OFF" }
+local LFO_TAG = { "1>", "2>", "3>", "4>" }
+local LFO_OFF = { "1 OFF", "2 OFF", "3 OFF", "4 OFF" }
+local LFO_NONE = "--"   -- a target its track does not have
 local LFO_GX1 = 110
 local function lfo_row(k, yb, selected, gx0)
   local L = C.lfo
   if not L then return end
   local P = LFO_PID[k]
-  local tid = L.TARGETS[floor(pget(P.target, 1) + 0.5) - 1]
+  local picked = L.TARGETS[floor(pget(P.target, 1) + 0.5) - 1]
+  -- the knob it moves on its own track ("T2 CUT"): nil when that track has
+  -- no such knob
+  local tid = picked and L.target_of(k)
   local depth = pget(P.depth, 0)
   local live = tid ~= nil and abs(depth) >= 0.001
   local lvl = selected and 11 or (live and 7 or 4)
-  if tid then
+  if picked then
+    local word = tid and (SHORT[tid] or "?") or LFO_NONE
+    local x = 2 + text_w(LFO_TAG[k], 1) + 1
     ptext(LFO_TAG[k], 2, yb - 6, 1, lvl)
-    ptext(SHORT[tid] or "?", 2 + text_w(LFO_TAG[k], 1) + 1, yb - 6, 1, lvl)
+    ptext(word, x, yb - 6, 1, lvl)
+    -- a long name ("T2 DENS") pushes the wave to the right of it
+    gx0 = max(gx0, x + text_w(word, 1) + 3)
   else
     ptext(LFO_OFF[k], 2, yb - 6, 1, lvl)
   end
@@ -1813,26 +1894,25 @@ local function body_MOTION(frame)
   local top, rh = 15, 10
   local gx0, gx1 = 33, 124
   -- the selection over every row: 0 none, 1..nlane the lanes, then the
-  -- two modulators
+  -- four modulators
   local focus = floor(pget("mod_focus", 1) + 0.5)
   local sel = focus > 1 and nlane + focus - 1
     or clamp(floor(pget("motion_lane", 0) + 0.5), 0, nlane)
   if nlane == 0 then
-    -- no lanes: the invitation above, the two modulator rows below it
+    -- no lanes: the invitation in one line, the four modulator rows below
     if armed then
       chip("REC", 2, 12)              -- steady: the header M is the blink
-      ptext_c("MOVE A KNOB TO RECORD", 64, 22, 1, 8)
+      ptext_c("MOVE A KNOB", 64, 12, 1, 8)
     else
-      ptext_c("EMPTY - K2 ARM", 64, 16, 1, 10)
-      ptext_c("THEN MOVE A KNOB", 64, 24, 1, 5)
+      ptext_c("EMPTY - K2 ARM", 64, 12, 1, 10)
     end
-    for k = 1, 2 do lfo_row(k, top + (k + 1) * rh + 8, sel == k, gx0) end
+    for k = 1, LFO_N do lfo_row(k, 26 + (k - 1) * 8, sel == k, gx0) end
     return
   end
   if ll > 0 then
     ptext_r(string.format("LOOP %.1fS", ll / FPS), 126, 9, 1, 5)
   end
-  local nrow = nlane + 2
+  local nrow = nlane + LFO_N
   local VIS = 4
   local shown = min(nrow, VIS)
   -- scroll: the VIS-row window follows the selection so every row is
@@ -2149,7 +2229,9 @@ local function purity()
   end
   if C.ROUTES then
     for _, r in ipairs(C.ROUTES) do
-      if pget(r.id, 0) > 0.001 then return false end
+      -- a send between tracks moves sound; the FX sends only scale what
+      -- the delay and reverb mixes (checked below) let through
+      if not r.fx and pget(r.id, 0) > 0.001 then return false end
     end
   end
   if abs(pget("pitch", 1) - 1) > 0.001 then return false end
@@ -2157,7 +2239,7 @@ local function purity()
   -- pan reaches the PLAY voice's Balance2: off-center output is not the
   -- recording, however clean the rest of the path is
   if abs(pget("pan", 0)) > 0.001 then return false end
-  if pget("drive", 0) > 0.001 or pget("delay_mix", 0) > 0.001
+  if pget("drive", 0) > 0.001 or pget("crush", 0) > 0.001 or pget("delay_mix", 0) > 0.001
       or pget("rev_mix", 0) > 0.001 or pget("shimmer", 0) > 0.001
       or pget("clouds_fb", 0) > 0.001 or pget("resample", 0) > 0.001
       or pget("regen", 0) > 0.001

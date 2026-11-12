@@ -3,22 +3,29 @@
 // mangler2 is mangler with FOUR engine tracks. Tracks 2 to 4 are more drones
 // (any mode) on the same take, each with its own window, pitch, grain knobs,
 // its own filter (\mangler2_strip) and its own level. They join track 1
-// after io's filter, so drive, delay and reverb are shared. Their commands
+// after io's filter, so the delay and reverb are shared. Their commands
 // are the drone's own names with a `t2_`, `t3_` or `t4_` prefix, plus the
 // strip's level, cutoff, resonance and filt_type, and the mode: 26 a track.
+// COLOR AND SPACE (the S-4's devices after the filter): every track has its
+// own drive and crush (sample rate and bit reduction), and its own send
+// amount into the shared delay (fx_dly) and reverb (fx_rev). Both sends
+// default to 1, which is the sound from before they existed. Track 1's
+// are io's `drive`, `crush`, `fx_dly`, `fx_rev`; the others' are four more
+// strip keys, so 30 a track.
 // ROUTING (the S-4's sends): `send_<from>_<to>` sends one track's filtered
 // output into another track's filter, 12 sends in all. A send arrives one
 // block late (InFeedback) and goes through a tanh, so a ring of sends can
 // feed back but never runs away. OWN MATERIAL: each track plays its own
 // 60s buffer pair; rec_track picks the pair io records into, buf_track the
-// pair the buffer commands use. Count: 66 + 3 x 26 + 12 + 2 = 158.
+// pair the buffer commands use. Count: 66 + 3 (crush, fx_dly, fx_rev)
+// + 3 x 30 + 12 + 2 = 173.
 //
 // HARD RULE: exactly one `Engine_Mangler2` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
 //
 // Architecture: one persistent `io` synth (input, record head, dry/wet mix,
 // resample/regen feedback, FILTER, output) + ONE `mode` drone at a time
-// (OFF/GRAIN/WARP/PV/PLAY, spawned/freed by setMode) + a polyphonic voice layer
+// (OFF/GRAIN/WARP/PV/PLAY/CLOUD, spawned/freed by setMode) + a polyphonic voice layer
 // + TWO spawn/free FX synths: the delay (updateDelay — alive while delay_mix
 // > 0 or the feedback is a near-infinite hold) and the reverb (updateReverb,
 // only while rev_mix > 0) + the spawn/free erosion head (updateErode, only
@@ -65,13 +72,16 @@ Engine_Mangler2 : CroneEngine {
     var <repSynth, <repBufs, <repIdx;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
-    // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
-    // then uses the Clouds granular voice instead of the GrainBuf fallback
+    // true when the MiClouds def compiled (mi-UGens present): CLOUD mode
+    // then uses the Clouds voice, else the GRAIN granulator
     var <hasClouds;
     // tracks 2 to 4: one Event each (keys n, synth, params, strip,
     // stripParams, bus, phase), the shared return they all add into, and the
     // four tracks' post-filter outputs the sends read (outBuses[0] = track 1)
     var <extra, <tRetBus, <outBuses, <stripKeys;
+    // what tracks 2 to 4 send into the delay and the reverb (fx_dly, fx_rev),
+    // added by io to track 1's own sends
+    var <tDlyBus, <tRevBus;
     // the send levels, sendV[from][to] (1-based), for updateStrip
     var <sendV;
 
@@ -79,11 +89,14 @@ Engine_Mangler2 : CroneEngine {
         ^super.new(context, doneCallback);
     }
 
-    // the drone def for mode i (1=GRAIN 2=WARP 3=PV 4=PLAY). GRAIN -> MiClouds
-    // when available, else GrainBuf. PLAY is the clean straight loop.
+    // the drone def for mode i (1=GRAIN 2=WARP 3=PV 4=PLAY 5=CLOUD). GRAIN is
+    // the granulator that reads the window itself (\mangler2_grain). CLOUD
+    // is MiClouds on the playing window (it was GRAIN until mangler2's tenth
+    // change), and falls back to the granulator when mi-UGens are absent.
+    // PLAY is the clean straight loop.
     droneDef { arg i;
         (i == 4).if({ ^\mangler2_play });
-        ((i == 1) and: { hasClouds }).if({ ^\mangler2_clouds });
+        (i == 5).if({ ^hasClouds.if({ \mangler2_clouds }, { \mangler2_grain }) });
         ^[\mangler2_grain, \mangler2_warp, \mangler2_pv].at(i - 1);
     }
 
@@ -279,7 +292,7 @@ Engine_Mangler2 : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
-        var winBounds, winRead, drEnv, seam;
+        var winBounds, winRead, drEnv, seam, colour;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -307,6 +320,8 @@ Engine_Mangler2 : CroneEngine {
         dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
         tRetBus = Bus.audio(s, 2);
+        tDlyBus = Bus.audio(s, 2);
+        tRevBus = Bus.audio(s, 2);
         outBuses = Array.fill(4, { Bus.audio(s, 2) });
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
@@ -348,12 +363,14 @@ Engine_Mangler2 : CroneEngine {
         // tracks 2 to 4: each owns every playParam but the three it shares
         // with the take (level, rec, freeze) and the erosion pair, and a
         // strip with these four (its commands: `t<n>_level` ...)
-        stripKeys = [\level, \cutoff, \resonance, \filt_type];
+        stripKeys = [\level, \cutoff, \resonance, \filt_type,
+            \drive, \crush, \fx_dly, \fx_rev];
         extra = [2, 3, 4].collect({ arg n;
             var e = (n: n, bus: Bus.audio(s, 2), phase: Bus.control(s, 1),
                 params: Dictionary.new,
                 stripParams: Dictionary[\level -> 1.0, \cutoff -> 20000,
-                    \resonance -> 0.0, \filt_type -> 0]);
+                    \resonance -> 0.0, \filt_type -> 0,
+                    \drive -> 0.0, \crush -> 0.0, \fx_dly -> 1.0, \fx_rev -> 1.0]);
             playParams.keysValuesDo({ arg k, v;
                 [\level, \rec, \freeze, \erode, \wear].includes(k).not.if({
                     e[\params][k] = v;
@@ -367,9 +384,9 @@ Engine_Mangler2 : CroneEngine {
         // delayParams) is the original ioKeys -> the command set is unchanged.
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
             \dry_wet, \resample, \regen, \grain_level,
-            \filt_type, \cutoff, \resonance, \drive,
-            \delay_mix,
-            \rev_mix];
+            \filt_type, \cutoff, \resonance, \drive, \crush,
+            \delay_mix, \fx_dly,
+            \rev_mix, \fx_rev];
         revParams = Dictionary[
             \rev_size -> 1.0, \rev_decay -> 2.0, \rev_damp -> 0.3, \rev_early -> 0.7,
             \rev_moddepth -> 0.1, \rev_modfreq -> 2.0,
@@ -437,6 +454,22 @@ Engine_Mangler2 : CroneEngine {
             (phase.min(1 - phase) * span * BufDur.kr(buf) / 0.005).clip(0, 1)
         };
 
+        // GRAIN: the granulator. It reads the track's window itself, the way
+        // the S-4's granular device reads its sample. One stream of STEREO
+        // grains: each trigger starts a grain in the left buffer and one in
+        // the right at the same time, place, length and pitch, so the take
+        // keeps its stereo image. (Two independent mono clouds smeared the
+        // image, and at spread 0 folded it to mono.)
+        //   spread: 0 = left grains left and right grains right (the take as
+        //     recorded); 1 = each pair thrown to one random place.
+        //   pos_jitter (SPRAY): each grain lands up to that much of the
+        //     window away from the head. Every grain is also scattered by at
+        //     least a quarter of its own length: grains that all start on
+        //     the same sample comb-filter into a buzz at the density.
+        //   a grain is CENTRED on its place (it reads half before, half
+        //     after), and the whole grain stays inside the window: it never
+        //     reads the empty buffer past the take.
+        //   pv_freeze holds the head where it is while grains keep coming.
         SynthDef(\mangler2_grain, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
@@ -447,37 +480,50 @@ Engine_Mangler2 : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-            var winPos, phase, span, look;
-            var trigL, trigR, posL, posR, panL, panR, sig, comp;
-            var durL, durR, pchL, pchR, envSel;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
-            look = (0.25 / BufDur.kr(buf_l)) * rec * (1 - freeze);
-            // Dust (Poisson) instead of Impulse (periodic). AUDIO rate:
-            // kr quantized grain onsets to the ~1.3ms control block, which
-            // correlates them audibly at high density. the TRands must be ar
-            // with it — a kr TRand samples an ar trigger once per block and
-            // misses most impulses (stale per-grain randoms).
-            trigL = Dust.ar(density);
-            trigR = Dust.ar(density);
-            posL = winPos - look + TRand.ar((pos_jitter * span).neg, pos_jitter * span, trigL);
-            posR = winPos - look + TRand.ar((pos_jitter * span).neg, pos_jitter * span, trigR);
-            panL = (pan + TRand.ar(spread.neg, spread, trigL)).clip(-1, 1);
-            panR = (pan + TRand.ar(spread.neg, spread, trigR)).clip(-1, 1);
-            durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
-            durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            // NO /12 before .midiratio — midiratio IS 2^(st/12); the old
-            // double-divide made a 12-semitone spread deliver ~1 semitone
-            // (the param had run at 1/12 strength since it was built)
-            pchL = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
-            pchR = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
+            var winPos, phase, span, lo, look, bufDur, trig, dur, pch, readLen;
+            var off, pos, r, wid, panL, panR, envSel, comp, sig;
+            #winPos, phase, span = winRead.(pos_start, pos_end, scan * (1 - pv_freeze),
+                buf_l, phase_out, 1, level, handover);
+            lo = winPos - (phase * span);
+            bufDur = BufDur.kr(buf_l);
+            // while recording, read a quarter second behind the record head
+            look = (0.25 / bufDur) * rec * (1 - freeze);
+            // the TIMING, AUDIO rate (kr onsets fall on the control block):
+            // grain_jitter 0 is a regular stream, and Hann grains at an
+            // overlap of 2 or more then add up to a steady level. 1 is
+            // Poisson (Dust), the old law: measured on the device at the
+            // default size and density, 18% of the sound fell below -50 dB
+            // between clumps. In between, the regular stream is thinned and
+            // Dust makes up the rest, so the mean rate stays the density.
+            // The same knob varies the length. Every per-grain random is ar
+            // on the same trigger.
+            trig = CoinGate.ar(1 - grain_jitter.clip(0, 1), Impulse.ar(density))
+                + Dust.ar(density * grain_jitter.clip(0, 1));
+            dur = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trig))).max(0.005);
+            // midiratio is already 2^(st/12): no /12 before it
+            pch = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trig).midiratio;
+            readLen = (dur * pch / bufDur).min(span);
+            off = TRand.ar(-1, 1, trig) * ((pos_jitter * span) + (size * 0.25 / bufDur));
+            pos = winPos - look + off - (readLen * 0.5);
+            pos = lo + (pos - lo).wrap(0, span).clip(0, (span - readLen).max(0));
+            r = TRand.ar(spread.neg, spread, trig);
+            wid = 1 - spread;
+            panL = (pan - wid + r).clip(-1, 1);
+            panR = (pan + wid + r).clip(-1, 1);
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
-            // equal-loudness across the whole density x size plane: below unity
-            // overlap this BOOSTS (<=2x, the original "too faint" fix, unchanged);
-            // above it it now ATTENUATES (to -12dB at ~100 stacked grains)
-            // instead of riding the master limiter into pumping.
-            comp = (density * size).clip(0.25, 16).sqrt.reciprocal;
-            sig = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, posL.wrap(0, 1), 4, panL, envSel)
-                + GrainBuf.ar(2, trigR, durR, buf_r, pchR, posR.wrap(0, 1), 4, panR, envSel)) * comp;
+            // equal loudness across density x size (boost below unity
+            // overlap, up to 2x; attenuate above it as 1/sqrt(overlap), to
+            // -18dB at an overlap of 64: capped at 16, a dense cloud measured
+            // 4 dB above PLAY on the device),
+            // and over spread: a pair thrown to one place sums its two
+            // channels, so the top of spread is 3dB down. x0.8: grain
+            // pairs overlap coherently, so they peak harder than PLAY; on the
+            // device the default cloud came out 1.3 dB above PLAY with the
+            // limiter at work in 2% of it, and 9% when dense
+            comp = (density * size).clip(0.25, 64).sqrt.reciprocal
+                * (1 + spread.squared).sqrt.reciprocal * 0.8;
+            sig = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel)
+                + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel)) * comp;
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
@@ -636,7 +682,10 @@ Engine_Mangler2 : CroneEngine {
                         dens,
                         clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
                         pv_freeze, clouds_mode, clouds_lofi);
-                    sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp;
+                    // x0.5: measured on the device, Clouds at the default
+                    // density came out 6 dB above PLAY on the same take, so
+                    // a mode change jumped in level
+                    sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp * 0.5;
                     Out.ar(play_bus, sig * drEnv.(gate));
                 }).add;
                 hasClouds = true;
@@ -663,27 +712,30 @@ Engine_Mangler2 : CroneEngine {
                 size = 0.1, density = 20, spread = 0.5,
                 grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
                 grain_env1 = -1, grain_env2 = -1, note_len = 0;
-            var trigL, trigR, durL, durR, pchL, pchR, envSel, cloud, eGate, env, sig;
-            var comp;
-            // ar like the drone: sample-accurate onsets + per-grain randoms
-            trigL = Dust.ar(density);
-            trigR = Dust.ar(density);
-            durL = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigL))).max(0.001);
-            durR = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trigR))).max(0.001);
-            // no /12 — same double-divide fix as the drone def
-            pchL = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigL).midiratio;
-            pchR = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trigR).midiratio;
+            var trig, dur, pch, off, pos, r, wid, envSel, cloud, eGate, env, sig;
+            var comp, bufDur, reach;
+            // the drone's laws, one stream of stereo grain pairs: sample
+            // accurate onsets (regular to Poisson on grain_jitter), per-grain
+            // randoms on the same trigger
+            trig = CoinGate.ar(1 - grain_jitter.clip(0, 1), Impulse.ar(density))
+                + Dust.ar(density * grain_jitter.clip(0, 1));
+            bufDur = BufDur.kr(buf_l);
+            dur = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trig))).max(0.005);
+            pch = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trig).midiratio;
+            // SCATTER: grains that all start on the pad's sample comb-filter
+            // into a static buzz. Each starts up to half a grain after it,
+            // and inside the slice (note_len, a buffer fraction; 0 = no limit)
+            reach = (size * 0.5 / bufDur).min(Select.kr(note_len > 0, [1.0, note_len * 0.5]));
+            off = TRand.ar(0, 1, trig) * reach;
+            pos = (note_pos + off).wrap(0, 1);
+            r = TRand.ar(spread.neg, spread, trig);
+            wid = 1 - spread;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
-            // the SAME equal-loudness law the drone uses. Without it, raising
-            // density with a chord of pads held multiplied every voice's level
-            // with nothing holding it back — eight voices each getting louder
-            // together is what slams the master limiter into pumping. (0.5 was
-            // the old fixed halving; the comp law subsumes it.)
-            comp = (density * size).clip(0.25, 16).sqrt.reciprocal * 0.5;
-            cloud = (GrainBuf.ar(2, trigL, durL, buf_l, pchL, note_pos.wrap(0, 1), 4,
-                    TRand.ar(spread.neg, spread, trigL), envSel)
-                + GrainBuf.ar(2, trigR, durR, buf_r, pchR, note_pos.wrap(0, 1), 4,
-                    TRand.ar(spread.neg, spread, trigR), envSel)) * comp;
+            // the drone's loudness law, halved for a chord of pads
+            comp = (density * size).clip(0.25, 64).sqrt.reciprocal * 0.5
+                * (1 + spread.squared).sqrt.reciprocal;
+            cloud = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, (r - wid).clip(-1, 1), envSel)
+                + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, (r + wid).clip(-1, 1), envSel)) * comp;
             eGate = Select.kr(one_shot, [gate, Trig.kr(Impulse.kr(0), sustain)]);
             env = EnvGen.ar(Env.asr(atk, 1, rel), eGate, doneAction: 2);
             sig = Balance2.ar(cloud[0], cloud[1], pan) * env * amp;
@@ -726,9 +778,34 @@ Engine_Mangler2 : CroneEngine {
         // (after the drones, before io). The filter is io's, the same two
         // DFM1s and the same 20ms type crossfade. 2.sqrt is io's Balance2
         // makeup, so the two tracks sit at the same level.
+        // COLOR, one law for every track (a build-time function: each def
+        // inlines the same UGens). DRIVE is a clean to saturated crossfade,
+        // so drive 0 is a true bypass (LINEAR, not equal power: the two arms
+        // are the same signal, and XFade2 summed them to a +3dB hump at mid
+        // knob). CRUSH holds each sample for longer (the rate falls 32 times
+        // at the top) and rounds it to fewer bits (16 down to 4). It fades in
+        // over the first tenth of the knob, so crush 0 is a true bypass and
+        // the rest of the knob is all crushed.
+        colour = { arg sig, drive, crush;
+            var pre, xf, rate, steps, cr;
+            drive = drive.lag(0.03);
+            pre = 1 + (drive * 6);
+            sig = LinXFade2.ar(sig, (sig * pre).tanh * pre.sqrt.reciprocal,
+                (drive * 2 - 1));
+            crush = crush.lag(0.05);
+            rate = SampleRate.ir * (0.5 ** (crush * 5));
+            steps = 2 ** (16 - (crush * 12));
+            cr = (Latch.ar(sig, Impulse.ar(rate)) * steps).round / steps;
+            xf = (crush * 10).clip(0, 1);
+            LinXFade2.ar(sig, cr, (xf * 2 - 1))
+        };
+
         SynthDef(\mangler2_strip, {
             arg in_bus, out_bus, own_out, level = 1.0, cutoff = 20000,
                 resonance = 0, filt_type = 0,
+                // COLOR and SPACE: its drive and crush, and how much of it
+                // goes into the shared delay and reverb (dly_out, rev_out)
+                drive = 0, crush = 0, fx_dly = 1, fx_rev = 1, dly_out = 0, rev_out = 0,
                 // the sends INTO this track: snd<m> from track m (its own
                 // stays 0), read from ob<m>, a block late
                 snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
@@ -761,9 +838,12 @@ Engine_Mangler2 : CroneEngine {
                 (RLPF.ar(sig, cf, rq) * wLp) + (RHPF.ar(sig, cf, rq) * wHp)
                     + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
             });
+            sig = colour.value(sig, drive, crush);
             sig = sig * level.lag(0.03);
             Out.ar(own_out, sig);     // what the other tracks' sends read
             Out.ar(out_bus, sig);
+            Out.ar(dly_out, sig * fx_dly.lag(0.03));
+            Out.ar(rev_out, sig * fx_rev.lag(0.03));
         }).add;
 
         // ---- io: input, record head (with resample feedback), dry/wet, out
@@ -774,6 +854,9 @@ Engine_Mangler2 : CroneEngine {
                 freeze = 0, dry_wet = 0.5, resample = 0.0, regen = 0.0,
                 grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
+                // track 1's COLOR (crush) and SPACE (its sends into the delay
+                // and the reverb); t_dly and t_rev carry the other tracks'
+                crush = 0.0, fx_dly = 1.0, fx_rev = 1.0, t_dly = 0, t_rev = 0,
                 // delay + reverb run in their own spawn/free synths; io keeps
                 // only the mix knobs and the send/return buses
                 delay_mix = 0.0, dly_send = 0, dly_ret = 0,
@@ -782,9 +865,9 @@ Engine_Mangler2 : CroneEngine {
                 // filtered output goes for the others to read
                 snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0;
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
-            var cf, res, pre, dlyRet, rvRet, dfmClass, mmFilter;
+            var cf, res, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
-            var sendIn;
+            var sendIn, others, revIn, dm;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
@@ -843,52 +926,39 @@ Engine_Mangler2 : CroneEngine {
                         + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
                 } { |e| mmFilter.value }
             }, { mmFilter.value });
-            Out.ar(own_out, wet);     // track 1, filtered, for the sends
-            // tracks 2 to 4 join here, after their own filters: drive, delay
-            // and reverb are shared. grain_level stays track 1's level.
-            wet = wet + In.ar(t2_ret, 2);
+            // COLOR: track 1's drive and crush, after its filter. The other
+            // tracks have their own in their strips (the drive was shared,
+            // after the join, before each track had one).
+            wet = colour.value(wet, drive, crush);
+            Out.ar(own_out, wet);     // track 1, filtered and coloured, for the sends
+            // tracks 2 to 4 join here, after their own filter and colour
+            others = In.ar(t2_ret, 2);
 
-            // drive is a clean->saturated crossfade so drive=0 is a TRUE
-            // bypass. it was an always-on tanh that soft-clipped even at 0,
-            // colouring a fresh dry recording; now the base sound is exactly
-            // the sample, and drive dials the saturation in on top.
-            drive = drive.lag(0.03);      // zipper-free drive rides
-            pre = 1 + (drive * 6);
-            // LINEAR crossfade (LinXFade2), not equal-power: the two arms are
-            // the SAME signal (one saturated), so XFade2's sin/cos law summed
-            // correlated copies to a ~+3dB loudness hump at mid-knob. end
-            // gains are exactly 1/0 — drive=0 stays a bit-true bypass.
-            wet = LinXFade2.ar(wet, (wet * pre).tanh * pre.sqrt.reciprocal,
-                (drive * 2 - 1));
-
-            // the delay runs in \mangler2_delay (spawn/free — alive while
-            // delay_mix > 0 or the feedback is a near-infinite hold). io
-            // sends the post-drive wet and reads the echo back via InFeedback
-            // (one block late; the delay synth's line is one block short to
-            // pay for it, and for its own LocalIn block on each repeat). the mix law stays the equal-power
-            // CROSSFADE — a dub throw wants the direct to duck — and the lag
-            // keeps a CC step from zippering it. at rest the synth is gone
-            // and the return reads 0: this stage is a multiply by zero.
-            delay_mix = delay_mix.lag(0.03);
-            Out.ar(dly_send, wet);
+            // the delay runs in \mangler2_delay (spawn/free: alive while
+            // delay_mix > 0 or the feedback is a near-infinite hold). SPACE:
+            // what goes in is each track's own send (fx_dly, 1 by default,
+            // which is everything, as before). The echo comes back through
+            // InFeedback, one block late; the delay synth's line is one block
+            // short to pay for it. The mix law stays the equal-power
+            // CROSSFADE (a dub throw wants the direct to duck), lagged so a
+            // CC step does not zipper. At rest the synth is gone and the
+            // return reads 0.
+            dm = delay_mix.lag(0.03);
+            Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(t_dly, 2));
             dlyRet = InFeedback.ar(dly_ret, 2);
-            wet = (wet * (1 - delay_mix).sqrt) + (dlyRet * delay_mix.sqrt);
 
             // reverb + shimmer run in a spawn/free synth (\mangler2_reverb, only
-            // while rev_mix > 0). io sends the post-delay wet and reads the tail
-            // back via InFeedback (1-block delay across the node boundary). At
-            // rev_mix=0 the synth is gone, the return reads 0, output unchanged.
-            Out.ar(rev_send, wet);
+            // while rev_mix > 0). It gets each track's own reverb send through
+            // the delay's crossfade (so at fx_rev 1 it is the post-delay wet,
+            // as before), and the tail comes back one block late.
+            revIn = (((wet * fx_rev.lag(0.03)) + In.ar(t_rev, 2)) * (1 - dm).sqrt)
+                + (dlyRet * dm.sqrt);
+            Out.ar(rev_send, revIn);
+            wet = ((wet + others) * (1 - dm).sqrt) + (dlyRet * dm.sqrt);
             rvRet = InFeedback.ar(rev_ret, 2);
-            // SEND-style (user decision, OT-like): the direct sound stays at
-            // FULL level across the whole knob and rev_mix only scales how
-            // much tail is ADDED — "with reverb I can't hear the recording"
-            // was the old equal-power crossfade doing its job too well. Lua
-            // squares the knob, so .sqrt makes the tail gain linear in it.
-            // full-wet wash is no longer on this knob: crank rev_decay (WASH)
-            // or choke the source instead. headroom: the master Limiter.
-            // (lagging the synth-side arg does NOT touch the sclang spawn/free
-            // gate — updateReverb reads the raw command value.)
+            // SEND-style (OT-like): the direct sound stays at full level and
+            // rev_mix only scales how much tail is ADDED. Lua squares the
+            // knob, so .sqrt makes the tail gain linear in it.
             rev_mix = rev_mix.lag(0.03);
             wet = wet + (rvRet * rev_mix.sqrt);
 
@@ -1088,6 +1158,7 @@ Engine_Mangler2 : CroneEngine {
             tr[\strip] = Synth.new(\mangler2_strip, [
                 \in_bus, tr[\bus], \out_bus, tRetBus,
                 \own_out, outBuses[tr[\n] - 1],
+                \dly_out, tDlyBus, \rev_out, tRevBus,
                 \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
             ] ++ tr[\stripParams].getPairs, playGroup, \addToTail);
             tr[\mode] = 0;
@@ -1109,6 +1180,7 @@ Engine_Mangler2 : CroneEngine {
             \dly_send, dlySendBus,
             \dly_ret, dlyRetBus,
             \t2_ret, tRetBus,
+            \t_dly, tDlyBus, \t_rev, tRevBus,
             \own_out, outBuses[0],
             \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
         ], playGroup, \addAfter);
@@ -1369,6 +1441,8 @@ Engine_Mangler2 : CroneEngine {
         phaseBus.free;
         extra.notNil.if({ extra.do({ arg tr; tr[\bus].free; tr[\phase].free }) });
         tRetBus.free;
+        tDlyBus.free;
+        tRevBus.free;
         outBuses.do({ arg b; b.free });
         recPhaseBus.free;
         recAmpBus.free;

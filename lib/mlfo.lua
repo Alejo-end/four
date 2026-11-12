@@ -1,4 +1,4 @@
--- mlfo: two modulators that each move the SOUND of one knob.
+-- mlfo: four modulators that each move the SOUND of one knob, on any track.
 --
 -- A modulator never writes its target param. The param stays where the hand,
 -- MIDI, a scene, the morph or a motion lane left it: that is the knob, the
@@ -27,6 +27,13 @@
 --
 -- The TARGETS list is APPEND-ONLY: the target param stores an index into it,
 -- so a PSET or a PMAP names a target by its position here.
+--
+-- PER TRACK (mangler2, the S-4's modulators): each modulator also has a
+-- track (`lfo<i>_track`). A target names track 1's knob; on track n it
+-- moves `t<n>_<target>` (track 1's `grain_level` is `t<n>_level`). A knob
+-- every track shares (the delay, the reverb, dry/wet) is the same knob on
+-- any track. A knob track n does not have (the erosion's wear) moves
+-- nothing there. MOTION sets the track to the focus when you pick a target.
 
 local floor, min, max, sin, pi = math.floor, math.min, math.max, math.sin, math.pi
 local C, pget, FPS
@@ -36,7 +43,17 @@ local TARGETS = {
   "delay_mix", "delay_fb", "rev_mix", "rev_size", "shimmer",
   "scan", "size", "density", "spread", "pan", "grain_jitter",
   "pos_jitter", "warp_window", "clouds_pos", "clouds_tex", "wear",
+  -- mangler2: the COLOR and SPACE of a track, and its level
+  "crush", "fx_dly", "fx_rev", "grain_level",
 }
+-- the knobs all four tracks share: the same id whatever the track
+local SHARED = {
+  dry_wet = true, delay_mix = true, delay_fb = true, rev_mix = true,
+  rev_size = true, shimmer = true,
+}
+-- track 1's id to track n's word, where they differ
+local ALIAS = { grain_level = "level" }
+local NTRACKS = 4
 -- kept above 0 while modulated: the engine frees these synths at 0
 local FLOOR = { delay_mix = 0.001, rev_mix = 0.001 }
 local SHAPES = { "SINE", "TRI", "SQUARE", "RAMP", "RANDOM", "ENV" }
@@ -44,7 +61,7 @@ local ENV_SHAPE = 6
 -- beats per cycle, matching the lfoN_period option names (false = FREE)
 local PERIODS = { false, 1, 2, 4, 8, 16, 32 }
 local PERIOD_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
-local N = 2
+local N = 4
 
 local M = {
   TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
@@ -60,15 +77,41 @@ local sum = {}    -- this frame's swing per target id (reused, never rebuilt)
 local PID = {}
 for i = 1, N do
   PID[i] = {}
-  for _, w in ipairs({ "target", "shape", "period", "rate", "depth" }) do
+  for _, w in ipairs({ "target", "shape", "period", "rate", "depth", "track" }) do
     PID[i][w] = "lfo" .. i .. "_" .. w
   end
 end
 
--- the target param id of modulator i, or nil when it is OFF
-local function target_of(i)
-  return TARGETS[floor(pget(PID[i].target, 1) + 0.5) - 1]
+-- RID[n][id]: track n's id for track 1's `id`, false when track n has no
+-- such knob. Built on first use and kept (the tick must not allocate).
+local RID = {}
+for n = 2, NTRACKS do RID[n] = {} end
+local function on_track(n, id)
+  if n <= 1 or SHARED[id] then return id end
+  local r = RID[n][id]
+  if r == nil then
+    local t = "t" .. n .. "_" .. (ALIAS[id] or id)
+    r = params.lookup[t] and t or false
+    RID[n][id] = r
+  end
+  return r or nil
 end
+M.on_track = on_track
+
+-- the track modulator i sits on (1 to 4)
+local function track_of(i)
+  local n = floor(pget(PID[i].track, 1) + 0.5)
+  return n < 1 and 1 or (n > NTRACKS and NTRACKS or n)
+end
+M.track_of = track_of
+
+-- the param id modulator i moves (on its track), or nil when it is OFF or
+-- its track has no such knob
+local function target_of(i)
+  local t = TARGETS[floor(pget(PID[i].target, 1) + 0.5) - 1]
+  return t and on_track(track_of(i), t) or nil
+end
+M.target_of = target_of
 
 local function depth_of(i)
   local d = pget(PID[i].depth, 0)
@@ -185,6 +228,17 @@ function M.swung(id, v)
 end
 
 
+-- does a modulator move one of track n's own knobs (the TRACKS hub asks)
+function M.moves_track(n)
+  for i = 1, N do
+    if depth_of(i) ~= 0 and track_of(i) == n then
+      local t = TARGETS[floor(pget(PID[i].target, 1) + 0.5) - 1]
+      if t and not SHARED[t] and target_of(i) then return true end
+    end
+  end
+  return false
+end
+
 -- any modulator set to move a knob (the purity mark and the header ask). Read
 -- from the params, so it is true from the moment it is set.
 function M.active()
@@ -216,7 +270,7 @@ function M.add_params(add_group)
     local p = params:lookup_param(TARGETS[k])
     names[k + 1] = p and p.name or TARGETS[k]
   end
-  add_group("grp_lfo", "modulators", 5 * N)
+  add_group("grp_lfo", "modulators", 6 * N)
   for i = 1, N do
     params:add_option(PID[i].target, "LFO " .. i .. " target", names, 1)
     params:add_option(PID[i].shape, "LFO " .. i .. " shape", SHAPES, 1)
@@ -225,6 +279,7 @@ function M.add_params(add_group)
       controlspec.new(0.01, 10, "exp", 0, 0.5, "Hz"))
     params:add_control(PID[i].depth, "LFO " .. i .. " depth",
       controlspec.new(-1, 1, "lin", 0, 0, ""))
+    params:add_number(PID[i].track, "LFO " .. i .. " track", 1, NTRACKS, 1)
   end
 end
 

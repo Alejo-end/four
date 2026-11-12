@@ -19,7 +19,7 @@
 --   rows 3-6  the WORKSPACE (follows the page):
 --     main   row 3 window slices (span gesture; write head glows while
 --            recording) · row 4 tape loop slices (same gesture) · row 5
---            mode radio x1-5 (OFF GRAIN WARP PV PLAY) + pitch reset x7 /
+--            mode radio x1-6 (OFF GRAIN WARP PV PLAY CLOUD) + pitch reset x7 /
 --            pitch quantize x8 · row 6 the beat repeat, held: x1-5 = 1/2 to
 --            1/32 (slide a finger across them for a roll) · x6/x7 visuals look
 --            back/next · x8 visuals FLASH, held
@@ -442,7 +442,7 @@ local function main_ws_key(x, y, z)
   elseif y == 4 then
     slice_key("loop_start", "loop_end", x, z)
   elseif y == 5 and z == 1 then
-    if x <= 5 then params:set("mode", x)     -- OFF GRAIN WARP PV PLAY
+    if x <= 6 then params:set("mode", x)     -- OFF GRAIN WARP PV PLAY CLOUD
     elseif x == 7 then
       params:set("pitch", 1.0)
       C.flash_id, C.flash_until = "pitch", C.frame + FPS
@@ -653,7 +653,7 @@ local function draw_main_ws()
   gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, tape_on and 15 or 4, "white")
   -- row 5: mode radio (selected YELLOW) + pitch utilities
   local mode = pget("mode", 5)
-  for x = 1, 5 do gg:led(x, 5, x == mode and 15 or 3, x == mode and "yellow" or nil) end
+  for x = 1, 6 do gg:led(x, 5, x == mode and 15 or 3, x == mode and "yellow" or nil) end
   local en = pget("keys_enable", 1) == 1
   local quant = en and pget("pitch_quant", 0) == 1
   gg:led(7, 5, en and 3 or 1)

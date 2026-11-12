@@ -3690,6 +3690,61 @@ material: track 2 deck 1's part, track 3 deck 2's, track 4 the take again (1 to 
 tape's stretch (11, 12). They load OFF, so each preset sounds as it did; TRACKS (K2) brings one
 in as an engine track. The tracks' windows stay out of the pset: the file snaps them.
 
+mangler2, ninth change: **COLOR, SPACE and modulators per track, the rest of the S-4 chain
+(ENGINE and Lua, the count is 173, needs a RESTART)**. COLOR: every track has its own drive
+and a new crush (sample rate down 32 times and 16 to 4 bits at the top, a true bypass at 0).
+Track 1's are io's `drive` and `crush`; tracks 2 to 4 get `t<n>_drive` and `t<n>_crush` in
+their strips. The drive used to sit after the join and colour all four tracks; it now colours
+track 1 only, so `test/make_set.lua` copies a preset's or scene's drive to every track
+(test_set counts that copy as one move). SPACE: each track's own send into the shared delay
+and reverb (`fx_dly`, `fx_rev`, `t<n>_fx_dly`, `t<n>_fx_rev`), 1 by default, which is the
+sound from before. They sit at the end of each row of the TRACKS routing grid (columns D and
+R), so K1+E2 walks a track's three sends and then its two FX sends. The FILTER page's K1
+layer is now the focused track's drive and crush (the curve draws as stairs while crushed);
+dry/wet moved to MIX K1+E3, where the norns monitor level was (it stays in the system LEVELS
+menu). DRY clears every track's drive and crush. MODULATORS: four instead of two, each with a
+track (`lfo<n>_track`). A target names track 1's knob and moves track n's own on track n; a
+knob all tracks share (delay, reverb, dry/wet) stays shared; a knob the track lacks (wear)
+moves nothing. Picking a target on MOTION puts the modulator on the focused track. MOTION
+shows four modulator rows ("3>T3 CUT"), TRACKS draws a small wave on a modulated track, and
+the targets list gained crush, the two FX sends and the level (append only). Engine: 3 new
+io commands and 4 more strip keys per track (66 + 3 + 3 x 30 + 12 + 2 = 173). On the device
+2026-11-12: compiles, `count: 173`. The worst case takes 45% of the scsynth thread with 0
+xruns over 60 s: four GRAIN tracks, all coloured, FX and four modulators
+(doc/measurements/2026-11-12/color-space-mods.md). Nobody has listened yet.
+
+mangler2, tenth change: **GRAIN is a granulator that reads the take; Clouds moves to CLOUD
+(ENGINE and Lua, the count stays 173, needs a RESTART)**. On a norns with mi-UGens, GRAIN
+was MiClouds on the playing window. Its grains came from about the last second of playback,
+so the window, spray and position knobs barely shaped it. Now:
+- GRAIN (`\mangler2_grain`) grains the track's window directly, with one stream of stereo
+  grain pairs. Each trigger starts a left and a right grain at the same time, place, length
+  and pitch, so the take keeps its stereo image.
+- `spread` 0 is the image as recorded, and 1 throws each pair to one random place.
+- `pos_jitter` (SPRAY) scatters the grains over the window. Every grain is also scattered
+  by a quarter of its length, so grains no longer comb into a buzz.
+- A grain is centred on its place and stays inside the window, so it never reads the
+  empty buffer past the take.
+- `grain_jitter` now sets the timing too. At 0 the grains form a regular stream that keeps
+  a steady level. At 1 the timing is Poisson, the old law: on the device 18% of the default
+  cloud fell below -50 dB between clumps.
+- The loudness law follows the overlap up to 64. The cloud is trimmed 2 dB, so the default
+  is 0.8 dB under PLAY with the limiter idle.
+- `pv_freeze` holds the head while the grains go on: FRZ and HELD now work in GRAIN.
+
+CLOUD is the sixth mode option (append-only, engine mode 5): MiClouds as before, trimmed by
+6 dB, because it measured 6 dB above PLAY. It falls back to the granulator without
+mi-UGens. The K3 cycle is PLAY > GRAIN > WARP > PV > CLOUD > PLAY, and grid row 5 x6 is
+CLOUD. VOICE in GRAIN: E2/E3 size and density, K1+E2/E3 SPRAY and the pitch spread. CLOUD
+keeps scan and pitch on K1. The mode rail fits five words, and OFF/HELD moved under it. In
+GRAIN the cloud draws its pairs (half left, half right, 1 - SPREAD from the middle).
+
+Pad voices: the same stereo pairs and timing law. Each grain starts up to half a grain
+after the pad's point, inside the slice, so a held pad no longer buzzes on one sample. The
+presets' GRAIN scenes are now CLOUD, so the set keeps the voice it was tuned on. On the
+device: doc/measurements/2026-11-12/grain.md. Nobody has listened yet. A script loaded
+between `compile done` and the `engines:` line hung on the engine (CLAUDE.md).
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

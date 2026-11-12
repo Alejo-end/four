@@ -705,6 +705,8 @@ end
 -- (the erosion) is out of reach on the others, and what all share (drive,
 -- dry/wet) stays the same param.
 local NTRACKS = 4
+-- the engine voice of a track. APPEND-ONLY: a PSET stores the index
+local MODE_NAMES = { "OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD" }
 local TRACK_PAGES = { TAKE = true, VOICE = true, FILTER = true }
 local function tsel() return clamp(math.floor(pget("track_sel", 1) + 0.5), 1, NTRACKS) end
 local function track2() return tsel() > 1 end   -- any track but track 1
@@ -744,12 +746,14 @@ local function switch_track()
   flash_page()
   print("mangler: the focus is track " .. tsel())
 end
--- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
--- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS). Tracks 2
--- to 4 start OFF, so their first tap lands on PLAY.
+-- MODE cycles PLAY->GRAIN->WARP->PV->CLOUD->PLAY, skipping OFF (a silence
+-- pothole mid-set; stopping is STOP's job — OFF stays reachable in PARAMS).
+-- Tracks 2 to 4 start OFF, so their first tap lands on PLAY. The options are
+-- append-only (a PSET stores the index): CLOUD is the sixth.
+local MODE_NEXT = { 5, 3, 4, 6, 2, 5 }
 local function cycle_mode(id)
-  local m = pget(id, 5)
-  params:set(id, m >= 5 and 2 or (m < 2 and 5 or m + 1))
+  local m = math.floor(pget(id, 5) + 0.5)
+  params:set(id, MODE_NEXT[m] or 5)
 end
 local function cycle_type(id) params:set(id, (pget(id, 1) % 3) + 1) end
 -- TAKE's SNAP on tracks 2 to 4: the track's window onto track 1's (the take
@@ -841,15 +845,23 @@ end
 
 -- ---- the routing (mangler2) -------------------------------------------------
 -- The S-4's sends: each track's filtered output can feed any other track's
--- filter, `send_<from>_<to>`, twelve in all. ROUTES walks them row by row
--- (row = from, column = to). On TRACKS with K1 held, the grid shows and the
--- encoders reach the FOCUSED track's row: K1+E2 picks where it sends
--- (`route_sel`), K1+E3 how much.
+-- filter, `send_<from>_<to>`, twelve in all. SPACE: each track also has its
+-- own send into the shared delay (to = 5, `fx_dly` / `t<n>_fx_dly`) and
+-- reverb (to = 6, `fx_rev` / `t<n>_fx_rev`), at 1 by default (everything
+-- goes in, the sound from before). ROUTES walks them row by row (row = from,
+-- column = to). On TRACKS with K1 held, the grid shows and the encoders
+-- reach the FOCUSED track's row: K1+E2 picks where it sends (`route_sel`),
+-- K1+E3 how much.
+local FX_TO = { [NTRACKS + 1] = "fx_dly", [NTRACKS + 2] = "fx_rev" }
 local ROUTES, ROW_FIRST = {}, {}
+local ROW_N = NTRACKS + 1   -- cells per row: three tracks and the two FX
 for from = 1, NTRACKS do
   ROW_FIRST[from] = #ROUTES + 1
-  for to = 1, NTRACKS do
-    if from ~= to then
+  for to = 1, NTRACKS + 2 do
+    if FX_TO[to] then
+      local id = from == 1 and FX_TO[to] or ("t" .. from .. "_" .. FX_TO[to])
+      ROUTES[#ROUTES + 1] = { from = from, to = to, id = id, fx = true }
+    elseif from ~= to then
       ROUTES[#ROUTES + 1] = { from = from, to = to, id = "send_" .. from .. "_" .. to }
     end
   end
@@ -866,7 +878,7 @@ ctx.route_cur = route_cur
 -- K1+E2 on TRACKS: the next or previous destination in the focus's row
 local function route_step(d)
   local first = ROW_FIRST[tsel()]
-  local k = clamp(route_idx() + (d > 0 and 1 or -1), first, first + NTRACKS - 2)
+  local k = clamp(route_idx() + (d > 0 and 1 or -1), first, first + ROW_N - 1)
   params:set("route_sel", k)
 end
 
@@ -1123,10 +1135,10 @@ local ENC_MAP = {
   -- sends: K1+E2 where to, K1+E3 how much
   TRACKS = { "track_sel", "@route_to", "@trk_level", "@route_amt" },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
-  FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
+  FILTER = { "cutoff", "drive", "resonance", "crush" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
-  MIX    = { "mix", "input_level", "out_level", "monitor_level" },
+  MIX    = { "mix", "input_level", "out_level", "dry_wet" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
@@ -1139,21 +1151,28 @@ local ENC_MAP = {
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
--- control what you're hearing). mode options: OFF GRAIN WARP PV PLAY.
+-- control what you're hearing). mode options: OFF GRAIN WARP PV PLAY CLOUD.
 local VOICE_FACE = {
   { "scan", "pitch" },            -- OFF (the universal pair still)
   { "size", "density" },          -- GRAIN
   { "warp_window", "warp_rand" }, -- WARP
   { "scan", "pitch" },            -- PV
   { "scan", "pitch" },            -- PLAY
+  { "size", "density" },          -- CLOUD
 }
+-- GRAIN's K1 pair: SPRAY (how far grains land from the head) and the pitch
+-- spread. scan and pitch stay on K1 in every other mode.
+local GRAIN_ALT = { "pos_jitter", "grain_pitch_spread" }
 
--- MOTION with a modulator row selected (mod_focus 2 or 3): E3 its depth,
--- K1+E2 its period, K1+E3 its target. E2 stays the row selector.
-local MOTION_LFO = {
-  { "@mo_sel", "lfo1_period", "lfo1_depth", "lfo1_target" },
-  { "@mo_sel", "lfo2_period", "lfo2_depth", "lfo2_target" },
-}
+-- MOTION with a modulator row selected (mod_focus 2 to 5): E3 its depth,
+-- K1+E2 its period, K1+E3 its target. E2 stays the row selector. Picking a
+-- target puts the modulator on the focused track (K1+E1 picks the track).
+local MOTION_LFO, LFO_TRACK = {}, {}
+for i = 1, Mlfo.N do
+  local p = "lfo" .. i .. "_"
+  MOTION_LFO[i] = { "@mo_sel", p .. "period", p .. "depth", p .. "target" }
+  LFO_TRACK[p .. "target"] = p .. "track"
+end
 
 -- the param id addressed by encoder n (2 or 3), page + alt + mode aware
 local function enc_param(n)
@@ -1168,8 +1187,11 @@ local function enc_param(n)
     end
   end
   if page == "VOICE" and not ctx.alt then
-    local f = VOICE_FACE[clamp(pget(tid("mode"), 5), 1, 5)]
+    local f = VOICE_FACE[clamp(pget(tid("mode"), 5), 1, 6)]
     return tid(n == 2 and f[1] or f[2])
+  end
+  if page == "VOICE" and ctx.alt and pget(tid("mode"), 5) == 2 then
+    return tid(n == 2 and GRAIN_ALT[1] or GRAIN_ALT[2])
   end
   -- VOICE's alt pair is mode-contextual too: in PLAY mode the face already IS
   -- scan/pitch, so the alt copy was redundant there — it now carries the
@@ -2455,6 +2477,11 @@ function ctx.fx_dry()
   params:set("rev_mix", 0)
   params:set("shimmer", 0)
   params:set("drive", 0)
+  params:set("crush", 0)
+  for n = 2, NTRACKS do
+    params:set("t" .. n .. "_drive", 0)
+    params:set("t" .. n .. "_crush", 0)
+  end
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
   params:set("cutoff", filter_open_cutoff(ft))
@@ -2750,8 +2777,9 @@ local function init_params()
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
   add_eng_control("grain_level", "grain level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  -- granular character: per-grain size jitter + detune spread (both
-  -- continuous from 0 = off), and a 3-way grain-envelope shape. shape is
+  -- granular character: grain jitter (0 = a regular, steady stream of
+  -- equal grains; 1 = Poisson timing and lengths that vary), the detune
+  -- spread (0 = off), and a 3-way grain-envelope shape. shape is
   -- an option (engine wants 0/1/2, norns options are 1-based, so -1 in the
   -- action — same trick as `mode`).
   add_eng_control("grain_jitter", "grain jitter", unit(0.0))
@@ -2759,7 +2787,7 @@ local function init_params()
     controlspec.new(0, 12, "lin", 0, 0.0, "st"))
   add_eng_option("grain_shape", "grain shape", { "HANN", "WELCH", "PERC" }, 1)
 
-  -- MiClouds granular controls (GRAIN mode uses the Clouds voice when
+  -- MiClouds granular controls (CLOUD mode uses the Clouds voice when
   -- mi-UGens are installed; on the GrainBuf fallback these are stored but
   -- ignored — same guarded philosophy as the JPverb-only reverb params). the
   -- shared size/density/spread/pitch already remap to Clouds; these are the
@@ -2779,7 +2807,7 @@ local function init_params()
   -- PLAY (clean straight loop = the exact recorded sample) is the
   -- DEFAULT so a fresh take plays back untouched; GRAIN/WARP/PV are switched
   -- on for mangling. appended (not reordered) so 1..4 keep their meaning.
-  add_eng_option("mode", "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 5)
+  add_eng_option("mode", "mode", MODE_NAMES, 5)
   add_eng_control("warp_window", "warp window",
     controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
   params:add_number("warp_overlaps", "warp overlaps", 1, 8, 4)
@@ -2929,13 +2957,15 @@ local function init_params()
   -- turning the knob re-resolves rather than silently fighting it
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
-  params:add_group("grp_filter", "filter", 4)
+  params:add_group("grp_filter", "filter", 5)
   add_eng_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
   add_eng_control("resonance", "resonance", unit(0.0))
   -- post-filter tanh saturation with makeup: louder AND dirtier up
   add_eng_control("drive", "drive", unit(0.0))
+  -- COLOR: sample rate and bit reduction, after the drive (0 = bypass)
+  add_eng_control("crush", "crush", unit(0.0))
 
   -- ---- tracks 2 to 4 (mangler2) -------------------------------------------
   -- more engine drones on the same take: each its own mode, window, pitch,
@@ -2950,11 +2980,11 @@ local function init_params()
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
-    params:add_group("grp_t" .. n, "track " .. n, 27)
+    params:add_group("grp_t" .. n, "track " .. n, 29)
     -- its own material from a file (the take of track n), like `sample_file`
     params:add_file(pre .. "file", lab .. "load file", _path.audio)
     params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
-    add_eng_option(pre .. "mode", lab .. "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 1)
+    add_eng_option(pre .. "mode", lab .. "mode", MODE_NAMES, 1)
     add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
     add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
     add_eng_control(pre .. "pos_end", lab .. "win end", fine_unit(1.0))
@@ -2987,11 +3017,20 @@ local function init_params()
     add_eng_option(pre .. "filt_type", lab .. "filter type", { "LP", "HP", "BP" }, 1)
     add_eng_control(pre .. "cutoff", lab .. "cutoff", controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
     add_eng_control(pre .. "resonance", lab .. "resonance", unit(0.0))
+    -- COLOR: its own drive and crush (track 1's are `drive` and `crush`)
+    add_eng_control(pre .. "drive", lab .. "drive", unit(0.0))
+    add_eng_control(pre .. "crush", lab .. "crush", unit(0.0))
   end
   -- the sends: one track's filtered output into another track's filter
+  -- and each track's SPACE: its send into the delay and the reverb
   params:add_group("grp_routing", "routing", #ROUTES)
   for _, r in ipairs(ROUTES) do
-    add_eng_control(r.id, "send " .. r.from .. " > " .. r.to, unit(0.0))
+    if r.fx then
+      add_eng_control(r.id, "t" .. r.from .. (r.to == NTRACKS + 1 and " > delay" or " > reverb"),
+        unit(1.0))
+    else
+      add_eng_control(r.id, "send " .. r.from .. " > " .. r.to, unit(0.0))
+    end
   end
 
   params:add_group("grp_delay", "delay", 4)
@@ -3177,7 +3216,7 @@ local function init_params()
       return ids[v]
     end)
   -- which rows MOTION's encoders address: the lanes, or one modulator
-  params:add_option("mod_focus", "motion focus", { "LANES", "LFO 1", "LFO 2" }, 1)
+  params:add_option("mod_focus", "motion focus", { "LANES", "LFO 1", "LFO 2", "LFO 3", "LFO 4" }, 1)
   params:add_control("motion_depth", "motion depth", unit(1.0))
   -- settable loop length (K1+E2 on MOTION). 0 = AUTO (the recorded length);
   -- >0 retimes the loop's playback SPEED without touching the stored gesture.
@@ -3485,12 +3524,12 @@ function enc(n, d)
       move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
     elseif id == "@mo_sel" then
       -- one walk over the rows MOTION draws: no lane (0), the lanes, then
-      -- the two modulators
+      -- the four modulators
       local n = #ctx.motion.lane_ids
       local f = math.floor(pget("mod_focus", 1) + 0.5)
       local cur = f > 1 and n + f - 1
         or clamp(math.floor(pget("motion_lane", 0) + 0.5), 0, n)
-      local nxt = clamp(cur + d, 0, n + 2)
+      local nxt = clamp(cur + d, 0, n + Mlfo.N)
       if nxt > n then
         params:set("mod_focus", nxt - n + 1)
       else
@@ -3499,6 +3538,8 @@ function enc(n, d)
       end
     elseif id and params.lookup[id] then
       params:delta(id, fine_delta(id, d))
+      -- a modulator's target picked on MOTION: it moves the focused track's
+      if LFO_TRACK[id] then params:set(LFO_TRACK[id], tsel()) end
     else
       id = nil
     end

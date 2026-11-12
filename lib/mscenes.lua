@@ -110,6 +110,12 @@ local SPACE_IDS = {
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix",
   "shimmer", "shimmer_pitch", "shimmer_tone",
+  -- COLOR and SPACE (mangler2): each track's drive and crush, and its sends
+  -- into the delay and the reverb
+  "crush", "fx_dly", "fx_rev",
+  "t2_drive", "t2_crush", "t2_fx_dly", "t2_fx_rev",
+  "t3_drive", "t3_crush", "t3_fx_dly", "t3_fx_rev",
+  "t4_drive", "t4_crush", "t4_fx_dly", "t4_fx_rev",
 }
 
 local SWITCH_IDS = {
@@ -273,6 +279,9 @@ local SCENE_EXCLUDE = {
   -- the modulators: machines too. A scene moves the knobs they ride on
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
+  "lfo3_target", "lfo3_shape", "lfo3_period", "lfo3_rate", "lfo3_depth",
+  "lfo4_target", "lfo4_shape", "lfo4_period", "lfo4_rate", "lfo4_depth",
+  "lfo1_track", "lfo2_track", "lfo3_track", "lfo4_track",
   "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",

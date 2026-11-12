@@ -257,7 +257,7 @@ const osd = document.createElement("canvas");
 osd.width = 960; osd.height = 540;
 const ox = osd.getContext("2d");
 const t0 = Date.now();
-const MODES = ["OFF", "GRAIN", "WARP", "PV", "PLAY"];
+const MODES = ["OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD"];
 const pad2 = (n) => String(n).padStart(2, "0");
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 function drawOsd() {

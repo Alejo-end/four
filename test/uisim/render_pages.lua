@@ -223,6 +223,16 @@ elseif TRACK2 then
   run_ticks(5)
   redraw()
   export(pfx("FILTER", "_T2_HP"))
+  -- COLOR: track 2's crush draws the curve as stairs
+  params:set("t2_crush", 0.6); params:set("t2_drive", 0.4)
+  run_ticks(5)
+  redraw()
+  export(pfx("FILTER", "_T2_CRUSH"))
+  params:set("t2_crush", 0); params:set("t2_drive", 0)
+  -- a modulator on track 3's cutoff: the TRACKS hub marks track 3
+  local TG = 1
+  for i, t in ipairs(script_ctx().lfo.TARGETS) do if t == "cutoff" then TG = i + 1 end end
+  params:set("lfo3_target", TG); params:set("lfo3_track", 3); params:set("lfo3_depth", 0.4)
   -- the TRACKS hub: four tracks, track 3 focused, then its sends under K1
   params:set("t2_mode", 2); params:set("t2_level", 1.2)
   params:set("t3_mode", 4); params:set("t3_pos_start", 0.05); params:set("t3_pos_end", 0.2)
@@ -233,11 +243,19 @@ elseif TRACK2 then
   redraw()
   export(pfx("TRACKS", ""))
   params:set("send_1_2", 0.8); params:set("send_3_1", 0.4); params:set("send_3_4", 0.25)
+  params:set("t3_fx_rev", 0.3); params:set("t2_fx_dly", 0)
   key(1, 1)
   run_ticks(3)
   redraw()
   export(pfx("TRACKS", "_SENDS"))
   key(1, 0)
+  -- MOTION with no lanes: the four modulator rows, LFO 3 on track 3
+  goto_page("MOTION")
+  params:set("mod_focus", 4)
+  run_ticks(5)
+  redraw()
+  export(pfx("MOTION", "_LFO4"))
+  params:set("mod_focus", 1); params:set("lfo3_depth", 0); params:set("lfo3_target", 1)
   goto_page("TAKE")                          -- TAKE 3: track 3's window, the others marked
   run_ticks(10)
   redraw()

@@ -205,8 +205,15 @@ do
   set({ density = 200 }); local thick = cloud()
   ok(thick > thin * 3, "a higher DENSITY draws more grains (" .. thick .. " > 3 x " .. thin .. ")")
 
+  -- GRAIN plays stereo PAIRS: at SPREAD 0 the left grains sit at the left
+  -- edge and the right grains at the right edge, the take as recorded
   local _, _, y0, y1 = (function() set({ spread = 0 }); return cloud() end)()
-  ok(y0 == y1, "SPREAD 0 puts every grain in the middle of the stereo field (rows "
+  ok(y1 - y0 >= 20, "GRAIN at SPREAD 0 keeps the take's stereo: grains at both edges (rows "
+    .. y0 .. ".." .. y1 .. ")")
+  -- CLOUD scatters each grain around the pan: SPREAD 0 is one row
+  BASE.mode = 6
+  _, _, y0, y1 = (function() set({ spread = 0 }); return cloud() end)()
+  ok(y0 == y1, "CLOUD at SPREAD 0 puts every grain in the middle of the stereo field (rows "
     .. y0 .. ".." .. y1 .. ")")
   set({ spread = 1 })
   _, _, y0, y1 = cloud()
@@ -217,6 +224,7 @@ do
   set({ spread = 0, pan = 1 })
   local _, _, ry0 = cloud()
   ok(ly1 < ry0, "PAN moves the cloud: left above right (" .. ly1 .. " < " .. ry0 .. ")")
+  BASE.mode = 2
 
   set({ pos_jitter = 0 }); local _, near_w = cloud()
   set({ pos_jitter = 1 }); local _, wide_w = cloud()

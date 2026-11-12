@@ -862,10 +862,35 @@ do
   local w0 = params:get("wear")
   enc(3, 3)
   ok(params:get("wear") ~= w0, "VOICE K1+E3 in PLAY moves wear")
-  params:set("mode", 2)                       -- GRAIN: pitch must stay reachable
+  params:set("mode", 6)                       -- CLOUD: pitch must stay reachable
   local p0 = params:get("pitch")
   enc(3, 3)
-  ok(params:get("pitch") ~= p0, "VOICE K1+E3 in GRAIN still moves pitch")
+  ok(params:get("pitch") ~= p0, "VOICE K1+E3 in CLOUD still moves pitch")
+  -- GRAIN (the granulator): K1 is SPRAY and the pitch spread
+  params:set("mode", 2)
+  local j0, s0 = params:get("pos_jitter"), params:get("grain_pitch_spread")
+  enc(2, 3); enc(3, 3)
+  ok(params:get("pos_jitter") > j0 and params:get("grain_pitch_spread") > s0,
+    "VOICE K1+E2/E3 in GRAIN move SPRAY and the pitch spread")
+  params:set("pos_jitter", j0); params:set("grain_pitch_spread", s0)
+  key(1, 0)
+  -- the K3 cycle: PLAY > GRAIN > WARP > PV > CLOUD > PLAY, OFF skipped
+  params:set("mode", 5)
+  local seen = {}
+  for _ = 1, 5 do
+    key(3, 1); key(3, 0)
+    seen[#seen + 1] = params:string("mode")
+  end
+  ok(table.concat(seen, " ") == "GRAIN WARP PV CLOUD PLAY",
+    "VOICE K3 cycles GRAIN WARP PV CLOUD and back to PLAY (" .. table.concat(seen, " ") .. ")")
+  local sent_mode
+  local real_mode = engine.mode
+  engine.mode = function(v) sent_mode = v end
+  params:set("mode", 6)
+  ok(sent_mode == 5, "CLOUD is engine mode 5 (the Clouds voice)")
+  engine.mode = real_mode
+  params:set("mode", 5)
+  key(1, 1)
   key(1, 0)
   params:set("pitch", p0)
 
@@ -1666,7 +1691,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   mangler2_cmds(sc, add)
-  ok(n == 158, "the engine command count is 158, the expected fingerprint (got " .. n .. ")")
+  ok(n == 173, "the engine command count is 173, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2609,6 +2634,109 @@ do
 end
 
 -- ============================================================================
+-- 27b · mangler2: modulators per track, COLOR and SPACE per track
+-- ============================================================================
+-- A modulator on track n moves t<n>_<target>; a knob the tracks share stays
+-- the shared knob; a knob track n lacks moves nothing. Every track has its
+-- own drive and crush, and its own send into the delay and the reverb.
+do
+  local lfo = CTX.lfo
+  local function tindex(id)
+    for k, t in ipairs(lfo.TARGETS) do if t == id then return k + 1 end end
+  end
+  ok(lfo.N == 4, "there are four modulators")
+  local sent = {}
+  local names = { "cutoff", "t3_cutoff", "t2_level", "delay_mix" }
+  local real = {}
+  for _, id in ipairs(names) do
+    real[id] = engine[id]
+    engine[id] = function(v) sent[id] = v end
+  end
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("orbit_on", 0)
+  params:set("cutoff", 2000); params:set("t3_cutoff", 2000)
+  params:set("lfo3_target", tindex("cutoff")); params:set("lfo3_track", 3)
+  params:set("lfo3_shape", 3); params:set("lfo3_period", 1)
+  params:set("lfo3_rate", 1); params:set("lfo3_depth", 0.5)
+  sent.cutoff = nil
+  _h.run_ticks(CTX.FPS)
+  ok(sent.t3_cutoff ~= nil and math.abs(sent.t3_cutoff - 2000) > 100,
+    "a modulator on track 3 swings track 3's cutoff")
+  ok(sent.cutoff == nil, "...and leaves track 1's alone")
+  near(params:get("t3_cutoff"), 2000, 1e-9, "...and the knob itself stays put")
+  ok(lfo.moves_track(3) and not lfo.moves_track(1), "...and the TRACKS hub can say track 3 moves")
+  -- track 1's level is track n's `level`
+  params:set("lfo3_target", tindex("grain_level")); params:set("lfo3_track", 2)
+  _h.run_ticks(CTX.FPS)
+  ok(lfo.target_of(3) == "t2_level" and sent.t2_level ~= nil,
+    "the level target on track 2 moves t2_level")
+  -- a shared knob is the shared knob on any track
+  params:set("lfo3_target", tindex("delay_mix")); params:set("lfo3_track", 4)
+  ok(lfo.target_of(3) == "delay_mix", "the delay mix is the same knob on track 4")
+  ok(not lfo.moves_track(4), "...and is not one of track 4's own knobs")
+  -- a knob the track does not have moves nothing
+  params:set("lfo3_target", tindex("wear")); params:set("lfo3_track", 2)
+  ok(lfo.target_of(3) == nil, "track 2 has no erosion, so its wear moves nothing")
+  params:set("lfo3_depth", 0); params:set("lfo3_target", 1); params:set("lfo3_track", 1)
+  _h.run_ticks(1)
+  for _, id in ipairs(names) do engine[id] = real[id] end
+  params:set("cutoff", 20000); params:set("t3_cutoff", 20000)
+
+  -- MOTION: picking a target puts the modulator on the focused track
+  T.goto_page("MOTION")
+  params:set("track_sel", 2)
+  params:set("mod_focus", 4)                 -- LFO 3
+  key(1, 1); enc(3, 3); key(1, 0)
+  ok(params:get("lfo3_track") == 2, "a target picked on MOTION lands on the focused track")
+  params:set("lfo3_target", 1); params:set("mod_focus", 1)
+  params:set("track_sel", 1)
+
+  -- COLOR: the FILTER page's K1 layer is the focused track's drive and crush
+  T.goto_page("FILTER")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == "drive" and CTX.enc_param(3) == "crush",
+    "FILTER K1+E2/E3 are track 1's drive and crush")
+  params:set("track_sel", 4)
+  ok(CTX.enc_param(2) == "t4_drive" and CTX.enc_param(3) == "t4_crush",
+    "...and track 4's on track 4")
+  CTX.alt = false
+  params:set("track_sel", 1)
+  -- dry/wet moved to MIX's K1+E3
+  T.goto_page("MIX")
+  CTX.alt = true
+  ok(CTX.enc_param(3) == "dry_wet", "dry/wet is on MIX K1+E3")
+  CTX.alt = false
+  -- DRY clears every track's colour
+  params:set("crush", 0.5); params:set("t3_drive", 0.4); params:set("t2_crush", 0.3)
+  CTX.fx_dry()
+  ok(params:get("crush") == 0 and params:get("t3_drive") == 0 and params:get("t2_crush") == 0,
+    "DRY clears every track's drive and crush")
+  CTX.throws_forget()
+
+  -- SPACE: the FX sends are on the routing grid, full by default
+  for n = 1, 4 do
+    local d = n == 1 and "fx_dly" or ("t" .. n .. "_fx_dly")
+    local r = n == 1 and "fx_rev" or ("t" .. n .. "_fx_rev")
+    ok(params:get(d) == 1 and params:get(r) == 1,
+      "track " .. n .. " sends everything to the delay and reverb by default")
+  end
+  T.goto_page("TRACKS")
+  params:set("track_sel", 2)
+  CTX.alt = true
+  local seen = {}
+  for _ = 1, 8 do enc(2, 1); seen[CTX.route_cur().id] = true end
+  ok(seen.t2_fx_dly and seen.t2_fx_rev and seen.send_2_4,
+    "K1+E2 on TRACKS walks track 2's sends and its two FX sends")
+  ok(CTX.route_cur().id == "t2_fx_rev", "...and stops at the reverb, the row's end")
+  ok(CTX.enc_target("@route_amt") == "t2_fx_rev", "...and K1+E3 sets that send")
+  enc(3, -5)
+  ok(params:get("t2_fx_rev") < 1, "...which turns track 2's reverb send down")
+  params:set("t2_fx_rev", 1)
+  CTX.alt = false
+  params:set("track_sel", 1); params:set("route_sel", 1)
+end
+
+-- ============================================================================
 -- 28 · the window locked to the clock
 -- ============================================================================
 -- With win_beats other than FREE the window's end is put at the start plus
@@ -3132,7 +3260,7 @@ end
 -- ============================================================================
 -- 32 · MOTION hosts the modulators
 -- ============================================================================
--- E2 walks the lanes and then the two modulator rows; a modulator row takes
+-- E2 walks the lanes and then the four modulator rows; a modulator row takes
 -- E3 (depth), K1+E2 (period) and K1+E3 (target). The eraser lets the
 -- selected modulator go and leaves the lanes.
 do
@@ -3146,9 +3274,11 @@ do
   ok(params:get("mod_focus") == 2, "...then LFO 1")
   enc(2, 1)
   ok(params:get("mod_focus") == 3, "...then LFO 2")
+  enc(2, 1); enc(2, 1)
+  ok(params:get("mod_focus") == 5, "...then LFO 3 and LFO 4")
   enc(2, 5)
-  ok(params:get("mod_focus") == 3, "...and stops there")
-  enc(2, -1)
+  ok(params:get("mod_focus") == 5, "...and stops there")
+  for _ = 1, 3 do enc(2, -1) end
   ok(params:get("mod_focus") == 2, "back down to LFO 1")
   enc(2, -1)
   ok(params:get("mod_focus") == 1 and params:get("motion_lane") == n,
@@ -3233,8 +3363,8 @@ do
   ok(CTX.enc_param(2) == "t2_cutoff" and CTX.enc_param(3) == "t2_resonance",
     "FILTER's E2/E3 are track 2's cutoff and resonance")
   CTX.alt = true
-  ok(CTX.enc_param(2) == "drive" and CTX.enc_param(3) == "dry_wet",
-    "...drive and dry/wet are shared, the same params on both tracks")
+  ok(CTX.enc_param(2) == "t2_drive" and CTX.enc_param(3) == "t2_crush",
+    "...and K1 reaches track 2's own COLOR: its drive and crush")
   CTX.alt = false
   local ft0 = params:get("filt_type")
   key(3, 1); _h.run_ticks(1); key(3, 0)
@@ -3320,8 +3450,10 @@ do
   ok(CTX.route_cur().from == 2, "the cursor sits in the focused track's row")
   enc(2, 1)
   ok(CTX.route_cur().id == "send_2_3", "K1+E2 steps to track 2 into track 3")
-  enc(2, 5)
-  ok(CTX.route_cur().id == "send_2_4", "...and stops at the row's end")
+  for _ = 1, 6 do enc(2, 1) end
+  ok(CTX.route_cur().id == "t2_fx_rev", "...and stops at the row's end, the reverb send")
+  enc(2, -1); enc(2, -1)
+  ok(CTX.route_cur().id == "send_2_4", "...two back is track 2 into track 4")
   enc(3, 10)
   ok(params:get("send_2_4") > 0 and params:get("send_2_3") == 0, "K1+E3 sets that send only")
   redraw()

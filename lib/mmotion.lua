@@ -75,6 +75,9 @@ local MOTION_IDS = {
   "t2_grain_pitch_spread", "t2_clouds_pos", "t2_clouds_tex", "t2_clouds_fb",
   "t2_clouds_lofi", "t2_clouds_mode", "t2_mode", "t2_warp_window",
   "t2_warp_rand", "t2_pv_freeze", "t2_cutoff", "t2_resonance", "t2_filt_type",
+  -- COLOR and SPACE (mangler2), appended: each track's drive and crush and
+  -- its sends into the delay and the reverb
+  "crush", "fx_dly", "fx_rev", "t2_drive", "t2_crush", "t2_fx_dly", "t2_fx_rev",
 }
 -- mangler2: tracks 3 and 4 the same as track 2 (appended, lane order kept),
 -- then the twelve sends
@@ -148,6 +151,9 @@ local MOTION_EXCLUDE = {
   -- the modulators: a loop of their knobs would fight them
   "lfo1_target", "lfo1_shape", "lfo1_period", "lfo1_rate", "lfo1_depth",
   "lfo2_target", "lfo2_shape", "lfo2_period", "lfo2_rate", "lfo2_depth",
+  "lfo3_target", "lfo3_shape", "lfo3_period", "lfo3_rate", "lfo3_depth",
+  "lfo4_target", "lfo4_shape", "lfo4_period", "lfo4_rate", "lfo4_depth",
+  "lfo1_track", "lfo2_track", "lfo3_track", "lfo4_track",
 }
 
 local M = {

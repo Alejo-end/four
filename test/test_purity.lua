@@ -51,7 +51,7 @@ SCENARIO = nil
 local PURE = {
   mode = 5, pitch = 1, scan = 1, pan = 0, dry_wet = 1,
   filt_type = 1, cutoff = 20000, resonance = 0,
-  drive = 0, delay_mix = 0, rev_mix = 0, shimmer = 0, clouds_fb = 0,
+  drive = 0, crush = 0, delay_mix = 0, rev_mix = 0, shimmer = 0, clouds_fb = 0,
   resample = 0, regen = 0, erode = 0, freeze = 0, pv_freeze = 0,
   mix = 0,           -- the tape holds audio: thrown fully away in the base
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
@@ -130,6 +130,7 @@ local MOVES = {
   { "scan off unity", "scan", 0.5 },
   { "pan off center", "pan", 0.5 },
   { "drive", "drive", 0.3 },
+  { "crush (mangler2)", "crush", 0.3 },
   { "delay", "delay_mix", 0.3 },
   { "reverb", "rev_mix", 0.3 },
   { "shimmer", "shimmer", 0.3 },
@@ -163,6 +164,12 @@ for _, m in ipairs(MOVES) do
   ok(lit(), "...and reverting " .. m[2] .. " restores it")
 end
 clock.run = real_run
+
+-- the SPACE sends only scale what the delay and reverb mixes let through:
+-- with both mixes at 0, a send turned down leaves the take as it is
+params:set("fx_dly", 0); params:set("t3_fx_rev", 0.2)
+ok(lit(), "a track's delay or reverb send alone leaves the mark (mangler2)")
+params:set("fx_dly", 1); params:set("t3_fx_rev", 1)
 
 -- a pad voice sounds on top of the take: a held one kills the mark
 local ctx
