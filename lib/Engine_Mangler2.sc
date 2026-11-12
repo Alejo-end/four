@@ -1,11 +1,15 @@
 // Engine_Mangler2.sc — THE ONLY engine file for the `mangler2` norns script.
 //
-// mangler2 is mangler with a SECOND engine track. Track 2 is a second drone
-// (any mode) on the same take, with its own window, pitch, grain knobs, its
-// own filter (\mangler2_strip) and its own level. It joins track 1 after
-// io's filter, so drive, delay and reverb are shared. Its commands are the
-// drone's own names with a `t2_` prefix, plus t2_mode, t2_level, t2_cutoff,
-// t2_resonance and t2_filt_type (count 92: mangler's 66 plus 26).
+// mangler2 is mangler with FOUR engine tracks. Tracks 2 to 4 are more drones
+// (any mode) on the same take, each with its own window, pitch, grain knobs,
+// its own filter (\mangler2_strip) and its own level. They join track 1
+// after io's filter, so drive, delay and reverb are shared. Their commands
+// are the drone's own names with a `t2_`, `t3_` or `t4_` prefix, plus the
+// strip's level, cutoff, resonance and filt_type, and the mode: 26 a track.
+// ROUTING (the S-4's sends): `send_<from>_<to>` sends one track's filtered
+// output into another track's filter, 12 sends in all. A send arrives one
+// block late (InFeedback) and goes through a tanh, so a ring of sends can
+// feed back but never runs away. Count: 66 + 3 x 26 + 12 = 156.
 //
 // HARD RULE: exactly one `Engine_Mangler2` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
@@ -56,10 +60,12 @@ Engine_Mangler2 : CroneEngine {
     // true when the MiClouds def compiled (mi-UGens present) — GRAIN mode
     // then uses the Clouds granular voice instead of the GrainBuf fallback
     var <hasClouds;
-    // track 2: its drone, its last-known values, its strip (filter + level),
-    // the bus the drone writes and the bus the strip hands to io
-    var <playSynth2, <playParams2, <t2Keys, <stripSynth, <stripParams;
-    var <t2Bus, <t2RetBus, <phaseBus2;
+    // tracks 2 to 4: one Event each (keys n, synth, params, strip,
+    // stripParams, bus, phase), the shared return they all add into, and the
+    // four tracks' post-filter outputs the sends read (outBuses[0] = track 1)
+    var <extra, <tRetBus, <outBuses, <stripKeys;
+    // the send levels, sendV[from][to] (1-based), for updateStrip
+    var <sendV;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -73,22 +79,51 @@ Engine_Mangler2 : CroneEngine {
         ^[\mangler2_grain, \mangler2_warp, \mangler2_pv].at(i - 1);
     }
 
-    // track 2's mode: the same release law as setMode. It shares the take's
-    // level, rec and freeze (STOP halts it too), and has no erosion head.
-    setMode2 { arg i;
-        playSynth2.notNil.if({
-            playSynth2.set(\gate, 0, \handover, if(i > 0, 1, 0));
-            playSynth2 = nil;
+    // an extra track's mode: the same release law as setMode. It shares the
+    // take's level, rec and freeze (STOP halts it too), and has no erosion.
+    // a strip runs only while its track plays or a send feeds it. Measured
+    // on the device: three strips always on cost about 18% of the engine
+    // thread with every extra track OFF. The pause waits 100ms, so a
+    // drone's 20ms release and the filter's tail are heard to the end.
+    updateStrip { arg tr;
+        var want = (tr[\mode] ? 0) > 0;
+        (1..4).do({ arg from;
+            (from != tr[\n]).if({
+                ((sendV[from - 1][tr[\n] - 1] ? 0) > 0).if({ want = true });
+            });
+        });
+        want.if({
+            tr[\strip].run(true);
+        }, {
+            SystemClock.sched(0.1, {
+                var still = (tr[\mode] ? 0) <= 0;
+                (1..4).do({ arg from;
+                    (from != tr[\n]).if({
+                        ((sendV[from - 1][tr[\n] - 1] ? 0) > 0).if({ still = false });
+                    });
+                });
+                still.if({ tr[\strip].run(false) });
+                nil
+            });
+        });
+    }
+
+    setModeN { arg tr, i;
+        tr[\synth].notNil.if({
+            tr[\synth].set(\gate, 0, \handover, if(i > 0, 1, 0));
+            tr[\synth] = nil;
         });
         (i > 0).if({
-            playSynth2 = Synth.new(this.droneDef(i), [
+            tr[\synth] = Synth.new(this.droneDef(i), [
                 \buf_l, bufL, \buf_r, bufR,
-                \play_bus, t2Bus, \phase_out, phaseBus2,
+                \play_bus, tr[\bus], \phase_out, tr[\phase],
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
                 \level, playParams[\level], \rec, playParams[\rec],
                 \freeze, playParams[\freeze],
-            ] ++ playParams2.getPairs, playGroup);
+            ] ++ tr[\params].getPairs, playGroup);
         });
+        tr[\mode] = i;
+        this.updateStrip(tr);
     }
 
     setMode { arg i;
@@ -261,9 +296,8 @@ Engine_Mangler2 : CroneEngine {
         dlySendBus = Bus.audio(s, 2);
         dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
-        t2Bus = Bus.audio(s, 2);
-        t2RetBus = Bus.audio(s, 2);
-        phaseBus2 = Bus.control(s, 1);
+        tRetBus = Bus.audio(s, 2);
+        outBuses = Array.fill(4, { Bus.audio(s, 2) });
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
         // the beat repeat's three capture buffers: 2s of stereo each (a half
@@ -301,21 +335,22 @@ Engine_Mangler2 : CroneEngine {
         // the playParams the erosion head reads: its window, its two knobs,
         // and the three gates that pause it
         eroKeys = [\pos_start, \pos_end, \erode, \wear, \level, \rec, \freeze];
-        // track 2's own drone values: every playParam but the three it
-        // shares with the take (level, rec, freeze) and the erosion pair.
-        // t2Keys maps each `t2_` command to its drone arg.
-        playParams2 = Dictionary.new;
-        t2Keys = Dictionary.new;
-        playParams.keysValuesDo({ arg k, v;
-            [\level, \rec, \freeze, \erode, \wear].includes(k).not.if({
-                playParams2[k] = v;
-                t2Keys[("t2_" ++ k).asSymbol] = k;
+        // tracks 2 to 4: each owns every playParam but the three it shares
+        // with the take (level, rec, freeze) and the erosion pair, and a
+        // strip with these four (its commands: `t<n>_level` ...)
+        stripKeys = [\level, \cutoff, \resonance, \filt_type];
+        extra = [2, 3, 4].collect({ arg n;
+            var e = (n: n, bus: Bus.audio(s, 2), phase: Bus.control(s, 1),
+                params: Dictionary.new,
+                stripParams: Dictionary[\level -> 1.0, \cutoff -> 20000,
+                    \resonance -> 0.0, \filt_type -> 0]);
+            playParams.keysValuesDo({ arg k, v;
+                [\level, \rec, \freeze, \erode, \wear].includes(k).not.if({
+                    e[\params][k] = v;
+                });
             });
+            e
         });
-        stripParams = Dictionary[
-            \t2_level -> 1.0, \t2_cutoff -> 20000, \t2_resonance -> 0.0,
-            \t2_filt_type -> 0
-        ];
         // reverb params live in revParams (routed to \mangler2_reverb) and the
         // delay's in delayParams (routed to \mangler2_delay); io keeps the two
         // MIX knobs it needs for its own crossfade/add. (ioKeys U revParams U
@@ -682,15 +717,23 @@ Engine_Mangler2 : CroneEngine {
         // DFM1s and the same 20ms type crossfade. 2.sqrt is io's Balance2
         // makeup, so the two tracks sit at the same level.
         SynthDef(\mangler2_strip, {
-            arg in_bus, out_bus, t2_level = 1.0, t2_cutoff = 20000,
-                t2_resonance = 0, t2_filt_type = 0;
-            var sig, cf, res, wLp, wHp, wBp, dfmClass;
-            sig = In.ar(in_bus, 2) * 2.sqrt;
-            cf = t2_cutoff.clip(20, 20000).lag(0.05);
-            res = t2_resonance.lag(0.05);
-            wLp = Lag.kr(t2_filt_type < 0.5, 0.02);
-            wHp = Lag.kr((t2_filt_type > 0.5) * (t2_filt_type < 1.5), 0.02);
-            wBp = Lag.kr(t2_filt_type > 1.5, 0.02);
+            arg in_bus, out_bus, own_out, level = 1.0, cutoff = 20000,
+                resonance = 0, filt_type = 0,
+                // the sends INTO this track: snd<m> from track m (its own
+                // stays 0), read from ob<m>, a block late
+                snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
+                ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0;
+            var sig, cf, res, wLp, wHp, wBp, dfmClass, sendIn;
+            sendIn = (InFeedback.ar(ob1, 2) * snd1.lag(0.03))
+                + (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
+                + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
+                + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
+            sig = (In.ar(in_bus, 2) * 2.sqrt) + LeakDC.ar(sendIn).tanh;
+            cf = cutoff.clip(20, 20000).lag(0.05);
+            res = resonance.lag(0.05);
+            wLp = Lag.kr(filt_type < 0.5, 0.02);
+            wHp = Lag.kr((filt_type > 0.5) * (filt_type < 1.5), 0.02);
+            wBp = Lag.kr(filt_type > 1.5, 0.02);
             dfmClass = "DFM1".asSymbol.asClass;
             sig = dfmClass.notNil.if({
                 try {
@@ -708,7 +751,9 @@ Engine_Mangler2 : CroneEngine {
                 (RLPF.ar(sig, cf, rq) * wLp) + (RHPF.ar(sig, cf, rq) * wHp)
                     + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
             });
-            Out.ar(out_bus, sig * t2_level.lag(0.03));
+            sig = sig * level.lag(0.03);
+            Out.ar(own_out, sig);     // what the other tracks' sends read
+            Out.ar(out_bus, sig);
         }).add;
 
         // ---- io: input, record head (with resample feedback), dry/wet, out
@@ -722,10 +767,14 @@ Engine_Mangler2 : CroneEngine {
                 // delay + reverb run in their own spawn/free synths; io keeps
                 // only the mix knobs and the send/return buses
                 delay_mix = 0.0, dly_send = 0, dly_ret = 0,
-                rev_mix = 0.0, rev_send = 0, rev_ret = 0, t2_ret = 0;
+                rev_mix = 0.0, rev_send = 0, rev_ret = 0, t2_ret = 0,
+                // routing: the sends into track 1, and where track 1's
+                // filtered output goes for the others to read
+                snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0;
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, pre, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
+            var sendIn;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
@@ -734,6 +783,11 @@ Engine_Mangler2 : CroneEngine {
             // EXACT unity vs the raw take (the "exact recorded sample"
             // claim, previously +0.5dB into the limiter).
             wet = In.ar(play_bus, 2) * grain_level.lag(0.03) * 2.sqrt;
+            // the sends into track 1 (a block late, bounded by a tanh)
+            sendIn = (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
+                + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
+                + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
+            wet = wet + LeakDC.ar(sendIn).tanh;
 
             // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
             // if sc3-plugins is absent. Two DFM1s: LP for LP+BP, HP for HP; BP
@@ -779,8 +833,9 @@ Engine_Mangler2 : CroneEngine {
                         + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
                 } { |e| mmFilter.value }
             }, { mmFilter.value });
-            // track 2 joins here, after its own filter: drive, delay and
-            // reverb are shared. grain_level stays track 1's level.
+            Out.ar(own_out, wet);     // track 1, filtered, for the sends
+            // tracks 2 to 4 join here, after their own filters: drive, delay
+            // and reverb are shared. grain_level stays track 1's level.
             wet = wet + In.ar(t2_ret, 2);
 
             // drive is a clean->saturated crossfade so drive=0 is a TRUE
@@ -1018,9 +1073,18 @@ Engine_Mangler2 : CroneEngine {
         // polyphonic voices also spawn into playGroup (before io) -> they add
         // onto play_bus and pass through the io FX chain like the drone.
         playGroup = Group.new(context.xg);
-        stripSynth = Synth.new(\mangler2_strip, [
-            \in_bus, t2Bus, \out_bus, t2RetBus,
-        ] ++ stripParams.getPairs, playGroup, \addToTail);
+        sendV = Array.fill(4, { Array.fill(4, 0) });
+        extra.do({ arg tr;
+            tr[\strip] = Synth.new(\mangler2_strip, [
+                \in_bus, tr[\bus], \out_bus, tRetBus,
+                \own_out, outBuses[tr[\n] - 1],
+                \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
+            ] ++ tr[\stripParams].getPairs, playGroup, \addToTail);
+            tr[\mode] = 0;
+        });
+        // every strip starts paused: no extra track plays and nothing is sent
+        // (the run message follows its /s_new in order, no sync needed)
+        extra.do({ arg tr; tr[\strip].run(false) });
         ioSynth = Synth.new(\mangler2_io, [
             \in1, context.in_b[0].index,
             \in2, context.in_b[1].index,
@@ -1034,7 +1098,9 @@ Engine_Mangler2 : CroneEngine {
             \rev_ret, revRetBus,
             \dly_send, dlySendBus,
             \dly_ret, dlyRetBus,
-            \t2_ret, t2RetBus,
+            \t2_ret, tRetBus,
+            \own_out, outBuses[0],
+            \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
         ], playGroup, \addAfter);
 
         // every float control as one command; rec/freeze/level fan out to both
@@ -1058,9 +1124,12 @@ Engine_Mangler2 : CroneEngine {
                 playParams.includesKey(name).if({
                     playParams[name] = v;
                     playSynth.notNil.if({ playSynth.set(name, v) });
-                    // the three a track 2 drone shares with the take
-                    ([\level, \rec, \freeze].includes(name)
-                        and: { playSynth2.notNil }).if({ playSynth2.set(name, v) });
+                    // the three the other tracks' drones share with the take
+                    [\level, \rec, \freeze].includes(name).if({
+                        extra.do({ arg tr;
+                            tr[\synth].notNil.if({ tr[\synth].set(name, v) });
+                        });
+                    });
                     (eroSynth.notNil and: { eroKeys.includes(name) }).if({
                         eroSynth.set(name, v);
                     });
@@ -1077,22 +1146,41 @@ Engine_Mangler2 : CroneEngine {
             this.setMode(msg[1]);
         });
 
-        // ---- track 2: `t2_<drone arg>` for each of its drone values, the
-        // strip's four, and its mode
-        t2Keys.keysValuesDo({ arg cmd, k;
-            this.addCommand(cmd, "f", { arg msg;
-                playParams2[k] = msg[1];
-                playSynth2.notNil.if({ playSynth2.set(k, msg[1]) });
+        // ---- tracks 2 to 4: `t<n>_<drone arg>` for each of its drone
+        // values, `t<n>_<strip key>` for its strip, and `t<n>_mode`
+        extra.do({ arg tr;
+            var pre = "t" ++ tr[\n] ++ "_";
+            tr[\params].keys.do({ arg k;
+                this.addCommand((pre ++ k).asSymbol, "f", { arg msg;
+                    tr[\params][k] = msg[1];
+                    tr[\synth].notNil.if({ tr[\synth].set(k, msg[1]) });
+                });
+            });
+            stripKeys.do({ arg k;
+                this.addCommand((pre ++ k).asSymbol, "f", { arg msg;
+                    tr[\stripParams][k] = msg[1];
+                    tr[\strip].set(k, msg[1]);
+                });
+            });
+            this.addCommand((pre ++ "mode").asSymbol, "i", { arg msg;
+                this.setModeN(tr, msg[1]);
             });
         });
-        stripParams.keys.do({ arg cmd;
-            this.addCommand(cmd, "f", { arg msg;
-                stripParams[cmd] = msg[1];
-                stripSynth.set(cmd, msg[1]);
+        // ---- routing: send_<from>_<to>, each to the receiving track's synth
+        // (track 1's is io) as its snd<from>
+        (1..4).do({ arg from;
+            (1..4).do({ arg to;
+                (from != to).if({
+                    this.addCommand(("send_" ++ from ++ "_" ++ to).asSymbol, "f", { arg msg;
+                        var key = ("snd" ++ from).asSymbol;
+                        sendV[from - 1][to - 1] = msg[1];
+                        (to == 1).if({ ioSynth.set(key, msg[1]) }, {
+                            extra[to - 2][\strip].set(key, msg[1]);
+                            this.updateStrip(extra[to - 2]);
+                        });
+                    });
+                });
             });
-        });
-        this.addCommand(\t2_mode, "i", { arg msg;
-            this.setMode2(msg[1]);
         });
 
         // ---- polyphony commands. note_on/one_shot gained a trailing AMP
@@ -1216,9 +1304,11 @@ Engine_Mangler2 : CroneEngine {
         this.addPoll(\play_phase, {
             phaseBus.getSynchronous;
         });
-        // track 2's read head (polls are not commands: the count stays 92)
-        this.addPoll(\play_phase2, {
-            phaseBus2.getSynchronous;
+        // the other tracks' read heads (polls are not commands)
+        extra.do({ arg tr;
+            this.addPoll(("play_phase" ++ tr[\n]).asSymbol, {
+                tr[\phase].getSynchronous;
+            });
         });
         this.addPoll(\rec_phase, {
             recPhaseBus.getSynchronous;
@@ -1234,8 +1324,10 @@ Engine_Mangler2 : CroneEngine {
     free {
         activeVoices.notNil.if({ activeVoices.do({ arg v; v.notNil.if({ v.free }) }) });
         playSynth.notNil.if({ playSynth.free });
-        playSynth2.notNil.if({ playSynth2.free });
-        stripSynth.notNil.if({ stripSynth.free });
+        extra.notNil.if({ extra.do({ arg tr;
+            tr[\synth].notNil.if({ tr[\synth].free });
+            tr[\strip].notNil.if({ tr[\strip].free });
+        }) });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });
@@ -1253,9 +1345,9 @@ Engine_Mangler2 : CroneEngine {
         dlySendBus.free;
         dlyRetBus.free;
         phaseBus.free;
-        t2Bus.free;
-        t2RetBus.free;
-        phaseBus2.free;
+        extra.notNil.if({ extra.do({ arg tr; tr[\bus].free; tr[\phase].free }) });
+        tRetBus.free;
+        outBuses.do({ arg b; b.free });
         recPhaseBus.free;
         recAmpBus.free;
     }

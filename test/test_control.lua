@@ -699,6 +699,28 @@ end
 -- and only on the device. The command set the engine builds at alloc (ioKeys
 -- plus the playParams/revParams dictionaries plus the explicit addCommands)
 -- is parseable from the .sc, so the contract is checkable offscreen.
+-- mangler2's extra-track and routing commands, built in loops in the .sc
+-- (so not literal): per track 2 to 4, a `t<n>_` command per playParam but
+-- the five it does not own, one per strip key, and `t<n>_mode`; and the
+-- twelve `send_<from>_<to>`
+local function mangler2_cmds(sc, add)
+  local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
+  local strip = {}
+  for id in (sc:match("stripKeys = %[(.-)%]") or ""):gmatch("\\([%w_]+)") do strip[#strip + 1] = id end
+  for n = 2, 4 do
+    for id in (sc:match("playParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
+      if not skip[id] then add("t" .. n .. "_" .. id) end
+    end
+    for _, id in ipairs(strip) do add("t" .. n .. "_" .. id) end
+    add("t" .. n .. "_mode")
+  end
+  for from = 1, 4 do
+    for to = 1, 4 do
+      if from ~= to then add("send_" .. from .. "_" .. to) end
+    end
+  end
+end
+
 do
   local sc = io.open("lib/Engine_Mangler2.sc"):read("a")
   local cmds = {}
@@ -712,16 +734,10 @@ do
     end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do cmds[id] = true end
-  -- mangler2's track 2 commands (built in a loop, so not literal)
-  local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
-  for id in (sc:match("playParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
-    if not skip[id] then cmds["t2_" .. id] = true end
-  end
-  for id in (sc:match("stripParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
-    cmds[id] = true
-  end
+  mangler2_cmds(sc, function(id) cmds[id] = true end)
   ok(cmds.mode and cmds.rev_mix and cmds.erode, "the .sc command set parsed")
-  ok(cmds.t2_mode and cmds.t2_size and cmds.t2_cutoff, "...with track 2's commands")
+  ok(cmds.t2_mode and cmds.t3_size and cmds.t4_cutoff and cmds.send_3_1,
+    "...with the other tracks' and the routing commands")
   local used = {}
   local function collect(path)
     local s = io.open(path):read("a")
@@ -1644,16 +1660,8 @@ do
         :gmatch("\\([%w_]+)%s*%->") do add(id) end
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
-  -- mangler2's track 2: a `t2_` command per playParam but the five it does
-  -- not own, and the strip's four (stripParams)
-  local skip = { level = true, rec = true, freeze = true, erode = true, wear = true }
-  for id in (sc:match("playParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
-    if not skip[id] then add("t2_" .. id) end
-  end
-  for id in (sc:match("stripParams = Dictionary%[(.-)%]") or ""):gmatch("\\([%w_]+)%s*%->") do
-    add(id)
-  end
-  ok(n == 92, "the engine command count is 92, the expected fingerprint (got " .. n .. ")")
+  mangler2_cmds(sc, add)
+  ok(n == 156, "the engine command count is 156, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -3234,11 +3242,18 @@ do
     "OPEN on track 2 opens track 2's filter only")
   key(2, 1); key(2, 0)
   ok(params:get("t2_cutoff") == 500, "...and a second tap puts it back")
-  -- hold again: back on track 1
+  -- hold again: on to track 3, then 4, then round to track 1
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(params:get("track_sel") == 3 and Mp.page_title() == "FILTER 3",
+    "FILTER K3 held again steps on to track 3")
+  ok(CTX.enc_param(2) == "t3_cutoff", "...and the knobs are track 3's")
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(params:get("track_sel") == 4 and CTX.enc_param(3) == "t4_resonance",
+    "...then track 4")
   key(3, 1); _h.run_ticks(20); key(3, 0)
   ok(params:get("track_sel") == 1 and Mp.page_title() == "FILTER",
-    "FILTER K3 held switches back to track 1")
-  ok(CTX.enc_param(2) == "cutoff", "...and the knobs are track 1's again")
+    "...and round to track 1")
+  ok(CTX.enc_param(2) == "cutoff", "...with track 1's knobs again")
   -- the flag: track 2 sounding lights T2 in the header on any page
   local HF2
   for _, f in ipairs(Mp.HFLAGS) do if f.id == "T2" then HF2 = f end end
@@ -3264,7 +3279,7 @@ do
   end
   CTX.alt = false
   params:set("t2_mode", 1)
-  T.goto_page("TRACK2")
+  T.goto_page("TRACK")
   ok(Mp.page_title() == "TRACK 2", "the page reads TRACK 2")
   ok(CTX.enc_param(2) == "t2_pos_start" and CTX.enc_param(3) == "t2_pos_end",
     "E2 and E3 are track 2's window")
@@ -3291,6 +3306,64 @@ do
   redraw()
   params:set("t2_mode", 1)
   params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+  -- K3 held steps the page to track 3, and its knobs and keys follow
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(Mp.page_title() == "TRACK 3" and CTX.enc_param(2) == "t3_pos_start",
+    "K3 held on TRACK steps to track 3, and E2 is its window")
+  key(2, 1); key(2, 0)
+  ok(params:get("t3_mode") == 5 and params:get("t2_mode") == 1, "K2 there turns track 3 on")
+  redraw()
+  key(2, 1); key(2, 0)
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  ok(Mp.page_title() == "TRACK 2", "...on to 4, and round to 2 (track 1 is VOICE's)")
+  params:set("track_sel", 1)
+end
+
+-- ============================================================================
+-- mangler2 · the ROUTE page: the sends as a grid
+-- ============================================================================
+do
+  local Mp
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(redraw, i)
+    if n == nil then break end
+    if n == "Mpages" then Mp = v end
+  end
+  CTX.alt = false
+  T.goto_page("ROUTE")
+  params:set("route_sel", 1)
+  ok(CTX.route_cur().id == "send_1_2", "the first cell is track 1 into track 2")
+  ok(CTX.enc_param(2) == "route_sel" and CTX.enc_param(3) == "@route_amt",
+    "E2 walks the cells, E3 sets the cell's send")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == nil and CTX.enc_param(3) == nil,
+    "K1 held, the encoders address nothing (an empty alt slot is a no-op)")
+  CTX.alt = false
+  enc(2, 4)
+  ok(CTX.route_cur().id == "send_2_3", "four cells on is track 2 into track 3")
+  local v0 = params:get("send_2_3")
+  enc(3, 10)
+  ok(params:get("send_2_3") > v0 and params:get("send_1_2") == 0,
+    "E3 raises the selected send only")
+  -- K2 PATCH: off and back
+  local v1 = params:get("send_2_3")
+  key(2, 1); key(2, 0)
+  ok(params:get("send_2_3") == 0, "K2 cuts the selected send")
+  key(2, 1); key(2, 0)
+  ok(math.abs(params:get("send_2_3") - v1) < 1e-9, "...and brings it back at its level")
+  params:set("route_sel", 7)                  -- send_3_1
+  key(2, 1); key(2, 0)
+  ok(math.abs(params:get("send_3_1") - 0.5) < 1e-9, "K2 on an unused send patches it at half")
+  -- K3: tap = the next row, hold = clear all
+  key(3, 1); _h.run_ticks(1); key(3, 0)
+  ok(CTX.route_cur().from == 4, "K3 tapped jumps to the next row (track 4)")
+  key(3, 1); _h.run_ticks(20); key(3, 0)
+  local any = false
+  for _, r in ipairs(CTX.ROUTES) do if params:get(r.id) > 0 then any = true end end
+  ok(not any, "K3 held to the arc clears every send")
+  redraw()
+  params:set("route_sel", 1)
 end
 
 T.report("control harness OK")

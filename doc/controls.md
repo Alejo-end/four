@@ -25,7 +25,8 @@ and FRZ on K2. Drive and dry/wet are shared by both tracks.
 | VOICE (GRAIN) | `size` | `density` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (WARP) | `warp_window` | `warp_rand` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (PV) | `scan` | `pitch` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
-| TRACK2 | `t2_pos_start` | `t2_pos_end` | `t2_level` | `t2_pitch` | ON | MODE | no |
+| TRACK | `t2_pos_start` | `t2_pos_end` | `t2_level` | `t2_pitch` | ON | MODE, hold TRK 3 | no |
+| ROUTE | `route_sel` | `@route_amt` | none | none | PATCH | ROW, hold CLEAR | no |
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
 | LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
 | FILTER | `cutoff` | `resonance` | `drive` | `dry_wet` | OPEN | TYPE, hold TRK 2 | no |
@@ -33,7 +34,7 @@ and FRZ on K2. Drive and dry/wet are shared by both tracks.
 | REVERB | `rev_mix` | `rev_decay` | `rev_size` | `rev_damp` | WASH | BLOOM | no |
 | MIX | `mix` | `out_level` | `input_level` | `monitor_level` | ENG | TAPE | no |
 | PADS | `seq_slice` | `pad_pitch` | `pad_voice` | `voice_rel` | PAD | ROUTE | no |
-| MOTION (lanes) | `@mo_sel` | `motion_depth` | `motion_len` | `motion_depth` | REC | PLAY | yes |
+| MOTION (lanes) | `@mo_sel` | `motion_depth` | `motion_len` | none | REC | PLAY | yes |
 | MOTION (LFO 1) | `@mo_sel` | `lfo1_depth` | `lfo1_period` | `lfo1_target` | REC | PLAY | yes |
 | MOTION (LFO 2) | `@mo_sel` | `lfo2_depth` | `lfo2_period` | `lfo2_target` | REC | PLAY | yes |
 | SCENE | `scene_slot` | `scene_morph_amt` | `orbit_rate` | `orbit_reach` | RCL | CAP | yes |

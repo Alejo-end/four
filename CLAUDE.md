@@ -10,13 +10,13 @@ the status block current, and add a change-log entry for every change.
 ## THIS IS MANGLER2
 
 mangler2 is a fork of mangler (branch `mangler2`, folder `../mangler2`, a git
-worktree of the mangler repo) with a SECOND ENGINE TRACK: step 1 of the
+worktree of the mangler repo) with FOUR ENGINE TRACKS and track-to-track sends: step 2 of the
 S-4 tracks idea. Track 2 is a second drone on the same take with its own
 mode, window, pitch, grain knobs, filter and level (the `t2_*` params, the
 "track 2" group). Names here: script `mangler2.lua`, class `Engine_Mangler2`,
 file `lib/Engine_Mangler2.sc`, `engine.name = 'Mangler2'`, SynthDefs
 `\mangler2_*`, deploy to `~/dust/code/mangler2/`. After a RESTART maiden must
-read **`count: 92`** (mangler's 66 plus 26 for track 2). On the device 2026-11-11: loads at
+read **`count: 156`** (mangler's 66, 26 for each of tracks 2 to 4, and 12 sends). On the device 2026-11-11: loads at
 `count: 92`, every def builds, two GRAIN tracks with reverb, shimmer and delay take
 30% of the scsynth thread with 0 xruns (doc/measurements/2026-11-11/mangler2-tracks.md).
 Nobody has listened yet. On VOICE and FILTER, K3 held flips the page between

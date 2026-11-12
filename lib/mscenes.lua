@@ -136,6 +136,32 @@ local function append(dst, src)
   for i = 1, #src do dst[#dst + 1] = src[i] end
 end
 
+-- mangler2: tracks 3 and 4 are classified exactly like track 2. Their ids
+-- are track 2's with the number changed, appended (TIMBRE) or put beside
+-- track 2's (SWITCH, so `mode` stays last of the last).
+local function more_tracks(list)
+  local out = {}
+  for i = 1, #list do
+    local id = list[i]
+    out[#out + 1] = id
+    local rest = id:match("^t2_(.+)$")
+    if rest then
+      out[#out + 1] = "t3_" .. rest
+      out[#out + 1] = "t4_" .. rest
+    end
+  end
+  return out
+end
+TIMBRE_IDS = more_tracks(TIMBRE_IDS)
+SWITCH_IDS = more_tracks(SWITCH_IDS)
+-- the sends are sound (what feeds what), so a scene keeps them and a morph
+-- crosses them smoothly
+for from = 1, 4 do
+  for to = 1, 4 do
+    if from ~= to then SPACE_IDS[#SPACE_IDS + 1] = "send_" .. from .. "_" .. to end
+  end
+end
+
 local SCENE_RECALL_IDS = {}
 append(SCENE_RECALL_IDS, TIMBRE_IDS)
 append(SCENE_RECALL_IDS, SPACE_IDS)
@@ -167,6 +193,7 @@ local MORPH_EXCLUDE = {
   mode = true, tape_reverse = true,
   -- track 2's mode and hold, for the same reasons as track 1's
   t2_mode = true, t2_pv_freeze = true,
+  t3_mode = true, t3_pv_freeze = true, t4_mode = true, t4_pv_freeze = true,
   -- the window lock switching mid-sweep re-cuts the window in one frame
   win_beats = true,
   -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
@@ -224,6 +251,7 @@ local SCENE_EXCLUDE = {
   -- padlock pset, not scenes)
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
   "track_sel",   -- mangler2: which track VOICE and FILTER address
+  "route_sel",   -- mangler2: the ROUTE grid's cursor
   -- config / keys
   "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
   -- the other machines' transports, and scene's own params (NEVER capture
@@ -388,7 +416,8 @@ end
 -- region instead of a bogus one. `start` key -> `end` key.
 local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
                      lay1_start = "lay1_end", lay2_start = "lay2_end",
-                     t2_pos_start = "t2_pos_end" }
+                     t2_pos_start = "t2_pos_end", t3_pos_start = "t3_pos_end",
+                     t4_pos_start = "t4_pos_end" }
 M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 
 -- A STORED window is clamped to the material before it is applied. Scenes

@@ -218,17 +218,29 @@ elseif TRACK2 then
   run_ticks(5)
   redraw()
   export(pfx("FILTER", "_T2_HP"))
-  goto_page("TRACK2")                        -- the track 2 page, playing
+  goto_page("TRACK")                         -- the track page, playing
   params:set("t2_mode", 2); params:set("t2_level", 1.2)
   run_ticks(10)
   redraw()
-  export(pfx("TRACK2", "_ON"))
+  export(pfx("TRACK", "_ON"))
   params:set("t2_mode", 1)                   -- ...and off
   run_ticks(5)
   redraw()
-  export(pfx("TRACK2", "_OFF"))
+  export(pfx("TRACK", "_OFF"))
   params:set("t2_mode", 2); params:set("t2_level", 1)
-  goto_page("TAKE")                          -- the T2 flag in the header
+  params:set("t3_mode", 4); params:set("t3_pos_start", 0.05); params:set("t3_pos_end", 0.2)
+  params:set("track_sel", 3)                 -- TRACK 3, with track 2 ticking above
+  run_ticks(10)
+  redraw()
+  export(pfx("TRACK", "_T3"))
+  params:set("track_sel", 1)
+  goto_page("ROUTE")                         -- the routing grid
+  params:set("send_1_2", 0.8); params:set("send_2_3", 0.4); params:set("send_3_1", 0.25)
+  params:set("route_sel", 4)
+  run_ticks(5)
+  redraw()
+  export(pfx("ROUTE", ""))
+  goto_page("TAKE")                          -- the track flag in the header
   run_ticks(5)
   redraw()
   export(pfx("TAKE", "_T2_FLAG"))

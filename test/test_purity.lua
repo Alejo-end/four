@@ -56,7 +56,8 @@ local PURE = {
   mix = 0,           -- the tape holds audio: thrown fully away in the base
   lay1_play = 0,     -- layer 1 holds audio: muted in the base
   stop_all = 0,
-  t2_mode = 1,       -- track 2 OFF (mangler2)
+  t2_mode = 1,       -- tracks 2 to 4 OFF, no sends (mangler2)
+  t4_mode = 1, send_1_3 = 0,
   step_run = 0,      -- the pad sequencer
   lfo1_depth = 0,    -- a modulator aimed at wear (below), at rest
 }
@@ -137,6 +138,8 @@ local MOVES = {
   { "regen writing the buffer", "regen", 0.3 },
   { "erosion writing the buffer", "erode", 0.3 },
   { "track 2 playing (mangler2)", "t2_mode", 5 },
+  { "track 4 playing (mangler2)", "t4_mode", 5 },
+  { "a send between tracks (mangler2)", "send_1_3", 0.5 },
   { "a freeze hold", "freeze", 1 },
   { "a pv freeze hold", "pv_freeze", 1 },
   { "live input mixed in (dry_wet)", "dry_wet", 0.5 },

@@ -3629,6 +3629,26 @@ Visuals also fixed for mangler: a page opened over the network halted at once (H
 `a` without audio), and such a page now reacts to the sound the listening page relays through
 the bridge. Tests: 13 assertions for the page, two renders in the track2 variant (84 shots).
 
+mangler2, fifth change: **four tracks and the routing (ENGINE and Lua, the count is 156,
+needs a RESTART)**. The engine's track 2 became tracks 2 to 4 (`extra`, one Event each: drone,
+strip, buses; `setModeN`), with commands `t<n>_*` (26 a track). ROUTING, from the S-4's sends:
+`send_<from>_<to>` feeds one track's filtered output into another track's filter (12 sends);
+each track writes its post-filter output to its own bus, a send arrives a block late through
+InFeedback and a LeakDC'd tanh, so a ring can feed back but not run away. A strip runs only
+while its track plays or a send feeds it (`updateStrip`, the pause 100ms late so a release is
+heard). Lua: `track_sel` is 1 to 4 (K3 held on VOICE/FILTER steps 1>2>3>4>1); the TRACK2 page is
+TRACK (tracks 2 to 4, K3 held steps 2>3>4); a new ROUTE page draws the sends as a 4x4 grid (rows
+FROM, columns TO, cells filled by level, the cursor framed, row labels bright while the track
+sounds): E2 walks the cells (`route_sel`), E3 sets the send (`@route_amt`), K2 PATCH toggles it
+(off, or back to its level, half the first time), K3 jumps a row and held clears every send.
+Groups: "tracks" (2), "track 2/3/4" (26 each), "routing" (12). Classification, SHORT words,
+RATE_IDS, FINE_IDS, EDGE_PAIRS and purity cover tracks 3, 4 and the sends; the header flag
+reads T2 to T234. Fixed: `enc_param` had turned an empty K1 slot (MOTION, SCENE) into the base
+param (`alt and m[2] or m[1]`), the trap its comment warns about. The writer pips in the header
+are 1px gap now (thirteen page dots). On the device: count 156, every def builds; four GRAIN
+tracks with FX, all sends and resonant filters at 48% of the thread, 0 xruns over 60 s
+(doc/measurements/2026-11-12/four-tracks.md). Nobody has listened.
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

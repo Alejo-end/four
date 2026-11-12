@@ -96,7 +96,7 @@ local min, max = math.min, math.max
 -- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
 -- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "TRACK2", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "TAKE", "VOICE", "TRACK", "ROUTE", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
 }
 
@@ -143,7 +143,9 @@ local FINE_IDS = { pos_start = "win", pos_end = "win",
                    loop_start = "loop", loop_end = "loop",
                    lay1_start = "lay1", lay1_end = "lay1",
                    lay2_start = "lay2", lay2_end = "lay2",
-                   t2_pos_start = "t2_pos", t2_pos_end = "t2_pos" }
+                   t2_pos_start = "t2_pos", t2_pos_end = "t2_pos",
+                   t3_pos_start = "t3_pos", t3_pos_end = "t3_pos",
+                   t4_pos_start = "t4_pos", t4_pos_end = "t4_pos" }
 
 -- interpolate between two values of one param in its controlspec's WARPED
 -- space (unmap, lerp, map): linear in the space the encoder moves in, so an
@@ -192,7 +194,8 @@ local ctx = {
   flash_until = 0,
   -- engine/system signals
   play_phase = 0,            -- engine poll: normalized playhead in the buffer
-  play_phase2 = 0,           -- the same for track 2 (mangler2)
+  play_phase2 = 0,           -- the same for tracks 2 to 4 (mangler2)
+  play_phases = { 0, 0, 0, 0 },
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
   rec_amp = 0,               -- engine poll: amplitude of what's being written
@@ -354,6 +357,7 @@ function ctx.enc_target(id)
   if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
   if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
   if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
+  if id == "@route_amt" then return ctx.route_cur().id end
   return id
 end
 
@@ -686,75 +690,148 @@ local function snap_window()
   end
 end
 
--- ---- the track switch (mangler2) ------------------------------------------
--- VOICE and FILTER address one engine track at a time. `track_sel` picks it,
--- and a HOLD of K3 on either page flips it (the tap keeps MODE / TYPE, as
--- TAKE's K3 keeps SNAP under its UNDO hold). On track 2 the same knobs and
--- keys reach the `t2_` params. What only track 1 has (the erosion) is out of
--- reach there, and what both share (drive, dry/wet) stays the same param.
+-- ---- the tracks (mangler2) ------------------------------------------------
+-- Four engine tracks. VOICE and FILTER address one at a time: `track_sel`
+-- picks it, and a HOLD of K3 on either page steps it 1 > 2 > 3 > 4 > 1 (the
+-- tap keeps MODE / TYPE, as TAKE's K3 keeps SNAP under its UNDO hold). On
+-- track n the same knobs and keys reach the `t<n>_` params. What only track 1
+-- has (the erosion) is out of reach there, and what all share (drive,
+-- dry/wet) stays the same param. The TRACK page plays tracks 2 to 4 directly.
+local NTRACKS = 4
 local TRACK_PAGES = { VOICE = true, FILTER = true }
-local function track2() return math.floor(pget("track_sel", 1) + 0.5) == 2 end
--- the selected track's id for a track 1 id: itself on track 1, or when
--- track 2 has no such param
--- (each "t2_" string is built once and cached: the redraw path reads this
--- every frame and must not allocate)
-local T2ID = setmetatable({}, { __index = function(t, id)
-  local v = "t2_" .. id
-  t[id] = v
-  return v
-end })
-local function tid(id)
-  if id and track2() then
-    local t = T2ID[id]
+local function tsel() return clamp(math.floor(pget("track_sel", 1) + 0.5), 1, NTRACKS) end
+local function track2() return tsel() > 1 end   -- any track but track 1
+-- TID[n][id] = "t<n>_<id>", each string built once and cached: the redraw
+-- path reads these every frame and must not allocate
+local TID = {}
+for n = 2, NTRACKS do
+  TID[n] = setmetatable({}, { __index = function(t, id)
+    local v = "t" .. n .. "_" .. id
+    t[id] = v
+    return v
+  end })
+end
+-- track n's id for a track 1 id: itself on track 1, or when track n has no
+-- such param
+local function tid_n(n, id)
+  if id and n > 1 then
+    local t = TID[n][id]
     if params.lookup[t] then return t end
   end
   return id
 end
-ctx.tid = tid
-local function switch_track()
-  params:set("track_sel", track2() and 1 or 2)
+local function tid(id) return tid_n(tsel(), id) end
+ctx.tid, ctx.tid_n, ctx.tsel = tid, tid_n, tsel
+-- the TRACK page's track: the selected one, or track 2 while track 1 is
+-- selected (the page plays the OTHER tracks)
+local function page_track() local n = tsel(); return n > 1 and n or 2 end
+ctx.page_track = page_track
+local function flash_page()
   -- the proof it worked: the page name pops, now with its track
   ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
-  print("mangler: VOICE and FILTER now on track " .. pget("track_sel", 1))
+end
+local function switch_track()
+  params:set("track_sel", tsel() % NTRACKS + 1)
+  flash_page()
+  print("mangler: VOICE and FILTER now on track " .. tsel())
+end
+local function next_extra()
+  local n = page_track()
+  params:set("track_sel", n < NTRACKS and n + 1 or 2)
+  flash_page()
+  print("mangler: TRACK now on track " .. tsel())
 end
 -- MODE cycles PLAY->GRAIN->WARP->PV, skipping OFF (a silence pothole
--- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS). Track 2
--- starts OFF, so its first tap lands on PLAY.
+-- mid-set; stopping is STOP's job — OFF stays reachable in PARAMS). Tracks 2
+-- to 4 start OFF, so their first tap lands on PLAY.
 local function cycle_mode(id)
   local m = pget(id, 5)
   params:set(id, m >= 5 and 2 or (m < 2 and 5 or m + 1))
 end
 local function cycle_type(id) params:set(id, (pget(id, 1) % 3) + 1) end
-local T2_KEYS = {
-  VOICE = {
-    k2 = pk("FRZ", "t2_pv_freeze"),
-    k3 = { label = "MODE", tap = function() cycle_mode("t2_mode") end,
-      hold = switch_track, hold_label = "TRK 1" },
-  },
-  FILTER = {
-    k2 = throw("OPEN", { "t2_cutoff", "t2_resonance" }, function()
-      params:set("t2_cutoff", filter_open_cutoff(pget("t2_filt_type", 1)))
-      params:set("t2_resonance", 0)
-    end, "OPEN2"),
-    k3 = { label = "TYPE", tap = function() cycle_type("t2_filt_type") end,
-      hold = switch_track, hold_label = "TRK 1" },
-  },
-}
+-- per track: VOICE/FILTER keys on track n, the TRACK page's K2 (ON) and K3.
+-- ON: a tap latches, a hold plays the track only while held (the punch law
+-- of every key). Off remembers the mode, so on brings back the voice you
+-- had; the first on is PLAY.
+local T_KEYS, T_ON, T_K3 = {}, {}, {}
+local last_mode = {}
+for n = 2, NTRACKS do
+  local pre = "t" .. n .. "_"
+  local nxt = "TRK " .. (n % NTRACKS + 1)
+  T_KEYS[n] = {
+    VOICE = {
+      k2 = pk("FRZ", pre .. "pv_freeze"),
+      k3 = { label = "MODE", tap = function() cycle_mode(pre .. "mode") end,
+        hold = switch_track, hold_label = nxt },
+    },
+    FILTER = {
+      k2 = throw("OPEN", { pre .. "cutoff", pre .. "resonance" }, function()
+        params:set(pre .. "cutoff", filter_open_cutoff(pget(pre .. "filt_type", 1)))
+        params:set(pre .. "resonance", 0)
+      end, "OPEN" .. n),
+      k3 = { label = "TYPE", tap = function() cycle_type(pre .. "filt_type") end,
+        hold = switch_track, hold_label = nxt },
+    },
+  }
+  last_mode[n] = 5
+  T_ON[n] = {
+    label = "ON",
+    lit = function() return pget(pre .. "mode", 1) ~= 1 end,
+    pon = function() params:set(pre .. "mode", last_mode[n]) end,
+    poff = function()
+      local m = pget(pre .. "mode", 1)
+      if m ~= 1 then last_mode[n] = m end
+      params:set(pre .. "mode", 1)
+    end,
+  }
+  T_K3[n] = { label = "MODE", tap = function() cycle_mode(pre .. "mode") end,
+    hold = next_extra, hold_label = "TRK " .. (n < NTRACKS and n + 1 or 2) }
+end
 
--- TRACK 2's K2: track 2 on and off. A tap latches, a hold plays it only
--- while held (the punch law of every key). Off remembers the mode, so on
--- brings back the voice you had; the first on is PLAY.
-local t2_last_mode = 5
-local T2_ON = {
-  label = "ON",
-  lit = function() return pget("t2_mode", 1) ~= 1 end,
-  pon = function() params:set("t2_mode", t2_last_mode) end,
-  poff = function()
-    local m = pget("t2_mode", 1)
-    if m ~= 1 then t2_last_mode = m end
-    params:set("t2_mode", 1)
+-- ---- the routing (mangler2) -------------------------------------------------
+-- The S-4's sends: each track's filtered output can feed any other track's
+-- filter, `send_<from>_<to>`, twelve in all. ROUTES walks them in the order
+-- the ROUTE page's grid reads (row = from, column = to). `route_sel` is the
+-- cell under the cursor.
+local ROUTES = {}
+for from = 1, NTRACKS do
+  for to = 1, NTRACKS do
+    if from ~= to then
+      ROUTES[#ROUTES + 1] = { from = from, to = to, id = "send_" .. from .. "_" .. to }
+    end
+  end
+end
+ctx.ROUTES = ROUTES
+local function route_cur() return ROUTES[clamp(math.floor(pget("route_sel", 1) + 0.5), 1, #ROUTES)] end
+ctx.route_cur = route_cur
+-- K2 PATCH: the selected send between off and its last level (half, the
+-- first time). K3 tapped jumps to the next track's row; held to the arc it
+-- clears every send.
+local patch_mem = {}
+local ROUTE_PATCH = {
+  label = "PATCH",
+  act = function()
+    local r = route_cur()
+    local v = pget(r.id, 0)
+    if v > 0.001 then
+      patch_mem[r.id] = v
+      params:set(r.id, 0)
+    else
+      params:set(r.id, patch_mem[r.id] or 0.5)
+    end
   end,
 }
+local function route_clear()
+  for _, r in ipairs(ROUTES) do params:set(r.id, 0) end
+  print("mangler: every send cleared")
+end
+local ROUTE_K3 = { label = "ROW",
+  tap = function()
+    local k = clamp(math.floor(pget("route_sel", 1) + 0.5), 1, #ROUTES)
+    local row = math.floor((k - 1) / (NTRACKS - 1))
+    params:set("route_sel", ((row + 1) % NTRACKS) * (NTRACKS - 1) + 1)
+  end,
+  hold = route_clear, hold_label = "CLEAR" }
 
 -- page key defs (+ each page's `erase`: what the K1+K3 arc wipes)
 local KEYS = {
@@ -772,10 +849,10 @@ local KEYS = {
     k3 = { label = "MODE", tap = function() cycle_mode("mode") end,
       hold = switch_track, hold_label = "TRK 2" },
   },
-  TRACK2 = {
-    k2 = T2_ON,
-    k3 = { label = "MODE", act = function() cycle_mode("t2_mode") end },
-  },
+  -- (the TRACK page's keys follow its track: key_def picks T_ON / T_K3;
+  -- these are track 2's, the shape doc/controls.md documents)
+  TRACK = { k2 = T_ON[2], k3 = T_K3[2] },
+  ROUTE = { k2 = ROUTE_PATCH, k3 = ROUTE_K3 },
   TAPE = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
@@ -971,7 +1048,12 @@ local function key_def(n)
   end
   local page = PAGES[ctx.page]
   if TRACK_PAGES[page] and track2() then
-    return n == 2 and T2_KEYS[page].k2 or T2_KEYS[page].k3
+    local tk = T_KEYS[tsel()][page]
+    return n == 2 and tk.k2 or tk.k3
+  end
+  if page == "TRACK" then
+    local t = page_track()
+    return n == 2 and T_ON[t] or T_K3[t]
   end
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
@@ -1001,8 +1083,10 @@ end
 local ENC_MAP = {
   TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
-  -- mangler2: track 2's own page. E2/E3 its window, K1 its level and pitch
-  TRACK2 = { "t2_pos_start", "t2_level", "t2_pos_end", "t2_pitch" },
+  -- mangler2: the TRACK page (its track's window, K1 its level and pitch;
+  -- enc_param maps them onto the page's track) and the ROUTE grid
+  TRACK = { "t2_pos_start", "t2_level", "t2_pos_end", "t2_pitch" },
+  ROUTE = { "route_sel", nil, "@route_amt", nil },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
@@ -1061,6 +1145,12 @@ local function enc_param(n)
   if page == "VOICE" and ctx.alt and pget("mode", 5) == 5 and not track2() then
     return n == 2 and "erode" or "wear"
   end
+  if page == "TRACK" then
+    local t = page_track()
+    if n == 2 then return tid_n(t, ctx.alt and "level" or "pos_start") end
+    if n == 3 then return tid_n(t, ctx.alt and "pitch" or "pos_end") end
+    return nil
+  end
   local m = ENC_MAP[page]
   if not m then return nil end
   -- explicit, NOT `alt and m[2] or m[1]`: a nil alt slot (MOTION/SCENE) must be
@@ -1068,9 +1158,9 @@ local function enc_param(n)
   -- held (which could wipe the wrong MOTION lane and leak a value in the footer)
   local id
   if n == 2 then
-    id = ctx.alt and m[2] or m[1]
+    if ctx.alt then id = m[2] else id = m[1] end
   elseif n == 3 then
-    id = ctx.alt and m[4] or m[3]
+    if ctx.alt then id = m[4] else id = m[3] end
   end
   if id and TRACK_PAGES[page] then return tid(id) end
   return id
@@ -2685,46 +2775,58 @@ local function init_params()
   -- post-filter tanh saturation with makeup: louder AND dirtier up
   add_eng_control("drive", "drive", unit(0.0))
 
-  -- ---- track 2 (mangler2) ------------------------------------------------
-  -- a second engine drone on the same take: its own mode, window, pitch,
-  -- grain knobs, filter and level. Each id is track 1's with a `t2_` prefix,
-  -- with the same range, so a knob means the same thing on either track.
-  -- OFF by default: track 2 costs nothing until it is switched on.
-  params:add_group("grp_t2", "track 2", 27)
-  -- which track VOICE and FILTER address (K3 held on either page flips it)
-  params:add_number("track_sel", "track (voice, filter)", 1, 2, 1)
-  add_eng_option("t2_mode", "t2 mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 1)
-  add_eng_control("t2_level", "t2 level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  add_eng_control("t2_pos_start", "t2 win start", fine_unit(0.0))
-  add_eng_control("t2_pos_end", "t2 win end", fine_unit(1.0))
-  add_eng_control("t2_scan", "t2 scan rate", controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
-  add_eng_control("t2_pitch", "t2 pitch", controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
-  add_eng_control("t2_pan", "t2 pan", controlspec.new(-1, 1, "lin", 0, 0.0, ""))
-  add_eng_control("t2_pos_jitter", "t2 jitter", unit(0.0))
-  add_eng_control("t2_size", "t2 size", controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
-  add_eng_control("t2_density", "t2 density", controlspec.new(1, 200, "exp", 0, 20, "hz"))
-  add_eng_control("t2_spread", "t2 spread", unit(0.5))
-  add_eng_control("t2_grain_jitter", "t2 grain jitter", unit(0.0))
-  add_eng_control("t2_grain_pitch_spread", "t2 pitch spread",
-    controlspec.new(0, 12, "lin", 0, 0.0, "st"))
-  add_eng_option("t2_grain_shape", "t2 grain shape", { "HANN", "WELCH", "PERC" }, 1)
-  add_eng_control("t2_clouds_pos", "t2 grain position", unit(0.5))
-  add_eng_control("t2_clouds_tex", "t2 grain texture", unit(0.5))
-  add_eng_control("t2_clouds_fb", "t2 grain feedback", unit(0.0))
-  add_eng_option("t2_clouds_mode", "t2 clouds mode",
-    { "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }, 1)
-  add_eng_control("t2_clouds_lofi", "t2 grain lofi", unit(0.0))
-  add_eng_control("t2_warp_window", "t2 warp window",
-    controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
-  params:add_number("t2_warp_overlaps", "t2 warp overlaps", 1, 8, 4)
-  params:set_action("t2_warp_overlaps", function(v)
-    if engine.t2_warp_overlaps then engine.t2_warp_overlaps(v) end
-  end)
-  add_eng_control("t2_warp_rand", "t2 warp rand", unit(0.0))
-  add_eng_binary("t2_pv_freeze", "t2 pv freeze")
-  add_eng_option("t2_filt_type", "t2 filter type", { "LP", "HP", "BP" }, 1)
-  add_eng_control("t2_cutoff", "t2 cutoff", controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
-  add_eng_control("t2_resonance", "t2 resonance", unit(0.0))
+  -- ---- tracks 2 to 4 (mangler2) -------------------------------------------
+  -- more engine drones on the same take: each its own mode, window, pitch,
+  -- grain knobs, filter and level. Each id is track 1's with a `t<n>_`
+  -- prefix, with the same range, so a knob means the same thing on every
+  -- track. OFF by default: a track costs nothing until it is switched on.
+  params:add_group("grp_tracks", "tracks", 2)
+  -- which track VOICE and FILTER address (K3 held on either page steps it),
+  -- and the ROUTE grid's cursor
+  params:add_number("track_sel", "track (voice, filter)", 1, NTRACKS, 1)
+  params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
+  for n = 2, NTRACKS do
+    local pre, lab = "t" .. n .. "_", "t" .. n .. " "
+    params:add_group("grp_t" .. n, "track " .. n, 26)
+    add_eng_option(pre .. "mode", lab .. "mode", { "OFF", "GRAIN", "WARP", "PV", "PLAY" }, 1)
+    add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+    add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
+    add_eng_control(pre .. "pos_end", lab .. "win end", fine_unit(1.0))
+    add_eng_control(pre .. "scan", lab .. "scan rate", controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
+    add_eng_control(pre .. "pitch", lab .. "pitch", controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
+    add_eng_control(pre .. "pan", lab .. "pan", controlspec.new(-1, 1, "lin", 0, 0.0, ""))
+    add_eng_control(pre .. "pos_jitter", lab .. "jitter", unit(0.0))
+    add_eng_control(pre .. "size", lab .. "size", controlspec.new(0.01, 0.5, "exp", 0, 0.1, "s"))
+    add_eng_control(pre .. "density", lab .. "density", controlspec.new(1, 200, "exp", 0, 20, "hz"))
+    add_eng_control(pre .. "spread", lab .. "spread", unit(0.5))
+    add_eng_control(pre .. "grain_jitter", lab .. "grain jitter", unit(0.0))
+    add_eng_control(pre .. "grain_pitch_spread", lab .. "pitch spread",
+      controlspec.new(0, 12, "lin", 0, 0.0, "st"))
+    add_eng_option(pre .. "grain_shape", lab .. "grain shape", { "HANN", "WELCH", "PERC" }, 1)
+    add_eng_control(pre .. "clouds_pos", lab .. "grain position", unit(0.5))
+    add_eng_control(pre .. "clouds_tex", lab .. "grain texture", unit(0.5))
+    add_eng_control(pre .. "clouds_fb", lab .. "grain feedback", unit(0.0))
+    add_eng_option(pre .. "clouds_mode", lab .. "clouds mode",
+      { "GRANULAR", "STRETCH", "LOOP", "SPECTRAL" }, 1)
+    add_eng_control(pre .. "clouds_lofi", lab .. "grain lofi", unit(0.0))
+    add_eng_control(pre .. "warp_window", lab .. "warp window",
+      controlspec.new(0.05, 0.5, "exp", 0, 0.25, "s"))
+    params:add_number(pre .. "warp_overlaps", lab .. "warp overlaps", 1, 8, 4)
+    params:set_action(pre .. "warp_overlaps", function(v)
+      local f = engine[pre .. "warp_overlaps"]
+      if f then f(v) end
+    end)
+    add_eng_control(pre .. "warp_rand", lab .. "warp rand", unit(0.0))
+    add_eng_binary(pre .. "pv_freeze", lab .. "pv freeze")
+    add_eng_option(pre .. "filt_type", lab .. "filter type", { "LP", "HP", "BP" }, 1)
+    add_eng_control(pre .. "cutoff", lab .. "cutoff", controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
+    add_eng_control(pre .. "resonance", lab .. "resonance", unit(0.0))
+  end
+  -- the sends: one track's filtered output into another track's filter
+  params:add_group("grp_routing", "routing", #ROUTES)
+  for _, r in ipairs(ROUTES) do
+    add_eng_control(r.id, "send " .. r.from .. " > " .. r.to, unit(0.0))
+  end
 
   params:add_group("grp_delay", "delay", 4)
   add_eng_control("delay_time", "delay time",
@@ -3096,7 +3198,9 @@ function init()
     polls[#polls + 1] = p
   end
   watch("play_phase", function(v) ctx.play_phase = v end)
-  watch("play_phase2", function(v) ctx.play_phase2 = v end)
+  watch("play_phase2", function(v) ctx.play_phase2 = v; ctx.play_phases[2] = v end)
+  watch("play_phase3", function(v) ctx.play_phases[3] = v end)
+  watch("play_phase4", function(v) ctx.play_phases[4] = v end)
   watch("rec_phase", function(v) ctx.rec_phase = v end)
   watch("rec_amp", function(v) ctx.rec_amp = v end)
   watch("amp_in_l", function(v) ctx.amp_in[1] = v end)
@@ -3201,7 +3305,7 @@ function enc(n, d)
       move_pair("pos_start", "pos_end", d)
     -- the LAYERS encoders address whichever deck is selected, so they resolve
     -- to a param id at turn time rather than being fixed in ENC_MAP
-    elseif id == "@lay_level" or id == "@lay_rate" then
+    elseif id == "@lay_level" or id == "@lay_rate" or id == "@route_amt" then
       -- delta the REAL param, but keep `id` as the compound target: the footer
       -- matches its flash against the slot's id, and the resolver turns it back
       -- into a value for display. (@win_move works for exactly this reason.)

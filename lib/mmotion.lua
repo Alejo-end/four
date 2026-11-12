@@ -76,6 +76,23 @@ local MOTION_IDS = {
   "t2_clouds_lofi", "t2_clouds_mode", "t2_mode", "t2_warp_window",
   "t2_warp_rand", "t2_pv_freeze", "t2_cutoff", "t2_resonance", "t2_filt_type",
 }
+-- mangler2: tracks 3 and 4 the same as track 2 (appended, lane order kept),
+-- then the twelve sends
+do
+  local t2 = {}
+  for i = 1, #MOTION_IDS do
+    local rest = MOTION_IDS[i]:match("^t2_(.+)$")
+    if rest then t2[#t2 + 1] = rest end
+  end
+  for _, n in ipairs({ 3, 4 }) do
+    for i = 1, #t2 do MOTION_IDS[#MOTION_IDS + 1] = "t" .. n .. "_" .. t2[i] end
+  end
+  for from = 1, 4 do
+    for to = 1, 4 do
+      if from ~= to then MOTION_IDS[#MOTION_IDS + 1] = "send_" .. from .. "_" .. to end
+    end
+  end
+end
 
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
 -- membership is TOTAL: test/test_control.lua asserts every param sits in
@@ -97,12 +114,14 @@ local MOTION_EXCLUDE = {
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade", "lay1_fade", "lay2_fade",
   "t2_grain_shape", "t2_warp_overlaps",
+  "t3_grain_shape", "t3_warp_overlaps", "t4_grain_shape", "t4_warp_overlaps",
   -- routing + structure (see the header: pad_input re-points the keyboard,
   -- the voices cap re-caps the allocator)
   "pad_input", "voices",
   -- UI cursors + the per-pad lock editors
   "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
   "track_sel",   -- mangler2: which track VOICE and FILTER address
+  "route_sel",   -- mangler2: the ROUTE grid's cursor
   -- a clock rule, set and left (a replayed one would jump the window)
   "win_beats",
   -- config / keys
