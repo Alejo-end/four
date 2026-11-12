@@ -40,6 +40,16 @@
     { "key": "drive", "type": "float" },
     { "key": "dry_wet", "type": "float" },
     { "key": "delay_mix", "type": "float" },
-    { "key": "rev_mix", "type": "float" }
+    { "key": "rev_mix", "type": "float" },
+    { "key": "t2_on", "type": "int", "note": "mangler2 only, as are the t2_ fields below" },
+    { "key": "t2_mode", "type": "int" },
+    { "key": "t2_level", "type": "float" },
+    { "key": "t2_play", "type": "float" },
+    { "key": "t2_win_start", "type": "float" },
+    { "key": "t2_win_end", "type": "float" },
+    { "key": "t2_size", "type": "float" },
+    { "key": "t2_density", "type": "float" },
+    { "key": "t2_pitch", "type": "float" },
+    { "key": "t2_cutoff", "type": "float" }
   ]
 }

@@ -20,7 +20,8 @@ read **`count: 92`** (mangler's 66 plus 26 for track 2). On the device 2026-11-1
 `count: 92`, every def builds, two GRAIN tracks with reverb, shimmer and delay take
 30% of the scsynth thread with 0 xruns (doc/measurements/2026-11-11/mangler2-tracks.md).
 Nobody has listened yet. On VOICE and FILTER, K3 held flips the page between
-track 1 and track 2 (doc/controls.md). The rules below are
+track 1 and track 2 (doc/controls.md). The TRACK2 page (after VOICE) shows both
+tracks on the take and plays track 2 directly. The rules below are
 mangler's and hold here with these names. mangler itself stays at 66.
 
 

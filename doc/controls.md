@@ -25,6 +25,7 @@ and FRZ on K2. Drive and dry/wet are shared by both tracks.
 | VOICE (GRAIN) | `size` | `density` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (WARP) | `warp_window` | `warp_rand` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | VOICE (PV) | `scan` | `pitch` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
+| TRACK2 | `t2_pos_start` | `t2_pos_end` | `t2_level` | `t2_pitch` | ON | MODE | no |
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
 | LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
 | FILTER | `cutoff` | `resonance` | `drive` | `dry_wet` | OPEN | TYPE, hold TRK 2 | no |

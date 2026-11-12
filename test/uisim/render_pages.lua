@@ -137,7 +137,7 @@ local PAGES = (function()
   local block = src:match("\nlocal PAGES = %{(.-)%}")
   assert(block, "could not read PAGES out of " .. MANGLER)
   local out = {}
-  for name in block:gmatch('"([A-Z_]+)"') do out[#out + 1] = name end
+  for name in block:gmatch('"([A-Z0-9_]+)"') do out[#out + 1] = name end
   assert(#out > 0, "PAGES parsed empty")
   return out
 end)()
@@ -218,7 +218,17 @@ elseif TRACK2 then
   run_ticks(5)
   redraw()
   export(pfx("FILTER", "_T2_HP"))
-  goto_page("TAKE")                          -- the "2" flag in the header
+  goto_page("TRACK2")                        -- the track 2 page, playing
+  params:set("t2_mode", 2); params:set("t2_level", 1.2)
+  run_ticks(10)
+  redraw()
+  export(pfx("TRACK2", "_ON"))
+  params:set("t2_mode", 1)                   -- ...and off
+  run_ticks(5)
+  redraw()
+  export(pfx("TRACK2", "_OFF"))
+  params:set("t2_mode", 2); params:set("t2_level", 1)
+  goto_page("TAKE")                          -- the T2 flag in the header
   run_ticks(5)
   redraw()
   export(pfx("TAKE", "_T2_FLAG"))

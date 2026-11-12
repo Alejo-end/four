@@ -96,7 +96,7 @@ local min, max = math.min, math.max
 -- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
 -- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "TAKE", "VOICE", "TRACK2", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
 }
 
@@ -741,6 +741,21 @@ local T2_KEYS = {
   },
 }
 
+-- TRACK 2's K2: track 2 on and off. A tap latches, a hold plays it only
+-- while held (the punch law of every key). Off remembers the mode, so on
+-- brings back the voice you had; the first on is PLAY.
+local t2_last_mode = 5
+local T2_ON = {
+  label = "ON",
+  lit = function() return pget("t2_mode", 1) ~= 1 end,
+  pon = function() params:set("t2_mode", t2_last_mode) end,
+  poff = function()
+    local m = pget("t2_mode", 1)
+    if m ~= 1 then t2_last_mode = m end
+    params:set("t2_mode", 1)
+  end,
+}
+
 -- page key defs (+ each page's `erase`: what the K1+K3 arc wipes)
 local KEYS = {
   TAKE = {
@@ -756,6 +771,10 @@ local KEYS = {
     -- tap = MODE (cycle_mode), hold to the arc = the track switch
     k3 = { label = "MODE", tap = function() cycle_mode("mode") end,
       hold = switch_track, hold_label = "TRK 2" },
+  },
+  TRACK2 = {
+    k2 = T2_ON,
+    k3 = { label = "MODE", act = function() cycle_mode("t2_mode") end },
   },
   TAPE = {
     k2 = pk("REC", "tape_rec"),
@@ -982,6 +1001,8 @@ end
 local ENC_MAP = {
   TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
+  -- mangler2: track 2's own page. E2/E3 its window, K1 its level and pitch
+  TRACK2 = { "t2_pos_start", "t2_level", "t2_pos_end", "t2_pitch" },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "dry_wet" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },

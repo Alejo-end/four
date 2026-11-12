@@ -63,6 +63,20 @@ add("drive", "drive", true)
 add("dry_wet", "dry_wet", true)
 add("delay_mix", "delay_mix", true)
 add("rev_mix", "rev_mix", true)
+-- track 2 (mangler2): on = switched on and audible, then its own head,
+-- window and knobs, so the visuals can give it a layer of its own
+add("t2_on", function()
+  return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001) and 1 or 0
+end)
+add("t2_mode", "t2_mode")
+add("t2_level", "t2_level")
+add("t2_play", function() return C.play_phase2 or 0 end)
+add("t2_win_start", "t2_pos_start")
+add("t2_win_end", "t2_pos_end")
+add("t2_size", "t2_size", true)
+add("t2_density", "t2_density", true)
+add("t2_pitch", "t2_pitch", true)
+add("t2_cutoff", "t2_cutoff", true)
 
 local M = { FIELDS = FIELDS, on = false, host = nil, port = nil, errors = 0 }
 

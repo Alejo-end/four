@@ -18,9 +18,19 @@ const m = { page: 1, page_name: "TAKE", scene: 1, look: 1, flash: 0, mode: 5, re
   env: 0, lfo1: 0.5, lfo2: 0.5, morph: 0, in_l: 0, in_r: 0, out_l: 0, out_r: 0,
   play: 0, rec_phase: 0, win_start: 0, win_end: 1, size: 0.5, density: 0.5,
   spread: 0.5, jitter: 0, pitch: 0.5, cutoff: 1, resonance: 0, drive: 0,
-  dry_wet: 0.5, delay_mix: 0, rev_mix: 0 };
+  dry_wet: 0.5, delay_mix: 0, rev_mix: 0,
+  // track 2 (mangler2 only; mangler never sends these, so the layer stays dark)
+  t2_on: 0, t2_mode: 1, t2_level: 1, t2_play: 0, t2_win_start: 0, t2_win_end: 1,
+  t2_size: 0.5, t2_density: 0.5, t2_pitch: 0.5, t2_cutoff: 1 };
 const s = Object.assign({}, m);          // smoothed copy
 let flash = 0, linked = false, lastMsg = 0;
+// a page opened over the network has no audio input (the browser gives a
+// microphone only to a secure page). The page on the computer with the norns
+// return sends its four audio bands through the bridge, 20 times a second,
+// and every other page reacts to those instead.
+const HAS_AUDIO = window.isSecureContext;
+const farFft = [0, 0, 0, 0];
+let farAt = 0;
 let otText = "", otAt = 0;                    // the last MIDI event, for the display
 let sceneDir = 0, sceneAt = 0, pageAt = 0;   // for the display: FF, REW and the page name
 
@@ -34,6 +44,7 @@ function connect() {
     lastMsg = Date.now();
     const j = JSON.parse(e.data);
     if (j.ev) { onEvent(j.ev, j.a || []); return; }
+    if (j.fft) { if (!HAS_AUDIO) { for (let i = 0; i < 4; i++) farFft[i] = +j.fft[i] || 0; farAt = Date.now(); } return; }
     if (j.state) Object.assign(m, j.state);
     else if (j.k in m) {
       if (j.k === "scene" && j.v !== m.scene) {            // a scene change
@@ -51,8 +62,21 @@ connect();
 // solid(r, g, b, a) adds and multiplies all four channels, so a grey level
 // is solid(x, x, x, 1), never solid(1, 1, 1, x)
 const grey = (f) => solid(f, f, f, 1);
+// Hydra makes no `a` when it detects no audio (a page opened over the
+// network). Without this stand-in, a.setBins threw and the whole page stopped
+// right here: connected to the bridge, drawing nothing.
+if (typeof a === "undefined" || !a || !a.setBins) {
+  window.a = { fft: [0, 0, 0, 0], setBins() {}, setSmooth() {}, setScale() {}, setCutoff() {} };
+}
 a.setBins(4); a.setSmooth(0.8); a.setScale(6); a.setCutoff(1);
-const hz = () => a.fft[0] + a.fft[1];       // low half of the return audio
+// band i of the return audio: this page's own, or the one sent from the page
+// that hears it (silence if that page has been quiet for a second)
+const fftBand = (i) => HAS_AUDIO ? a.fft[i] : (Date.now() - farAt < 1000 ? farFft[i] : 0);
+const hz = () => fftBand(0) + fftBand(1);       // low half of the return audio
+if (HAS_AUDIO) setInterval(() => {
+  if (sock && sock.readyState === 1)
+    sock.send(JSON.stringify({ fft: [0, 1, 2, 3].map((i) => +(a.fft[i] || 0).toFixed(3)) }));
+}, 50);
 
 // the news picture, or a stand-in when there is none
 const vid = document.getElementById("news");
@@ -66,7 +90,8 @@ const newsPic = () => HAVE_VIDEO ? src(s0) : osc(8, 0.05, 1).color(0.6, 0.6, 0.7
 // order. AUTO is 1 and is not a look of its own.
 const NAMES = ["AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS"];
 const AUTO_BY_PAGE = { TAKE: 5, VOICE: 2, TAPE: 5, LAYERS: 5, PADS: 2,
-  FILTER: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4 };
+  FILTER: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4,
+  TRACK2: 2 };   // mangler2's track 2 page
 
 const LOOKS = {
   // BARS: size and density of the grains. density = how many, size = how
@@ -185,6 +210,21 @@ src(o1).mult(grey(() => wb[0]))
   .scale(() => 1 - m.freeze * 0.03)
   .out(o5);
 
+// track 2's layer, in o7 (mangler2): a second voice gets a second mark. A
+// cold blue column stands where track 2's head plays; its width is track 2's
+// window, its grain is its density and size, its tint its cutoff. It fades in
+// when track 2 sounds and out when it stops, over the look and under the display.
+src(o7).mult(grey(0.82))
+  .add(osc(() => 12 + s.t2_density * 70, 0.04, 0)
+    .thresh(() => 0.45 + (1 - s.t2_size) * 0.4, 0.06)
+    .modulate(noise(() => 2 + s.t2_pitch * 8, 0.15), () => 0.04 + s.t2_pitch * 0.12)
+    .mult(shape(4, 1, 0.25)
+      .scale(1, () => 0.03 + Math.max(0, s.t2_win_end - s.t2_win_start) * 0.35, 4)
+      .scrollX(() => (s.t2_play - 0.5) * 1.6))
+    .color(() => 0.25 + (1 - s.t2_cutoff) * 0.3, () => 0.55 + s.t2_cutoff * 0.35, 1)
+    .mult(grey(() => s.t2_on * Math.min(1, s.t2_level) * 0.9)), 0.35)
+  .out(o7);
+
 // the bed, in o4: the news worn like old tape (low resolution, faded warm
 // colour, a slow wobble, scanlines, grain, a smear of the last frame) with
 // slow blobs through it. Without a picture the blobs stand alone.
@@ -242,7 +282,8 @@ function drawOsd() {
   if (Date.now() - otAt < 1600) put(otText, 480, 400, "center");
   put("SP " + Math.floor(el / 3600) + ":" + pad2(Math.floor(el / 60) % 60) + ":" + pad2(el % 60), 920, 40, "right");
   put(NAMES[(m.look > 1 ? Math.round(m.look) : (AUTO_BY_PAGE[m.page_name] ?? 5)) - 1] + "  SC" + m.scene + "  " +
-    (MODES[Math.round(m.mode) - 1] || ""), 40, 470);
+    (MODES[Math.round(m.mode) - 1] || "") +
+    (m.t2_on ? "  T2 " + (MODES[Math.round(m.t2_mode) - 1] || "") : ""), 40, 470);
   put(((window.NEWS && window.NEWS.name) || "") + "  " + MONTHS[d.getMonth()] + " " + pad2(d.getDate()) + " " + d.getFullYear(), 920, 470, "right");
   // the link: only when something is wrong
   if (Date.now() - lastMsg > 4000) put(linked ? "WAITING FOR THE NORNS" : "NO BRIDGE", 480, 250, "center");
@@ -356,8 +397,9 @@ s2.init({ src: dd, dynamic: true });
 const pulse = () => Math.pow(1 - (m.beat || 0), 5);
 
 // ---- the picture, in three steps ------------------------------------------------
-// o6: the bed, the look on top of it, and the display on top of that
-src(o4).layer(src(o5).luma(0.04, 0.03)).layer(src(s2)).layer(src(s1)).out(o6);
+// o6: the bed, the look on top of it, track 2's column, and the display on top
+src(o4).layer(src(o5).luma(0.04, 0.03)).layer(src(o7).luma(0.05, 0.03))
+  .layer(src(s2)).layer(src(s1)).out(o6);
 
 // o0: the tape's faults. The three colour channels slip apart a little (more
 // when the input is loud), a tracking band rolls up the picture and tears it
@@ -387,7 +429,7 @@ setInterval(() => {
   const rep = { id: PAGE_ID, t: Date.now(), visible: document.visibilityState === "visible", fps: Math.round(frames / 5), playing: !!(v && !v.paused && v.readyState > 2),
     muted: !!(v && v.muted), vt: v ? +v.currentTime.toFixed(1) : 0,
     src: (window.NEWS && window.NEWS.name) || "none", fails: window.NEWS ? window.NEWS.fails : 0,
-    audio: +(a.fft[0] + a.fft[1] + a.fft[2] + a.fft[3]).toFixed(3),
+    audio: +(fftBand(0) + fftBand(1) + fftBand(2) + fftBand(3)).toFixed(3), has_audio: HAS_AUDIO,
     look: m.look, scene: m.scene, page: m.page_name,
     heap_mb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
     up_s: Math.round((Date.now() - t0) / 1000) };

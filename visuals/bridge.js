@@ -134,7 +134,7 @@ const server = net.createServer((sock) => {
       sock.write(frame(JSON.stringify({ state })));
       return;
     }
-    // frames from the page: masked, text. Only the page's own report matters.
+    // frames from the page: masked, text: its report, and its audio bands
     inbuf = Buffer.concat([inbuf, d]);
     while (inbuf.length >= 2) {
       const op = inbuf[0] & 0x0f;
@@ -150,7 +150,13 @@ const server = net.createServer((sock) => {
       if (op === 0x8) { sock.end(); return; }
       if (op === 0x9) sock.write(Buffer.from([0x8a, 0]));   // ping -> pong
       if (op === 0x1) {
-        try { const j = JSON.parse(payload.toString("utf8")); if (j.diag) diags.set(j.diag.id || "?", { r: j.diag, at: Date.now() }); } catch (e) {}
+        try {
+          const j = JSON.parse(payload.toString("utf8"));
+          if (j.diag) diags.set(j.diag.id || "?", { r: j.diag, at: Date.now() });
+          // the audio bands of the page that hears the norns, passed on to the
+          // pages that cannot (a page opened over the network has no input)
+          if (Array.isArray(j.fft)) broadcast(JSON.stringify({ fft: j.fft.slice(0, 4) }));
+        } catch (e) {}
       }
     }
   });

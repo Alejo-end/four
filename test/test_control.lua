@@ -3252,4 +3252,45 @@ do
   params:set("mode", 5)
 end
 
+-- ============================================================================
+-- mangler2 · the TRACK 2 page
+-- ============================================================================
+do
+  local Mp
+  for i = 1, 255 do
+    local n, v = debug.getupvalue(redraw, i)
+    if n == nil then break end
+    if n == "Mpages" then Mp = v end
+  end
+  CTX.alt = false
+  params:set("t2_mode", 1)
+  T.goto_page("TRACK2")
+  ok(Mp.page_title() == "TRACK 2", "the page reads TRACK 2")
+  ok(CTX.enc_param(2) == "t2_pos_start" and CTX.enc_param(3) == "t2_pos_end",
+    "E2 and E3 are track 2's window")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == "t2_level" and CTX.enc_param(3) == "t2_pitch",
+    "K1+E2 and K1+E3 are its level and pitch")
+  CTX.alt = false
+  params:set("t2_pos_start", 0.5); params:set("t2_pos_end", 0.6)
+  local a0 = params:get("t2_pos_start")
+  enc(2, -1)
+  ok(params:get("t2_pos_start") < a0 and a0 - params:get("t2_pos_start") < 0.01,
+    "a tight track 2 window moves by a fine step")
+  -- K2: on and off, remembering the mode
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 5, "K2 tapped turns track 2 on, in PLAY the first time")
+  key(3, 1); key(3, 0)
+  ok(params:get("t2_mode") == 2, "K3 cycles its mode (PLAY to GRAIN)")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 1, "K2 tapped again turns it off")
+  key(2, 1); key(2, 0)
+  ok(params:get("t2_mode") == 2, "...and on again brings back GRAIN")
+  key(2, 1); _h.run_ticks(10); key(2, 0)
+  ok(params:get("t2_mode") == 1, "K2 held while on plays it only while held: off at the release")
+  redraw()
+  params:set("t2_mode", 1)
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+end
+
 T.report("control harness OK")

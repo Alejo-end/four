@@ -3613,6 +3613,22 @@ lights while track 2 sounds. The footer words and values of a `t2_` id read as t
 Tests: 26 assertions in test_control's last section, the T2 flag in test_screen, and a
 `track2` render variant in the check (81 shots).
 
+mangler2, fourth change: **the TRACK 2 page, and track 2 in the visuals (Lua and visuals;
+the count stays 92)**. A new page after VOICE, TRACK2 (title "TRACK 2"): track 2's mode rail,
+the take with track 1's window dim and its head dashed, track 2's window bright with brackets
+and a solid head, and a level bar marked at unity. E2/E3 move track 2's window (the fine step),
+K1+E2/E3 its level and pitch, K2 is ON (a tap latches, a hold plays while held, and on brings
+back the last mode, PLAY the first time), K3 cycles its mode. OFF, STOP or level 0 lay it flat
+and dim. The VOICE rail is now one helper (`mode_rail`). The short header bars are 3px (was
+4): the twelfth page dot and the T2 flag left the worst case 2px short of the dots. The test
+page list and the renderer now read a page name with a digit (they silently dropped TRACK2,
+which shifted every later page's index). mosc sends track 2's state (`t2_on`, `t2_mode`,
+`t2_level`, `t2_play`, its window, size, density, pitch, cutoff); the visuals draw it as a cold
+blue column over the look (o7), name it in the display, and pick BARS for the page in AUTO.
+Visuals also fixed for mangler: a page opened over the network halted at once (Hydra makes no
+`a` without audio), and such a page now reacts to the sound the listening page relays through
+the bridge. Tests: 13 assertions for the page, two renders in the track2 variant (84 shots).
+
 ---
 
 ## Build order (procedural, each ends in an on-device gate)

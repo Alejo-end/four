@@ -452,7 +452,7 @@ end
 local T2_BASE = {}
 for k in pairs(SHORT) do
   local b = k:match("^t2_(.+)$")
-  if b then T2_BASE[k] = b end
+  if b and SHORT[b] then T2_BASE[k] = b end
 end
 local function label_for(id, full)
   if not id then return "--" end
@@ -831,10 +831,8 @@ local function grain_cloud(frame, scan)
   end
 end
 
-local function body_VOICE(frame)
-  local mode = tp("mode", 5)
-  local held_pv = tp("pv_freeze", 0) == 1
-  -- the mode rail: the active word inverted; OFF dims the whole rail
+-- the mode rail: the active word inverted; OFF dims the whole rail
+local function mode_rail(mode)
   local x = 4
   for _, m in ipairs(VOICE_RAIL) do
     local w = text_w(m[1], 1)
@@ -848,6 +846,12 @@ local function body_VOICE(frame)
     end
     x = x + w + 8
   end
+end
+
+local function body_VOICE(frame)
+  local mode = tp("mode", 5)
+  local held_pv = tp("pv_freeze", 0) == 1
+  mode_rail(mode)
   -- HELD: the PV freeze is heard in PV, and in GRAIN on the Clouds voice
   -- (it doubles as the Clouds freeze). In PLAY and WARP it waits, dim.
   if mode == 1 then ptext_r("OFF", 126, 13, 1, 8)
@@ -940,6 +944,85 @@ local function body_VOICE(frame)
     screen.move(phx, 24) screen.line(phx, 50)
     screen.stroke()
   end
+end
+
+-- ============================================================================
+-- TRACK 2 (mangler2): both engine tracks on the one take. The material lies
+-- dim; track 1's window is a dim band with its dashed head, track 2's window
+-- is bright with brackets and a solid head, so you see where each track
+-- plays. The rail is track 2's mode, the bar its level. OFF, STOP or a level
+-- of 0 lays track 2 flat and dim, like every silent thing on this screen.
+-- ============================================================================
+local T2_MID, T2_HALF = 34, 8
+local function body_TRACK2(frame)
+  local mode = pget("t2_mode", 1)
+  mode_rail(mode)
+  if mode == 1 then ptext_r("OFF", 126, 13, 1, 8) end
+  if not C.wave_any then
+    screen.level(3)
+    for x = 2, 125, 3 do screen.rect(x, T2_MID, 1, 1) end
+    screen.fill()
+    ptext_c("EMPTY - REC ON TAKE", 64, 24, 1, 10)
+    return
+  end
+  local level = pget("t2_level", 1)
+  local live = mode ~= 1 and level > 0.001 and (C.mix_gains()) > 0.001
+  local lo1, hi1 = window_bounds()
+  local a, b = pget("t2_pos_start", 0), pget("t2_pos_end", 1)
+  local lo, hi = min(a, b), max(a, b)
+  local run = 0
+  for x = 0, 127 do
+    local amp = wave[x + 1]
+    if amp > 0.002 then
+      local h = clamp(sqrt(min(amp * 2, 1)) * T2_HALF, 1, T2_HALF)
+      local nx = x / 127
+      local lvl = 2
+      if nx >= lo1 and nx <= hi1 then lvl = 4 end
+      if nx >= lo and nx <= hi then lvl = live and 12 or 6 end
+      if lvl ~= run then
+        if run ~= 0 then screen.stroke() end
+        screen.level(lvl)
+        run = lvl
+      end
+      screen.move(x, T2_MID - h)
+      screen.line(x, T2_MID + h)
+    end
+  end
+  if run ~= 0 then screen.stroke() end
+  -- track 2's brackets
+  screen.level(live and 15 or 6)
+  for k = 1, 2 do
+    local e = (k == 1 and lo or hi) * 127
+    screen.move(e, T2_MID - T2_HALF - 2)
+    screen.line(e, T2_MID + T2_HALF + 2)
+  end
+  screen.stroke()
+  -- track 1's head: dashed and dim, as a reference
+  if pget("mode", 5) ~= 1 and (C.mix_gains()) > 0.001 then
+    local p1 = clamp(C.play_phase, 0, 1) * 127
+    screen.level(5)
+    for y = T2_MID - T2_HALF, T2_MID + T2_HALF, 2 do screen.rect(p1, y, 1, 1) end
+    screen.fill()
+  end
+  -- track 2's head: solid and bright while it sounds
+  if live then
+    local p2 = clamp(C.play_phase2 or 0, 0, 1) * 127
+    screen.level(15)
+    screen.move(p2, T2_MID - T2_HALF - 2)
+    screen.line(p2, T2_MID + T2_HALF + 2)
+    screen.stroke()
+  end
+  -- the level bar (0 to 1.5, unity marked)
+  ptext("LV", 2, 47, 1, 5)
+  screen.level(1)
+  screen.rect(12, 48, 60, 3)
+  screen.fill()
+  screen.level(live and 11 or 4)
+  screen.rect(12, 48, floor(clamp(level / 1.5, 0, 1) * 60), 3)
+  screen.fill()
+  screen.level(8)
+  screen.rect(52, 47, 1, 5)
+  screen.fill()
 end
 
 -- ============================================================================
@@ -1911,6 +1994,7 @@ local BODY = {
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
+  TRACK2 = body_TRACK2,
 }
 
 local function draw_body()
@@ -2006,7 +2090,9 @@ local RP_CH = { "RP2", "RP4", "RP8", "RP16", "RP32" }
 local RP_W = {}
 -- the width of a flag whole, and short (a writer's letter, or a bar)
 local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
-local function hflag_pip(f) return f.write and f.w + 2 or 4 end
+-- (a bar's pip is 3: the 2px bar and a 1px gap. It was 4, but mangler2's
+-- twelfth page dot and T2 flag left the worst case 2px short of the dots.)
+local function hflag_pip(f) return f.write and f.w + 2 or 3 end
 local function any_layer_rec()
   local decks = C.layers
   if not decks then return false end
@@ -2065,10 +2151,11 @@ end
 -- the page's name, with its track on VOICE and FILTER while track 2 is
 -- selected (mangler2). Fixed strings: the redraw path allocates nothing.
 local TITLE2 = { VOICE = "VOICE 2", FILTER = "FILTER 2" }
+local TITLE = { TRACK2 = "TRACK 2" }
 local function page_title()
   local name = PAGES[C.page]
   if TITLE2[name] and on_t2() then return TITLE2[name] end
-  return name
+  return TITLE[name] or name
 end
 M.page_title = page_title
 
