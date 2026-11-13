@@ -419,7 +419,7 @@ Engine_Four : CroneEngine {
         var s = context.server;
         var allKeys;
         var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
-        var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, th, dfmTrim;
+        var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, roomClass, th, dfmTrim;
         var grainCap;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
@@ -646,9 +646,10 @@ Engine_Four : CroneEngine {
         tanhClass = "FourTanh".asSymbol.asClass;
         delayClass = "FourDelay".asSymbol.asClass;
         grainClass = "FourGrain".asSymbol.asClass;
+        roomClass = "FourRoom".asSymbol.asClass;
         stretchOn = pvClass.notNil and: { warpClass.notNil } and: { readClass.notNil }
             and: { tanhClass.notNil } and: { delayClass.notNil }
-            and: { grainClass.notNil } and: {
+            and: { grainClass.notNil } and: { roomClass.notNil } and: {
             "FOUR_STRETCH".getenv.notNil or: {
                 ["FourStretch.so", "FourStretch.scx"].any({ arg f;
                     File.exists(Platform.userExtensionDir +/+ "FourStretch" +/+ f)
@@ -1446,6 +1447,7 @@ Engine_Four : CroneEngine {
                 rev_lowcut = 500, rev_highcut = 2000,
                 shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0;
             var wet, fbIn, shimFb, revIn, rv, jpClass, ratio, pitched, shimOut;
+            var roomGain;
             wet = In.ar(in_bus, 2);                 // io's post-delay wet send
             // shimmer feedback: the pitched tail recirculates into the reverb
             // INPUT so it climbs in octaves. shimmer=0 -> shimOut 0 -> revIn==wet.
@@ -1453,7 +1455,23 @@ Engine_Four : CroneEngine {
             shimFb = fbIn;
             revIn = wet + (shimFb * shimmer.clip(0, 0.95));
             jpClass = "JPverb".asSymbol.asClass;
-            rv = jpClass.notNil.if({
+            // With the plugin the reverb is THE ROOM (doc/space-plan.md): four
+            // unitary diffusion steps and eight late lines. It takes 4% of
+            // the audio thread where JPverb took 13.5%. rev_decay is its T60.
+            // rev_damp makes it dark: the top keeps 1 down to 0.15 of the
+            // decay. rev_size is the base time of the diffusion, read when the
+            // synth starts. The other reverb values do nothing to it yet.
+            // Its level is set against JPverb's, measured on the device with
+            // the same pink noise at decays of 0.8, 2 and 7 s. The room alone
+            // rose 4.9 dB over that range and JPverb 2.0 dB, so the return
+            // falls gently with the decay. With this law the two are within
+            // 0.7 dB of each other at all three, and a preset keeps its balance.
+            roomGain = 0.71 * (rev_decay.max(0.1) ** -0.15).lag(0.1);
+            rv = stretchOn.if({
+                roomClass.ar(revIn[0], revIn[1], rev_decay,
+                    1 - (0.85 * rev_damp.clip(0, 1)),
+                    (0.005 * rev_size).clip(0.002, 0.0105)) * roomGain
+            }, { jpClass.notNil.if({
                 // in (STEREO pair — the mono .sum collapsed the grain field's
                 // pan/spread and the stereo shimmer out of the tail; array-in
                 // via perform works, the MiClouds call is the precedent),
@@ -1466,7 +1484,7 @@ Engine_Four : CroneEngine {
                 var rs = rev_decay.linlin(0.1, 30, 0.1, 0.97);
                 [FreeVerb.ar(revIn[0], 1.0, rs, rev_damp),
                     FreeVerb.ar(revIn[1], 1.0, rs, rev_damp)] * 2
-            });
+            }) });
             // pitch the tail (semitones -> ratio), band-limit so the octave
             // stack stays a halo (HPF kills DC/rumble build-up, LPF tames the
             // metallic hiss), the saturator bounds runaway. STEREO shimmer, a

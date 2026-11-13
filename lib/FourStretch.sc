@@ -63,3 +63,17 @@ FourGrain : MultiOutUGen {
         ^this.initOutputs(2, rate)
     }
 }
+
+// THE ROOM: the reverb. Four unitary diffusion steps and eight late lines
+// (doc/space-plan.md). The wet sound only. decay is T60 in seconds, colour is
+// the share of it that the top keeps (1 bright, 0.15 dark), size is the base
+// time of the diffusion in seconds (0.002 to 0.0105), read at the start.
+FourRoom : MultiOutUGen {
+    *ar { arg inL, inR, decay = 2, colour = 0.6, size = 0.005;
+        ^this.multiNew('audio', inL, inR, decay, colour, size)
+    }
+    init { arg ... theInputs;
+        inputs = theInputs;
+        ^this.initOutputs(2, rate)
+    }
+}

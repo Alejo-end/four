@@ -536,3 +536,12 @@ Three things the work found:
 
 Not done in this core: the early field of 5.3, a change of SIZE while it plays,
 the slow movement of the lines, and the gain law for long decays.
+
+## 14. The room in the engine (2026-11-13)
+
+`FourRoom` is in the plugin and `\\four_reverb` uses it. On the norns, preset 1
+with its reverb and delay on: four PLAY tracks take 17.2% of the thread, where
+they took 25.2% with JPverb. The reverb synth costs about 5% in all. Its level
+is matched to JPverb's (within 0.7 dB at three decay times), so a preset keeps
+its balance. The engine still feeds it by the old law, and the page is still
+the old REVERB page. Nobody has listened.

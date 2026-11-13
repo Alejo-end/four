@@ -911,7 +911,7 @@ struct DelayFb {
 //      in proportion to m, so every line decays at one rate.
 struct Room {
     static const int CH = 8, STEPS = 4;
-    static const int DMAX = 8192;        // a diffusion delay, at most (170 ms)
+    static const int DMAX = 4096;        // a diffusion delay, at most (85 ms)
     static const int LMAX = 16384;       // a late line, at most (341 ms)
     // Each buffer gets a gap of its own size after it. Forty buffers that sit
     // exactly 32 kB apart all want the same places in the cache, and the first

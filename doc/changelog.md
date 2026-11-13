@@ -4077,3 +4077,38 @@ four, fifteenth change: **the name everywhere, the opening text, and an opening 
   the same day, at the user's word.)
 - `main` is pushed, and the GitHub repository is `four`.
 On the device: `count: 197`, the log says `four: FourStretch on`, the opening draws.
+
+four, sixteenth change: **the README as a norns script page, new pictures and a new
+signal flow drawing (documents only, no code of the instrument changes)**.
+- README.md is rewritten for four: what it is, the requirements, the install line for
+  maiden, a first session, each page with its pictures, and the plan of
+  doc/space-plan.md as "what comes next", marked as not built. The old text named one
+  track, two modulators, the LAYERS page and `count: 66`.
+- `test/uisim/gallery.py` rebuilds `doc/ui/` from the offscreen renders: 37 pictures and
+  `four.png`, the twelve pages in one picture. The old pictures were from October and
+  showed LAYERS. No render has CLOUD or ECHO yet, so neither has a picture.
+- `doc/signal-flow.svg` is redrawn by hand for four tracks, the sends and the tape.
+
+four, sixteenth change: **THE ROOM: a reverb of our own in place of JPverb (engine and
+plugin, the count stays 197, needs a RESTART and the new binary first)**. Step 3 of
+doc/space-plan.md, done before the delay because the reverb was the heaviest part.
+- JPverb took 13.5% of the audio thread, more than six tracks. Nobody measured it alone
+  before: preset 1 points a modulator at the reverb mix, so it never stopped, and every
+  "at rest" figure of this week held it.
+- `Room` (ugen/four_core.h) and the UGen `FourRoom`: four unitary diffusion steps
+  (delays, sign flips, a Hadamard mix: one click is 4096 echoes) into eight late lines
+  through a Householder matrix. The decay comes only from a first-order shelf in each
+  line, whose loss in dB is in proportion to the line's length.
+- The proof (17 checks): with no loss set the energy holds to 0.00 dB over 10 s, all
+  eight lines decay at one rate, the late slope is within 2% of the design from 500 Hz
+  to 10 kHz, the echo density is full after 80 ms, left and right are uncorrelated.
+- Buffers of a power of two, one after the other, wanted the same places in the cache:
+  the first build took 22.8% of a norns core. A gap of its own size after each buffer
+  brought it to 4.2%.
+- `\four_reverb` uses it when the plugin is there. `rev_decay` is its T60, `rev_damp`
+  makes it dark, `rev_size` is read when the synth starts. The other reverb params do
+  nothing to it yet. Its level follows JPverb's within 0.7 dB at decays of 0.8, 2 and
+  7 s, measured on the device with the same noise.
+On the device, preset 1 with its reverb and delay on: four PLAY tracks 17.2% of the
+thread (25.2% before), four PV 28.6%, four GRAIN 19.1%. Nobody has listened yet. Not
+done: the early field, SIZE while it plays, moving lines, the SPACE page, the sends.

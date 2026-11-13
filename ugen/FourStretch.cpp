@@ -195,6 +195,42 @@ static void FourGrain_Dtor(FourGrain* unit) {
     if (unit->core) RTFree(unit->mWorld, unit->core);
 }
 
+// FourRoom.ar(inL, inR, decay, colour, size): see Room in four_core.h. The wet
+// sound only. decay is T60 in seconds, colour the share of it that the top
+// keeps (1 bright, 0.15 dark), size the base time of the diffusion in seconds.
+// size is read when the synth starts.
+struct FourRoom : public Unit { four::Room* core; float* mem; float lastDecay, lastColour; };
+static void FourRoom_next(FourRoom* unit, int inNumSamples) {
+    const float* inL = IN(0); const float* inR = IN(1);
+    float* outL = OUT(0); float* outR = OUT(1);
+    const float decay = sc_clip(IN0(2), 0.05f, 60.f), colour = sc_clip(IN0(3), 0.05f, 1.f);
+    if (decay != unit->lastDecay || colour != unit->lastColour) {
+        unit->core->setDecay(decay, colour);
+        unit->lastDecay = decay; unit->lastColour = colour;
+    }
+    for (int i = 0; i < inNumSamples; i++) unit->core->tick(inL[i], inR[i], outL[i], outR[i]);
+}
+static void FourRoom_Ctor(FourRoom* unit) {
+    unit->core = (four::Room*)RTAlloc(unit->mWorld, sizeof(four::Room));
+    unit->mem = (float*)RTAlloc(unit->mWorld, four::Room::need() * sizeof(float));
+    if (!unit->core || !unit->mem) {
+        if (unit->core) RTFree(unit->mWorld, unit->core);
+        if (unit->mem) RTFree(unit->mWorld, unit->mem);
+        unit->core = nullptr; unit->mem = nullptr;
+        SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1);
+        Print("FourRoom: no memory for the room\n");
+        return;
+    }
+    unit->core->init(unit->mem, SAMPLERATE, sc_clip(IN0(4), 0.002f, 0.0105f));
+    unit->lastDecay = -1.f; unit->lastColour = -1.f;
+    SETCALC(FourRoom_next);
+    OUT0(0) = 0.f; OUT0(1) = 0.f;
+}
+static void FourRoom_Dtor(FourRoom* unit) {
+    if (unit->core) RTFree(unit->mWorld, unit->core);
+    if (unit->mem) RTFree(unit->mWorld, unit->mem);
+}
+
 PluginLoad(FourStretch) {
     ft = inTable;
     four::tables();     // built here, off the audio thread
@@ -209,4 +245,5 @@ PluginLoad(FourStretch) {
     DefineSimpleUnit(FourTanh);
     DefineDtorCantAliasUnit(FourDelay);
     DefineDtorCantAliasUnit(FourGrain);
+    DefineDtorCantAliasUnit(FourRoom);
 }

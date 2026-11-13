@@ -123,6 +123,12 @@ block current, and add a change-log entry for every change.
   The album presets in `data/` are regenerated (the deck parts play on
   tracks 2 and 3), but they are NOT on the device: `test/deploy_set.sh` overwrites
   slots 1 to 12 there, and the user has not said yes.
+- **THE ROOM (four, sixteenth change), on the device 2026-11-13:** the reverb is our own
+  `FourRoom` when the plugin is there (JPverb took 13.5% of the thread, the room takes
+  about 5%). doc/space-plan.md is the plan for SPACE (BBD delay, the room, sends, the
+  page), reviewed by a second agent; its section 13 says what is built. With preset 1's
+  reverb and delay on, four PLAY tracks take 17% of the thread. Nobody has listened.
+  README.md and doc/ui are edited from another terminal: do not commit them from here.
 - **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
