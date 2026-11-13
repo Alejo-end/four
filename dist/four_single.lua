@@ -12,7 +12,6 @@
 -- record any sound, then
 -- loop, stretch and grain
 -- it on four tracks.
--- four all mankind.
 --
 -- START
 -- 1 plug a sound into the
@@ -7779,13 +7778,12 @@ local function draw_page_flash()
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
--- THE OPENING: about two seconds, once, when the script starts. Four bars
--- rise one after the other (the four tracks), the name lands on them, and the
--- line "ALL MANKIND" types itself under it. Any key or knob ends it at once.
-local SPLASH_FRAMES = 34
-local SPLASH_LINE = "ALL MANKIND"
+-- THE OPENING: a second and a half, once, when the script starts. Four bars
+-- rise one after the other (the four tracks) and the name lands on them. Any
+-- key or knob ends it at once.
+local SPLASH_FRAMES = 24
 local function draw_splash(t)
-  local fade = t > 28 and (SPLASH_FRAMES - t) / 6 or 1      -- out over the last frames
+  local fade = t > 18 and (SPLASH_FRAMES - t) / 6 or 1      -- out over the last frames
   local function lv(l) return max(1, floor(l * fade + 0.5)) end
   -- the four bars, each rising for five frames, two frames apart
   for k = 0, 3 do
@@ -7805,11 +7803,6 @@ local function draw_splash(t)
     screen.rect(64 - w / 2 - 2, 17, w + 4, 19)
     screen.fill()
     ptext_c("FOUR", 64, 19, 3, lv(4 + floor(11 * b)))
-  end
-  if t >= 15 then
-    local n = min(#SPLASH_LINE, t - 14)
-    local full = text_w(SPLASH_LINE, 1)
-    ptext(SPLASH_LINE:sub(1, n), floor(64 - full / 2), 44, 1, lv(9))
   end
 end
 

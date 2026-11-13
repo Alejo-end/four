@@ -2,7 +2,6 @@
 -- record any sound, then
 -- loop, stretch and grain
 -- it on four tracks.
--- four all mankind.
 --
 -- START
 -- 1 plug a sound into the

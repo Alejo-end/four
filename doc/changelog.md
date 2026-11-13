@@ -4072,7 +4072,8 @@ four, fifteenth change: **the name everywhere, the opening text, and an opening 
   It is new: what the script is, how to start, every key and knob, each page in a line.
   Its lines are short enough for the norns screen. The notes for a developer are a
   second comment block under it.
-- The script opens with a two second picture: four bars rise, the name lands on them,
-  and "ALL MANKIND" types itself under it. Any key or knob ends it.
+- The script opens with a picture of a second and a half: four bars rise and the name
+  lands on them. Any key or knob ends it. (A line "ALL MANKIND" under it was removed
+  the same day, at the user's word.)
 - `main` is pushed, and the GitHub repository is `four`.
 On the device: `count: 197`, the log says `four: FourStretch on`, the opening draws.
