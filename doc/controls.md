@@ -32,7 +32,7 @@ K1 and FRZ on K2 there. Drive and dry/wet are shared by every track.
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
 | LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
 | FILTER | `cutoff` | `resonance` | `drive` | `crush` | OPEN | TYPE, hold TRK 2 | no |
-| EFFECT | `effect_amt` | `effect_rate` | none | none | ON | TYPE, hold TRK 2 | no |
+| EFFECT | `effect_amt` | `effect_rate` | `effect2_amt` | `effect2_rate` | ON | TYPE, hold TRK 2 | no |
 | DELAY | `delay_mix` | `delay_fb` | `delay_time` | `delay_sync` | INF | KILL | no |
 | REVERB | `rev_mix` | `rev_decay` | `rev_size` | `rev_damp` | WASH | BLOOM | no |
 | MIX | `mix` | `out_level` | `input_level` | `dry_wet` | ENG | TAPE | no |

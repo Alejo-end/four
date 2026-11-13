@@ -2233,6 +2233,14 @@ do
       if from ~= to then MOTION_IDS[#MOTION_IDS + 1] = "send_" .. from .. "_" .. to end
     end
   end
+  -- the second effect slot, appended AFTER everything above: a lane is
+  -- stored by its place in this list, so nothing before it may move
+  for n = 1, 4 do
+    local pre = n == 1 and "" or ("t" .. n .. "_")
+    for _, k in ipairs({ "effect2", "effect2_amt", "effect2_rate" }) do
+      MOTION_IDS[#MOTION_IDS + 1] = pre .. k
+    end
+  end
 end
 
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
@@ -2908,6 +2916,8 @@ local TARGETS = {
   "crush", "fx_dly", "fx_rev", "grain_level",
   -- four: the two knobs of a track's effect (appended: a PSET stores the index)
   "effect_amt", "effect_rate",
+  -- the second effect slot (appended)
+  "effect2_amt", "effect2_rate",
 }
 -- the knobs all four tracks share: the same id whatever the track
 local SHARED = {
@@ -3642,6 +3652,9 @@ local SPACE_IDS = {
   -- THE EFFECT (four): each track's two effect knobs
   "effect_amt", "effect_rate", "t2_effect_amt", "t2_effect_rate",
   "t3_effect_amt", "t3_effect_rate", "t4_effect_amt", "t4_effect_rate",
+  -- the second effect slot
+  "effect2_amt", "effect2_rate", "t2_effect2_amt", "t2_effect2_rate",
+  "t3_effect2_amt", "t3_effect2_rate", "t4_effect2_amt", "t4_effect2_rate",
 }
 
 local SWITCH_IDS = {
@@ -3655,6 +3668,7 @@ local SWITCH_IDS = {
   "t2_filt_type", "t2_clouds_mode", "t2_grain_shape", "t2_pv_freeze",
   -- THE EFFECT (four): which effect each track's slot holds
   "effect", "t2_effect", "t3_effect", "t4_effect",
+  "effect2", "t2_effect2", "t3_effect2", "t4_effect2",
   "t2_mode",   -- respawns track 2's voice
   "mode",   -- last of the last: this one respawns the voice
 }
@@ -5657,6 +5671,7 @@ local SHORT = {
   crush = "CRSH", fx_dly = "1>DLY", fx_rev = "1>REV",
   -- THE EFFECT (four): the slot's type and its two knobs
   effect = "EFFECT", effect_amt = "AMOUNT", effect_rate = "RATE",
+  effect2 = "FX 2", effect2_amt = "AMT 2", effect2_rate = "RATE 2",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
@@ -5687,6 +5702,7 @@ local SHORT = {
   t2_drive = "T2 DRV", t2_crush = "T2 CRSH",
   t2_fx_dly = "2>DLY", t2_fx_rev = "2>REV",
   t2_effect = "T2 FX", t2_effect_amt = "T2 AMT", t2_effect_rate = "T2 RATE",
+  t2_effect2 = "T2 FX2", t2_effect2_amt = "T2 AMT2", t2_effect2_rate = "T2 RT2",
   -- the ROUTE page: its cursor and the selected send's amount
   route_sel = "SEND", ["@route_amt"] = "AMT",
   track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
@@ -5783,7 +5799,9 @@ for k in pairs(SHORT) do
 end
 -- each track's effect type id, by its rate id (RATE reads in the type's unit)
 local FX_TYPE_OF = { effect_rate = "effect", t2_effect_rate = "t2_effect",
-  t3_effect_rate = "t3_effect", t4_effect_rate = "t4_effect" }
+  t3_effect_rate = "t3_effect", t4_effect_rate = "t4_effect",
+  effect2_rate = "effect2", t2_effect2_rate = "t2_effect2",
+  t3_effect2_rate = "t3_effect2", t4_effect2_rate = "t4_effect2" }
 local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
@@ -5841,7 +5859,7 @@ local function fmt_value(id)
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
   end
-  if key == "effect_rate" then
+  if key == "effect_rate" or key == "effect2_rate" then
     -- RATE reads in the unit its effect gives it: a speed, a note, a frequency
     local fx = floor(params:get(FX_TYPE_OF[id]) + 0.5)
     local v = params:get(id)
@@ -6969,6 +6987,12 @@ local function fx_wave(sh, h)
 end
 local function body_EFFECT(frame)
   local fx = floor(tp("effect", 1) + 0.5)
+  -- the second slot, named top right while it is on (K1+E2 and K1+E3 turn
+  -- its knobs; its type is in PARAMS for now)
+  if floor(tp("effect2", 1) + 0.5) > 1 then
+    ptext_r("+ " .. params:string(C.tid and C.tid("effect2") or "effect2"), 126, 12, 1,
+      track_sounds(cur_track()) and 10 or 4)
+  end
   local a = tp("effect_amt", 0.5)
   local r = tp("effect_rate", 0.5)
   local live = track_sounds(cur_track())
@@ -9027,7 +9051,7 @@ local ENC_MAP = {
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "crush" },
   -- the focused track's effect slot: its two knobs. K1 held has nothing here
-  EFFECT = { "effect_amt", nil, "effect_rate", nil },
+  EFFECT = { "effect_amt", "effect2_amt", "effect_rate", "effect2_rate" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "dry_wet" },
@@ -10371,10 +10395,12 @@ function ctx.fx_dry()
   params:set("drive", 0)
   params:set("crush", 0)
   params:set("effect", 1)
+  params:set("effect2", 1)
   for n = 2, NTRACKS do
     params:set("t" .. n .. "_drive", 0)
     params:set("t" .. n .. "_crush", 0)
     params:set("t" .. n .. "_effect", 1)
+    params:set("t" .. n .. "_effect2", 1)
   end
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
@@ -10851,7 +10877,7 @@ local function init_params()
   -- turning the knob re-resolves rather than silently fighting it
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
-  params:add_group("grp_filter", "filter", 8)
+  params:add_group("grp_filter", "filter", 11)
   add_eng_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
@@ -10866,6 +10892,11 @@ local function init_params()
   add_eng_option("effect", "effect", EFFECT_NAMES, 1)
   add_eng_control("effect_amt", "effect amount", unit(0.5))
   add_eng_control("effect_rate", "effect rate", unit(0.5))
+  -- THE SECOND SLOT, after the first (the engine's effect2). The same types
+  -- and the same two knobs. On the EFFECT page K1+E2 and K1+E3 turn them.
+  add_eng_option("effect2", "effect 2", EFFECT_NAMES, 1)
+  add_eng_control("effect2_amt", "effect 2 amount", unit(0.5))
+  add_eng_control("effect2_rate", "effect 2 rate", unit(0.5))
 
   -- ---- tracks 2 to 4 (four) -------------------------------------------
   -- more engine drones on the same take: each its own mode, window, pitch,
@@ -10880,7 +10911,7 @@ local function init_params()
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
-    params:add_group("grp_t" .. n, "track " .. n, 32)
+    params:add_group("grp_t" .. n, "track " .. n, 35)
     -- its own material from a file (the take of track n), like `sample_file`
     params:add_file(pre .. "file", lab .. "load file", _path.audio)
     params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
@@ -10924,6 +10955,9 @@ local function init_params()
     add_eng_option(pre .. "effect", lab .. "effect", EFFECT_NAMES, 1)
     add_eng_control(pre .. "effect_amt", lab .. "effect amount", unit(0.5))
     add_eng_control(pre .. "effect_rate", lab .. "effect rate", unit(0.5))
+    add_eng_option(pre .. "effect2", lab .. "effect 2", EFFECT_NAMES, 1)
+    add_eng_control(pre .. "effect2_amt", lab .. "effect 2 amount", unit(0.5))
+    add_eng_control(pre .. "effect2_rate", lab .. "effect 2 rate", unit(0.5))
   end
   -- the sends: one track's filtered output into another track's filter
   -- and each track's SPACE: its send into the delay and the reverb

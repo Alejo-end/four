@@ -36,7 +36,7 @@ Then SYSTEM > RESTART on the norns and pick four in SELECT. Two rules:
    `dust/code` hangs every norns script on LOADING.
 2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
    reload. After a restart the maiden log prints the engine command count. It must read
-   `count: 185`; any other number means an old engine is still running.
+   `count: 197`; any other number means an old engine is still running.
 
 ## First session
 

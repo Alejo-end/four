@@ -119,6 +119,9 @@ local SPACE_IDS = {
   -- THE EFFECT (four): each track's two effect knobs
   "effect_amt", "effect_rate", "t2_effect_amt", "t2_effect_rate",
   "t3_effect_amt", "t3_effect_rate", "t4_effect_amt", "t4_effect_rate",
+  -- the second effect slot
+  "effect2_amt", "effect2_rate", "t2_effect2_amt", "t2_effect2_rate",
+  "t3_effect2_amt", "t3_effect2_rate", "t4_effect2_amt", "t4_effect2_rate",
 }
 
 local SWITCH_IDS = {
@@ -132,6 +135,7 @@ local SWITCH_IDS = {
   "t2_filt_type", "t2_clouds_mode", "t2_grain_shape", "t2_pv_freeze",
   -- THE EFFECT (four): which effect each track's slot holds
   "effect", "t2_effect", "t3_effect", "t4_effect",
+  "effect2", "t2_effect2", "t3_effect2", "t4_effect2",
   "t2_mode",   -- respawns track 2's voice
   "mode",   -- last of the last: this one respawns the voice
 }

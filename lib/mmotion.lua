@@ -98,6 +98,14 @@ do
       if from ~= to then MOTION_IDS[#MOTION_IDS + 1] = "send_" .. from .. "_" .. to end
     end
   end
+  -- the second effect slot, appended AFTER everything above: a lane is
+  -- stored by its place in this list, so nothing before it may move
+  for n = 1, 4 do
+    local pre = n == 1 and "" or ("t" .. n .. "_")
+    for _, k in ipairs({ "effect2", "effect2_amt", "effect2_rate" }) do
+      MOTION_IDS[#MOTION_IDS + 1] = pre .. k
+    end
+  end
 end
 
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.

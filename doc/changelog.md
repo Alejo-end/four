@@ -3971,3 +3971,24 @@ user never saw a deck's wave fill up and could not tell if a recording was there
 - LAYERS and the tape lane of MIX use the same view.
 On the device with a drum loop: a 4.6 s tape loop and a 3.5 s layer fill their strips
 and each hit shows. No test of the new view exists yet in test_screen.
+
+four, twelfth change: **lanes: a track runs only what is heard, and it has a second
+effect slot (engine and Lua, the count goes from 185 to 197, needs a RESTART)**.
+- Each track's path from its voice to the mix is a LANE: a group of small synths. The
+  in synth, one filter family (LO for LP and BP, HI for HP), the colour synth while
+  drive or crush is above 0, one effect synth for each slot that is on, and for tracks
+  2 to 4 the out synth. `\four_strip` is gone, and io reads track 1's lane from a bus.
+  Before, every track ran both filter ladders, the crusher and all five effects.
+- A change of filter family and a change of effect are crossfades between two synths,
+  released and started in one bundle (20 ms and 50 ms, as before).
+- The second slot: `effect2`, `effect2_amt`, `effect2_rate` for each track, after the
+  first in series. They are in the scenes, the motion lanes (appended at the end) and
+  the modulator targets. On EFFECT, K1+E2 and K1+E3 turn its knobs, and its name shows
+  top right. Its TYPE has no key yet: it is in PARAMS.
+- A cloud holds 32 grain pairs at most (`maxGrains`), and the level law stops there
+  too. The user's set reached 100% with two dense GRAIN tracks and two pitched PV
+  tracks. That set now takes 59.8% with no xruns.
+- An argument named `s_bus` beside `p_bus` broke the def's event function (both read
+  as `bus`). They are `sbus` and `pbus`.
+On the device: `count: 197`, four PLAY tracks 25.2% of the thread (36.0% before), four
+PV at pitch 2 53.0% (64.1%). doc/measurements/2026-11-13/lanes.md. Nobody has listened.

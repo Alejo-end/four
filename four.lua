@@ -1168,7 +1168,7 @@ local ENC_MAP = {
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "crush" },
   -- the focused track's effect slot: its two knobs. K1 held has nothing here
-  EFFECT = { "effect_amt", nil, "effect_rate", nil },
+  EFFECT = { "effect_amt", "effect2_amt", "effect_rate", "effect2_rate" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "dry_wet" },
@@ -2512,10 +2512,12 @@ function ctx.fx_dry()
   params:set("drive", 0)
   params:set("crush", 0)
   params:set("effect", 1)
+  params:set("effect2", 1)
   for n = 2, NTRACKS do
     params:set("t" .. n .. "_drive", 0)
     params:set("t" .. n .. "_crush", 0)
     params:set("t" .. n .. "_effect", 1)
+    params:set("t" .. n .. "_effect2", 1)
   end
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
@@ -2992,7 +2994,7 @@ local function init_params()
   -- turning the knob re-resolves rather than silently fighting it
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
-  params:add_group("grp_filter", "filter", 8)
+  params:add_group("grp_filter", "filter", 11)
   add_eng_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
@@ -3007,6 +3009,11 @@ local function init_params()
   add_eng_option("effect", "effect", EFFECT_NAMES, 1)
   add_eng_control("effect_amt", "effect amount", unit(0.5))
   add_eng_control("effect_rate", "effect rate", unit(0.5))
+  -- THE SECOND SLOT, after the first (the engine's effect2). The same types
+  -- and the same two knobs. On the EFFECT page K1+E2 and K1+E3 turn them.
+  add_eng_option("effect2", "effect 2", EFFECT_NAMES, 1)
+  add_eng_control("effect2_amt", "effect 2 amount", unit(0.5))
+  add_eng_control("effect2_rate", "effect 2 rate", unit(0.5))
 
   -- ---- tracks 2 to 4 (four) -------------------------------------------
   -- more engine drones on the same take: each its own mode, window, pitch,
@@ -3021,7 +3028,7 @@ local function init_params()
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
-    params:add_group("grp_t" .. n, "track " .. n, 32)
+    params:add_group("grp_t" .. n, "track " .. n, 35)
     -- its own material from a file (the take of track n), like `sample_file`
     params:add_file(pre .. "file", lab .. "load file", _path.audio)
     params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
@@ -3065,6 +3072,9 @@ local function init_params()
     add_eng_option(pre .. "effect", lab .. "effect", EFFECT_NAMES, 1)
     add_eng_control(pre .. "effect_amt", lab .. "effect amount", unit(0.5))
     add_eng_control(pre .. "effect_rate", lab .. "effect rate", unit(0.5))
+    add_eng_option(pre .. "effect2", lab .. "effect 2", EFFECT_NAMES, 1)
+    add_eng_control(pre .. "effect2_amt", lab .. "effect 2 amount", unit(0.5))
+    add_eng_control(pre .. "effect2_rate", lab .. "effect 2 rate", unit(0.5))
   end
   -- the sends: one track's filtered output into another track's filter
   -- and each track's SPACE: its send into the delay and the reverb

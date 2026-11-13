@@ -1691,7 +1691,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   four_cmds(sc, add)
-  ok(n == 185, "the engine command count is 185, the expected fingerprint (got " .. n .. ")")
+  ok(n == 197, "the engine command count is 197, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2714,14 +2714,16 @@ do
   CTX.throws_forget()
 
   -- THE EFFECT: its own page for the focused track. E2 and E3 are the two
-  -- knobs, K1 held has nothing; K3 steps the type and skips OFF; K2 is ON
+  -- knobs, K1 held turns the second slot's; K3 steps the type and skips OFF; K2 is ON
   -- under the punch law and remembers the type; DRY switches every slot off.
   T.goto_page("EFFECT")
   ok(CTX.enc_param(2) == "effect_amt" and CTX.enc_param(3) == "effect_rate",
     "EFFECT E2/E3 are track 1's effect amount and rate")
   CTX.alt = true
-  ok(CTX.enc_param(2) == nil and CTX.enc_param(3) == nil, "...and K1 held has no knob there")
+  ok(CTX.enc_param(2) == "effect2_amt" and CTX.enc_param(3) == "effect2_rate",
+    "...and K1 held turns the SECOND slot's amount and rate")
   CTX.alt = false
+  params:set("effect2", 4); params:set("t3_effect2", 5)
   ok(params:get("effect") == 1, "the effect starts OFF")
   key(3, 1); key(3, 0)
   ok(params:get("effect") == 2, "EFFECT K3 steps OFF to CHORUS")
@@ -2742,6 +2744,8 @@ do
     "...and K3 steps track 3's effect, not track 1's")
   CTX.fx_dry()
   ok(params:get("effect") == 1 and params:get("t3_effect") == 1, "DRY switches every effect off")
+  ok(params:get("effect2") == 1 and params:get("t3_effect2") == 1,
+    "...and the second slot of every track")
   CTX.throws_forget()
   params:set("track_sel", 1)
 

@@ -15,13 +15,13 @@ block current, and add a change-log entry for every change.
   data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The one-track
   mangler is retired: git tag `mangler-1`. The OSC addresses stay `/mangler/...`, because
   the visuals bridge reads them. The log lines still start with `mangler:`.
-- **The fingerprint:** after a RESTART maiden must read **`count: 185`**. That is
-  mangler's 66, plus crush, the two FX sends and the three effect commands of track 1,
-  33 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
+- **The fingerprint:** after a RESTART maiden must read **`count: 197`**. That is
+  mangler's 66, plus crush, the two FX sends and the six effect commands of track 1
+  (two slots), 36 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
 - **The instrument:** four tracks, each with its OWN material (four 60 s buffers). K1+E1
   picks the track. Each track has its own voice (OFF GRAIN WARP PV PLAY CLOUD), window,
-  filter, COLOR (drive, crush), one EFFECT slot (OFF CHORUS FLANGE WOBBLE RESON RING, with
-  an amount and a rate) and SPACE (delay and reverb sends, on the TRACKS grid).
+  filter, COLOR (drive, crush), two EFFECT slots in series (OFF CHORUS FLANGE WOBBLE RESON
+  RING, each with an amount and a rate) and SPACE (delay and reverb sends, on the TRACKS grid).
   The four modulators can sit on any track. GRAIN is a granulator that reads the take
   (stereo grain pairs, spray, regular to Poisson timing); CLOUD is MiClouds.
 - **TRACKS** (after VOICE) is the hub: E2 picks the focused track, which TAKE, VOICE,
@@ -34,7 +34,7 @@ block current, and add a change-log entry for every change.
   changes the output and the slot adds no CPU that the measurement can see
   (doc/measurements/2026-11-12/effect-slot.md). RESON's level was raised in the fifth
   change and now sits within about 4 dB of the dry signal.
-- The history below says 173 in places; read 185.
+- The history below says 173 or 185 in places; read 197.
 - The history below the line is mangler's, from before the merge; where it says 66 or
   `Engine_Mangler`, read 173 and `Engine_Four`.
 
@@ -99,15 +99,23 @@ block current, and add a change-log entry for every change.
   LAYERS, the tape lane of MIX) shows the LOOP, not the 60 s deck (`deck_view` in
   lib/mpages.lua), from a 1024-bin picture. TAPE says `SILENT / SEE MIX` when the MIX
   crossfade hides it. Screenshots taken on the device; the user did not see it yet.
+- **Lanes and the second slot (four, twelfth change), on the device 2026-11-13:** each
+  track's filter, colour and effects are small synths in a group (`buildLane`,
+  `laneSet` in the engine), and only what is HEARD exists: one filter family, the
+  colour while drive or crush is up, an effect synth for each slot that is on. `count:
+  197`. Four PLAY tracks take 25% of the thread (were 36%), four PV at pitch 2 take
+  53%. A cloud holds 32 grain pairs at most: denser settings ran the engine to 100%.
+  The second slot has params and K1+E2/E3 on EFFECT, but no key for its type yet (it
+  is in PARAMS). doc/measurements/2026-11-13/lanes.md. Nobody has listened yet.
 - **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 185` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 197` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
-   source no longer adds up to 185.
+   source no longer adds up to 197.
 
 Lua-only changes skip all this: save and reload the script.
 

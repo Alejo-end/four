@@ -47,6 +47,8 @@ local TARGETS = {
   "crush", "fx_dly", "fx_rev", "grain_level",
   -- four: the two knobs of a track's effect (appended: a PSET stores the index)
   "effect_amt", "effect_rate",
+  -- the second effect slot (appended)
+  "effect2_amt", "effect2_rate",
 }
 -- the knobs all four tracks share: the same id whatever the track
 local SHARED = {

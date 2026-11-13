@@ -306,6 +306,7 @@ local SHORT = {
   crush = "CRSH", fx_dly = "1>DLY", fx_rev = "1>REV",
   -- THE EFFECT (four): the slot's type and its two knobs
   effect = "EFFECT", effect_amt = "AMOUNT", effect_rate = "RATE",
+  effect2 = "FX 2", effect2_amt = "AMT 2", effect2_rate = "RATE 2",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
@@ -336,6 +337,7 @@ local SHORT = {
   t2_drive = "T2 DRV", t2_crush = "T2 CRSH",
   t2_fx_dly = "2>DLY", t2_fx_rev = "2>REV",
   t2_effect = "T2 FX", t2_effect_amt = "T2 AMT", t2_effect_rate = "T2 RATE",
+  t2_effect2 = "T2 FX2", t2_effect2_amt = "T2 AMT2", t2_effect2_rate = "T2 RT2",
   -- the ROUTE page: its cursor and the selected send's amount
   route_sel = "SEND", ["@route_amt"] = "AMT",
   track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
@@ -432,7 +434,9 @@ for k in pairs(SHORT) do
 end
 -- each track's effect type id, by its rate id (RATE reads in the type's unit)
 local FX_TYPE_OF = { effect_rate = "effect", t2_effect_rate = "t2_effect",
-  t3_effect_rate = "t3_effect", t4_effect_rate = "t4_effect" }
+  t3_effect_rate = "t3_effect", t4_effect_rate = "t4_effect",
+  effect2_rate = "effect2", t2_effect2_rate = "t2_effect2",
+  t3_effect2_rate = "t3_effect2", t4_effect2_rate = "t4_effect2" }
 local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
@@ -490,7 +494,7 @@ local function fmt_value(id)
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
   end
-  if key == "effect_rate" then
+  if key == "effect_rate" or key == "effect2_rate" then
     -- RATE reads in the unit its effect gives it: a speed, a note, a frequency
     local fx = floor(params:get(FX_TYPE_OF[id]) + 0.5)
     local v = params:get(id)
@@ -1618,6 +1622,12 @@ local function fx_wave(sh, h)
 end
 local function body_EFFECT(frame)
   local fx = floor(tp("effect", 1) + 0.5)
+  -- the second slot, named top right while it is on (K1+E2 and K1+E3 turn
+  -- its knobs; its type is in PARAMS for now)
+  if floor(tp("effect2", 1) + 0.5) > 1 then
+    ptext_r("+ " .. params:string(C.tid and C.tid("effect2") or "effect2"), 126, 12, 1,
+      track_sounds(cur_track()) and 10 or 4)
+  end
   local a = tp("effect_amt", 0.5)
   local r = tp("effect_rate", 0.5)
   local live = track_sounds(cur_track())

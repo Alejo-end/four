@@ -15,7 +15,7 @@ judged by that: can a tired player on a dark stage read it at once?
   `four.lua`, `Engine_Four` in `lib/Engine_Four.sc`, `engine.name = 'Four'`,
   SynthDefs `\four_*`. The old mangler is the git tag `mangler-1`. The OSC
   addresses stay `/mangler/...`, because the visuals read them.
-- **Fingerprint.** After a RESTART, maiden must read `count: 185`.
+- **Fingerprint.** After a RESTART, maiden must read `count: 197`.
 - **What four is.** Four tracks, each with its own 60 s of material. Each track
   has a voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window, a filter, COLOR
   (drive, crush) and SPACE (its delay and reverb sends). Tracks can send into
@@ -84,7 +84,7 @@ whether the show works.
    - `node visuals/test_bridge.js` passes.
    - `lua test/check.lua` with `LUA53` set passes.
    - The norns answers on `norns.local`.
-   - Maiden reads `count: 185`.
+   - Maiden reads `count: 197`.
    - The system output level is not at -inf. On 2026-11-12 it read -inf, so
      crone's outputs were silent.
 
@@ -235,7 +235,7 @@ The details are in CLAUDE.md. In short:
       norns-matron` over one SSH master session that stays open.
    3. Wait for both `compile done` and the `engines: [...]` line in the
       sclang log. A load before the second line hangs.
-   4. Load the script, and make sure that maiden reads `count: 185`.
+   4. Load the script, and make sure that maiden reads `count: 197`.
 5. Capture audio from `SuperCollider:out_1/2` with `n.record(..., ports=...)`.
    crone's outputs follow the system output level.
 6. Add an entry to doc/changelog.md for every change, as "four, Nth change".

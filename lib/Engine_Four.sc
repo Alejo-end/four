@@ -87,6 +87,11 @@ Engine_Four : CroneEngine {
     var <tDlyBus, <tRevBus;
     // the send levels, sendV[from][to] (1-based), for updateStrip
     var <sendV;
+    // one LANE for each track: what its sound passes between its voice and
+    // the mix. A lane is a group of small synths, and only the ones that are
+    // HEARD exist: one filter family, the colour while drive or crush is up,
+    // and an effect synth for each slot that is on. See buildLane.
+    var <lanes;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -130,6 +135,121 @@ Engine_Four : CroneEngine {
                 nil
             });
         });
+    }
+
+    // ---- the lanes
+    // A lane is a group. In order: the in synth (S bus), the filter group
+    // (S to P), the colour group, the two effect groups (in place on P), and
+    // for tracks 2 to 4 the out synth. lane[\p] holds its last values.
+    buildLane { arg i, inBus, outArgs;
+        var s = context.server;
+        var lane = (p: Dictionary[\cutoff -> 20000, \resonance -> 0.0, \filt_type -> 0,
+                \drive -> 0.0, \crush -> 0.0,
+                \effect -> 0, \effect_amt -> 0.5, \effect_rate -> 0.5,
+                \effect2 -> 0, \effect2_amt -> 0.5, \effect2_rate -> 0.5],
+            sBus: Bus.audio(s, 2), pBus: Bus.audio(s, 2),
+            fx: [nil, nil], fxKind: [nil, nil]);
+        lane[\group] = Group.new(playGroup, \addToTail);
+        lane[\in] = Synth.new(\four_lane_in, [
+            \in_bus, inBus, \sbus, lane[\sBus],
+            \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
+        ], lane[\group], \addToTail);
+        lane[\gFilt] = Group.new(lane[\group], \addToTail);
+        lane[\gCol] = Group.new(lane[\group], \addToTail);
+        lane[\gFx] = [Group.new(lane[\group], \addToTail), Group.new(lane[\group], \addToTail)];
+        outArgs.notNil.if({
+            lane[\out] = Synth.new(\four_lane_out, [\pbus, lane[\pBus]] ++ outArgs,
+                lane[\group], \addToTail);
+        });
+        lanes[i] = lane;
+        this.laneFilter(lane);
+    }
+
+    // the filter family that is heard: LO for LP and BP, HI for HP. A change
+    // of family releases the old synth and starts the new one in ONE bundle,
+    // so their two 20ms ramps cross exactly.
+    laneFilter { arg lane;
+        var want = ((lane[\p][\filt_type] ? 0).round == 1).if({ \four_filt_hi }, { \four_filt_lo });
+        (lane[\filtKind] != want).if({
+            context.server.makeBundle(nil, {
+                lane[\filt].notNil.if({ lane[\filt].set(\gate, 0) });
+                lane[\filt] = Synth.new(want, [
+                    \sbus, lane[\sBus], \pbus, lane[\pBus],
+                    \cutoff, lane[\p][\cutoff], \resonance, lane[\p][\resonance],
+                    \filt_type, lane[\p][\filt_type],
+                ], lane[\gFilt], \addToTail);
+            });
+            lane[\filtKind] = want;
+        });
+    }
+
+    // the colour synth exists while drive or crush is up. It starts at 0 and
+    // is set in the same bundle, so its lags ramp from the bypass. It goes
+    // 300ms after both are back at 0, when the lags are down.
+    laneColour { arg lane;
+        var on = ((lane[\p][\drive] ? 0) > 0) or: { (lane[\p][\crush] ? 0) > 0 };
+        on.if({
+            lane[\col].isNil.if({
+                context.server.makeBundle(nil, {
+                    lane[\col] = Synth.new(\four_colour, [\pbus, lane[\pBus]],
+                        lane[\gCol], \addToTail);
+                    lane[\col].set(\drive, lane[\p][\drive], \crush, lane[\p][\crush]);
+                });
+            });
+        }, {
+            lane[\col].notNil.if({
+                SystemClock.sched(0.3, {
+                    var still = (((lane[\p][\drive] ? 0) > 0) or: { (lane[\p][\crush] ? 0) > 0 }).not;
+                    (still and: { lane[\col].notNil }).if({
+                        lane[\col].free;
+                        lane[\col] = nil;
+                    });
+                    nil
+                });
+            });
+        });
+    }
+
+    // an effect slot (0 or 1): the synth of the type's kind, or none for OFF
+    laneFx { arg lane, slot;
+        var pre = (slot == 0).if({ "effect" }, { "effect2" });
+        var type = (lane[\p][pre.asSymbol] ? 0).round.asInteger.clip(0, 5);
+        var kind = [nil, \four_fx_mod, \four_fx_mod, \four_fx_mod,
+            \four_fx_reson, \four_fx_ring].at(type);
+        (kind == lane[\fxKind][slot]).if({
+            lane[\fx][slot].notNil.if({ lane[\fx][slot].set(\type, type) });
+        }, {
+            context.server.makeBundle(nil, {
+                lane[\fx][slot].notNil.if({ lane[\fx][slot].set(\gate, 0) });
+                lane[\fx][slot] = kind.notNil.if({
+                    Synth.new(kind, [\pbus, lane[\pBus], \type, type,
+                        \amt, lane[\p][(pre ++ "_amt").asSymbol],
+                        \rate, lane[\p][(pre ++ "_rate").asSymbol],
+                    ], lane[\gFx][slot], \addToTail)
+                });
+            });
+            lane[\fxKind][slot] = kind;
+        });
+    }
+
+    // one value of a lane, by its command name
+    laneSet { arg i, name, v;
+        var lane = lanes[i];
+        lane[\p][name] = v;
+        name.switch(
+            \filt_type, { lane[\gFilt].set(name, v); this.laneFilter(lane) },
+            \drive, { this.laneColour(lane); lane[\gCol].set(name, v) },
+            \crush, { this.laneColour(lane); lane[\gCol].set(name, v) },
+            \effect, { this.laneFx(lane, 0) },
+            \effect_amt, { lane[\gFx][0].set(\amt, v) },
+            \effect_rate, { lane[\gFx][0].set(\rate, v) },
+            \effect2, { this.laneFx(lane, 1) },
+            \effect2_amt, { lane[\gFx][1].set(\amt, v) },
+            \effect2_rate, { lane[\gFx][1].set(\rate, v) },
+            \grain_level, { lane[\in].set(\pre_gain, v) },
+            // cutoff, resonance, and the out synth's level, fx_dly, fx_rev
+            { lane[\group].set(name, v) }
+        );
     }
 
     setModeN { arg tr, i;
@@ -369,14 +489,16 @@ Engine_Four : CroneEngine {
         // strip with these four (its commands: `t<n>_level` ...)
         stripKeys = [\level, \cutoff, \resonance, \filt_type,
             \drive, \crush, \fx_dly, \fx_rev,
-            \effect, \effect_amt, \effect_rate];
+            \effect, \effect_amt, \effect_rate,
+            \effect2, \effect2_amt, \effect2_rate];
         extra = [2, 3, 4].collect({ arg n;
             var e = (n: n, bus: Bus.audio(s, 2), phase: Bus.control(s, 1),
                 params: Dictionary.new,
                 stripParams: Dictionary[\level -> 1.0, \cutoff -> 20000,
                     \resonance -> 0.0, \filt_type -> 0,
                     \drive -> 0.0, \crush -> 0.0, \fx_dly -> 1.0, \fx_rev -> 1.0,
-                    \effect -> 0, \effect_amt -> 0.5, \effect_rate -> 0.5]);
+                    \effect -> 0, \effect_amt -> 0.5, \effect_rate -> 0.5,
+                    \effect2 -> 0, \effect2_amt -> 0.5, \effect2_rate -> 0.5]);
             playParams.keysValuesDo({ arg k, v;
                 [\level, \rec, \freeze, \erode, \wear].includes(k).not.if({
                     e[\params][k] = v;
@@ -392,6 +514,7 @@ Engine_Four : CroneEngine {
             \dry_wet, \resample, \regen, \grain_level,
             \filt_type, \cutoff, \resonance, \drive, \crush,
             \effect, \effect_amt, \effect_rate,
+            \effect2, \effect2_amt, \effect2_rate,
             \delay_mix, \fx_dly,
             \rev_mix, \fx_rev];
         revParams = Dictionary[
@@ -582,17 +705,24 @@ Engine_Four : CroneEngine {
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // equal loudness across density x size (boost below unity
             // overlap, up to 2x; attenuate above it as 1/sqrt(overlap), to
-            // -18dB at an overlap of 64: capped at 16, a dense cloud measured
+            // -15dB at an overlap of 32: capped at 16, a dense cloud measured
             // 4 dB above PLAY on the device),
             // and over spread: a pair thrown to one place sums its two
             // channels, so the top of spread is 3dB down. x0.8: grain
             // pairs overlap coherently, so they peak harder than PLAY; on the
             // device the default cloud came out 1.3 dB above PLAY with the
             // limiter at work in 2% of it, and 9% when dense
-            comp = (density * size).clip(0.25, 64).sqrt.reciprocal
+            comp = (density * size).clip(0.25, 32).sqrt.reciprocal
                 * (1 + spread.squared).sqrt.reciprocal * 0.8;
-            sig = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel)
-                + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel)) * comp;
+            // maxGrains 32: a cloud holds 32 grain pairs at most, and the
+            // level law above stops there too. A pair costs 0.27% of the
+            // audio thread on the norns. Density 200 with size 0.5s asked
+            // for 100 pairs on one track: two such tracks ran the engine to
+            // 100%, and four still did with a cap of 64. At 32, four full
+            // clouds take about 60%. A grain UGen of our own is the way to
+            // lift this (doc/dsp-plan.md).
+            sig = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel, 32)
+                + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel, 32)) * comp;
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
@@ -832,7 +962,7 @@ Engine_Four : CroneEngine {
             wid = 1 - spread;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // the drone's loudness law, halved for a chord of pads
-            comp = (density * size).clip(0.25, 64).sqrt.reciprocal * 0.5
+            comp = (density * size).clip(0.25, 32).sqrt.reciprocal * 0.5
                 * (1 + spread.squared).sqrt.reciprocal;
             cloud = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, (r - wid).clip(-1, 1), envSel)
                 + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, (r + wid).clip(-1, 1), envSel)) * comp;
@@ -874,10 +1004,8 @@ Engine_Four : CroneEngine {
             Out.ar(play_bus, sig);
         }).add;
 
-        // ---- track 2's strip: its filter and its level, in playGroup's tail
-        // (after the drones, before io). The filter is io's, the same two
-        // DFM1s and the same 20ms type crossfade. 2.sqrt is io's Balance2
-        // makeup, so the two tracks sit at the same level.
+        // ---- the lanes' parts (see buildLane): every track has the same
+        // filter, colour and effects between its voice and the mix.
         // COLOR, one law for every track (a build-time function: each def
         // inlines the same UGens). DRIVE is a clean to saturated crossfade,
         // so drive 0 is a true bypass (LINEAR, not equal power: the two arms
@@ -915,19 +1043,27 @@ Engine_Four : CroneEngine {
         //   5 RING    the signal times a sine. rate is its frequency (20Hz
         //             to 4kHz), amt is the mix
         // Types 1 to 3 share ONE comb pair (they are all a moving delay), so
-        // a change between them glides the delay time for 100ms. The cost is
-        // two comb pairs and a sine for each track, always on.
-        fxSlot = { arg sig, type, amt, rate;
-            var a, r, idx, w, wFam, wRes, wRing;
-            var lfoCh, lfoFl, wow, flut, dt, decay, comb, dryG, wetG, fam;
-            var note, rdt, rdec, fb, res, ring;
+        // a change between them glides the delay time for 100ms. A track has
+        // TWO slots in series (effect, effect2), and a slot that is OFF has
+        // no synth and costs nothing.
+        // The three effect synths. Each reads the lane's bus, and XOut puts
+        // its sound back over a 50ms fade (in at the start, out at the
+        // release), so a type change is the same crossfade as before.
+        //   \four_fx_mod    CHORUS, FLANGE, WOBBLE (type 1 to 3): one comb
+        //                   pair, so a change between them glides for 100ms
+        //   \four_fx_reson  RESON     \four_fx_ring  RING
+        fxSlot = { arg name, func;
+            SynthDef(name, {
+                arg pbus, type = 1, amt = 0.5, rate = 0.5, gate = 1;
+                var env = EnvGen.kr(Env.asr(0.05, 1, 0.05, \lin), gate, doneAction: 2);
+                var sig = In.ar(pbus, 2);
+                XOut.ar(pbus, env, func.value(sig, type,
+                    amt.clip(0, 1).lag(0.05), rate.clip(0, 1).lag(0.05)));
+            }).add;
+        };
+        fxSlot.value(\four_fx_mod, { arg sig, type, a, r;
+            var idx, lfoCh, lfoFl, wow, flut, dt, decay, comb, dryG, wetG;
             var chF, chD, wowF, wowD, flF, flD;
-            a = amt.clip(0, 1).lag(0.05);
-            r = rate.clip(0, 1).lag(0.05);
-            w = { arg i; Lag.kr((type - i).abs < 0.5, 0.05) };
-            wFam = Lag.kr((type > 0.5) * (type < 3.5), 0.05);
-            wRes = w.value(4);
-            wRing = w.value(5);
             idx = (type - 1).clip(0, 2);
             // DEPTH IS SET AS PITCH, not as time. A delay that moves by
             // D*sin(2pi*f*t) bends the pitch by the ratio 2pi*f*D at its
@@ -960,11 +1096,14 @@ Engine_Four : CroneEngine {
             wetG = Select.kr(idx, [0.7 * a, a * (1 + (0.5 * a)).reciprocal,
                 DC.kr(1)]).lag(0.05);
             comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], decay) });
-            fam = (sig * dryG) + (comb * wetG);
-            // RESON: the gain law holds a long ring near the level of a short
-            // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
-            // exact law for noise) music came out about 8dB under the other
-            // effects on the device
+            (sig * dryG) + (comb * wetG)
+        });
+        // RESON: the gain law holds a long ring near the level of a short
+        // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
+        // exact law for noise) music came out about 8dB under the other
+        // effects on the device
+        fxSlot.value(\four_fx_reson, { arg sig, type, a, r;
+            var note, rdt, rdec, fb, res;
             note = (36 + (r * 48)).round(1).midicps;
             rdt = [note, note * 1.003].reciprocal;
             rdec = 0.05 + (a * a * 3);
@@ -973,54 +1112,76 @@ Engine_Four : CroneEngine {
                 th.value(CombC.ar(sig[ch], 0.02, rdt[ch].lag(0.05), rdec)
                     * ((1 - fb[ch].squared) ** 0.25))
             });
-            res = LinXFade2.ar(sig, res, (a * 2 - 1));
-            ring = LinXFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r)), (a * 2 - 1));
-            sig + ((fam - sig) * wFam) + ((res - sig) * wRes) + ((ring - sig) * wRing)
-        };
+            LinXFade2.ar(sig, res, (a * 2 - 1))
+        });
+        fxSlot.value(\four_fx_ring, { arg sig, type, a, r;
+            LinXFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r)), (a * 2 - 1))
+        });
 
-        SynthDef(\four_strip, {
-            arg in_bus, out_bus, own_out, level = 1.0, cutoff = 20000,
-                resonance = 0, filt_type = 0,
-                // COLOR and SPACE: its drive and crush, and how much of it
-                // goes into the shared delay and reverb (dly_out, rev_out)
-                drive = 0, crush = 0, fx_dly = 1, fx_rev = 1, dly_out = 0, rev_out = 0,
-                // THE EFFECT: its type and its two knobs
-                effect = 0, effect_amt = 0.5, effect_rate = 0.5,
-                // the sends INTO this track: snd<m> from track m (its own
-                // stays 0), read from ob<m>, a block late
+        // ---- the lane's other synths
+        // in: the track's voice (pre_gain is track 1's grain_level) and the
+        // sends from the other tracks, a block late and bounded by a tanh.
+        // 2.sqrt is the exact inverse of Balance2's -3dB centre in the play
+        // defs, so PLAY at pan 0 is the take at unity.
+        SynthDef(\four_lane_in, {
+            arg in_bus, sbus, pre_gain = 1.0,
                 snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
                 ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0;
-            var sig, cf, res, wLp, wHp, wBp, dfmClass, sendIn;
-            sendIn = (InFeedback.ar(ob1, 2) * snd1.lag(0.03))
+            var sendIn = (InFeedback.ar(ob1, 2) * snd1.lag(0.03))
                 + (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
                 + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
                 + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
-            sig = (In.ar(in_bus, 2) * 2.sqrt) + th.value(LeakDC.ar(sendIn));
-            cf = cutoff.clip(20, 20000).lag(0.05);
-            res = resonance.lag(0.05);
-            wLp = Lag.kr(filt_type < 0.5, 0.02);
-            wHp = Lag.kr((filt_type > 0.5) * (filt_type < 1.5), 0.02);
-            wBp = Lag.kr(filt_type > 1.5, 0.02);
-            dfmClass = "DFM1".asSymbol.asClass;
-            sig = dfmClass.notNil.if({
-                try {
-                    var lp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 0, 0) * dfmTrim;
-                    var hp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 1, 0) * dfmTrim;
-                    (lp * wLp) + (hp * wHp)
-                        + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
-                } { |e|
+            Out.ar(sbus, (In.ar(in_bus, 2) * pre_gain.lag(0.03) * 2.sqrt)
+                + th.value(LeakDC.ar(sendIn)));
+        }).add;
+        // the filter, as two families: LO is the low-pass ladder (LP, and BP
+        // as its peak high-passed), HI is the high-pass ladder. Only the one
+        // that is heard runs. A change of family is a 20ms crossfade between
+        // two synths (linear, so the two add up to 1); LP to BP glides inside
+        // LO. DFM1 is guarded: stock filters when sc3-plugins is absent.
+        // inputgain 0.5: DFM1 is a NONLINEAR diode model, and at unity input
+        // gain it saturated constantly. dfmTrim brings its output to unity.
+        // The resonance stays under DFM1's self-oscillation (about 0.95).
+        [\four_filt_lo, \four_filt_hi].do({ arg name, hi;
+            SynthDef(name, {
+                arg sbus, pbus, cutoff = 20000, resonance = 0, filt_type = 0, gate = 1;
+                var env = EnvGen.kr(Env.asr(0.02, 1, 0.02, \lin), gate, doneAction: 2);
+                var sig = In.ar(sbus, 2);
+                var cf = cutoff.clip(20, 20000).lag(0.05);
+                var res = resonance.lag(0.05);
+                var wBp = Lag.kr(filt_type > 1.5, 0.02);
+                var dfmClass = "DFM1".asSymbol.asClass;
+                var stock = {
                     var rq = (1 - (res * 0.92)).max(0.05);
-                    (RLPF.ar(sig, cf, rq) * wLp) + (RHPF.ar(sig, cf, rq) * wHp)
-                        + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
-                }
-            }, {
-                var rq = (1 - (res * 0.92)).max(0.05);
-                (RLPF.ar(sig, cf, rq) * wLp) + (RHPF.ar(sig, cf, rq) * wHp)
-                    + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
-            });
-            sig = colour.value(sig, drive, crush);
-            sig = fxSlot.value(sig, effect, effect_amt, effect_rate);
-            sig = sig * level.lag(0.03);
+                    (hi == 1).if({ RHPF.ar(sig, cf, rq) }, {
+                        (RLPF.ar(sig, cf, rq) * (1 - wBp))
+                            + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
+                    })
+                };
+                var out = dfmClass.notNil.if({
+                    try {
+                        // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel
+                        var f = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, hi, 0) * dfmTrim;
+                        (hi == 1).if({ f }, {
+                            (f * (1 - wBp))
+                                + (HPF.ar(f, (cf * 0.5).clip(20, 20000)) * wBp)
+                        })
+                    } { |e| stock.value }
+                }, { stock.value });
+                Out.ar(pbus, out * env);
+            }).add;
+        });
+        // COLOR, in place. It exists only while drive or crush is up: at 0
+        // both are an exact bypass, so it comes and goes with no fade.
+        SynthDef(\four_colour, {
+            arg pbus, drive = 0, crush = 0;
+            ReplaceOut.ar(pbus, colour.value(In.ar(pbus, 2), drive, crush));
+        }).add;
+        // out (tracks 2 to 4): the level, and where the track goes
+        SynthDef(\four_lane_out, {
+            arg pbus, out_bus, own_out, level = 1.0, fx_dly = 1, fx_rev = 1,
+                dly_out = 0, rev_out = 0;
+            var sig = In.ar(pbus, 2) * level.lag(0.03);
             Out.ar(own_out, sig);     // what the other tracks' sends read
             Out.ar(out_bus, sig);
             Out.ar(dly_out, sig * fx_dly.lag(0.03));
@@ -1046,70 +1207,17 @@ Engine_Four : CroneEngine {
                 rev_mix = 0.0, rev_send = 0, rev_ret = 0, t2_ret = 0,
                 // routing: the sends into track 1, and where track 1's
                 // filtered output goes for the others to read
-                snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0;
+                snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0,
+                lane_bus = 0;
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
             var sendIn, others, revIn, dm;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
-            // wet = drone + ALL polyphonic voices (they Out.ar-add onto play_bus)
-            // 2.sqrt (not 1.5): the exact inverse of Balance2's -3dB centre
-            // gain in the play defs — PLAY at pan 0 with no FX now lands at
-            // EXACT unity vs the raw take (the "exact recorded sample"
-            // claim, previously +0.5dB into the limiter).
-            wet = In.ar(play_bus, 2) * grain_level.lag(0.03) * 2.sqrt;
-            // the sends into track 1 (a block late, bounded by a tanh)
-            sendIn = (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
-                + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
-                + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
-            wet = wet + th.value(LeakDC.ar(sendIn));
-
-            // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
-            // if sc3-plugins is absent. Two DFM1s: LP for LP+BP, HP for HP; BP
-            // high-passes the resonant LP peak into a band. filt_type 0=LP 1=HP 2=BP.
-            cf = cutoff.clip(20, 20000).lag(0.05);
-            // lag the resonance like cutoff: a stepped CC/encoder jump on a
-            // near-self-oscillating filter is the file's likeliest pop source.
-            // (reassigning the arg means the fallback's rq law below gets the
-            // same smoothing for free.)
-            resonance = resonance.lag(0.05);
-            // clip below DFM1's self-oscillation onset (~0.95) so max resonance
-            // is very resonant but STABLE; raise toward 0.95 to let it self-osc.
-            res = resonance.clip(0, 0.9);
-            // a TYPE change is a 20ms CROSSFADE: every type runs all the
-            // time and these weights glide. Lag is linear in its input, so
-            // the three still add up to 1 mid-glide. A switched type popped,
-            // because the output and the ladder's state both jumped. The
-            // cost is a second DFM1, always on (CPU sat near 30%).
-            wLp = Lag.kr(filt_type < 0.5, 0.02);
-            wHp = Lag.kr((filt_type > 0.5) * (filt_type < 1.5), 0.02);
-            wBp = Lag.kr(filt_type > 1.5, 0.02);
-            mmFilter = {
-                var rq = (1 - (resonance * 0.92)).max(0.05);
-                (RLPF.ar(wet, cf, rq) * wLp)
-                    + (RHPF.ar(wet, cf, rq) * wHp)
-                    + (BPF.ar(wet, cf, rq) * (1 + resonance) * wBp)
-            };
-            dfmClass = "DFM1".asSymbol.asClass;
-            wet = dfmClass.notNil.if({
-                try {
-                    // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel.
-                    // inputgain 0.5: DFM1 is a NONLINEAR diode model, and at
-                    // unity input gain it saturated constantly ("the engine
-                    // sounds noisy"). dfmTrim brings its output to unity.
-                    // two ladders, LP and HP; BP is the LP peak high-passed
-                    var lp = dfmClass.ar(wet, cf, res, 0.5, 0, 0) * dfmTrim;
-                    var hp = dfmClass.ar(wet, cf, res, 0.5, 1, 0) * dfmTrim;
-                    (lp * wLp) + (hp * wHp)
-                        + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
-                } { |e| mmFilter.value }
-            }, { mmFilter.value });
-            // COLOR: track 1's drive and crush, after its filter. The other
-            // tracks have their own in their strips (the drive was shared,
-            // after the join, before each track had one).
-            wet = colour.value(wet, drive, crush);
-            wet = fxSlot.value(wet, effect, effect_amt, effect_rate);
+            // wet is track 1 after its lane (the drone and the polyphonic
+            // voices, its filter, colour and effects): see buildLane
+            wet = In.ar(lane_bus, 2);
             Out.ar(own_out, wet);     // track 1, filtered and coloured, for the sends
             // tracks 2 to 4 join here, after their own filter and colour
             others = In.ar(t2_ret, 2);
@@ -1334,17 +1442,21 @@ Engine_Four : CroneEngine {
         // onto play_bus and pass through the io FX chain like the drone.
         playGroup = Group.new(context.xg);
         sendV = Array.fill(4, { Array.fill(4, 0) });
+        // the four lanes, in playGroup's tail: after every drone and voice
+        // (they are added at its head), before io. Track 1's lane has no out
+        // synth: io reads its bus. A lane of tracks 2 to 4 is that track's
+        // `strip`, and it starts paused: no extra track plays yet.
+        lanes = Array.newClear(4);
+        this.buildLane(0, playBus, nil);
         extra.do({ arg tr;
-            tr[\strip] = Synth.new(\four_strip, [
-                \in_bus, tr[\bus], \out_bus, tRetBus,
-                \own_out, outBuses[tr[\n] - 1],
-                \dly_out, tDlyBus, \rev_out, tRevBus,
-                \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
-            ] ++ tr[\stripParams].getPairs, playGroup, \addToTail);
+            this.buildLane(tr[\n] - 1, tr[\bus], [
+                \out_bus, tRetBus, \own_out, outBuses[tr[\n] - 1],
+                \dly_out, tDlyBus, \rev_out, tRevBus]);
+            lanes[tr[\n] - 1][\p] = tr[\stripParams];
+            tr[\strip] = lanes[tr[\n] - 1][\group];
             tr[\mode] = 0;
         });
-        // every strip starts paused: no extra track plays and nothing is sent
-        // (the run message follows its /s_new in order, no sync needed)
+        // (the run message follows its /g_new in order, no sync needed)
         extra.do({ arg tr; tr[\strip].run(false) });
         ioSynth = Synth.new(\four_io, [
             \in1, context.in_b[0].index,
@@ -1362,7 +1474,7 @@ Engine_Four : CroneEngine {
             \t2_ret, tRetBus,
             \t_dly, tDlyBus, \t_rev, tRevBus,
             \own_out, outBuses[0],
-            \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
+            \lane_bus, lanes[0][\pBus],
         ], playGroup, \addAfter);
 
         // every float control as one command; rec/freeze/level fan out to both
@@ -1374,7 +1486,14 @@ Engine_Four : CroneEngine {
         allKeys.do({ arg name;
             this.addCommand(name, "f", { arg msg;
                 var v = msg[1];
-                ioKeys.includes(name).if({ ioSynth.set(name, v) });
+                ioKeys.includes(name).if({
+                    ioSynth.set(name, v);
+                    // track 1's lane takes its own (the names io also has,
+                    // level, fx_dly and fx_rev, are io's alone)
+                    [\level, \fx_dly, \fx_rev].includes(name).not.if({
+                        this.laneSet(0, name, v);
+                    });
+                });
                 revParams.includesKey(name).if({
                     revParams[name] = v;
                     revSynth.notNil.if({ revSynth.set(name, v) });
@@ -1430,8 +1549,7 @@ Engine_Four : CroneEngine {
             });
             stripKeys.do({ arg k;
                 this.addCommand((pre ++ k).asSymbol, "f", { arg msg;
-                    tr[\stripParams][k] = msg[1];
-                    tr[\strip].set(k, msg[1]);
+                    this.laneSet(tr[\n] - 1, k, msg[1]);
                 });
             });
             this.addCommand((pre ++ "mode").asSymbol, "i", { arg msg;
@@ -1446,10 +1564,8 @@ Engine_Four : CroneEngine {
                     this.addCommand(("send_" ++ from ++ "_" ++ to).asSymbol, "f", { arg msg;
                         var key = ("snd" ++ from).asSymbol;
                         sendV[from - 1][to - 1] = msg[1];
-                        (to == 1).if({ ioSynth.set(key, msg[1]) }, {
-                            extra[to - 2][\strip].set(key, msg[1]);
-                            this.updateStrip(extra[to - 2]);
-                        });
+                        lanes[to - 1][\in].set(key, msg[1]);
+                        (to > 1).if({ this.updateStrip(extra[to - 2]) });
                     });
                 });
             });
@@ -1600,7 +1716,7 @@ Engine_Four : CroneEngine {
         playSynth.notNil.if({ playSynth.free });
         extra.notNil.if({ extra.do({ arg tr;
             tr[\synth].notNil.if({ tr[\synth].free });
-            tr[\strip].notNil.if({ tr[\strip].free });
+            tr[\strip].notNil.if({ tr[\strip].free });   // the lane group, with all in it
         }) });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
@@ -1624,6 +1740,7 @@ Engine_Four : CroneEngine {
         tDlyBus.free;
         tRevBus.free;
         outBuses.do({ arg b; b.free });
+        lanes.notNil.if({ lanes.do({ arg l; l.notNil.if({ l[\sBus].free; l[\pBus].free }) }) });
         recPhaseBus.free;
         recAmpBus.free;
     }

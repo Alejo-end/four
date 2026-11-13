@@ -42,14 +42,17 @@ Engine_Four.new(ctx, { arg eng;
                 \phase_out, 100, \pos_start, 0.5, \pos_end, 0.58, \level, 1]],
              [0.5, [\n_set, 1000, \pos_start, 0.8, \pos_end, 0.95]],
              [1.0, [\n_set, 1000, \scan, 0.5]], [1.3, [\n_set, 1000, \scan, 1]]]],
+        // the effect synths work in place on a bus: a copy of the source goes
+        // to a bus for each case, the effect acts on it, a tap sends it out
         [\fx, 4, 12, [],
-            [[0.0, [\d_recv, src.asBytes]], [0.0, [\d_recv, def.(\four_strip)]],
+            [[0.0, [\d_recv, src.asBytes]], [0.0, [\d_recv, def.(\four_fx_mod)]],
+             [0.0, [\d_recv, SynthDef(\copy, { |from, to| Out.ar(to, In.ar(from, 2)) }).asBytes]],
              [0.001, [\s_new, \src, 900, 0, 0, \out, 40]]]
             ++ [[0, 0.5, 0.5], [1, 1, 1], [1, 0.5, 0.5], [1, 1, 0], [3, 1, 1], [3, 1, 0]].collect({ |c, i|
-                [0.002, [\s_new, \four_strip, 1000 + i, 1, 0, \in_bus, 40,
-                    \out_bus, i * 2, \own_out, 60, \dly_out, 62, \rev_out, 64,
-                    \ob1, 70, \ob2, 70, \ob3, 70, \ob4, 70,
-                    \effect, c[0], \effect_amt, c[1], \effect_rate, c[2]]] })]
+                [[0.002, [\s_new, \copy, 1000 + i, 1, 0, \from, 40, \to, 80 + (i * 2)]]]
+                ++ (c[0] > 0).if({ [[0.003, [\s_new, \four_fx_mod, 1100 + i, 1, 0,
+                    \pbus, 80 + (i * 2), \type, c[0], \amt, c[1], \rate, c[2]]]] }, { [] })
+                ++ [[0.004, [\s_new, \copy, 1200 + i, 1, 0, \from, 80 + (i * 2), \to, i * 2]]] }).flatten(1)]
     ];
     run = { |i|
         if (i >= jobs.size) { "BENCH_DONE".postln; 0.exit } {
