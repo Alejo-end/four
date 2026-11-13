@@ -895,6 +895,149 @@ struct DelayFb {
     }
 };
 
+// THE ROOM (doc/space-plan.md, sections 5 and 12). Stereo in, stereo out, the
+// wet sound only.
+//   1. The input spreads to 8 channels.
+//   2. Four diffusion steps. Each one delays every channel by its own time,
+//      flips the sign of some, and mixes all 8 with a Hadamard matrix. Each
+//      step turns one echo into 8, so one click is 4096 echoes after the four.
+//      Every step is unitary: it changes no energy.
+//   3. The late field: 8 delay lines that feed each other through a Householder
+//      matrix (unitary). With no loss in the lines the energy is constant, so
+//      ALL the decay comes from the loss filters, and it is the decay we set.
+//   4. The loss of a line of m samples is 10^(-3 m / (fs T60)) at 0 Hz, and a
+//      one-pole low-pass (Jot's form) makes the high frequencies die sooner by
+//      the ratio `colour` (T60 at fs/2 against T60 at 0 Hz). The loss in dB is
+//      in proportion to m, so every line decays at one rate.
+struct Room {
+    static const int CH = 8, STEPS = 4;
+    static const int DMAX = 8192;        // a diffusion delay, at most (170 ms)
+    static const int LMAX = 16384;       // a late line, at most (341 ms)
+    // Each buffer gets a gap of its own size after it. Forty buffers that sit
+    // exactly 32 kB apart all want the same places in the cache, and the first
+    // build took 23% of a norns core for that reason alone.
+    static int gap(int k) { return 16 * (3 + (k * 7) % 29); }
+    static size_t need() {
+        size_t n = 0;
+        for (int k = 0; k < STEPS * CH; k++) n += DMAX + gap(k);
+        for (int k = 0; k < CH; k++) n += LMAX + gap(40 + k);
+        return n;
+    }
+
+    float* dbuf[STEPS][CH]; int dlen[STEPS][CH]; float dsign[STEPS][CH];
+    float* lbuf[CH]; int llen[CH];
+    int dw, lw;                          // write places (one for each kind)
+    float b0[CH], b1[CH], a1[CH], zx[CH], zy[CH];   // each line's loss: a first-order shelf
+    double fs;
+
+    static inline void hadamard(float* x) {      // 8 in place, scaled to unitary
+        for (int h = 1; h < CH; h <<= 1)
+            for (int i = 0; i < CH; i += h << 1)
+                for (int j = i; j < i + h; j++) {
+                    const float a = x[j], c = x[j + h];
+                    x[j] = a + c; x[j + h] = a - c;
+                }
+        for (int i = 0; i < CH; i++) x[i] *= 0.35355339f;      // 1/sqrt(8)
+    }
+
+    // mem: need() floats. size: the base time of the diffusion in seconds
+    // (0.005 is a middle room) and it scales the late lines too.
+    void init(float* mem, double sampleRate, double size) {
+        fs = sampleRate; dw = lw = 0;
+        std::memset(mem, 0, need() * sizeof(float));
+        uint32_t seed = 0x9E3779B9u;
+        auto rnd = [&]() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xffffff) / 16777216.0; };
+        for (int k = 0; k < STEPS; k++) {
+            const double span = size * (double)(1 << k) * fs;   // this step's longest delay
+            for (int c = 0; c < CH; c++) {
+                dbuf[k][c] = mem; mem += DMAX + gap(k * CH + c);
+                int n = (int)(span * (c + rnd()) / CH) + 1;      // one in each eighth of the span
+                dlen[k][c] = n > DMAX - 1 ? DMAX - 1 : n;
+                dsign[k][c] = rnd() < 0.5 ? -1.f : 1.f;
+            }
+        }
+        for (int c = 0; c < CH; c++) {
+            lbuf[c] = mem; mem += LMAX + gap(40 + c);
+            // 100 ms to 183 ms at the middle size, in equal ratios: no two near
+            int n = (int)(fs * 0.100 * std::pow(2.0, (double)c / CH) * (size / 0.005) * 0.7 + 0.3 * fs * 0.100 * std::pow(2.0, (double)c / CH));
+            n |= 1;                                              // odd: fewer common factors
+            llen[c] = n > LMAX - 1 ? LMAX - 1 : n;
+            b0[c] = 1.f; b1[c] = 0.f; a1[c] = 0.f; zx[c] = 0.f; zy[c] = 0.f;
+        }
+    }
+
+    // decay: T60 at 0 Hz, in seconds (0 or less: no loss at all, for the proof).
+    // colour: T60 at the top against T60 at 0 Hz, 1 (bright) down to 0.1 (dark).
+    // cross: where the decay is half way between the two, in Hz.
+    //
+    // A line of m samples must lose 60 dB in T60(f) seconds at EVERY frequency:
+    //   |H(f)| = 10^(-3 m / (fs T60(f)))
+    // H is G times a first-order shelf from 1 (at 0 Hz) to R (at the top), with
+    // its middle, sqrt(R), at `cross` for any R:
+    //   H(s) = G (R s + w sqrt(R)) / (s + w sqrt(R))
+    // The dB of such a shelf are close to proportional to the dB of R, and the
+    // dB of R are proportional to m, so all 8 lines decay at one rate at every
+    // frequency (the test reads the largest difference).
+    void setDecay(double decay, double colour, double cross = 4000.0) {
+        if (colour > 1) colour = 1;
+        if (colour < 0.05) colour = 0.05;
+        const double t = std::tan(3.14159265358979323846 * cross / fs);
+        for (int c = 0; c < CH; c++) {
+            if (!(decay > 0)) { b0[c] = 1.f; b1[c] = 0.f; a1[c] = 0.f; continue; }
+            const double lg = -3.0 * llen[c] / (fs * decay);     // log10 of the gain at 0 Hz
+            const double G = std::pow(10.0, lg), R = std::pow(10.0, lg / colour - lg);
+            const double q = t * std::sqrt(R), n = 1.0 / (1.0 + q);
+            b0[c] = (float)(G * (R + q) * n); b1[c] = (float)(G * (q - R) * n); a1[c] = (float)((q - 1.0) * n);
+        }
+    }
+    // the designed T60 of line c at frequency f (what a test compares with)
+    double designT60(int c, double f) const {
+        const double w = 2 * 3.14159265358979323846 * f / fs, cw = std::cos(w);
+        const double num = (double)b0[c] * b0[c] + (double)b1[c] * b1[c] + 2.0 * b0[c] * b1[c] * cw;
+        const double den = 1.0 + (double)a1[c] * a1[c] + 2.0 * a1[c] * cw;
+        return -3.0 * llen[c] / (fs * 0.5 * std::log10(num / den));
+    }
+    // the energy held in the late lines (the lossless proof reads this)
+    double energy() const {
+        double e = 0;
+        // only what a line still holds: its last llen samples
+        for (int c = 0; c < CH; c++)
+            for (int i = 1; i <= llen[c]; i++) { const float v = lbuf[c][(lw - i) & (LMAX - 1)]; e += (double)v * v; }
+        return e;
+    }
+
+    inline void tick(float inL, float inR, float& outL, float& outR) {
+        float x[CH];
+        // each side to four channels at half level: the energy in is the input's
+        for (int c = 0; c < CH; c++) x[c] = ((c & 1) ? inR : inL) * 0.5f;
+        for (int k = 0; k < STEPS; k++) {
+            for (int c = 0; c < CH; c++) {
+                dbuf[k][c][dw] = x[c];
+                x[c] = dbuf[k][c][(dw - dlen[k][c]) & (DMAX - 1)] * dsign[k][c];
+            }
+            hadamard(x);
+        }
+        float d[CH], sum = 0;
+        for (int c = 0; c < CH; c++) {
+            const float v = lbuf[c][(lw - llen[c]) & (LMAX - 1)];
+            const float y = b0[c] * v + b1[c] * zx[c] - a1[c] * zy[c] + 1e-25f;   // (the small term keeps denormals out)
+            zx[c] = v; zy[c] = y;
+            d[c] = y; sum += y;
+        }
+        sum *= 2.f / CH;                                          // Householder: d - (2/8) sum
+        float l = 0, r = 0;
+        for (int c = 0; c < CH; c++) {
+            const float v = x[c] + d[c] - sum;
+            lbuf[c][lw] = v;
+            // the output is what goes INTO the lines: the diffused sound at
+            // once (the room's first build-up) and each return of the field
+            if (c & 1) r += v; else l += v;
+        }
+        outL = l * 0.5f; outR = r * 0.5f;
+        dw = (dw + 1) & (DMAX - 1); lw = (lw + 1) & (LMAX - 1);
+    }
+};
+
 // tanh for a block of samples. The C library's tanhf takes about 130 cycles
 // for each sample on the norns, and the engine calls it on 28 channels. This
 // one is the same curve to about 2e-7 (below the last bit of 24-bit audio):

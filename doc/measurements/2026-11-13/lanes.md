@@ -60,3 +60,10 @@ After a restart, `count: 197`, with captures running (a capture adds a few xruns
 | Track 1 PLAY with ECHO | 18.4% |
 
 With a cap of 128 the four dense clouds took 95%, so the cap is 48.
+
+## The reverb alone (for doc/space-plan.md)
+
+Track 1 in PLAY. A fresh script with no preset: 4.2% of the thread. The delay adds
+0.6%. The reverb (JPverb) adds 13.5%, measured by pausing its synth: 17.9% to 4.4%.
+Preset 1 keeps the reverb alive at a mix of 0, because LFO 1 points at the reverb mix
+and the engine value stays at 0.002. Every "at rest" figure above includes that 13%.

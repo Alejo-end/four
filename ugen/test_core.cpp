@@ -214,6 +214,80 @@ int main() {
         for (size_t i = 0; i < x.size(); i++) if (z[i] != y[i]) same = false;
         expect(same, "in place gives the same samples", same ? 1 : 0);
     }
+    std::printf("THE ROOM\n");
+    {
+        std::vector<float> mem(Room::need());
+        static Room rm;
+        // 1. lossless: no loss in the lines, one click, and the energy stays
+        rm.init(mem.data(), 48000, 0.005); rm.setDecay(0, 1);
+        float l, r;
+        for (int i = 0; i < 48000; i++) rm.tick(i == 0 ? 1.f : 0.f, i == 0 ? 0.5f : 0.f, l, r);
+        const double e1 = rm.energy();
+        for (int i = 0; i < 48000 * 10; i++) rm.tick(0, 0, l, r);
+        const double e2 = rm.energy();
+        expect(std::fabs(10 * std::log10(e2 / e1)) < 0.01, "no loss set: energy after 10 s against 1 s, dB", 10 * std::log10(e2 / e1));
+        expect(std::fabs(10 * std::log10(e1 / 1.25)) < 0.01, "...and it is the click's own energy, dB", 10 * std::log10(e1 / 1.25));
+        // 2. the decay: T60 2 s, the highs at half of it
+        rm.init(mem.data(), 48000, 0.005); rm.setDecay(2.0, 0.5);
+        const int n = 48000 * 5;
+        std::vector<float> hL(n), hR(n);
+        for (int i = 0; i < n; i++) rm.tick(i == 0 ? 1.f : 0.f, i == 0 ? 1.f : 0.f, hL[i], hR[i]);
+        double spread = 0;
+        for (int c = 1; c < Room::CH; c++) spread = std::fmax(spread, std::fabs(rm.designT60(c, 2000) / rm.designT60(0, 2000) - 1));
+        expect(spread < 0.05, "designed T60 at 2 kHz: largest difference between lines", spread);
+        for (double f : {500.0, 4000.0, 10000.0}) {
+            double sp = 0;
+            for (int c = 1; c < Room::CH; c++) sp = std::fmax(sp, std::fabs(rm.designT60(c, f) / rm.designT60(0, f) - 1));
+            char name[80]; std::snprintf(name, sizeof name, "...and at %5.0f Hz", f);
+            expect(sp < 0.05, name, sp);
+        }
+        expect(std::fabs(rm.designT60(0, 0.001) - 2.0) < 0.01, "designed T60 at 0 Hz, s", rm.designT60(0, 0.001));
+        expect(std::fabs(rm.designT60(0, 23999) - 1.0) < 0.05, "designed T60 at the top, s", rm.designT60(0, 23999));
+        for (double f : {500.0, 1000.0, 4000.0, 10000.0}) {
+            // one band (a two-pole resonator, twice), then Schroeder's sum from the end
+            const double w = 2 * PI * f / 48000, rr = 1 - PI * (f / 12) / 48000;      // a band a twelfth of f wide
+            const double a1 = 2 * rr * std::cos(w), a2 = -rr * rr;
+            // both outputs: two views of the same field, so their mean is steadier
+            double t60 = 0;
+            for (const std::vector<float>* hh : {&hL, &hR}) {
+                std::vector<double> z(n);
+                double y1 = 0, y2 = 0, z1 = 0, z2 = 0;
+                for (int i = 0; i < n; i++) {
+                    const double v = (*hh)[i] + a1 * y1 + a2 * y2; y2 = y1; y1 = v;
+                    const double u = v + a1 * z1 + a2 * z2; z2 = z1; z1 = u; z[i] = u * u;
+                }
+                for (int i = n - 2; i >= 0; i--) z[i] += z[i + 1];
+                auto at = [&](double db) { for (int i = 0; i < n; i++) if (10 * std::log10(z[i] / z[0] + 1e-300) < db) return (double)i / 48000; return 1e9; };
+                // the late slope, -20 to -50 dB. (The first 20 dB fall more slowly at
+                // the top: the build-up of the four steps has no loss in it. Measured:
+                // the late slope is within 1% of the design from 1 kHz to 16 kHz.)
+                t60 += (at(-50) - at(-20));
+            }
+            const double want = rm.designT60(0, f);
+            char name[96]; std::snprintf(name, sizeof name, "T60 in the band at %5.0f Hz against the design (%.2f s), ratio", f, want);
+            expect(std::fabs(t60 / want - 1) < 0.05, name, t60 / want);
+        }
+        // 3. density: the share of samples beyond one standard deviation, against a normal 0.3173
+        auto ned = [&](double t) {
+            const int c0 = (int)(t * 48000), hw = 480; double m2 = 0; int out = 0;
+            for (int i = c0 - hw; i < c0 + hw; i++) m2 += (double)hL[i] * hL[i];
+            const double sd = std::sqrt(m2 / (2 * hw));
+            for (int i = c0 - hw; i < c0 + hw; i++) if (std::fabs(hL[i]) > sd) out++;
+            return out / (2.0 * hw) / 0.3173;
+        };
+        expect(ned(0.08) > 0.9, "echo density 80 ms after the click (1 is a normal density)", ned(0.08));
+        // (above 1: the echoes of the four steps all have one size, so more than a
+        // normal share of them stands beyond one deviation)
+        expect(ned(0.04) > 0.3, "echo density 40 ms after the click (the field is still building)", ned(0.04));
+        // 4. the two sides are not copies, and nothing is left standing
+        double sl = 0, sr = 0, slr = 0;
+        for (int i = 9600; i < 48000; i++) { sl += (double)hL[i] * hL[i]; sr += (double)hR[i] * hR[i]; slr += (double)hL[i] * hR[i]; }
+        expect(std::fabs(slr / std::sqrt(sl * sr)) < 0.1, "left against right, 0.2 s to 1 s: correlation", slr / std::sqrt(sl * sr));
+        expect(std::fabs(10 * std::log10(sl / sr)) < 1.0, "left against right: level, dB", 10 * std::log10(sl / sr));
+        bool fin = true; float peak = 0;
+        for (int i = 0; i < 48000 * 60; i++) { rm.tick(0, 0, l, r); if (!std::isfinite(l) || !std::isfinite(r)) fin = false; if (i > 48000 * 50 && std::fabs(l) > peak) peak = std::fabs(l); }
+        expect(fin && peak < 1e-9f, "60 s of silence: all values finite, and the last 10 s under 1e-9", peak);
+    }
     std::printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails ? 1 : 0;
 }

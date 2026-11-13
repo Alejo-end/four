@@ -39,5 +39,20 @@ int main() {
         double sec = std::chrono::duration<double>(clk::now() - t0).count();
         std::printf("%-28s %11.2f%% %16.0f\n", c.name, sec / 10 * 100, worst);
     }
+    {
+        // THE ROOM: stereo noise in, 10 s
+        std::vector<float> mem(Room::need());
+        static Room rm; rm.init(mem.data(), 48000, 0.005); rm.setDecay(2.0, 0.5);
+        double worst = 0; float acc = 0, l, r;
+        auto t0 = clk::now();
+        for (int b = 0; b < 48000 * 10 / 64; b++) {
+            auto a = clk::now();
+            for (int j = 0; j < 64; j++) { rm.tick(L[(b * 64 + j) % len], R[(b * 64 + j) % len], l, r); acc += l; }
+            double us = std::chrono::duration<double, std::micro>(clk::now() - a).count();
+            if (us > worst) worst = us;
+        }
+        double sec = std::chrono::duration<double>(clk::now() - t0).count();
+        std::printf("%-28s %11.2f%% %16.0f   (%g)\n", "THE ROOM, stereo", sec / 10 * 100, worst, acc);
+    }
     std::printf("one block is 1333 us\n");
 }
