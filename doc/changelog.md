@@ -4112,3 +4112,26 @@ doc/space-plan.md, done before the delay because the reverb was the heaviest par
 On the device, preset 1 with its reverb and delay on: four PLAY tracks 17.2% of the
 thread (25.2% before), four PV 28.6%, four GRAIN 19.1%. Nobody has listened yet. Not
 done: the early field, SIZE while it plays, moving lines, the SPACE page, the sends.
+
+four, seventeenth change: **THE BUCKET BRIGADE: a delay of our own (engine and plugin,
+the count stays 197). NOT on the device: the norns was off the network.** Step 2 of
+doc/space-plan.md.
+- `BBD` (ugen/four_core.h): a chain of cells and a clock, with an anti-alias filter
+  before it and a reconstruction filter after it. Both are solved in continuous time
+  (Holters and Parker), because the clock's ticks do not sit on the host's samples.
+- The proof: a tone comes out within 0.00 dB of `H sinc H sinc` at four frequencies,
+  the device's own image is within 0.5 dB of its formula, and nothing else is in the
+  spectrum. The delay equals chain + hold + filters to a tenth of a clock period.
+- `BBDDelay`: the clock is set so an echo lands on its time. AGE adds the compander
+  pair (the compressor's implicit equation has an exact form), the chain's noise and
+  the rails. At rest the pair is an identity (0.00 dB). The noise is -110 dBFS in
+  silence and -72 dBFS behind a loud note: that rise is the "breathing".
+- `\four_delay` uses `FourBBD` when the plugin is there, with 8192 cells. Rendered
+  offline through the real synth: echoes at 0.3, 1 and 2 s land within 1.3 ms, and
+  95% of an echo's energy is under 8.0 kHz, 2.8 kHz and 1.2 kHz. The least time is
+  43 ms. AGE is fixed at 0.25 and TONE at 0.35 until SPACE has knobs for them.
+- In silence the filters' states fell into the denormal range, and the first run of
+  the proof on the norns did not end in 400 s. A term of 1e-15 keeps them out. The
+  comb of FLANGE and ECHO (`DelayFb`) had the same fault and has the same repair.
+To do on the device: build the plugin, install it BEFORE the engine, restart, read
+`count: 197`, measure the delay's cost, and confirm that silence costs nothing.

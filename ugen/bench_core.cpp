@@ -54,5 +54,21 @@ int main() {
         double sec = std::chrono::duration<double>(clk::now() - t0).count();
         std::printf("%-28s %11.2f%% %16.0f   (%g)\n", "THE ROOM, stereo", sec / 10 * 100, worst, acc);
     }
+    for (double time : {0.2, 0.5, 1.5}) {
+        // THE BUCKET BRIGADE delay, one channel, 16384 cells
+        std::vector<float> mem(8192);
+        static BBDDelay dl; dl.init(mem.data(), 8192, 48000); dl.set(time, 0.35);
+        double worst = 0; float acc = 0;
+        auto t0 = clk::now();
+        for (int b = 0; b < 48000 * 10 / 64; b++) {
+            auto a = clk::now();
+            for (int j = 0; j < 64; j++) acc += dl.tick(L[(b * 64 + j) % len], 0.5f, 0.5f);
+            double us = std::chrono::duration<double, std::micro>(clk::now() - a).count();
+            if (us > worst) worst = us;
+        }
+        double sec = std::chrono::duration<double>(clk::now() - t0).count();
+        char name[64]; std::snprintf(name, sizeof name, "BBD delay, mono, %.1f s", time);
+        std::printf("%-28s %11.2f%% %16.0f   (clock %.0f Hz, %g)\n", name, sec / 10 * 100, worst, dl.chain.inc * 48000, acc);
+    }
     std::printf("one block is 1333 us\n");
 }

@@ -886,7 +886,7 @@ struct DelayFb {
         const float c2 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
         const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
         const float y = ((c3 * fr + c2) * fr + c1) * fr + y1;
-        lp += k * (y - lp);
+        lp += k * (y - lp) + 1e-25f;       // (the small term keeps denormals out)
         float s = lp;
         if (s > 1.5f) s = 1.5f; else if (s < -1.5f) s = -1.5f;
         back = s - (4.f / 27.f) * s * s * s;
@@ -1035,6 +1035,171 @@ struct Room {
         }
         outL = l * 0.5f; outR = r * 0.5f;
         dw = (dw + 1) & (DMAX - 1); lw = (lw + 1) & (LMAX - 1);
+    }
+};
+
+// THE BUCKET BRIGADE (doc/space-plan.md, section 4). A chain of `half` cells
+// that a clock of f_c moves one cell for each tick, so the delay is
+// half / f_c. Before the chain an anti-alias filter, after it a
+// reconstruction filter, both third-order Butterworth low-passes whose corner
+// follows the clock: a long delay is a slow clock and a dark sound.
+//
+// The ticks do not sit on the host's samples, so the two filters are solved
+// in continuous time (Holters and Parker, 2018). Each filter is
+//   H(s) = w^3 / ((s + w)(s^2 + w s + w^2)) = r1/(s - p1) + r2/(s - p2) + conj
+//   p1 = -w, p2 = w(-1/2 + j sqrt(3)/2), r1 = w, r2 = w(-1/2 - j/(2 sqrt(3)))
+// and each part's state x obeys x' = p x + u. For an input u held over a time
+// D the step is exact:  x <- e^(pD) x + (e^(pD) - 1)/p * u.
+//   input filter: u is the host's sample, held for one sample period. At a
+//     tick inside the sample the state is advanced to the tick and read.
+//   output filter: u is the chain's output, held from tick to tick. It is
+//     advanced tick by tick and read at the host's sample.
+// So the model has the sampling of the device (images at k f_c +- f) and its
+// staircase, and nothing else is approximated but "held between samples".
+struct BBD {
+    float* ring; int half, w;
+    double ph, inc;                    // the place in a tick (0..1), and ticks for each sample
+    double ia, ibr, ibi, oa, obr, obi; // the two filters: a real state and a complex one
+    double hold;                       // what the chain puts out now
+    double om, E1, E2r, E2i;           // the corner (rad/s) and one whole sample's step
+    double fs;
+
+    void init(float* mem, int cells, double sampleRate) {   // cells: a power of two
+        ring = mem; half = cells; w = 0; fs = sampleRate;
+        std::memset(mem, 0, cells * sizeof(float));
+        ph = 0; ia = ibr = ibi = oa = obr = obi = 0; hold = 0;
+        om = 0; setClock(12000.0, 0.35);
+    }
+    // fc: the clock in Hz. ratio: the filters' corner as a share of the clock.
+    // The corner stops at 8.4 kHz, so a fast clock folds nothing into hearing.
+    void setClock(double fc, double ratio) {
+        inc = fc / fs;
+        double corner = ratio * fc;
+        if (corner > 8400.0) corner = 8400.0;
+        const double o = 2 * 3.14159265358979323846 * corner;
+        if (o == om) return;
+        om = o;
+        const double x = om / fs, m = std::exp(-0.5 * x);
+        E1 = m * m; E2r = m * std::cos(0.8660254037844386 * x); E2i = m * std::sin(0.8660254037844386 * x);
+    }
+    // one filter, advanced by a step whose exponentials are (e1, e2r + j e2i), input u
+    inline void adv(double& a, double& br, double& bi, double e1, double e2r, double e2i, double u) const {
+        a = e1 * a + (1.0 - e1) / om * u;
+        // (e2 - 1)/p2, with 1/p2 = (-1/2 - j sqrt(3)/2)/w
+        const double gr = ((e2r - 1.0) * -0.5 + e2i * 0.8660254037844386) / om;
+        const double gi = ((e2r - 1.0) * -0.8660254037844386 + e2i * -0.5) / om;
+        const double nr = e2r * br - e2i * bi + gr * u;
+        bi = e2r * bi + e2i * br + gi * u; br = nr;
+    }
+    static inline double read(double om, double a, double br, double bi) {
+        return om * (a - br + 0.5773502691896258 * bi);      // r1 x1 + 2 Re(r2 x2)
+    }
+    inline float tick(float in) {
+        // (the small term: in silence the states fall into the denormal range,
+        // where each operation on the norns takes a hundred times as long)
+        const double u = (double)in + 1e-15;
+        const int nt = (int)(ph + inc);
+        if (nt == 0) {
+            adv(ia, ibr, ibi, E1, E2r, E2i, u);
+            adv(oa, obr, obi, E1, E2r, E2i, hold);
+            ph += inc;
+        } else {
+            double t = 0, P1 = 1, Pr = 1, Pi = 0;          // the time so far, and the product of the steps
+            const double x = om / fs;
+            for (int k = 1; k <= nt; k++) {
+                const double d = ((double)k - ph) / inc, D = d - t;
+                const double m = std::exp(-0.5 * x * D), e1 = m * m;
+                const double e2r = m * std::cos(0.8660254037844386 * x * D), e2i = m * std::sin(0.8660254037844386 * x * D);
+                adv(ia, ibr, ibi, e1, e2r, e2i, u);
+                adv(oa, obr, obi, e1, e2r, e2i, hold);
+                hold = (double)ring[w] + 1e-15;                 // what went in `half` ticks ago
+                ring[w] = (float)read(om, ia, ibr, ibi);
+                w = (w + 1) & (half - 1);
+                P1 *= e1; const double q = Pr * e2r - Pi * e2i; Pi = Pr * e2i + Pi * e2r; Pr = q;
+                t = d;
+            }
+            // the rest of the sample: the whole step divided by the steps taken
+            const double e1 = E1 / P1, n2 = Pr * Pr + Pi * Pi;
+            const double e2r = (E2r * Pr + E2i * Pi) / n2, e2i = (E2i * Pr - E2r * Pi) / n2;
+            adv(ia, ibr, ibi, e1, e2r, e2i, u);
+            adv(oa, obr, obi, e1, e2r, e2i, hold);
+            ph = ph + inc - nt;
+        }
+        return (float)read(om, oa, obr, obi);
+    }
+    // the whole delay in seconds for a clock: the chain, its hold, both filters
+    static double seconds(int cells, double fc, double corner) {
+        return cells / fc + 0.5 / fc + 2.0 * 2.0 / (2 * 3.14159265358979323846 * corner);
+    }
+};
+
+// The delay made of it: the clock is set so that an echo lands after `time`
+// (the filters' own delay is taken off), and the loop goes back in through a
+// 30 Hz high-pass and a soft clip.
+//
+// AGE (0 to 1) adds what an old unit has around its chip, and at 0 none of it
+// runs:
+//   a compressor before the chain and an expander after it (the NE570 pair).
+//     compressor:  y = x / avg(|y|)     (a 2:1 law in dB)
+//     expander:    z = w * avg(|w|)     (a 1:2 law)
+//     avg is a one-pole of 10 ms. The compressor's equation holds its own
+//     output, and for a one-pole it has an exact answer:
+//       c = (1 - k) a[n-1],  a[n] = (c + sqrt(c^2 + 4 k |x|)) / 2,  y = x / a[n]
+//     With a clean path between them the pair is an identity. What makes the
+//     sound is what sits between them:
+//   the chain's noise, added after the compressor. The expander pushes it
+//     down in the quiet and lets it rise behind each note.
+//   the rails: a clip at the chain's input, exactly linear up to 1 and
+//     smooth to 1.5 beyond, which catches the compressor's attacks.
+struct BBDDelay {
+    BBD chain; double hpx, hpy, back;
+    double ca, ea, k;                  // the two averages and their coefficient
+    uint32_t seed;
+    void init(float* mem, int cells, double sampleRate) {
+        chain.init(mem, cells, sampleRate); hpx = hpy = back = 0;
+        ca = ea = 1.0; k = 1.0 - std::exp(-1.0 / (0.010 * sampleRate)); seed = 22222u;
+    }
+    // time in seconds, tone: the corner as a share of the clock (0.2..0.45)
+    inline void set(double time, double tone) {
+        // cells/fc + 0.5/fc + 2/(pi tone fc) = time, while the corner follows the clock
+        double fc = (chain.half + 0.5 + 2.0 / (3.14159265358979323846 * tone)) / time;
+        if (tone * fc > 8400.0) {          // the corner stands still: its delay is fixed
+            const double rest = time - 2.0 * 2.0 / (2 * 3.14159265358979323846 * 8400.0);
+            fc = (chain.half + 0.5) / (rest > 1e-4 ? rest : 1e-4);
+        }
+        if (fc > 4.0 * chain.fs) fc = 4.0 * chain.fs;
+        chain.setClock(fc, tone);
+    }
+    static inline double rails(double s) {
+        const double a = s < 0 ? -s : s;
+        if (a <= 1.0) return s;
+        const double v = 1.0 + 0.5 * std::tanh((a - 1.0) * 2.0);
+        return s < 0 ? -v : v;
+    }
+    // fb -0.98..0.98, age 0..1
+    inline float tick(float in, float fb, float age) {
+        double x = (double)in + fb * back;
+        if (age > 0.f) {
+            const double ax = x < 0 ? -x : x, c = (1.0 - k) * ca;
+            ca = 0.5 * (c + std::sqrt(c * c + 4.0 * k * ax));
+            if (ca < 0.03) ca = 0.03;                 // the floor: the largest gain is 30 dB
+            x = x / ca;
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            x += (double)age * 3.2e-4 * ((double)(seed & 0xffffff) / 8388608.0 - 1.0);   // -70 dB at AGE 1
+            x = rails(x);
+        }
+        double y = chain.tick((float)x);
+        if (age > 0.f) {
+            const double ay = y < 0 ? -y : y;
+            ea += k * (ay - ea);
+            y *= ea < 0.03 ? 0.03 : ea;
+        }
+        const double hp = y - hpx + 0.99608 * hpy;           // 30 Hz at 48 kHz
+        hpx = y; hpy = hp + 1e-25;
+        double s2 = hp;
+        if (s2 > 1.5) s2 = 1.5; else if (s2 < -1.5) s2 = -1.5;
+        back = s2 - (4.0 / 27.0) * s2 * s2 * s2;
+        return (float)y;
     }
 };
 

@@ -288,6 +288,108 @@ int main() {
         for (int i = 0; i < 48000 * 60; i++) { rm.tick(0, 0, l, r); if (!std::isfinite(l) || !std::isfinite(r)) fin = false; if (i > 48000 * 50 && std::fabs(l) > peak) peak = std::fabs(l); }
         expect(fin && peak < 1e-9f, "60 s of silence: all values finite, and the last 10 s under 1e-9", peak);
     }
+    std::printf("THE BUCKET BRIGADE\n");
+    {
+        std::vector<float> mem(8192);
+        static BBD bb;
+        const double fs = 48000, fc = 12000, ratio = 0.35, corner = ratio * fc;
+        auto H = [&](double f) { return 1.0 / std::sqrt(1.0 + std::pow(f / corner, 6)); };
+        auto sinc = [&](double x) { return x == 0 ? 1.0 : std::sin(PI * x) / (PI * x); };
+        // the level of the component at `f` in a run with a tone at f0
+        auto level = [&](double f0, double f) {
+            bb.init(mem.data(), 4096, fs); bb.setClock(fc, ratio);
+            const int n = 48000 * 3; double a = 0, b = 0; int cnt = 0;
+            for (int i = 0; i < n; i++) {
+                const float y = bb.tick(0.5f * (float)std::sin(2 * PI * f0 * i / fs));
+                if (i >= 48000) { const double hw = 0.5 - 0.5 * std::cos(2 * PI * (i - 48000) / (n - 48000)); a += hw * y * std::cos(2 * PI * f * i / fs); b += hw * y * std::sin(2 * PI * f * i / fs); cnt++; }
+            }
+            return 20 * std::log10(2 * std::sqrt(a * a + b * b) / (0.5 * cnt) / 0.5 + 1e-30);
+        };
+        for (double f0 : {300.0, 1500.0, 3000.0, 4200.0}) {
+            const double got = level(f0, f0);
+            const double want = 20 * std::log10(H(f0) * sinc(f0 / fc) * H(f0) * sinc(f0 / fs));
+            char name[96]; std::snprintf(name, sizeof name, "clock 12 kHz: a tone at %4.0f Hz against H sinc H sinc (%.2f dB), difference", f0, want);
+            expect(std::fabs(got - want) < 0.2, name, got - want);
+        }
+        {
+            const double f0 = 3000, fi = fc - f0;
+            const double got = level(f0, fi) - level(f0, f0);
+            const double want = 20 * std::log10((f0 / fi) * (H(fi) / H(f0)) * (sinc(fi / fs) / sinc(f0 / fs)));
+            expect(std::fabs(got - want) < 0.5, "the image at 9 kHz of a 3 kHz tone against the formula, dB", got - want);
+            expect(want > -60, "(that image, against the tone, dB)", want);
+            // nothing else: a place that is neither the tone nor an image
+            expect(level(f0, 5000.0) - level(f0, f0) < -70, "a 3 kHz tone: the level at 5 kHz, where nothing belongs, dB", level(f0, 5000.0) - level(f0, f0));
+        }
+        {
+            // the time: the phase of a 100 Hz tone against the delay the model states
+            bb.init(mem.data(), 4096, fs); bb.setClock(fc, ratio);
+            const int n = 48000 * 3; double a = 0, b = 0;
+            for (int i = 0; i < n; i++) {
+                const float y = bb.tick((float)std::sin(2 * PI * 100.0 * i / fs));
+                if (i >= 48000) { a += y * std::cos(2 * PI * 100.0 * i / fs); b += y * std::sin(2 * PI * 100.0 * i / fs); }
+            }
+            double lag = std::atan2(-a, b) / (2 * PI * 100.0);           // seconds, modulo 10 ms
+            // (the host's sample is held for one period, which is half a sample of
+            // delay, and tick() returns the state at the END of that period, which
+            // takes a whole sample off: half a sample less in all)
+            const double want = BBD::seconds(4096, fc, corner) - 0.5 / fs;
+            double diff = lag - std::fmod(want, 0.01);
+            while (diff > 0.005) diff -= 0.01; while (diff < -0.005) diff += 0.01;
+            expect(std::fabs(diff) < 0.1 / fc, "the delay against chain + hold + filters, in clock periods", diff * fc);
+        }
+        {
+            // the delay as a whole: an echo lands on its time, and a loop at 0.98 falls
+            static BBDDelay dl; std::vector<float> m2(8192);
+            dl.init(m2.data(), 8192, fs); dl.set(0.5, 0.35);
+            const int n = 48000 * 30; double e1 = 0, e2 = 0; int first = -1; bool fin = true;
+            for (int i = 0; i < n; i++) {
+                const float in = i < 4800 ? 0.5f * (float)std::sin(2 * PI * 220.0 * i / fs) * (float)std::sin(PI * i / 4800.0) : 0.f;
+                const float y = dl.tick(in, 0.98f, 0.f);
+                if (!std::isfinite(y)) fin = false;
+                if (first < 0 && std::fabs(y) > 0.05f) first = i;
+                if (i >= 48000 * 2 && i < 48000 * 4) e1 += (double)y * y;
+                if (i >= 48000 * 28) e2 += (double)y * y;
+            }
+            // (the burst's 0.05 level comes about 0.25 ms after its start)
+            expect(std::fabs(first / fs - 0.5) < 0.004, "TIME 0.5 s: the first echo arrives at, s", first / fs);
+            expect(fin && e2 < e1 && e2 > 0, "feedback 0.98 for 30 s: the last 2 s against seconds 2 to 4, dB", 10 * std::log10(e2 / e1 + 1e-30));
+            for (int i = 0; i < 48000 * 60; i++) { const float y = dl.tick(0, 0.5f, 0.f); if (!std::isfinite(y)) fin = false; }
+            expect(fin, "60 s of silence: every value finite", fin ? 1 : 0);
+        }
+        {
+            // AGE: the pair around the chain. At rest a low tone comes out at its own level.
+            static BBDDelay dl; std::vector<float> m2(8192);
+            auto tone = [&](float amp, float age) {
+                dl.init(m2.data(), 8192, fs); dl.set(0.2, 0.35);
+                const int n = 48000 * 4; double a = 0, b = 0; int cnt = 0;
+                for (int i = 0; i < n; i++) {
+                    const float y = dl.tick(amp * (float)std::sin(2 * PI * 200.0 * i / fs), 0.f, age);
+                    if (i >= 48000 * 2) { a += y * std::cos(2 * PI * 200.0 * i / fs); b += y * std::sin(2 * PI * 200.0 * i / fs); cnt++; }
+                }
+                return 20 * std::log10(2 * std::sqrt(a * a + b * b) / cnt / amp + 1e-30);
+            };
+            const double clean = tone(0.25f, 0.f);
+            expect(std::fabs(tone(0.25f, 1e-6f) - clean) < 0.1, "AGE on, a 200 Hz tone at 0.25: level against AGE off, dB", tone(0.25f, 1e-6f) - clean);
+            expect(std::fabs(tone(0.05f, 1e-6f) - tone(0.05f, 0.f)) < 0.1, "...and at 0.05", tone(0.05f, 1e-6f) - tone(0.05f, 0.f));
+            // the noise: quiet at rest, and louder behind a note
+            dl.init(m2.data(), 8192, fs); dl.set(0.2, 0.35);
+            double rest = 0, behind = 0; bool fin = true;
+            for (int i = 0; i < 48000 * 4; i++) { const float y = dl.tick(0, 0.f, 1.f); if (!std::isfinite(y)) fin = false; if (i >= 48000 * 3) rest += (double)y * y; }
+            for (int i = 0; i < 48000 * 2; i++) {
+                // a 60 Hz tone: the noise is read above 2 kHz, where the tone has nothing
+                const float y = dl.tick(0.5f * (float)std::sin(2 * PI * 60.0 * i / fs), 0.f, 1.f);
+                static double h1 = 0, h2 = 0, px = 0, py = 0;
+                const double q = 0.77;                       // two one-pole high-passes near 2 kHz
+                const double a1v = q * (h1 + y - px); px = y; h1 = a1v;
+                const double a2v = q * (h2 + a1v - py); py = a1v; h2 = a2v;
+                if (i >= 48000) behind += a2v * a2v;
+                if (!std::isfinite(y)) fin = false;
+            }
+            const double restDb = 10 * std::log10(rest / 48000 + 1e-30), behindDb = 10 * std::log10(behind / 48000 + 1e-30);
+            expect(fin && restDb < -110, "AGE 1, silence in: the noise at the output, dBFS", restDb);
+            expect(behindDb > restDb + 20 && behindDb < -55, "AGE 1, behind a loud note: the noise above 2 kHz, dBFS", behindDb);
+        }
+    }
     std::printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails ? 1 : 0;
 }

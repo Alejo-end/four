@@ -545,3 +545,27 @@ they took 25.2% with JPverb. The reverb synth costs about 5% in all. Its level
 is matched to JPverb's (within 0.7 dB at three decay times), so a preset keeps
 its balance. The engine still feeds it by the old law, and the page is still
 the old REVERB page. Nobody has listened.
+
+## 15. The bucket brigade, built (2026-11-13). NOT on the norns yet
+
+`BBD` and `BBDDelay` in `ugen/four_core.h`, the UGen `FourBBD`, and
+`\\four_delay` uses it. The proof passes on the Mac.
+
+| Claim | Result |
+|---|---|
+| A tone against `H sinc(f/f_c) H sinc(f/f_s)`, four frequencies | 0.00 dB |
+| The image of a 3 kHz tone at a 12 kHz clock, against the formula | 0.47 dB |
+| The level where nothing belongs | under -290 dB |
+| The delay against chain + hold + filters | under 0.1 clock period |
+| TIME 0.5 s: the first echo | at 0.50 s |
+| Feedback 0.98 for 30 s | falls 14 dB |
+| AGE on, a tone at rest against AGE off | 0.00 dB |
+| AGE 1: the noise in silence, and behind a loud note | -110 dBFS, -72 dBFS |
+
+The design is simpler than section 4.7. One model serves every clock: the
+ticks are solved exactly, several for each sample if the clock is fast, and
+the corner stops at 8.4 kHz so a fast clock folds nothing into hearing.
+
+Open: the cost on the norns, silence on the norns (the denormal repair), the
+clock in steps of one block (a ramp inside the block is finer), an LFO on the
+clock, knobs for AGE and TONE, the review's test at clocks above 24 kHz.

@@ -72,6 +72,16 @@ Engine_Four.new(ctx, { arg eng;
             ++ [[0.002, [\s_new, \copy, 1010, 1, 0, \from, 44, \to, 90]],
                 [0.003, [\s_new, \four_fx_echo, 1110, 1, 0, \pbus, 90, \type, 6, \amt, 0.7, \rate, 0.5]],
                 [0.004, [\s_new, \copy, 1210, 1, 0, \from, 90, \to, 8]]]]
+        ,
+        // the engine's delay synth (THE BUCKET BRIGADE with the plugin): a noise
+        // burst of 20 ms through it at three times, each on its own pair of outs
+        ["FOUR_PLUGIN_DIR".getenv.notNil.if({ \bbd }, { \skip }), 8, 6, [],
+            [[0.0, [\d_recv, def.(\four_delay)]],
+             [0.0, [\d_recv, SynthDef(\burst, { |out| Out.ar(out, WhiteNoise.ar(0.5) * EnvGen.ar(Env.linen(0.001, 0.02, 0.001)) ! 2) }).asBytes]],
+             [0.5, [\s_new, \burst, 900, 0, 0, \out, 40]]]
+            ++ [0.3, 1.0, 2.0].collect({ |t, i|
+                [0.01, [\s_new, \four_delay, 1000 + i, 1, 0, \in_bus, 40, \out_bus, i * 2,
+                    \delay_time, t, \delay_fb, 0.6, \delay_mix, 0.5]] })]
     ];
     run = { |i|
         if (i >= jobs.size) { "BENCH_DONE".postln; 0.exit } {

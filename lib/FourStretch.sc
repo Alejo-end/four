@@ -77,3 +77,13 @@ FourRoom : MultiOutUGen {
         ^this.initOutputs(2, rate)
     }
 }
+
+// THE BUCKET BRIGADE: the delay (doc/space-plan.md, section 4). One channel,
+// with its own feedback loop. time is in seconds, tone is the filters' corner
+// as a share of the clock (0.2 to 0.45), age is 0 (clean) to 1 (noise and the
+// compander of an old unit).
+FourBBD : UGen {
+    *ar { arg in, time = 0.3, feedback = 0.3, tone = 0.35, age = 0;
+        ^this.multiNew('audio', in, time, feedback, tone, age)
+    }
+}

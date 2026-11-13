@@ -419,7 +419,7 @@ Engine_Four : CroneEngine {
         var s = context.server;
         var allKeys;
         var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
-        var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, roomClass, th, dfmTrim;
+        var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, roomClass, bbdClass, th, dfmTrim;
         var grainCap;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
@@ -647,9 +647,11 @@ Engine_Four : CroneEngine {
         delayClass = "FourDelay".asSymbol.asClass;
         grainClass = "FourGrain".asSymbol.asClass;
         roomClass = "FourRoom".asSymbol.asClass;
+        bbdClass = "FourBBD".asSymbol.asClass;
         stretchOn = pvClass.notNil and: { warpClass.notNil } and: { readClass.notNil }
             and: { tanhClass.notNil } and: { delayClass.notNil }
-            and: { grainClass.notNil } and: { roomClass.notNil } and: {
+            and: { grainClass.notNil } and: { roomClass.notNil } and: { bbdClass.notNil }
+            and: {
             "FOUR_STRETCH".getenv.notNil or: {
                 ["FourStretch.so", "FourStretch.scx"].any({ arg f;
                     File.exists(Platform.userExtensionDir +/+ "FourStretch" +/+ f)
@@ -1412,6 +1414,21 @@ Engine_Four : CroneEngine {
             var sig, fbIn, dIn, dOut;
             sig = In.ar(in_bus, 2);
             delay_fb = delay_fb.lag(0.03);   // CC steps zipper without this
+            // With the plugin the delay is THE BUCKET BRIGADE (FourBBD,
+            // doc/space-plan.md): a chain of 8192 cells and a clock. TIME
+            // moves the clock, so a turn bends the pitch as before, and a long
+            // time is a slow clock and a dark echo: the corner is 5.7 kHz at
+            // 0.5 s, 2.9 kHz at 1 s and 1.4 kHz at 2 s. Its loop is inside
+            // it, so the echoes carry no block of delay. Only io's read of
+            // the return is one block late, and the time is that much short.
+            // The least time is 43 ms. AGE is fixed at 0.25 until SPACE has a
+            // knob for it: a little noise that rises behind each note.
+            stretchOn.if({
+                dOut = 2.collect({ arg ch;
+                    bbdClass.ar(sig[ch], delay_time.clip(0.01, 2.0).lag(0.2) - ControlDur.ir,
+                        delay_fb, 0.35, 0.25)
+                });
+            }, {
             fbIn = LocalIn.ar(2);
             dIn = sig + (fbIn * delay_fb);
             // 2s line: a half-note sync below 120 BPM needs more than 1s,
@@ -1433,6 +1450,7 @@ Engine_Four : CroneEngine {
             // repeats. Quiet repeats are unaffected. If the infinite hold
             // needs to sustain rather than fade, put softclip back here.
             LocalOut.ar(th.value(LPF.ar(dOut, 3500)));
+            });
             Out.ar(out_bus, dOut);
         }).add;
 

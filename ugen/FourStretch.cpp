@@ -231,6 +231,33 @@ static void FourRoom_Dtor(FourRoom* unit) {
     if (unit->mem) RTFree(unit->mWorld, unit->mem);
 }
 
+// FourBBD.ar(in, time, feedback, tone, age): the bucket brigade delay, one
+// channel. See BBD and BBDDelay in four_core.h. time is in seconds (43 ms at
+// the least), tone is the filters' corner as a share of the clock (0.2 to
+// 0.45), age is 0 (clean) to 1 (an old unit: noise and the compander).
+struct FourBBD : public Unit { four::BBDDelay core; float* mem; float lastTime, lastTone; };
+static void FourBBD_next(FourBBD* unit, int inNumSamples) {
+    const float* in = IN(0); float* out = OUT(0);
+    const float time = sc_clip(IN0(1), 0.02f, 3.f), tone = sc_clip(IN0(3), 0.2f, 0.45f);
+    const float fb = sc_clip(IN0(2), -0.98f, 0.98f), age = sc_clip(IN0(4), 0.f, 1.f);
+    if (time != unit->lastTime || tone != unit->lastTone) {
+        unit->core.set(time, tone);                  // once for each block: the clock glides in steps of 1.3 ms
+        unit->lastTime = time; unit->lastTone = tone;
+    }
+    for (int i = 0; i < inNumSamples; i++) out[i] = unit->core.tick(in[i], fb, age);
+}
+static void FourBBD_Ctor(FourBBD* unit) {
+    unit->mem = (float*)RTAlloc(unit->mWorld, 8192 * sizeof(float));
+    if (!unit->mem) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    unit->core.init(unit->mem, 8192, SAMPLERATE);
+    unit->lastTime = -1.f; unit->lastTone = -1.f;
+    SETCALC(FourBBD_next);
+    OUT0(0) = 0.f;
+}
+static void FourBBD_Dtor(FourBBD* unit) {
+    if (unit->mem) RTFree(unit->mWorld, unit->mem);
+}
+
 PluginLoad(FourStretch) {
     ft = inTable;
     four::tables();     // built here, off the audio thread
@@ -246,4 +273,5 @@ PluginLoad(FourStretch) {
     DefineDtorCantAliasUnit(FourDelay);
     DefineDtorCantAliasUnit(FourGrain);
     DefineDtorCantAliasUnit(FourRoom);
+    DefineDtorCantAliasUnit(FourBBD);
 }

@@ -129,6 +129,12 @@ block current, and add a change-log entry for every change.
   page), reviewed by a second agent; its section 13 says what is built. With preset 1's
   reverb and delay on, four PLAY tracks take 17% of the thread. Nobody has listened.
   README.md and doc/ui are edited from another terminal: do not commit them from here.
+- **THE BUCKET BRIGADE (four, seventeenth change), NOT on the device:** `FourBBD` is
+  the delay when the plugin is there (ugen/four_core.h `BBD`, `BBDDelay`; proof in
+  test_core, 68 checks in all). The norns was off the network when it was written:
+  build the plugin there, install it BEFORE the engine, restart, read `count: 197`,
+  measure its cost and make sure that silence costs nothing (a denormal repair is
+  unconfirmed there). doc/space-plan.md section 15.
 - **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
