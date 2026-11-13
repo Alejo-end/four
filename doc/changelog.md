@@ -3763,6 +3763,15 @@ only what softcut cannot (granular, time-stretch, custom filter/delay/reverb). G
 are a **mode switch** on a single SC voice, never run together (Pi4 = one scsynth core,
 xruns past ~60%).
 
+Hundred-and-fourteenth change: **the doodles come only from played events, and six richer
+shapes (visuals only)**. The ambient words and drawings that appeared when nothing played
+(they showed the Octatrack's screen words, CROSSFADER among them) are gone: with no MIDI event
+nothing is drawn. A note draws one of six shapes by track and pitch (rings with tick marks, a
+low-poly shard with spokes and corner dots, a spiral, a burst, a lattice, a scribble), each track in its
+own warm tape colour. A CC types its word at most four times a second; the display line shows
+every value. The Octatrack link was seen working by the user (CC 39, 40 and 41 appeared); the
+CC 70 to 97 mapping and the toggle buttons are still not confirmed.
+
 four, first change: **mangler2 becomes the instrument, named four (names only, the count
 stays 173, needs a RESTART)**. The one-track mangler retires; it stays in git as the tag
 `mangler-1`. main's 115th and 116th changes (the folder rename and the visuals over the
@@ -3774,3 +3783,191 @@ The new names: script `four.lua`, class `Engine_Four` in `lib/Engine_Four.sc`,
 `mangler2-NN.pset` renamed `four-NN.pset` and `mangler2.pmap` renamed `four.pmap`. The PARAMS
 separator and exported takes say `four`. The OSC addresses stay `/mangler/...` (the visuals
 read them), and the log lines still start with `mangler:`.
+
+four, second change: **you can see what is recorded and what plays (Lua only, the count
+stays 173)**. Play-tested as "hard to understand: what is being recorded, and what is T234".
+The header now starts with the four TRACKS, one cell each, on every page:
+- A white box is the track the page edits (TAKE, VOICE, FILTER, TRACKS).
+- On a shared page (DELAY, REVERB ...) the focus is only underlined, because those pages
+  edit no track.
+- A bright number sounds and a dim one is silent.
+- The track being recorded blinks as a box.
+
+The cells replace the inverted badge, the T2 / T23 / T234 flag and the R flag. TAKE says
+what it records in words: REC TRACK 2, and with REC END on ONE-SHOT, THEN 3 (THEN STOP on
+track 4). TAKE no longer draws the other tracks' windows and heads: each track has its own
+take, so those marks were on other material and read as part of this one. A writer flag
+keeps its letter and blinks only its dot, so it never vanishes for half the blink. The page
+dots moved to a 3px pitch, with the current page the one bright dot, to make room for the
+cells.
+
+four, third change: **one effect slot for each track (engine and params, the count is now
+185, needs a RESTART)**. Asked for as "some effects extra more than delay and reverb", for
+each track. Every track has one slot after its drive and crush:
+- `effect` picks OFF, CHORUS, FLANGE, WOBBLE, RESON or RING. OFF is a true bypass.
+- `effect_amt` is the depth, the feedback, the ring time or the mix, as the type needs.
+- `effect_rate` is the speed, the note (C2 to C6) or the frequency.
+
+Tracks 2 to 4 have the same three with the `t<n>_` prefix. One slot and two knobs keep the
+controls small: four separate effects on each track would be about forty params. In the
+engine it is one build-time function (`fxSlot`), used by io and by the strip. CHORUS, FLANGE
+and WOBBLE share one comb pair. The count: 3 more for track 1 and 3 for each of tracks 2 to
+4, so 173 becomes 185. DRY sets every slot to OFF, the purity mark goes dark for an effect
+on track 1, scenes and motion lanes hold all three, and a modulator can move the amount and
+the rate. There is NO page yet: the slot is in PARAMS (filter, and track n) and can be
+MIDI-mapped. On the device: `count: 185`, no SC errors, each type changes the output, and
+four GRAIN tracks take 42.7% of the scsynth thread with the slots off and 43.3% with them
+on (doc/measurements/2026-11-12/effect-slot.md). RESON reads about 8 dB quieter than the
+others. A preset saved before this change does not reset the effect. Nobody has listened yet.
+
+four, fourth change: **the EFFECT page (Lua only, the count stays 185)**. The effect slot
+gets its own page, after FILTER, so there are thirteen pages. It edits the focused track,
+like TAKE, VOICE and FILTER.
+- E2 is AMOUNT and E3 is RATE. K1 held has no knob there.
+- K3 is TYPE: a tap steps CHORUS, FLANGE, WOBBLE, RESON, RING and round again. It skips
+  OFF. Held, it steps the focus to the next track.
+- K2 is ON, under the punch law: a tap latches, a hold sounds the effect only while held.
+  Off remembers the type. The first on is CHORUS.
+- While E3 turns, RATE reads in the unit of the effect: a speed in Hz for CHORUS and
+  FLANGE, a note (C#4) for RESON, a frequency for RING. The font has a `#` now.
+- The body draws one trace the way the effect moves the sound: copies that drift
+  (CHORUS), a train of close echoes (FLANGE), a wave whose time bends (WOBBLE), a
+  string that rings (RESON), a wave cut into beats (RING). OFF is a dim word and a flat
+  dim line. The effect of a silent track is drawn dim.
+
+The header had no room for a thirteenth dot in its worst case (every flag lit on a six
+letter title): the dot row moved 1px towards the edge and the flags start 1px closer to
+the title. The visuals show the FILTER look on EFFECT. Tests: the keys, the knobs and DRY
+in test_control, the three brightness cases in test_screen, nine new shots in the render
+suite. On the device (a script reload, no restart): `count: 185`, thirteen pages, K3 walks the five
+effects, K2 switches off and back to the last one, E3 moves the rate, the screenshot matches
+the render, no Lua errors, CPU unchanged at 27.5%. Nobody has listened yet.
+
+four, fifth change: **RESON is as loud as the other effects (engine, the count stays 185,
+needs a RESTART)**. RESON's peak was about 8 dB under the others on the device. Its gain
+law was the exact one for noise (the square root of 1 minus the feedback squared), and
+music has less energy at the comb's pitch than noise has. The power is now 0.25. On the
+device after a restart: `count: 185`, no SC errors, and RESON sits within about 4 dB of
+the dry signal at three amounts and three notes
+(doc/measurements/2026-11-12/effect-slot.md). Nobody has listened yet.
+
+four, sixth change: **an exact read head, and effect depth as pitch (engine, the count
+stays 185, needs a RESTART)**. SuperCollider is on the Mac now, and test/dsp/ compiles the
+real engine there (with a stand-in for CroneEngine) and renders its SynthDefs offline.
+The first run found two defects, and both are repaired.
+- The read head of PLAY, PV and CLOUD was one float from 0 to 1 across the 60 s buffer.
+  A float has 24 bits and the buffer has 2.88 million frames, so the head landed up to a
+  quarter frame off on every sample. A 5 kHz tone 54 s into the buffer read with noise at
+  -38 dB at pitch 1 and -25 dB a semitone up. The head now counts in frames, in two parts
+  (whole frames and the place between two frames), and `exactRd` does the cubic from four
+  plain reads. At pitch 1 the output is the buffer, bit for bit (-154 dB), anywhere in the
+  buffer, forward and reverse, and after a window move and a scan change. Away from pitch
+  1 the noise is -49 dB anywhere, which is the limit of the cubic curve itself.
+- CHORUS and WOBBLE set their depth in time, so the pitch bend grew with the rate: CHORUS
+  reached -456 to +361 cents at the top of both knobs, and WOBBLE 140. The depth is now
+  set in cents: CHORUS 5 to 30, WOBBLE's wow up to 50 and its flutter 15. Measured after:
+  CHORUS 27 cents at the top, 18 at the defaults; WOBBLE 50.
+Two repairs from doc/dsp-plan.md were dropped after the math: the antialiased drive (it
+costs 3 dB at 12 kHz for 5 to 12 dB less aliasing) and the lowpass before RING (it only
+acts above 20 kHz). NOT on the device yet: the cost of `exactRd` (eight plain reads for
+each track in place of two cubic reads) is not measured, and nobody has listened.
+
+four, seventh change: **FourStretch, our own UGens for PV, WARP and PLAY (engine and a
+new C++ plugin, the count stays 185, needs a RESTART and a build on the norns)**. Stock
+UGens cannot stretch correctly, and the bench proved it: the old PV changed pitch with
+scan and ignored its pitch knob, and `Warp1` did not return its input at speed 1.
+- `ugen/four_core.h` holds the algorithms in plain C++, and `ugen/test_core.cpp` proves
+  them with no SuperCollider (41 checks). `ugen/FourStretch.cpp` wraps them as three
+  UGens, and `lib/FourStretch.sc` is their one class file.
+- PV is a phase vocoder with locked phases. It reads two frames one hop apart at the
+  head, so the head can crawl, stand still or run backward. Left and right share one
+  rotation, so the stereo image holds. A rise in level resets the phases, so an attack
+  stays the take's own. FRZ now holds the head, as in GRAIN, and pitch is its own knob.
+- WARP is WSOLA. A grain starts where it continues the last one, or at the best match
+  near the head. Its level now equals PLAY's (the stock voice was 3.4 dB louder).
+- PLAY reads through a windowed sinc. Pitched reads went from -49 dB to -70 dB of
+  noise, and nothing folds above pitch 1.
+- Both stretches run at pitch 1 and one resampler makes the pitch. A first version
+  resampled every frame and took 9.5% of a Mac core at pitch 2; this one takes 1.5%
+  (with a real-input transform, which gives the same spectrum for half the work).
+- Every position and count is 64 bits. The norns is a 32-bit system, and a `long`
+  there wraps after a few hours of samples.
+- The engine looks for the binary in the Extensions folder. Absent, it builds the stock
+  voices and says so in the log.
+Measured on the Mac through the real engine (test/dsp): at speed 1 PV and WARP read a
+5 kHz tone 54 s in with -109 dB off the tone; at speed 0.5 the tone stays at 5 kHz with no
+level swing (the stock WARP swung 2 dB, the stock PV dropped to 2.5 kHz); pitch 2 at
+speed 0.5 lands on 10 kHz. NOT on the norns: the plugin is not built there, its CPU on a
+Pi is unknown, and nobody has listened.
+
+four, eighth change: **FourStretch on the norns: the build, FFTW, and the measured cost
+(plugin only, the count stays 185)**. The sixth and seventh changes went onto the device.
+- The engine alone (no binary): `count: 185`, the log says `FourStretch absent`, and four
+  PLAY tracks through `exactRd` take 41.8% of the thread.
+- The proof (`ugen/test_core.cpp`) passes on the norns, and the plugin loads there.
+- The first build was too heavy: four PV tracks took 58.7% at pitch 1 and 85% at pitch 2.
+  A timing of each part on the norns found three causes, and two are repaired.
+  - Our own transform took 70 us for a frame. `-DFOUR_FFTW` now takes the transforms from
+    FFTW (21 us). The plan mode is `FFTW_ESTIMATE`, so every start gives the same output.
+    The spectrum is the same to the rounding of a float: the proof passes with it.
+  - The resampler kept its place as one `double` and converted it to 64 bits for each
+    sample, which is a library call on a 32-bit system. It now keeps whole samples and a
+    fraction apart. The output is bit for bit the same.
+  - NOT repaired: the 32 kernel weights of a pitched read take 2.1% of a core for each
+    track. They come from two table reads for each tap.
+- With FFTW: four PV tracks take 53.4% at pitch 1 and 72.3% at pitch 2 (3 xruns). Four
+  WARP tracks take 45.8% and 60.0%. Four PLAY tracks take 41.5% and, at pitch 1.5, 50.5%.
+- `-O3` and `-ffast-math` made the code slower on the Pi. The build keeps `-O2`.
+The record: doc/measurements/2026-11-13/fourstretch.md. Nobody has listened yet.
+
+four, ninth change: **less CPU with the same sound: an exact kernel, buffer reads with no
+division, and our own tanh (engine and plugin, the count stays 185, needs a RESTART)**.
+The user's set ran at 67 to 69% on the screen, which is over the budget.
+- The kernel of every pitched read is now computed, not read from two tables. The sinc
+  comes from one sine and one cosine for each sample, so it is exact to a float. The
+  window comes from a table of 257 rows, read between two rows. The four taps nearest
+  the read place get their own division. NEON does the rest four taps at a time. The
+  resampler at pitch 2 fell from 3.2% of a core to 1.0%, and a pitched PLAY read went
+  from -72 dB of noise to under -96 dB.
+- `Buf::at` took a 64-bit division for every sample it read, which is a library call on
+  the norns. The usual case now needs none. WARP's search for a grain start fell from
+  500 us to under 200 us, and one WARP track from 1.6% to 1.0%.
+- PV finds the rise in level with NEON, four bins at a time.
+- `tanh` from the C library costs 0.4% of the thread for each channel, and the engine
+  has 28 channels of it (drive, the send input, RESON, the delay loop, the shimmer).
+  `FourTanh` is the same curve to 2e-7 (-136 dB against the value) for a tenth of the
+  cost. The engine uses it when the plugin is there, and `.tanh` when it is not.
+- A first NEON kernel with a Newton division for each tap was no faster than the tables.
+  The division-free table for the far taps is what gave the gain.
+On the device: `count: 185`, no xruns. Four PLAY tracks fell from 41.5% to 36.0%, four
+WARP at pitch 2 from 60.0% to 47.1%, four PV at pitch 1 from 53.4% to 48.6%. Four PV at
+pitch 2 take 64.1%, still over the budget. The proof has 44 checks now.
+
+four, tenth change: **a track leaves its filter at the level of its take (engine only, the
+count stays 185, needs a RESTART)**. The user heard mud with four tracks. One track
+measured flat to 19 kHz, so no filter dulls it. But one PLAY track left the engine 7 dB
+louder than its take, and with three or four tracks the master limiter held the peaks
+down all the time (crest factor 7 dB, against 11.6 for one track).
+- The cause: DFM1 at input gain 0.5 already passes a tone 1.0 dB louder, and the engine
+  doubled its output as "makeup". `dfmTrim` (0.891) replaces the x2 in both filters.
+- Now the engine output equals its input for one PLAY track (-24.7 dBFS both), and four
+  tracks of preset 1 peak at -2.7 dBFS with a crest factor of 12.1 dB.
+- EVERYTHING is 7 dB quieter at the output. The balance between tracks and presets is
+  the same. Drive, RESON, the sends and the delay loop see 7 dB less, so their `tanh`
+  bites later on the knob. Regen and resample now write the take back at its own level.
+The record: doc/measurements/2026-11-13/mud.md. Nobody has listened to this change yet.
+
+four, eleventh change: **the tape and the layers show what is on them (Lua only)**. The
+user never saw a deck's wave fill up and could not tell if a recording was there.
+- The cause: a deck strip drew all 60 s of the deck, and the picture had 128 bins. A 4 s
+  loop was a sliver 8 pixels wide. The TAPE page drew no wave at all, only a rail.
+- A deck strip now shows the loop: the loop's two ends are the strip's two ends. While
+  a first pass is open, it shows the pass, 8 s at least, so the pass fills the strip
+  from the left. A rail under the strip shows where that stretch sits in the 60 s.
+- The decks keep 1024 bins (59 ms each). `paint_bins`, `clear_bins`, `fill_wave_bins`,
+  `wave_lane` and the wav fill read the size from the strip. The take keeps 128.
+- TAPE draws the wave and the head under the reels. A loop that plays unheard says
+  `SILENT / SEE MIX`: the MIX crossfade is where its sound went.
+- LAYERS and the tape lane of MIX use the same view.
+On the device with a drum loop: a 4.6 s tape loop and a 3.5 s layer fill their strips
+and each hit shows. No test of the new view exists yet in test_screen.

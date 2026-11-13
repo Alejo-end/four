@@ -36,7 +36,7 @@ Then SYSTEM > RESTART on the norns and pick four in SELECT. Two rules:
    `dust/code` hangs every norns script on LOADING.
 2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
    reload. After a restart the maiden log prints the engine command count. It must read
-   `count: 173`; any other number means an old engine is still running.
+   `count: 185`; any other number means an old engine is still running.
 
 ## First session
 
@@ -78,7 +78,7 @@ The full map of every page's knobs and keys, generated from the code, is in
 ## Pages
 
 The stations sit in families: the take (TAKE, VOICE), the loop decks (TAPE, LAYERS), the
-tone (FILTER, DELAY, REVERB), the console (MIX), and the performance layer (PADS, MOTION,
+tone (FILTER, EFFECT, DELAY, REVERB), the console (MIX), and the performance layer (PADS, MOTION,
 SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives on SCENE.
 
 | Page | What it does | Keys |
@@ -88,6 +88,7 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
 | LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 | FILTER | Diode ladder filter plus drive | K2 open, K3 type |
+| EFFECT | One effect for the focused track: chorus, flange, wobble, reson or ring. E2 is the amount, E3 the rate. | K2 on and off, K3 next effect |
 | DELAY | Feedback echoes, optionally clocked | K2 infinite hold, K3 kill |
 | REVERB | Tail and shimmer, added on top of the dry sound | K2 wash, K3 shimmer bloom |
 | MIX | Input, both decks, output | K2 engine throw, K3 tape throw |

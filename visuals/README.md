@@ -86,8 +86,9 @@ A note draws a shape. The track (MIDI channel) picks the column and the note pic
 so a pattern across the tracks draws across the screen. A program change types the pattern
 name, for example PTN A01 (set PROG CH OUT on the Octatrack, MIDI, CONTROL menu). A CC types its
 number and value, a start types PLAY and a stop types STOP. The last event also shows in the
-display, above the page name. A few doodles and words also appear by themselves when nothing
-plays, so the picture is never still. The MIDI clock is not forwarded.
+display, above the page name. Nothing is drawn unless an event arrives: the shapes (rings, low-poly
+shards, spirals, bursts, lattices, scribbles, one colour per track) and the words come only from
+the Octatrack. The MIDI clock is not forwarded.
 
 The same notes also play mangler (pads or the drone) if "keys enable" is on and the channel
 matches. To use the Octatrack for the picture only, set mangler's "midi channel" to one the

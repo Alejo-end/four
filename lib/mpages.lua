@@ -32,8 +32,12 @@ local wave = waves[1]
 local wave_bin = 0
 
 -- same idea for the tape loop: bins indexed by the tape head while recording
+-- The loop decks (the tape and the two layers) keep a FINER picture than the
+-- take: 1024 bins over their 60s, 59ms each. A deck page zooms onto the loop,
+-- and a 4s loop was 8 bins of the old 128: it never looked recorded.
+local DECK_BINS = 1024
 local twave = {}
-for i = 1, 128 do twave[i] = 0 end
+for i = 1, DECK_BINS do twave[i] = 0 end
 local twave_bin = 0
 
 -- paint amplitude into display bins between the last-seen head position and
@@ -46,28 +50,33 @@ local twave_bin = 0
 -- loop wrapping round or a pass re-armed somewhere else. Walking it painted
 -- the whole loop with one moment's level (every seam of a DUB loop drew a
 -- solid block). Only the landing bin is painted.
+-- JUMP_BINS is for a strip of 128 bins; a finer strip scales it, so a jump
+-- is the same stretch of time on every strip.
 local JUMP_BINS = 3
 local function paint_bins(bins, last, bin, amp, pre)
   if last == 0 or last == bin then
     bins[bin] = max(bins[bin], amp)
     return bin
   end
-  local fwd = (bin - last) % 128
-  local bwd = (last - bin) % 128
-  if fwd > JUMP_BINS and bwd > JUMP_BINS then
+  local n = #bins
+  local jump = JUMP_BINS * n / 128
+  local fwd = (bin - last) % n
+  local bwd = (last - bin) % n
+  if fwd > jump and bwd > jump then
     bins[bin] = max(bins[bin] * pre, amp)
     return bin
   end
   local step = (fwd <= bwd) and 1 or -1
   local b = last
   repeat
-    b = ((b - 1 + step) % 128) + 1
+    b = ((b - 1 + step) % n) + 1
     bins[b] = max(bins[b] * pre, amp)
   until b == bin
   return bin
 end
 local M = {}
 M.paint_bins = paint_bins   -- the layer decks paint their own pictures
+M.DECK_BINS = DECK_BINS
 
 -- track the buffer's contents as the write head passes over it. STOP holds
 -- the record head (an arm under STOP waits for START), so it holds the
@@ -87,7 +96,7 @@ end
 function M.update_tape_wave()
   if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0
       and pget("stop_all", 0) == 0 then
-    local bin = floor(clamp(C.tape_phase, 0, 0.999) * 128) + 1
+    local bin = floor(clamp(C.tape_phase, 0, 0.999) * DECK_BINS) + 1
     -- meter what softcut actually records (C.cut_rec_amp — the ADC tap, the
     -- engine output, or the blend): a WET print otherwise painted nothing
     -- and left twave_any false over audible tape
@@ -101,7 +110,7 @@ end
 -- their bins and erase through here)
 function M.clear_bins(bins)
   W.cancel_fill(bins)
-  for i = 1, 128 do bins[i] = 0 end
+  for i = 1, #bins do bins[i] = 0 end
 end
 
 -- wipe the tape picture (the CLR gesture starts the loop over)
@@ -145,7 +154,8 @@ end
 -- softcut buffer, but the wav it was restored FROM is right there; without
 -- this a restored loop played audibly under a blank picture).
 function M.fill_wave_bins(path, bins, secs)
-  for i = 1, 128 do bins[i] = 0 end
+  -- a strip that is still empty becomes a 128-bin one
+  for i = 1, (#bins > 0 and #bins or 128) do bins[i] = 0 end
   return W.queue_fill(path, bins, secs)
 end
 
@@ -176,9 +186,20 @@ end
 -- the bins, which is how PADS draws only the window. The caller sets the level.
 local function wave_lane(bins, x0, x1, ym, k, hmin, hmax, lo, span)
   lo, span = lo or 0, span or 1
+  local n = #bins
   local w = x1 - x0
+  local per = span * (n - 1) / w        -- bins for each column
   for x = x0, x1 do
-    local a = bins[floor((lo + (x - x0) / w * span) * 127) + 1] or 0
+    local i0 = floor((lo + (x - x0) / w * span) * (n - 1)) + 1
+    local a = bins[i0] or 0
+    -- a column that covers several bins shows the loudest of them, or a
+    -- short hit between two columns would not draw
+    if per > 1 then
+      for i = i0 + 1, min(n, floor(i0 + per)) do
+        local b = bins[i]
+        if b > a then a = b end
+      end
+    end
     if a > 0.002 then
       local h = clamp(sqrt(min(a * 2, 1)) * k, hmin, hmax)
       screen.move(x, ym - h)
@@ -186,6 +207,44 @@ local function wave_lane(bins, x0, x1, ym, k, hmin, hmax, lo, span)
     end
   end
   screen.stroke()
+end
+
+-- WHAT A DECK STRIP SHOWS. A deck is 60s long and a loop is a few seconds of
+-- it, so a strip of the whole deck drew a loop as a sliver. The strip shows:
+--   the LOOP, when one is set (its two ends are the strip's two ends);
+--   else the MATERIAL (a first pass that is still open: from where it began,
+--   8s at least, so the pass fills the strip from the left as it records);
+--   else the whole deck.
+-- Returns lo and span (0..1 of the deck).
+local function deck_view(ls, le, mat_lo, mat_hi, len)
+  local lo, hi = min(ls, le), max(ls, le)
+  if hi - lo < 0.999 then return lo, max(hi - lo, 0.0001) end
+  if mat_lo and mat_hi then
+    local span = max(mat_hi - mat_lo, 8 / len)
+    if mat_lo + span > 1 then span = 1 - mat_lo end
+    return mat_lo, max(span, 0.0001)
+  end
+  return 0, 1
+end
+
+-- where the strip sits in the whole deck: a rail one pixel high with the
+-- shown stretch lit. Drawn only when the strip is a part of the deck.
+local function view_map(x0, x1, y, lo, span, lvl)
+  if span > 0.98 then return end
+  local w = x1 - x0
+  screen.level(1)
+  screen.rect(x0, y, w + 1, 1)
+  screen.fill()
+  screen.level(lvl)
+  screen.rect(x0 + floor(lo * w), y, max(2, floor(span * w + 0.5)), 1)
+  screen.fill()
+end
+
+-- the head on a zoomed strip, or nil when it is outside the strip
+local function view_x(ph, x0, x1, lo, span)
+  local t = (ph - lo) / span
+  if t < 0 or t > 1 then return nil end
+  return x0 + floor(t * (x1 - x0))
 end
 
 -- the record-SOURCE flag: a deck printing PROCESSED audio is never a hidden
@@ -245,6 +304,8 @@ local SHORT = {
   lfo4_depth = "DPT", lfo4_period = "PER", lfo4_target = "TGT",
   -- COLOR and SPACE (four): the crush, and each track's FX sends
   crush = "CRSH", fx_dly = "1>DLY", fx_rev = "1>REV",
+  -- THE EFFECT (four): the slot's type and its two knobs
+  effect = "EFFECT", effect_amt = "AMOUNT", effect_rate = "RATE",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
@@ -274,6 +335,7 @@ local SHORT = {
   t2_resonance = "T2 RES", t2_filt_type = "T2 FILT",
   t2_drive = "T2 DRV", t2_crush = "T2 CRSH",
   t2_fx_dly = "2>DLY", t2_fx_rev = "2>REV",
+  t2_effect = "T2 FX", t2_effect_amt = "T2 AMT", t2_effect_rate = "T2 RATE",
   -- the ROUTE page: its cursor and the selected send's amount
   route_sel = "SEND", ["@route_amt"] = "AMT",
   track_sel = "TRACK", ["@route_to"] = "TO", ["@trk_level"] = "LEVEL",
@@ -368,6 +430,10 @@ for k in pairs(SHORT) do
   local b = k:match("^t%d_(.+)$")
   if b then T2_KEY[k] = b end
 end
+-- each track's effect type id, by its rate id (RATE reads in the type's unit)
+local FX_TYPE_OF = { effect_rate = "effect", t2_effect_rate = "t2_effect",
+  t3_effect_rate = "t3_effect", t4_effect_rate = "t4_effect" }
+local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
@@ -423,6 +489,23 @@ local function fmt_value(id)
     if v < 0.02 then return "DRY" end
     if v > 0.98 then return "WET" end
     return floor(v * 100 + 0.5) .. "%"
+  end
+  if key == "effect_rate" then
+    -- RATE reads in the unit its effect gives it: a speed, a note, a frequency
+    local fx = floor(params:get(FX_TYPE_OF[id]) + 0.5)
+    local v = params:get(id)
+    if fx == 2 then return string.format("%.1fHZ", 0.1 * 60 ^ v) end
+    if fx == 3 then return string.format("%.2fHZ", 0.05 * 100 ^ v) end
+    if fx == 5 then
+      local m = floor(36 + v * 48 + 0.5)
+      return NOTE_NAMES[m % 12 + 1] .. (floor(m / 12) - 1)
+    end
+    if fx == 6 then
+      local hz = 20 * 200 ^ v
+      return hz >= 1000 and string.format("%.1fKHZ", hz / 1000)
+        or string.format("%dHZ", floor(hz + 0.5))
+    end
+    return string.format("%d%%", floor(v * 100 + 0.5))
   end
   if key == "cutoff" then
     local v = params:get(id)
@@ -661,6 +744,9 @@ local TK_MID, TK_HALF = 30, 11
 -- Left: "<" while an UNDO is kept, then the chips of a writer that re-touches
 -- the buffer (RSMP, REGN). What K3's SNAP or UNDO just did takes the whole row
 -- for a moment (LAYERS' rule): the action proves it happened.
+local REC_INTO = { "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4" }
+local REC_THEN = { "THEN 2", "THEN 3", "THEN 4" }
+local REC_LAST = "THEN STOP"
 local function take_top_row(frame, rec)
   if C.take_msg and (frame - (C.take_msg_at or -1e9)) < FPS * 1.2 then
     screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
@@ -678,6 +764,18 @@ local function take_top_row(frame, rec)
     ptext_r("ON SND", rx, 12, 1, 5)
   end
   local bx = 2
+  -- (four) what is being recorded, in words: REC, the track, and with
+  -- REC END on ONE-SHOT the track it goes on to
+  if rec then
+    local n = C.tsel and C.tsel() or 1
+    bx = bx + chip("REC", bx, 12) + 3
+    ptext(REC_INTO[n], bx, 12, 1, 15)
+    bx = bx + text_w(REC_INTO[n], 1) + 4
+    if pget("rec_end", 1) == 2 then
+      ptext(n < 4 and REC_THEN[n] or REC_LAST, bx, 12, 1, 6)
+    end
+    return
+  end
   if C.undo_ready and C.undo_ready() then
     ptext("<", bx, 12, 1, 6)
     bx = bx + 7
@@ -797,8 +895,8 @@ local function body_TAKE(frame)
   screen.fill()
   if rec then
     -- no blinking window frame (play-tested as "way too much"): the
-    -- sweeping write head, the big elapsed seconds, the IN meter and the header
-    -- R flag already say REC. the strip stays calm.
+    -- sweeping write head, the big elapsed seconds, the IN meter, the words
+    -- REC TRACK n and the header's blinking track box already say REC.
     screen.level(15)                -- the write head
     screen.move(wx, TK_MID - TK_HALF - 2)
     screen.line(wx, TK_MID + TK_HALF + 2)
@@ -806,7 +904,7 @@ local function body_TAKE(frame)
     -- elapsed seconds: the one number a performer needs
     -- ...or, armed to start on sound and none yet, WAIT
     if C.rec_waiting then
-      ptext("WAIT", 88, 46, 2, 12)   -- steady: the header R is the blink
+      ptext("WAIT", 88, 46, 2, 12)   -- steady: the header's track box is the blink
     else
       local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
       ptext(string.format("%.1fS", el), 88, 46, 2, 15)
@@ -830,28 +928,10 @@ local function body_TAKE(frame)
   -- WRITE head. distinct SHAPE, not just tone: a
   -- DASHED column + a caret above the strip vs the write head's solid line +
   -- comet-tail glow — so even when they cross you can tell read from write.
-  -- (four) every sounding track's head: the focused one with the caret,
-  -- the others as short dim ticks above the strip, and the other tracks'
-  -- windows as dim marks along the top edge
+  -- (four) only the focused track: every track has its own take, so the
+  -- other tracks' windows and heads are on other material and do not
+  -- belong over this wave (drawn here, they read as part of this take)
   local focus = cur_track()
-  local audible = (C.mix_gains()) > 0.001
-  for n = 1, 4 do
-    if n ~= focus then
-      local on = n == 1 and pget("mode", 5) ~= 1 or (n > 1 and track_live(n))
-      if on then
-        local l, h = track_window_n(n)
-        screen.level(3)
-        screen.rect(floor(l * 127), TK_MID - TK_HALF - 6, max(1, floor((h - l) * 127)), 1)
-        screen.fill()
-        if audible and C.wave_any then
-          local p = n == 1 and C.play_phase or (C.play_phases[n] or 0)
-          screen.level(6)
-          screen.rect(floor(clamp(p, 0, 1) * 127), TK_MID - TK_HALF - 5, 1, 3)
-          screen.fill()
-        end
-      end
-    end
-  end
   local fmode = focus == 1 and pget("mode", 5) or pget(TK[focus].mode, 1)
   if C.wave_any and fmode ~= 1 then
     local phx = clamp(track_phase(), 0, 1) * 127
@@ -1251,23 +1331,47 @@ local function body_TAPE(frame)
   screen.move(46, 16) screen.line(86, 16)
   screen.move(46, 32) screen.line(86, 32)
   screen.stroke()
-  -- the loop track below: full-width rail, the loop region, the head
-  screen.level(2)
-  screen.move(0, 40) screen.line(128, 40)
-  screen.stroke()
-  screen.level(8)
-  screen.move(lo * 127, 40) screen.line(hi * 127, 40)
-  screen.stroke()
-  screen.level(15)
-  local tx = clamp(C.tape_phase, 0, 1) * 127
-  screen.move(tx, 37) screen.line(tx, 43)
-  screen.stroke()
+  -- the loop below, as what is ON it: the strip is the loop (or the pass
+  -- that is still open), with the head, and under it where that sits in the
+  -- 60s of tape
+  local _, tape_g = C.mix_gains()
+  local heard = tape_g > 0.001
+  local td = C.tape_deck
+  local vlo, vspan = deck_view(a2, b2, td and td.mat_lo, td and td.mat_hi, C.TAPE_LEN or 60)
+  local x0, x1 = 2, 125
+  local recording = pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0
+  if C.twave_any or recording then
+    screen.level(heard and 10 or 5)
+    wave_lane(twave, x0, x1, 42, 5, 1, 5, vlo, vspan)
+    if lspan < 0.999 then               -- the loop's two ends
+      screen.level(6)
+      screen.rect(x0 - 1, 36, 1, 13)
+      screen.rect(x1 + 1, 36, 1, 13)
+      screen.fill()
+    end
+    local hx = view_x(clamp(C.tape_phase, 0, 1), x0, x1, vlo, vspan)
+    if hx then
+      screen.level(heard and 15 or 7)
+      screen.rect(hx, 36, 1, 13)
+      screen.fill()
+    end
+    view_map(x0, x1, 51, vlo, vspan, heard and 8 or 4)
+  else
+    screen.level(2)
+    screen.rect(x0, 42, x1 - x0 + 1, 1)
+    screen.fill()
+  end
   ptext_r(string.format("%.1fS", lspan * (C.TAPE_LEN or 60)), 126, 12, 1, 5)
-  src_flag(2, 46)
-  if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
+  src_flag(2, 20)
+  if recording then
     chip("REC", 2, 12)                -- steady: the header T is the blink
   elseif not C.twave_any then
     ptext_c("EMPTY - K2 REC", 64, 26, 1, 10)
+  elseif not heard then
+    -- a loop that plays unheard is the tape's commonest puzzle: say where
+    -- the sound went
+    ptext_r("SILENT", 126, 20, 1, 9)
+    ptext_r("SEE MIX", 126, 28, 1, 5)
   end
 end
 
@@ -1302,19 +1406,26 @@ local function layer_strip(d, y, sel, frame)
 
   local x0, x1 = 38, 124
   local w = x1 - x0
-  -- the material
-  screen.level(base)
-  wave_lane(d.wave, x0, x1, y, 5, 1, 5)
-  -- the loop bracket: where this deck actually reads from
   local ls = clamp(pget(C.deck_p(d, "start"), 0), 0, 1)
   local le = clamp(pget(C.deck_p(d, "end"), 1), 0, 1)
-  local bx0 = x0 + floor(min(ls, le) * w)
-  local bx1 = x0 + floor(max(ls, le) * w)
-  screen.level(sel and 12 or 5)
-  screen.rect(bx0, y - 6, 1, 13)
-  screen.rect(bx1, y - 6, 1, 13)
-  screen.rect(bx0, y - 6, bx1 - bx0, 1)
-  screen.fill()
+  -- the strip is the loop, or the pass that is still open (deck_view)
+  local vlo, vspan = deck_view(ls, le, d.mat_lo, d.mat_hi, d.len)
+  -- the material
+  screen.level(base)
+  wave_lane(d.wave, x0, x1, y, 5, 1, 5, vlo, vspan)
+  -- the loop bracket: where this deck actually reads from
+  local bx0 = x0 + floor(clamp((min(ls, le) - vlo) / vspan, 0, 1) * w)
+  local bx1 = x0 + floor(clamp((max(ls, le) - vlo) / vspan, 0, 1) * w)
+  -- (not while a first pass is open: there is no loop yet, and the strip is
+  -- the pass)
+  local looped = math.abs(le - ls) < 0.999 or not d.any
+  if looped then
+    screen.level(sel and 12 or 5)
+    screen.rect(bx0, y - 6, 1, 13)
+    screen.rect(bx1, y - 6, 1, 13)
+    screen.rect(bx0, y - 6, bx1 - bx0, 1)
+    screen.fill()
+  end
 
   -- the invitation goes over the bracket (which is drawn across the same
   -- space), so it knocks out a pocket first — the rule the footer follows when
@@ -1330,9 +1441,14 @@ local function layer_strip(d, y, sel, frame)
   end
 
   -- the head, drawn last so it is never hidden
-  screen.level(audible and 15 or 6)
-  screen.rect(x0 + floor(clamp(d.phase, 0, 1) * w), y - 5, 1, 11)
-  screen.fill()
+  local hx = view_x(clamp(d.phase, 0, 1), x0, x1, vlo, vspan)
+  if hx then
+    screen.level(audible and 15 or 6)
+    screen.rect(hx, y - 5, 1, 11)
+    screen.fill()
+  end
+  -- where the strip sits in the deck's 60s
+  if d.any then view_map(x0, x1, y + 8, vlo, vspan, sel and 8 or 4) end
 
   -- level, as a short bar under the name
   screen.level(sel and 8 or 4)
@@ -1473,6 +1589,87 @@ local function body_FILTER(frame)
   screen.rect(nx - 1, FILT_Y[nx + 1] - 1, 3, 3)
   screen.fill()
   chip(params:string(C.tid and C.tid("filt_type") or "filt_type"), 2, 12)
+end
+
+-- ============================================================================
+-- 5b · EFFECT — the focused track's effect slot. One trace, drawn the way the
+--      effect moves the sound, so the type reads without its name:
+--        CHORUS  the wave and two copies that drift apart and back
+--        FLANGE  the wave and a train of close echoes that sweeps
+--        WOBBLE  one wave whose time bends
+--        RESON   a string that rings, more waves for a higher note
+--        RING    the wave cut into beats
+--      OFF, or a silent track, lies flat and dim.
+-- ============================================================================
+local FX_YM = 31
+local FX_Y = {}
+for i = 1, 128 do FX_Y[i] = FX_YM end
+local function fx_stroke(level)
+  screen.level(level)
+  for x = 1, 127 do
+    screen.move(x - 1, FX_Y[x])
+    screen.line(x, FX_Y[x + 1])
+  end
+  screen.stroke()
+end
+-- the plain wave, `sh` columns late, at height `h`
+local function fx_wave(sh, h)
+  for x = 0, 127 do FX_Y[x + 1] = FX_YM + h * sin((x - sh) * 0.16) end
+end
+local function body_EFFECT(frame)
+  local fx = floor(tp("effect", 1) + 0.5)
+  local a = tp("effect_amt", 0.5)
+  local r = tp("effect_rate", 0.5)
+  local live = track_sounds(cur_track())
+  if fx <= 1 then
+    -- OFF: the sound passes untouched. A dim word and one flat dim line
+    ptext("OFF", 5, 14, 1, 4)
+    screen.level(2)
+    screen.rect(4, FX_YM, 120, 1)
+    screen.fill()
+    return
+  end
+  chip(params:string(C.tid and C.tid("effect") or "effect"), 2, 12)
+  local hi = live and 12 or 4
+  local lo = live and 5 or 2
+  local t = frame / FPS
+  if fx == 2 then
+    local d = (2 + a * 7) * sin(t * 6.2832 * 0.1 * 60 ^ r * 0.25)
+    fx_wave(0, 9) fx_stroke(lo)
+    fx_wave(d, 9) fx_stroke(hi)
+    fx_wave(-d, 9) fx_stroke(hi)
+  elseif fx == 3 then
+    local d = 2.5 + 2 * sin(t * 6.2832 * 0.05 * 100 ^ r * 0.25)
+    fx_wave(0, 9) fx_stroke(hi)
+    local h = 9
+    for k = 1, 1 + floor(a * 3 + 0.5) do
+      h = h * (0.45 + a * 0.3)
+      fx_wave(d * k, h) fx_stroke(lo)
+    end
+  elseif fx == 4 then
+    local w = t * (1 + r * 4)
+    for x = 0, 127 do
+      FX_Y[x + 1] = FX_YM + 9 * sin((x + a * 20 * sin(w + x * 0.05)) * 0.16)
+    end
+    fx_stroke(hi)
+  elseif fx == 5 then
+    local n = 1 + floor(r * 7 + 0.5)
+    local ring = (0.35 + a * 0.65) * (0.6 + 0.4 * cos(t * 9))
+    for x = 0, 127 do
+      FX_Y[x + 1] = FX_YM + 12 * ring * sin(x * 3.14159 * n / 127)
+    end
+    fx_stroke(hi)
+    screen.level(lo)
+    screen.rect(0, FX_YM - 3, 1, 7)
+    screen.rect(127, FX_YM - 3, 1, 7)
+    screen.fill()
+  else
+    local k = 0.25 + r * 1.6
+    for x = 0, 127 do
+      FX_Y[x + 1] = FX_YM + 11 * sin(x * 0.16) * ((1 - a) + a * sin(x * k + t * 3))
+    end
+    fx_stroke(hi)
+  end
 end
 
 -- ============================================================================
@@ -1621,6 +1818,10 @@ local function body_MIX(frame)
   local eng_g, tape_g = C.mix_gains()
   local eng_on = pget("mode", 5) ~= 1 and eng_g > 0.001 and C.wave_any
   local tape_on = C.twave_any and tape_g > 0.001
+  -- the tape lane shows what the TAPE page shows: the loop, not the 60s
+  local ttd = C.tape_deck
+  local tvlo, tvspan = deck_view(pget("loop_start", 0), pget("loop_end", 1),
+    ttd and ttd.mat_lo, ttd and ttd.mat_hi, C.TAPE_LEN or 60)
   local newframe = C.frame ~= vu_last_frame
   -- input meter, left
   ptext("IN", 3, 12, 1, 5)
@@ -1655,13 +1856,15 @@ local function body_MIX(frame)
     screen.stroke()
   else
     screen.level(10)
-    wave_lane(twave, 18, 104, 41.5, clamp(tape_g, 0, 1) * 4, 0.5, 4)
+    wave_lane(twave, 18, 104, 41.5, clamp(tape_g, 0, 1) * 4, 0.5, 4, tvlo, tvspan)
   end
   if C.twave_any then
-    screen.level(tape_on and 15 or 4)
-    local hx = 18 + clamp(C.tape_phase, 0, 1) * 86
-    screen.move(hx, 38) screen.line(hx, 45)
-    screen.stroke()
+    local hx = view_x(clamp(C.tape_phase, 0, 1), 18, 104, tvlo, tvspan)
+    if hx then
+      screen.level(tape_on and 15 or 4)
+      screen.move(hx + 0.5, 38) screen.line(hx + 0.5, 45)
+      screen.stroke()
+    end
   end
   ptext("TAPE", 18, 47, 1, 5)
   -- master VU, right
@@ -2203,7 +2406,7 @@ end
 local BODY = {
   LAYERS = body_LAYERS,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
-  FILTER = body_FILTER, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
+  FILTER = body_FILTER, EFFECT = body_EFFECT, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
   TRACKS = body_TRACKS,
 }
@@ -2239,6 +2442,8 @@ local function purity()
   -- pan reaches the PLAY voice's Balance2: off-center output is not the
   -- recording, however clean the rest of the path is
   if abs(pget("pan", 0)) > 0.001 then return false end
+  -- an effect in track 1's slot (the other tracks' are covered by track_live)
+  if pget("effect", 1) ~= 1 then return false end
   if pget("drive", 0) > 0.001 or pget("crush", 0) > 0.001 or pget("delay_mix", 0) > 0.001
       or pget("rev_mix", 0) > 0.001 or pget("shimmer", 0) > 0.001
       or pget("clouds_fb", 0) > 0.001 or pget("resample", 0) > 0.001
@@ -2280,24 +2485,23 @@ local function purity()
   return true
 end
 
--- header: TITLE ◇ flags ···· path dots. STOP inverts the title chip;
--- writes (R/T/M/L) carry the ONLY fast blink; holds and runs are steady.
--- The flags, in priority order: the writers (R the take, T the tape, M the
--- motion looper, L a layer deck), the holds (FZ, TF, RP a beat repeat), then
--- the machines that play on their own (SQ the pad sequencer, LF a
+-- header: [1][2][3][4] TITLE ◇ flags ···· path dots. The four cells on
+-- the left are the TRACKS (see draw_tracks); STOP inverts the title chip.
+-- A writer's dot carries the ONLY fast blink (its letter stays, so a flag
+-- never vanishes); holds and runs are steady. The flags, in priority order:
+-- the writers (T the tape, M the motion looper, L a layer deck; the take's
+-- REC is the blinking track cell), the holds (FZ, TF, RP a beat repeat),
+-- then the machines that play on their own (SQ the pad sequencer, LF a
 -- modulator). A flag that does not fit whole shrinks: a writer to its
 -- blinking letter without the dot, the others to a 2px bar. Room is kept for
 -- the short forms of the lit flags after it, so a lit state never drops off
 -- the header. Built once: draw_header refreshes `on` (and RP's `lvl`), and
 -- leaves `x` and `full` for the tests.
 local HFLAGS = {
-  { ch = "R", write = true }, { ch = "T", write = true },
+  { ch = "T", write = true },
   { ch = "M", write = true }, { ch = "L", write = true },
   { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
   { ch = "SQ", lvl = 7 }, { ch = "LF", lvl = 7 },
-  -- four: the other tracks that sound: T2, T3, T23 ... T234 ("T" and the
-  -- numbers, not bare digits: after a title a digit read as the page name)
-  { ch = "T2", lvl = 9 },
 }
 M.HFLAGS = HFLAGS
 local HF = {}
@@ -2310,16 +2514,6 @@ end
 -- once, indexed like the repeat_div option, widths measured in init.
 local RP_CH = { "RP2", "RP4", "RP8", "RP16", "RP32" }
 local RP_W = {}
--- the track flag's word per set of sounding tracks (bit 1 = track 2, 2 =
--- track 3, 4 = track 4), built once, widths measured in init
-local TR_CH, TR_W = {}, {}
-for mask = 1, 7 do
-  local w = "T"
-  if mask % 2 == 1 then w = w .. "2" end
-  if math.floor(mask / 2) % 2 == 1 then w = w .. "3" end
-  if mask >= 4 then w = w .. "4" end
-  TR_CH[mask] = w
-end
 -- the width of a flag whole, and short (a writer's letter, or a bar)
 local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 -- (a bar's pip is 3: the 2px bar and a 1px gap, and a writer's letter keeps
@@ -2348,13 +2542,16 @@ local function draw_hflags(x, lim, blink)
       f.x = x
       f.full = x + hflag_w(f) - 3 + rest <= lim
       if f.write then
-        if blink and f.full then
-          screen.level(15)
-          screen.rect(x, 1, 3, 3)
-          screen.fill()
+        -- the letter stays; the dot before it is the blink
+        if f.full then
+          if blink then
+            screen.level(15)
+            screen.rect(x, 1, 3, 3)
+            screen.fill()
+          end
           ptext(f.ch, x + 5, 1, 1, 15)
-        elseif blink then
-          ptext(f.ch, x, 1, 1, 15)
+        else
+          ptext(f.ch, x, 1, 1, blink and 15 or 6)
         end
       elseif f.full then
         ptext(f.ch, x, 1, 1, f.lvl)
@@ -2368,48 +2565,93 @@ local function draw_hflags(x, lim, blink)
   end
 end
 -- path dots, top-right. Every page has a fixed slot on one straight row: all
--- dots share rows y=4..5 and a 4px pitch, and no dot ever moves when the page
--- changes. The current page is a brighter, wider bar centred on its own slot,
--- so it stays on the row and clear of its neighbours. The row is RIGHT-ANCHORED
+-- dots share rows y=4..5 and a 3px pitch, and no dot ever moves when the page
+-- changes. The current page is the one BRIGHT dot (four: the track cells took
+-- the room the 4px pitch and the wider bar had). The row is RIGHT-ANCHORED
 -- whatever the page count (a fixed left origin cropped the last dot once the
 -- count reached twelve). Laid out once, in init.
-local DOT_PITCH = 4
+local DOT_PITCH = 3
 local DOT_OFF = {}
 local function layout_dots()
   for i = 1, #PAGES do DOT_OFF[i] = (i - 1) * DOT_PITCH end
-  -- the last dot ends 2px clear of the edge; its bar, 1px wider each way, ends
-  -- 1px clear, and at the first slot it stays clear of the header flags
-  M.DOT_X0 = 126 - ((DOT_OFF[#PAGES] or 0) + 2)
+  -- the last dot ends 1px clear of the edge (it was 2px until the EFFECT
+  -- page made thirteen dots: the worst case of flags then met the row)
+  M.DOT_X0 = 127 - ((DOT_OFF[#PAGES] or 0) + 2)
 end
 -- the page's name, with its track on VOICE and FILTER while track 2 is
 -- selected (four). Fixed strings: the redraw path allocates nothing.
--- (four) the pages that belong to a track: their header starts with the
--- track's number as an inverted badge, S-4 style (track, then device), and
--- their name is the device's: [2] TAKE, [2] VOICE, [2] FILTER. TRACKS shows
--- the badge too: it is the focused track's row the keys act on.
-local TRACK_PAGE = { TAKE = true, VOICE = true, FILTER = true, TRACKS = true }
+-- (four) THE TRACKS, always on the left of the header: four cells, 1 to 4,
+-- one rule each, so nothing needs a legend:
+--   a WHITE BOX is the track this page edits (TAKE, VOICE, FILTER and
+--     TRACKS belong to the focused track; on the shared pages, DELAY,
+--     REVERB ..., the focus is only underlined: those pages edit no track)
+--   a BRIGHT number sounds, a DIM one is silent (OFF, level 0, or STOP)
+--   a BLINKING box is the track being RECORDED
+-- It replaces the badge and the old T2 / T23 / T234 flag.
+local TRACK_PAGE = { TAKE = true, VOICE = true, FILTER = true, EFFECT = true, TRACKS = true }
 local BADGE = { "1", "2", "3", "4" }
+local CELL_W = 6
+M.TRACKS_W = 4 * CELL_W   -- the strip's width; the title starts after it
 local function page_title()
   return PAGES[C.page]
 end
--- the badge, drawn at x; returns the x after it
-local function draw_badge(x, y)
-  local n = cur_track()
-  screen.level(15)
-  screen.rect(x, y - 1, 7, 8)
-  screen.fill()
-  ptext(BADGE[n], x + 2, y, 1, 0)
-  return x + 10
+-- a cell's outline (four 1px fills: a stroke's corners land half a pixel off)
+local function cell_frame(x)
+  screen.rect(x, 0, CELL_W, 1)
+  screen.rect(x, 7, CELL_W, 1)
+  screen.rect(x, 0, 1, 8)
+  screen.rect(x + CELL_W - 1, 0, 1, 8)
 end
-M.draw_badge = draw_badge
+-- M.CELL[n] = how cell n was drawn last ("box", "rec", "line", "lit",
+-- "dim"), for the tests
+M.CELL = {}
+local function draw_tracks(blink, own)
+  local focus = cur_track()
+  local audible = (C.mix_gains()) > 0.001 and pget("stop_all", 0) ~= 1
+  local recording = pget("rec", 0) == 1 and pget("freeze", 0) == 0
+  for n = 1, 4 do
+    local x = (n - 1) * CELL_W
+    local sounds = audible and track_sounds(n)
+    if recording and n == focus then
+      -- REC: the box blinks; between blinks its frame stays
+      screen.level(15)
+      if blink then
+        screen.rect(x, 0, CELL_W, 8)
+        screen.fill()
+        ptext(BADGE[n], x + 1, 1, 1, 0)
+      else
+        cell_frame(x)
+        screen.fill()
+        ptext(BADGE[n], x + 1, 1, 1, 15)
+      end
+      M.CELL[n] = "rec"
+    elseif n == focus and own then
+      screen.level(15)
+      screen.rect(x, 0, CELL_W, 8)
+      screen.fill()
+      ptext(BADGE[n], x + 1, 1, 1, 0)
+      M.CELL[n] = "box"
+    elseif n == focus then
+      ptext(BADGE[n], x + 1, 1, 1, sounds and 15 or 5)
+      screen.level(15)
+      screen.rect(x + 1, 7, CELL_W - 2, 1)
+      screen.fill()
+      M.CELL[n] = "line"
+    else
+      ptext(BADGE[n], x + 1, 1, 1, sounds and 13 or 3)
+      M.CELL[n] = sounds and "lit" or "dim"
+    end
+  end
+end
 M.page_title = page_title
 
 local function draw_header()
   local page, frame = C.page, C.frame
   local title = page_title()
   local x
-  local x0 = 2
-  if TRACK_PAGE[PAGES[page]] then x0 = draw_badge(0, 1) end
+  local blink = (frame % 4) < 2
+  draw_tracks(blink, TRACK_PAGE[PAGES[page]])
+  local x0 = M.TRACKS_W + 3
   if pget("stop_all", 0) == 1 then
     screen.level(15)
     screen.rect(x0 - 2, 0, text_w(title, 1) + 5, 8)
@@ -2418,7 +2660,7 @@ local function draw_header()
     x = x0 - 2 + text_w(title, 1) + 9
   else
     ptext(title, x0, 1, 1, 8)
-    x = x0 + text_w(title, 1) + 4
+    x = x0 + text_w(title, 1) + 3
   end
   if purity() then
     screen.level(15)
@@ -2430,7 +2672,6 @@ local function draw_header()
     x = x + 8
   end
   local dx0 = M.DOT_X0
-  HF.R.on = pget("rec", 0) == 1
   HF.T.on = pget("tape_rec", 0) == 1
   HF.M.on = pget("motion_rec", 0) == 1
   HF.L.on = any_layer_rec()
@@ -2443,20 +2684,11 @@ local function draw_header()
   HF.RP.ch, HF.RP.w = RP_CH[rd], RP_W[rd]
   HF.SQ.on = pget("step_run", 0) == 1
   HF.LF.on = C.lfo and C.lfo.active() or false
-  local mask = (track_live(2) and 1 or 0) + (track_live(3) and 2 or 0)
-    + (track_live(4) and 4 or 0)
-  HF.T2.on = mask > 0
-  if mask > 0 then HF.T2.ch, HF.T2.w = TR_CH[mask], TR_W[mask] end
-  draw_hflags(x, dx0 - 2, (frame % 4) < 2)
+  draw_hflags(x, dx0 - 2, blink)
   for i = 1, #PAGES do
     local dx = dx0 + DOT_OFF[i]
-    if i == page then
-      screen.level(15)
-      screen.rect(dx - 1, 4, 4, 2)
-    else
-      screen.level(3)
-      screen.rect(dx, 4, 2, 2)
-    end
+    screen.level(i == page and 15 or 2)
+    screen.rect(dx, 4, 2, 2)
     screen.fill()
   end
 end
@@ -2473,7 +2705,7 @@ local orig_level, dim_level
 -- the pop on a track page names the track first: "2 VOICE" (not on TRACKS,
 -- where "2 TRACKS" read as a count)
 local FLASH_N = {}
-for _, p in ipairs({ "TAKE", "VOICE", "FILTER" }) do
+for _, p in ipairs({ "TAKE", "VOICE", "FILTER", "EFFECT" }) do
   FLASH_N[p] = {}
   for n = 1, 4 do FLASH_N[p][n] = n .. " " .. p end
 end
@@ -2512,7 +2744,6 @@ function M.init(ctx)
     F.ptext, F.ptext_c, F.ptext_r, F.chip, F.text_w
   for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
   for i, ch in ipairs(RP_CH) do RP_W[i] = text_w(ch, 1) end
-  for i, ch in ipairs(TR_CH) do TR_W[i] = text_w(ch, 1) end
   layout_dots()
 end
 

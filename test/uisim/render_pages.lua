@@ -441,6 +441,31 @@ else
   export(pfx("FILTER", "_OPEN"))
   key(2, 1) key(2, 0)
   run_ticks(2)
+  -- EFFECT: K3 steps through the five effects from OFF; each one draws its
+  -- own motion. Then RESON's note read while E3 turns, K2 switching it off
+  -- (the word goes dark, the line flat), and the same page on track 2.
+  goto_page("EFFECT")
+  for _, name in ipairs({ "CHORUS", "FLANGE", "WOBBLE", "RESON", "RING" }) do
+    key(3, 1) key(3, 0)
+    run_ticks(7)
+    redraw()
+    export(pfx("EFFECT", "_" .. name))
+  end
+  params:set("effect", 5)
+  enc(3, 2)
+  run_ticks(2)
+  redraw()
+  export(pfx("EFFECT", "_NOTE"))
+  key(2, 1) key(2, 0)
+  run_ticks(25)
+  redraw()
+  export(pfx("EFFECT", "_OFF_AGAIN"))
+  params:set("track_sel", 2)
+  params:set("t2_effect", 3); params:set("t2_effect_amt", 0.9)
+  run_ticks(25)
+  redraw()
+  export(pfx("EFFECT", "_T2_SILENT"))
+  params:set("t2_effect", 1); params:set("track_sel", 1)
   -- the erase arc: K1+K3 held on TAKE, shot mid-arc (frame ~8 of 15),
   -- then released in the abort zone — nothing fires, the take survives
   goto_page("TAKE")

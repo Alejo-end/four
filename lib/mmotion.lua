@@ -78,6 +78,9 @@ local MOTION_IDS = {
   -- COLOR and SPACE (four), appended: each track's drive and crush and
   -- its sends into the delay and the reverb
   "crush", "fx_dly", "fx_rev", "t2_drive", "t2_crush", "t2_fx_dly", "t2_fx_rev",
+  -- THE EFFECT (four), appended: each track's effect and its two knobs
+  "effect", "effect_amt", "effect_rate",
+  "t2_effect", "t2_effect_amt", "t2_effect_rate",
 }
 -- four: tracks 3 and 4 the same as track 2 (appended, lane order kept),
 -- then the twelve sends

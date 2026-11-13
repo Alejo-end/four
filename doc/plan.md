@@ -1,199 +1,244 @@
-# mangler: the plan after the full review
+# four: the plan (written 2026-11-12, for the next session)
 
-This plan says what to do next, in what order, and why. It comes from a
-line-by-line review of the whole codebase (October 2026). The review found 76
-issues. Every Lua bug is fixed and tested (the 78th change in
-doc/changelog.md), and so are most of the cleanup findings. Three cleanups are
-still open and listed in Phase 4. The engine issues are listed in Phase 2,
-because engine code cannot be tested in this environment and must go through
-the device gate.
+This plan says what to do next, in order, and why. Read CLAUDE.md first: it has
+the hard rules, the deploy ritual and the lessons. The per-change history is in
+doc/changelog.md. The plan before this one (mangler's, October 2026) is in git
+history. Phase 5 below carries its open engine items.
+
+The user performs with this instrument. Their words: "don't make me think, I
+barely know what I'm doing, so it has to be really polished." Every change is
+judged by that: can a tired player on a dark stage read it at once?
 
 ## Where the project stands
 
-The last state proven on hardware is from 2026-07-16, at `count: 63`. Since
-then about thirty changes landed without a device test, several of them in the
-engine. After a RESTART the engine must report `count: 66`.
+- **Name.** mangler2 replaced the one-track mangler and is now called **four**:
+  `four.lua`, `Engine_Four` in `lib/Engine_Four.sc`, `engine.name = 'Four'`,
+  SynthDefs `\four_*`. The old mangler is the git tag `mangler-1`. The OSC
+  addresses stay `/mangler/...`, because the visuals read them.
+- **Fingerprint.** After a RESTART, maiden must read `count: 185`.
+- **What four is.** Four tracks, each with its own 60 s of material. Each track
+  has a voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window, a filter, COLOR
+  (drive, crush) and SPACE (its delay and reverb sends). Tracks can send into
+  each other. There are four modulators, and each one sits on a track. GRAIN is
+  a granulator that reads the take. CLOUD is MiClouds.
+- **On the device (norns shield, Pi 4, `norns.local`, user `we`).**
+  - `dust/code/four` and `dust/data/four` are installed.
+  - `dust/code/mangler` and `dust/code/mangler2` are deleted.
+  - `dust/data/mangler` and `dust/data/mangler2` stay as backups.
+  - The last code synced to the device is the screen change below. The script
+    was not reloaded, because the user was playing it.
+- **Measured on 2026-11-12.**
+  - The worst case with four GRAIN tracks takes 45% of the scsynth thread.
+  - A 30 minute soak ran at about 40% at 58 to 60 °C, with no throttling
+    (`vcgencmd get_throttled` = `0x0`).
+  - There were 0 xruns while playing. A preset loaded by hand gave a burst of
+    3 to 7 xruns (doc/measurements/2026-11-12/).
+- **Nobody listened yet** to the four-track work: per-track COLOR, SPACE and
+  modulators, the new GRAIN, CLOUD, or the pad scatter.
 
-The offscreen tests are strong. Five test scripts run 785 assertions, the
-render suite compares 70 screens pixel by pixel, and the single-file build is
-tested for freshness. No test script can judge sound and feel. That is why the
-first step is a device session and not more code.
+### Git state (read `git status` first)
 
-## Phase 1: the device session (do this first)
+- **Branch `main`.** It is the four version and is NOT pushed. `origin/main` is
+  still the one-track mangler. When the user says so, push it.
+- **Uncommitted, from this session: the screen change** ("four, second change"
+  in doc/changelog.md):
+  - The header track cells.
+  - REC TRACK n on TAKE.
+  - Steady writer letters.
+  - Page dots on a 3 px pitch.
+  - `test/device/soak.py`.
+  - This plan.
+- **Uncommitted, from another session: the visuals doodles.**
+  - `visuals/hydra.js` and `visuals/README.md`.
+  - A changelog entry titled "Hundred-and-fourteenth change". That number is
+    already used, so it needs a new one.
+  - When the user says so, commit these (see Phase 1, item 5).
+- **The `../mangler2` folder.** It is a git worktree on branch `mangler2`. It is
+  fully merged and can be removed with `git worktree remove ../mangler2` once
+  the user agrees.
+- **GitHub.** The repo and the local folder are still named `mangler`. A rename
+  is the user's decision.
 
-Nothing else in this plan is safe until this passes.
+## Phase 1: the show checks (needs the user at the hardware)
 
-1. Deploy with `rsync --delete`, then run SYSTEM > RESTART.
-2. Make sure that maiden reads `count: 66`. If it does not, stop.
-3. Walk doc/device-gate.md from stage 0 to stage 18, top to bottom. If a stage
-   fails, stop there and note what you heard.
-4. When it passes, update the STATUS block in CLAUDE.md with the date and the
-   count.
+This list comes from the visuals session. Do 3 and 2 first, because they decide
+whether the show works.
 
-Stages 12 to 14 are new. They cover the review's fixes, the additions and
-the erosion synth, where only hardware can judge. For example, a late sample
-conversion must no longer replace a live take.
+1. **News sound into the norns.** The norns input read silence. Make sure that
+   the cable runs from the laptop headphone or line output into the shield
+   input, and that the laptop output is set to it. The laptop showed only its
+   built-in speakers. Without this, the news voices cannot reach the norns.
+2. **Octatrack mapping.** The user saw CC 39 to CC 41 arrive, which proves the
+   link. The channel 16 map (CC 70 to CC 97) with the Octatrack on MIDI port 2
+   is not confirmed. Ask the user to turn a few knobs and press the buttons, and
+   to say which ones move the norns. doc/octatrack-midi.md has the map. Its
+   paths now read `dust/data/four/four.pmap`.
+3. **The picture on a woken screen.** The kiosk page was restarted with the
+   event-only doodles, but the display was asleep. Ask the user to wake it and
+   make sure that the six shapes look right. If they still feel plain, ask which
+   part.
+4. **Launchpad colours.** Nobody has seen them on real pads yet.
+5. **Commit.** When the user says so, commit the doodle changes, the visuals
+   README and their changelog entry. Renumber the entry first.
+6. **The pre-show test.** When the cable is sorted, make sure that:
+   - `node visuals/test_bridge.js` passes.
+   - `lua test/check.lua` with `LUA53` set passes.
+   - The norns answers on `norns.local`.
+   - Maiden reads `count: 185`.
+   - The system output level is not at -inf. On 2026-11-12 it read -inf, so
+     crone's outputs were silent.
 
-## Phase 2: the engine batch
+## Phase 2: the listening session (the gate for everything after it)
 
-Do these one at a time, after Phase 1, each with its own RESTART and listening
-test.
-None of them adds a command, so the count stays 66. They are ordered by risk to
-the sound.
+No test can judge sound. Before more engine work, sit with the user and walk this
+list on the device. For each item, write down what they heard in
+doc/device-gate.md, and fix or revert it.
 
-1. **STOP clicks and leaks DC.** The STOP gate in `winRead` freezes the read
-   head instantly. PLAY, PV and Clouds then output one held sample: a click on
-   stop, and a constant fed into the delay and reverb for the whole stop. Fix:
-   lag the gate (`Lag.kr(run > 0.001, 0.05)`), use it in the head increment,
-   and multiply each drone's output by it.
-2. **Resample and regen print after the fader.** The record path taps the mix
-   after the deck `level`, so the master volume and the MIX crossfader decide
-   how loud material is printed. With regen up and the master down, the take
-   decays 6 dB faster per pass. Fix: take `preLim` before the level multiply.
-   Keep the `(level > 0.001)` gate so STOP still pauses regen.
-3. **The open filter is never a bypass.** At LP, 20 kHz and no resonance the
-   take still runs through the DFM1 diode ladder, so the purity mark (◇) and
-   "PLAY plays the exact sample" are not literally true. Fix: crossfade to the
-   unfiltered signal at the open end stop, and make `purity()` test the same
-   end stop.
-4. **Every echo is one block late.** `LocalIn` and `InFeedback` each add one
-   control block (1.33 ms), so a tempo-synced hold drifts off the clock (21 ms
-   after one bar of sixteenths). Fix: subtract `ControlDur.ir` from the delay
-   time.
-5. **A reused voice id orphans a synth.** `noteOn` does not release an id that
-   is already sounding. The Lua side guards it today. Fix: call
-   `this.noteOff(id)` first in `noteOn`.
-6. **Shimmer costs CPU at zero.** With the reverb up, two PitchShifts run even
-   at `shimmer` 0 (the default). Fix: move the shimmer loop into its own
-   spawn/free synth, the same pattern as the reverb and delay.
-7. **Duplicated graph code.** The grain cloud is written twice (drone and voice)
-   and fixes have had to be ported between the copies twice. Fix: build-time
-   functions `grainCloud`, `stereoRead` and `loadPair`, like `winRead`.
-8. **Stale engine comments.** Five comments describe older behavior (a 1.5x
-   makeup that is now `2.sqrt`, a 44.1k file that "plays 9% fast"). Fix them
-   with the next engine change.
+1. GRAIN at grain jitter 0 (a steady stream) and at 1 (random). Then CLOUD on
+   the same take. Is GRAIN nicer than the old Clouds-only voice?
+2. GRAIN with spread 0 (the take's stereo) and 1 (wide). Then spray 0.5. Then
+   FRZ held.
+3. Per-track drive and crush (FILTER, K1 held). Is the crush range musical, or
+   is it lo-fi too early?
+4. The SPACE sends on the TRACKS grid (K1 held, columns D and R). Turn one
+   track's reverb send down while the others keep theirs.
+5. A modulator on track 3's cutoff. Is the small wave on TRACKS clear enough?
+6. The header track cells and REC TRACK n on TAKE. Ask: "Can you tell what is
+   recording, and what plays?" This is the user's own question.
+7. A held GRAIN pad. Does it still buzz?
+8. The effect slot (four, third change): CHORUS, FLANGE, WOBBLE, RESON and RING
+   on one track, on the EFFECT page. Is each one worth keeping? Is the picture
+   of each one clear? RESON's level was raised (four, fifth change): is it even
+   with the others now, at every note?
+9. The presets. They are tuned on CLOUD and have never been heard. Fix the table
+   in test/make_set.lua after the listen, then rebuild.
 
-## Phase 3: finish the tape fold
+To deploy the rebuilt presets, run `test/deploy_set.sh` (it writes to
+`data/four`). It deletes the takes saved in slots 1 to 12, so ask the user
+first.
 
-After Phase 1 proves the tape on hardware, move the tape's loop-pedal law onto
-`Mdeck.arm_loop` and `Mdeck.close_loop`. The review found that the tape's own
-copy had missed two fixes the layers already had. Both are fixed now, but three
-differences remain (the minimum pass length, reverse direction, and SNAP). One
-law removes about 30 lines and the whole class of drift. lib/mtape.lua lists the
-differences.
+## Phase 3: no glitch when a preset loads
 
-## Phase 4: structure
+- **Measured.** Loading preset 6 by hand gave 3 xruns at once, and 7 on a second
+  load. That preset loads the same 50 s file five times: the take, tracks 2 to 4,
+  and both layer decks.
+- **Also seen.** crone printed "error seeking to frame 2400256; aborting read".
+  softcut tries to read past the end of a 50 s file.
+- **Goal.** Loading a preset during a show makes no audible glitch.
 
-These change no behavior. Each one is proven the same way as this review:
-paramset dump, test scripts, and byte-identical renders.
+Candidate fixes, in order of cost:
 
-1. **Extract the take helpers into lib/mtake.lua.** mangler.lua is 2580 lines
-   with three jobs: the control surface, the parameter registration, and about
-   650 lines of take and file work (load, clear, export, print, chop, tighten,
-   the PSET take). The take work already has one rule (`buffer_replaced`) and
-   one loader (`load_at_rate`), so it can move as a unit.
-2. **One pair loop in mscenes.** `apply`, the morph sweep and the morph's way
-   home each write region pairs with their own loop, instead of going through
-   `Mdeck.set_pair` like every other writer. mscenes needs its writer to count
-   the params that moved, so the shared writer needs a writer argument first.
-   This removes about 30 lines.
-3. **Cache the MOTION lane geometry.** The page now draws one column at a time
-   when a lane is dense. A per-lane cache, rebuilt on each lane change, makes a
-   playing loop cost the same as an empty one.
-4. **Skip unchanged grid frames.** A native monome gets every LED 15 times a
-   second whether or not anything changed. A per-frame signature can skip the
-   redraw.
-5. **Merge font pixels into runs.** `ptext` issues one rectangle per lit pixel.
-   Precomputed runs cut the font's rectangles by about a third, with identical
-   pixels.
-6. **Two small leftovers from the review.** The VOICE encoder table repeats the
-   scan/pitch pair for three modes and carries two slots nothing reads. The
-   decks re-send an unchanged seam time on every loop edge write. Remembering
-   the last value sent skips it.
+1. **Do not read a file twice.** If a track's file is the take's file, the
+   engine copies the buffer in SuperCollider (`Buffer.copyData`) and does not
+   read the disk again. This needs a new engine command, so the count moves: update
+   CLAUDE.md, test_control and the ritual.
+2. **Stagger the reads.** Space the file loads over a few frames with
+   `clock.run`, instead of loading all of them in one frame.
+3. **Fade the engine out and back in** around the load (about 50 ms each way),
+   so a dropped block falls into silence.
+4. **Clip softcut's read** to the file's real length, which ends the seek error.
 
-## Phase 5: features worth adding
+To measure: `test/device/soak.py` gives the CPU and xrun numbers.
+`n.xruns_since(n.now())` around one `params:read(6)` counts the xruns of one
+load. Read real slots only. Never write slots 1 to 12. Use slot 90 (see the
+memory note and CLAUDE.md).
 
-Most of this phase is built (the 79th change in doc/changelog.md). These need
-no engine change and are tested offscreen:
+## Phase 4: "don't make me think" (the screen and the controls)
 
-- The frame loop survives a Lua error, and reports it every 5 seconds at most.
-- The motion loop saves with the PSET and comes back playing.
-- The orbit stands still while anything else moves the morph, and resumes two
-  seconds later.
-- A synced delay stays on the clock, whatever else writes its time.
-- 8-bit WAV files decode, and a frame wider than its stated depth reads the
-  container.
-- Every page stays within 2500 screen calls a frame (a test).
-- A first motion pass close to a musical length loops on it.
-- In pad mode the grid piano lights the keys whose pad sounds.
-- A Mini MK3 plugged in after load takes over, and its arrows step the page
-  and the scene slot.
-- Background jobs queue instead of refusing.
-- GLIDE recall: the morph sweeps to a scene over N beats, then it lands.
-- Deck and tape PSET saves stop at the end of their material.
-- After regen or erosion stops, the take strip repaints.
-- doc/controls.md is generated from the code.
-- `test/check.lua` runs every offline check. With a Lua 5.3 build set up, it
-  runs them on the norns version.
+The user still finds four hard to read. The 2026-11-12 screen change fixed the
+two things they named. Next:
 
-Erosion as a spawn/free synth is also built (the 80th change). It went ahead
-of the device session by request, so stage 14 of doc/device-gate.md must pass
-before more engine work lands. A code review of the branch then found ten
-bugs in this work. The 81st change fixes them, and stage 15 of
-doc/device-gate.md checks them on the device. The other engine items wait for
-Phase 1:
+1. **Walk every page with the user.** For each page, ask what they think each
+   word, number and mark means. Wrong guesses go on a list. doc/ux-feedback.md
+   is the place for it.
+2. **Fewer words that need a legend.** Some words still need one: GJIT, DTUN,
+   SPRD, CRSH, 1>DLY, the route grid's D and R. Prefer full words at rest and
+   short ones only while a knob turns. The footer already does this for some
+   ids.
+3. **Fewer pages.** There are thirteen: the user agreed to an EFFECT page
+   after FILTER on 2026-11-12. The user asked for fewer pages and one
+   focus before. Candidates are to fold TAPE and LAYERS into one deck page, and
+   PADS and MOTION into one. Plan this with the user before you build it.
+4. **A MIDI controller map.** The user asked if a controller can help the
+   granular sound. Ask which controller they own (the question is unanswered).
+   Then give each track a column of knobs (level, filter, send, grain size)
+   through a shipped `data/four.pmap.example`.
+5. **Keep every screen rule in CLAUDE.md:** brightness means audibility, one
+   blink, the footer's four words, and no allocation per frame.
 
-The 83rd to 93rd changes added six Lua features, each reviewed by an agent
-and fixed before the next: start on sound, the pad sequencer, two
-modulators, the window on the clock, the take undo and the modulation out.
-Stage 16 of doc/device-gate.md checks them on the device.
+Prove each screen change with the uisim renders (`test/uisim/render_pages.lua`,
+the variants `base` and `track2`) and test_screen. Look at the PNGs. A
+redraw error on the device is a silent black screen.
 
-The engine items below wait for Phase 1, one at a time, each with its own
-RESTART and listening test. A new command moves the count from 65, so the
-command count in CLAUDE.md, test/test_control.lua and the deploy ritual move
-with it.
+## Phase 5: engine items left from mangler's plan
 
-| Feature | Why | Design | Cost |
-|---|---|---|---|
-| Server-side plugin test | `.asClass` proves the class, not the plugin binary. A partial install is silent | At alloc, play each plugin UGen into a 1-sample buffer and check a /done reply; fall back as for a missing class | medium |
-| Linked stereo limiting | Two independent limiters shift the stereo image while limiting | One gain from `max(abs(L), abs(R))` applied to both sides, in place of the two `Limiter.ar` | medium |
-| Beat repeat | BUILT in the 94th change, by request ahead of the device session: `\mangler_repeat` and the `beat_repeat` command (count 66). Stage 17 of doc/device-gate.md | | |
-| Reversed grains | GRAIN plays every grain forward | A per-grain rate sign drawn with a probability (`grain_rev`), on both grain copies (Phase 2 item 7 first, so it is written once). One new command, count 66 or 67 | small, after item 7 |
+Before you build each item, make sure that it is still open: read the engine.
+One at a time, each with a RESTART and a listen.
 
-## Next: the decks as tracks, and the screen
+1. **Per-track reverb.** One reverb per track costs too much CPU on one scsynth
+   core. SPACE is a send into the shared reverb for that reason. Revisit it only
+   with a measurement.
+2. **Shimmer costs CPU at zero.** Move the shimmer loop into its own spawn/free
+   synth, like the reverb.
+3. **The open filter is not a bypass.** At LP, 20 kHz and no resonance, the take
+   still passes through the DFM1 ladder. Crossfade to the dry signal at the end
+   stop, and make `purity()` test the same end stop.
+4. **Resample and regen print after the fader.** Take `preLim` before the level
+   multiply, and keep the `(level > 0.001)` gate.
+5. **Duplicated grain code.** The GRAIN drone and the pad voice repeat the
+   stereo-pair law. Make a build-time function, like `winRead` and `colour`.
+6. **Linked stereo limiting.** Derive one gain from `max(abs(L), abs(R))` and
+   apply it to both sides.
+7. **Reversed grains.** Add a per-grain direction probability (`grain_rev`), as
+   one new command.
 
-doc/tracks-plan.md plans the next stage: a filter, modulation, sends and a
-texture mode for each deck, macros, and a list of screen fixes from an
-audit of every page. It is research and design; nothing in it is built.
+## Phase 6: the device (the S-4 alternative)
 
-## Phase 6: decisions for you
+The goal in memory is a physical instrument in the norns form factor, meant to
+beat the S-4. It has a DIY 16x8 grid in `../grid128`, which is not ordered yet.
 
-These are not code questions. Each one needs a yes or no.
+- **Cooling.** The Pi 4 runs at 58 to 60 °C under the soak, with 20 °C of room
+  before it throttles. In a closed case, start with a passive heatsink or a
+  thermal pad to a metal case. A fan is a last resort: it is heard in quiet
+  passages, and its noise can reach the audio. If a fan is needed, switch it at
+  about 70 °C with the `gpio-fan` overlay, on a GPIO pin that the shield does
+  not use. Check the pin first.
+- **The grid.** Review `../grid128` with the pcb-design-review skill before
+  ordering.
 
-1. **Delete `CLAUDE_PLAN.md`?** It is the original S0 plan and nothing
-   references it. Keeping it in git history loses nothing.
-2. **Delete `data/layers/`?** It holds ten byte-identical copies of the
-   presets for the old `layers` branch build. If no device runs `layers.lua`
-   any more, it doubles every preset change.
-3. **Rename one of the two SNAPs?** TAKE K3 SNAP fits the window to the take.
-   The layer SNAP quantizes a loop length. One word, two gestures.
+## Decisions for the user
+
+Each one needs a yes or a no. Ask the user. Do not decide.
+
+1. Push `main` (the four version) to GitHub?
+2. Rename the GitHub repo and the local folder from mangler to four?
+3. Remove the `../mangler2` worktree?
+4. Deploy the rebuilt presets with `deploy_set.sh`? It deletes the takes in
+   slots 1 to 12 of `data/four`.
+5. Delete `CLAUDE_PLAN.md` (the original S0 plan) and `data/layers/` (old
+   preset copies)?
+6. Which MIDI controller do they own?
 
 ## How to work on this project
 
-Every change follows the same loop. CLAUDE.md has the details and the rules.
+The details are in CLAUDE.md. In short:
 
-1. Make the change in the smallest step that can be tested.
-2. Add a test for any bug you fix. Then revert the fix and make sure that the
-   test fails.
-3. Render the four variants before and after, and compare the PGM files byte
-   for byte. Only the screens you meant to change can differ. Compare renders
-   made by the same Lua version.
-4. Rebuild the single file with `lua test/amalgamate.lua`. If a page's knobs
-   or keys changed, also rebuild the control map with `lua test/controls.lua`.
-5. Run `lua test/check.lua` with `LUA53` set to a Lua 5.3 build. It runs the
-   syntax check, the five test scripts and the source-against-build renders on
-   the version norns runs.
-6. Add an entry to doc/changelog.md, and a row to doc/device-gate.md for
-   anything only hardware can judge.
-7. Engine changes go one at a time and only after the current device gate
-   passes. Never send untested SuperCollider in bulk.
+1. Make the smallest change that can be tested.
+2. Add a test for every bug that you fix. Then revert the fix and make sure that
+   the test fails.
+3. Run `LUA53=<lua 5.3> lua test/check.lua`. Rebuild `dist/four_single.lua`
+   with `lua test/amalgamate.lua`. Rebuild `doc/controls.md` with
+   `lua test/controls.lua` when knobs or keys change.
+4. For an engine change, follow the ritual:
+   1. Run `rsync --delete` to `dust/code/four/`.
+   2. Run `sudo systemctl restart norns-jack norns-crone norns-sclang
+      norns-matron` over one SSH master session that stays open.
+   3. Wait for both `compile done` and the `engines: [...]` line in the
+      sclang log. A load before the second line hangs.
+   4. Load the script, and make sure that maiden reads `count: 185`.
+5. Capture audio from `SuperCollider:out_1/2` with `n.record(..., ports=...)`.
+   crone's outputs follow the system output level.
+6. Add an entry to doc/changelog.md for every change, as "four, Nth change".
+   Keep the STATUS block in CLAUDE.md current.
+7. When the user asks, commit. If you are on `main`, branch first. End the
+   commit message with the session line the harness gives you.

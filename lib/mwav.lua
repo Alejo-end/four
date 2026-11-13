@@ -144,7 +144,8 @@ function M.queue_fill(path, bins, secs)
   local SR = SERVER_SR
   local frames = min(floor(dlen / fbytes), floor(SR * secs))
   local span = clamp(frames / (SR * secs), 0, 1)
-  local nb = max(1, floor(span * 128 + 0.5))
+  local nbins = #bins > 0 and #bins or 128      -- an empty strip is a 128-bin one
+  local nb = max(1, floor(span * nbins + 0.5))
   -- hand the slow per-bin peak read to load_tick (below). stride the UNPACKS
   -- (not the disk read) so a transient is never skipped — a 40ms drum hit
   -- vanished when this sampled a few windows per bin instead.
@@ -156,7 +157,7 @@ function M.queue_fill(path, bins, secs)
   if frames > 0 then
     fills[#fills + 1] = { f = f, dpos = dpos, fbytes = fbytes, frames = frames,
       nb = nb, bps = bps, step = stride * bps, readpeak = readpeak, i = 0,
-      bins = bins }
+      bins = bins, per = BINS_PER_TICK * max(1, nbins // 128) }
   else
     f:close()
   end
@@ -170,7 +171,8 @@ function M.load_tick()
   local p = fills[1]
   if not p then return end
   local bins = p.bins
-  local last = min(p.i + BINS_PER_TICK, p.nb)
+  -- a finer strip fills more bins a tick, so it draws in over the same time
+  local last = min(p.i + p.per, p.nb)
   for i = p.i + 1, last do
     local b0 = floor((i - 1) / p.nb * p.frames)
     local n = floor(i / p.nb * p.frames) - b0

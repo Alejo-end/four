@@ -320,7 +320,7 @@ do
     first = first or at
     for k = 1, #at do
       if at[k] ~= first[k] then same = false end
-      if k > 1 and at[k] - at[k - 1] ~= 4 then evenly = false end
+      if k > 1 and at[k] - at[k - 1] ~= 3 then evenly = false end
     end
     for c = Mp.DOT_X0 - 1, 127 do
       if px(c, 3) > 0 or px(c, 6) > 0 then straight = false end
@@ -348,6 +348,41 @@ do
   ok(bars > 0, "stopped, the step row is drawn (" .. bars .. " px)")
   ok(maxl <= 3, "...dim (level " .. maxl .. ")")
   params:set("step_len", 4); params:set("step_fill", 4)
+end
+
+-- ============================================================================
+-- 7 · EFFECT: off lies flat and dim, on draws a bright moving trace, and a
+--     silent track's effect is dim
+-- ============================================================================
+do
+  local function body()
+    local lit, maxl, rows = 0, 0, {}
+    for y = 22, 44 do   -- under the type chip, over the footer
+      for x = 0, 127 do
+        local l = px(x, y)
+        if l > 0 then lit = lit + 1; maxl = math.max(maxl, l); rows[y] = true end
+      end
+    end
+    local n = 0
+    for _ in pairs(rows) do n = n + 1 end
+    return lit, maxl, n
+  end
+  T.goto_page("EFFECT")
+  params:set("track_sel", 1); params:set("mode", 5); params:set("effect", 1)
+  _h.run_ticks(30); redraw()
+  local lit, maxl, rows = body()
+  ok(rows == 1 and maxl <= 3, "EFFECT off: one flat dim line (" .. rows .. " rows, level " .. maxl .. ")")
+  for fx = 2, 6 do
+    params:set("effect", fx); params:set("effect_amt", 0.7)
+    _h.run_ticks(3); redraw()
+    lit, maxl, rows = body()
+    ok(rows >= 5 and maxl >= 10, params:string("effect") .. " draws a bright trace (" .. rows .. " rows, level " .. maxl .. ")")
+  end
+  params:set("mode", 1)
+  _h.run_ticks(3); redraw()
+  lit, maxl, rows = body()
+  ok(maxl <= 4 and lit > 0, "a silent track's effect is drawn dim (level " .. maxl .. ")")
+  params:set("mode", 5); params:set("effect", 1)
 end
 
 T.report("screen harness OK")

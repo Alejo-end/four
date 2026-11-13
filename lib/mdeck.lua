@@ -27,7 +27,7 @@ M.decks = {}
 -- ---------------------------------------------------------------------------
 -- construction
 -- ---------------------------------------------------------------------------
--- `o` = { id, name, va, vb, from, len }
+-- `o` = { id, name, va, vb, from, len, bins }
 --   id       param prefix, e.g. "lay1" -> lay1_rec, lay1_level, ...
 --   va, vb   the softcut voice pair (lower = left, upper = right)
 --   from     where this deck's region starts, in seconds into the buffer
@@ -43,14 +43,14 @@ function M.new(o)
     from = o.from, len = o.len,
     phase = 0,          -- 0..1 within the region, from the softcut poll
     any = false,        -- has audio been recorded into it?
-    wave = {},          -- 128-bin picture, painted as the head passes
+    wave = {},          -- the picture, painted as the head passes (o.bins bins)
     wave_bin = 0,
     gen = 0,            -- bumped by anything that replaces the material, so a
                         -- file conversion that lands late can tell (layer_load)
     -- mat_lo / mat_hi: the stretch of the region that holds material (0..1),
     -- nil when there is none. Kept by track_extent, read through M.extent.
   }
-  for i = 1, 128 do d.wave[i] = 0 end
+  for i = 1, (o.bins or 128) do d.wave[i] = 0 end
   M.decks[#M.decks + 1] = d
   return d
 end
@@ -309,7 +309,7 @@ function M.clear(d)
   -- (a PSET restore fills strips one after another) is cancelled with it and
   -- cannot draw the old waveform over the silence
   if C.clear_bins then C.clear_bins(d.wave)
-  else for i = 1, 128 do d.wave[i] = 0 end end
+  else for i = 1, #d.wave do d.wave[i] = 0 end end
   d.wave_bin = 0
   d.any = false
   d.mat_lo, d.mat_hi = nil, nil
@@ -438,7 +438,7 @@ function M.on_phase(voice, pos)
         local a = C.cut_rec_amp()   -- what softcut records: the shared law
         if a > 0.01 then d.any = true end
         d.wave_bin = C.paint_bins(d.wave, d.wave_bin,
-          math.floor(d.phase * 127.999) + 1, a, get(d, "pre", 1))
+          math.floor(d.phase * (#d.wave - 0.001)) + 1, a, get(d, "pre", 1))
       end
       return
     end

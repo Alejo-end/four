@@ -17,8 +17,11 @@
 // block late (InFeedback) and goes through a tanh, so a ring of sends can
 // feed back but never runs away. OWN MATERIAL: each track plays its own
 // 60s buffer pair; rec_track picks the pair io records into, buf_track the
-// pair the buffer commands use. Count: 66 + 3 (crush, fx_dly, fx_rev)
-// + 3 x 30 + 12 + 2 = 173.
+// pair the buffer commands use. THE EFFECT: every track has one effect slot
+// after its COLOR (`effect` picks OFF, CHORUS, FLANGE, WOBBLE, RESON or RING;
+// `effect_amt` and `effect_rate` are its two knobs), so 33 a track.
+// Count: 66 + 6 (crush, fx_dly, fx_rev, effect, effect_amt, effect_rate)
+// + 3 x 33 + 12 + 2 = 185.
 //
 // HARD RULE: exactly one `Engine_Four` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
@@ -292,7 +295,8 @@ Engine_Four : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
-        var winBounds, winRead, drEnv, seam, colour;
+        var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
+        var stretchOn, pvClass, warpClass, readClass, tanhClass, th, dfmTrim;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -364,13 +368,15 @@ Engine_Four : CroneEngine {
         // with the take (level, rec, freeze) and the erosion pair, and a
         // strip with these four (its commands: `t<n>_level` ...)
         stripKeys = [\level, \cutoff, \resonance, \filt_type,
-            \drive, \crush, \fx_dly, \fx_rev];
+            \drive, \crush, \fx_dly, \fx_rev,
+            \effect, \effect_amt, \effect_rate];
         extra = [2, 3, 4].collect({ arg n;
             var e = (n: n, bus: Bus.audio(s, 2), phase: Bus.control(s, 1),
                 params: Dictionary.new,
                 stripParams: Dictionary[\level -> 1.0, \cutoff -> 20000,
                     \resonance -> 0.0, \filt_type -> 0,
-                    \drive -> 0.0, \crush -> 0.0, \fx_dly -> 1.0, \fx_rev -> 1.0]);
+                    \drive -> 0.0, \crush -> 0.0, \fx_dly -> 1.0, \fx_rev -> 1.0,
+                    \effect -> 0, \effect_amt -> 0.5, \effect_rate -> 0.5]);
             playParams.keysValuesDo({ arg k, v;
                 [\level, \rec, \freeze, \erode, \wear].includes(k).not.if({
                     e[\params][k] = v;
@@ -385,6 +391,7 @@ Engine_Four : CroneEngine {
         ioKeys = [\level, \rec, \rec_level, \pre_level, \freeze,
             \dry_wet, \resample, \regen, \grain_level,
             \filt_type, \cutoff, \resonance, \drive, \crush,
+            \effect, \effect_amt, \effect_rate,
             \delay_mix, \fx_dly,
             \rev_mix, \fx_rev];
         revParams = Dictionary[
@@ -439,14 +446,43 @@ Engine_Four : CroneEngine {
         // the phase bus, so the screen follows the new drone alone.
         // drEnv is the drone's own 10ms in, 20ms out, which frees it.
         winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0;
-            var lo, span, incr, phase, winPos;
+            var lo, span, frames, loF, spanF, rate, whole, frac, phase, winPos;
             #lo, span = winBounds.(pos_start, pos_end);
-            incr = Lag.kr(scan, 0.02) * pitchMul * (Lag.kr(run, 0.05) > 0.001)
-                * SampleDur.ir / (BufDur.kr(buf) * span);
-            phase = Phasor.ar(0, incr, 0, 1);
+            // THE HEAD COUNTS IN FRAMES, in two parts. It was one float from
+            // 0 to 1 across the 60s buffer: a float has 24 bits and the
+            // buffer has 2.88 million frames, so the head landed up to a
+            // quarter frame off on every sample. Measured (test/dsp): a 5kHz
+            // tone 54s into the buffer read with noise at -38dB at pitch 1
+            // and -25dB a semitone up. `whole` runs over the window in
+            // frames, `frac` over one frame; both add the same rate into a
+            // 64-bit state, so (whole - frac) is a whole number that a float
+            // holds exactly, and frac keeps the place between two frames to
+            // 24 bits anywhere in the buffer. At a rate of 1 frac stays 0.
+            frames = BufFrames.kr(buf);
+            loF = (lo * frames).round;
+            spanF = (span * frames).round.max(64);
+            rate = Lag.kr(scan, 0.02) * pitchMul * (Lag.kr(run, 0.05) > 0.001)
+                * BufRateScale.kr(buf);
+            whole = Phasor.ar(0, rate, 0, spanF);
+            frac = Phasor.ar(0, rate, 0, 1);
+            phase = (whole / spanF).clip(0, 1);
             winPos = lo + (phase * span);
             Out.kr(phase_out, A2K.kr(winPos) * (1 - quiet));
-            [winPos, phase, span];
+            [winPos, phase, span, loF + (whole - frac).round, frac];
+        };
+        // the read for winRead's two-part head: four plain reads at whole
+        // frames and the cubic between them (BufRd's own, the same curve).
+        // With frac 0 it returns the stored sample, bit for bit.
+        exactRd = { arg buf, idx, frac;
+            var ym1, y0, y1, y2, c1, c2, c3;
+            ym1 = BufRd.ar(1, buf, idx - 1, 1, 1);
+            y0 = BufRd.ar(1, buf, idx, 1, 1);
+            y1 = BufRd.ar(1, buf, idx + 1, 1, 1);
+            y2 = BufRd.ar(1, buf, idx + 2, 1, 1);
+            c1 = 0.5 * (y1 - ym1);
+            c2 = ym1 - (2.5 * y0) + (2 * y1) - (0.5 * y2);
+            c3 = (0.5 * (y2 - ym1)) + (1.5 * (y0 - y1));
+            (((((c3 * frac) + c2) * frac) + c1) * frac) + y0
         };
         drEnv = { arg gate; EnvGen.kr(Env.asr(0.01, 1, 0.02), gate, doneAction: 2) };
         // the loop seam fade PLAY has always had (~5ms, buffer-time referenced)
@@ -470,6 +506,39 @@ Engine_Four : CroneEngine {
         //     after), and the whole grain stays inside the window: it never
         //     reads the empty buffer past the take.
         //   pv_freeze holds the head where it is while grains keep coming.
+        // FourStretch (ugen/): our own UGens for the two stretch voices. WARP
+        // is WSOLA and PV is a phase vocoder with locked phases; both return
+        // the take sample for sample at speed 1 (ugen/test_core.cpp proves
+        // it). The class is lib/FourStretch.sc, so it is always there; what
+        // can be missing is the BINARY on the server, and a def that names a
+        // UGen the server lacks does not load. So look for the file. Absent:
+        // the stock voices below (Warp1, and the FFT that only freezes).
+        pvClass = "FourPV".asSymbol.asClass;
+        warpClass = "FourWarp".asSymbol.asClass;
+        readClass = "FourRead".asSymbol.asClass;
+        tanhClass = "FourTanh".asSymbol.asClass;
+        stretchOn = pvClass.notNil and: { warpClass.notNil } and: { readClass.notNil }
+            and: { tanhClass.notNil } and: {
+            "FOUR_STRETCH".getenv.notNil or: {
+                ["FourStretch.so", "FourStretch.scx"].any({ arg f;
+                    File.exists(Platform.userExtensionDir +/+ "FourStretch" +/+ f)
+                })
+            }
+        };
+        ("mangler: FourStretch " ++ stretchOn.if({ "on" },
+            { "absent, WARP and PV are the stock voices" })).postln;
+        // tanh, for every def below. The C library's tanh costs 0.4% of the
+        // audio thread for each channel on the norns, and the engine has 28
+        // of them. FourTanh is the same curve to 2e-7 at a tenth of the cost.
+        th = { arg x; stretchOn.if({ tanhClass.ar(x) }, { x.tanh }) };
+        // DFM1's makeup. At inputgain 0.5 the filter itself passes a tone
+        // 1.0dB LOUDER than it came in (measured on the device, low-pass and
+        // high-pass, any cutoff). The makeup was x2, so every track left its
+        // filter 7dB hot, and three or four tracks sat in the master limiter
+        // all the time (crest factor 7dB, down from 11.6). 0.891 is -1.0dB:
+        // a track now leaves the filter at the level of its take.
+        dfmTrim = 0.891;
+
         SynthDef(\four_grain, {
             arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
                 pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
@@ -537,11 +606,20 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-            var winPos, phase, span, ptr, l, r, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
-            ptr = A2K.kr(winPos);
-            l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
-            r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
+            var winPos, phase, span, idx, frac, ptr, l, r, sig;
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+            stretchOn.if({
+                // bufL, bufR, the head in frames, pitch, window in frames,
+                // overlaps, rand (positional: see the MiClouds call)
+                sig = warpClass.ar(buf_l, buf_r, idx, pitch,
+                    warp_window * SampleRate.ir, warp_overlaps, warp_rand);
+                l = sig[0];
+                r = sig[1];
+            }, {
+                ptr = A2K.kr(winPos);
+                l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
+                r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
+            });
             sig = Balance2.ar(l, r, pan.lag(0.03));
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
@@ -556,21 +634,33 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-            var winPos, phase, span, sigL, sigR, chainL, chainR, l, r, sig, edge;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+            var winPos, phase, span, idx, frac, sigL, sigR, chainL, chainR, l, r, sig, edge;
+            // with FourStretch, FRZ holds the head (GRAIN's law) and the
+            // vocoder sustains what is under it; pitch is its own knob
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end,
+                stretchOn.if({ scan * (1 - pv_freeze) }, { scan }),
+                buf_l, phase_out, 1, level, handover);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             // the seam fade before the FFT: a wrap click fed to MagFreeze
             // is held as a steady hiss
-            edge = seam.(phase, span, buf_l);
-            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4) * edge;
-            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4) * edge;
-            chainL = FFT(LocalBuf(2048), sigL);
-            chainR = FFT(LocalBuf(2048), sigR);
-            chainL = PV_MagFreeze(chainL, pv_freeze);
-            chainR = PV_MagFreeze(chainR, pv_freeze);
-            l = IFFT(chainL);
-            r = IFFT(chainR);
+            stretchOn.if({
+                // no seam fade: the frames overlap, so the loop point is a
+                // crossfade of spectra already
+                sig = pvClass.ar(buf_l, buf_r, idx, pitch.lag(0.05));
+                l = sig[0];
+                r = sig[1];
+            }, {
+                edge = seam.(phase, span, buf_l);
+                sigL = exactRd.(buf_l, idx, frac) * edge;
+                sigR = exactRd.(buf_r, idx, frac) * edge;
+                chainL = FFT(LocalBuf(2048), sigL);
+                chainR = FFT(LocalBuf(2048), sigR);
+                chainL = PV_MagFreeze(chainL, pv_freeze);
+                chainR = PV_MagFreeze(chainR, pv_freeze);
+                l = IFFT(chainL);
+                r = IFFT(chainR);
+            });
             sig = Balance2.ar(l, r, pan.lag(0.03));
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
@@ -590,10 +680,20 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-            var winPos, phase, span, sigL, sigR, edge, sig;
-            #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover);
-            sigL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4);
-            sigR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4);
+            var winPos, phase, span, idx, frac, sigL, sigR, edge, sig;
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover);
+            stretchOn.if({
+                // a windowed sinc in place of the cubic: nothing folds above
+                // pitch 1 and the images sit below -70dB. On a whole frame
+                // (pitch 1) it is the stored sample, like exactRd.
+                sig = readClass.ar(buf_l, buf_r, idx, frac,
+                    (Lag.kr(scan, 0.02) * pitch.lag(0.05)).abs);
+                sigL = sig[0];
+                sigR = sig[1];
+            }, {
+                sigL = exactRd.(buf_l, idx, frac);
+                sigR = exactRd.(buf_r, idx, frac);
+            });
             // ~5ms edge fade at the loop seam (buffer-time referenced, shrinks
             // with rate): the rec-stop window almost never lands on a zero
             // crossing, so the bare loop CLICKED every pass — the one blemish
@@ -658,8 +758,8 @@ Engine_Four : CroneEngine {
                         clouds_mode = 0, clouds_lofi = 0,
                         warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                         pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-                    var winPos, phase, span, srcL, srcR, sig, dens, edge;
-                    #winPos, phase, span = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+                    var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
+                    #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
                     // Clouds' density is silent at 0.5: below it grains are
                     // random, above it periodic. Mapping 1..200 across 0.5 made
                     // density 13 to 16 silent and the default 20 about 20 dB
@@ -667,8 +767,8 @@ Engine_Four : CroneEngine {
                     // lift the sparse end by the level the device measured.
                     dens = density.explin(1, 200, 0.36, 0.05);
                     edge = seam.(phase, span, buf_l);
-                    srcL = BufRd.ar(1, buf_l, winPos * BufFrames.kr(buf_l), 1, 4) * edge;
-                    srcR = BufRd.ar(1, buf_r, winPos * BufFrames.kr(buf_r), 1, 4) * edge;
+                    srcL = exactRd.(buf_l, idx, frac) * edge;
+                    srcR = exactRd.(buf_r, idx, frac) * edge;
                     // POSITIONAL args (keyword args don't survive perform on a
                     // var-held class): in, pit, pos, size, dens, tex, drywet,
                     // in_gain, spread, rvb, fb, freeze, mode, lofi. our size/
@@ -790,7 +890,7 @@ Engine_Four : CroneEngine {
             var pre, xf, rate, steps, cr;
             drive = drive.lag(0.03);
             pre = 1 + (drive * 6);
-            sig = LinXFade2.ar(sig, (sig * pre).tanh * pre.sqrt.reciprocal,
+            sig = LinXFade2.ar(sig, th.value(sig * pre) * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
             crush = crush.lag(0.05);
             rate = SampleRate.ir * (0.5 ** (crush * 5));
@@ -800,12 +900,92 @@ Engine_Four : CroneEngine {
             LinXFade2.ar(sig, cr, (xf * 2 - 1))
         };
 
+        // THE EFFECT, one slot for every track (a build-time function, like
+        // `colour`). type 0 is OFF, and then every weight is 0 and the output
+        // is the input, sample for sample. A type change is a 50ms crossfade.
+        //   1 CHORUS  a 15ms delay that an LFO moves, beside the dry signal.
+        //             amt is depth and mix, rate is the LFO speed (0.1 to 6Hz)
+        //   2 FLANGE  a 0.5 to 6.5ms sweep with feedback. amt is feedback and
+        //             mix, rate is the sweep speed (0.05 to 5Hz)
+        //   3 WOBBLE  the delayed signal alone, its time drifting like a worn
+        //             tape (wow and flutter). amt is the drift depth, rate
+        //             its speed. amt 0 is the signal 12ms late, unchanged
+        //   4 RESON   a comb tuned to a note. rate is the note (C2 to C6, in
+        //             semitones), amt is how long it rings and the mix
+        //   5 RING    the signal times a sine. rate is its frequency (20Hz
+        //             to 4kHz), amt is the mix
+        // Types 1 to 3 share ONE comb pair (they are all a moving delay), so
+        // a change between them glides the delay time for 100ms. The cost is
+        // two comb pairs and a sine for each track, always on.
+        fxSlot = { arg sig, type, amt, rate;
+            var a, r, idx, w, wFam, wRes, wRing;
+            var lfoCh, lfoFl, wow, flut, dt, decay, comb, dryG, wetG, fam;
+            var note, rdt, rdec, fb, res, ring;
+            var chF, chD, wowF, wowD, flF, flD;
+            a = amt.clip(0, 1).lag(0.05);
+            r = rate.clip(0, 1).lag(0.05);
+            w = { arg i; Lag.kr((type - i).abs < 0.5, 0.05) };
+            wFam = Lag.kr((type > 0.5) * (type < 3.5), 0.05);
+            wRes = w.value(4);
+            wRing = w.value(5);
+            idx = (type - 1).clip(0, 2);
+            // DEPTH IS SET AS PITCH, not as time. A delay that moves by
+            // D*sin(2pi*f*t) bends the pitch by the ratio 2pi*f*D at its
+            // peak, so a fixed depth in time grew with the rate: measured,
+            // CHORUS reached -456 to +361 cents at the top of both knobs and
+            // WOBBLE +-140. D = (2^(cents/1200) - 1) / (2pi*f) holds the
+            // bend whatever the rate, up to the room the delay line has.
+            // CHORUS 5 to 30 cents; WOBBLE's wow up to 50, its flutter 15.
+            chF = 0.1 * (60 ** r);
+            chD = (((2 ** ((5 + (25 * a)) / 1200)) - 1) / (2pi * chF)).min(0.012);
+            wowF = 0.3 * (6 ** r);
+            wowD = (((2 ** (50 / 1200)) - 1) / (2pi * wowF)).min(0.010);
+            flF = 6 * (2 ** r);
+            flD = ((2 ** (15 / 1200)) - 1) / (2pi * flF);
+            lfoCh = SinOsc.kr(chF, [0, 0.5pi]);
+            lfoFl = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
+            wow = (SinOsc.kr(wowF, [0, 0.3]) * 0.7)
+                + (LFNoise2.kr(0.5 * (6 ** r)) * 0.3);
+            flut = SinOsc.kr(flF);
+            dt = 2.collect({ arg ch;
+                Select.kr(idx, [
+                    0.015 + (chD * lfoCh[ch]),
+                    0.0035 + (0.003 * lfoFl[ch]),
+                    0.012 + (a * ((wowD * wow[ch]) + (flD * flut)))
+                ]).lag(0.1)
+            });
+            decay = Select.kr(idx, [DC.kr(0), a * 0.12, DC.kr(0)]).lag(0.05);
+            dryG = Select.kr(idx, [1 - (0.3 * a), (1 + (0.5 * a)).reciprocal,
+                DC.kr(0)]).lag(0.05);
+            wetG = Select.kr(idx, [0.7 * a, a * (1 + (0.5 * a)).reciprocal,
+                DC.kr(1)]).lag(0.05);
+            comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], decay) });
+            fam = (sig * dryG) + (comb * wetG);
+            // RESON: the gain law holds a long ring near the level of a short
+            // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
+            // exact law for noise) music came out about 8dB under the other
+            // effects on the device
+            note = (36 + (r * 48)).round(1).midicps;
+            rdt = [note, note * 1.003].reciprocal;
+            rdec = 0.05 + (a * a * 3);
+            fb = 0.001 ** (rdt / rdec);
+            res = 2.collect({ arg ch;
+                th.value(CombC.ar(sig[ch], 0.02, rdt[ch].lag(0.05), rdec)
+                    * ((1 - fb[ch].squared) ** 0.25))
+            });
+            res = LinXFade2.ar(sig, res, (a * 2 - 1));
+            ring = LinXFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r)), (a * 2 - 1));
+            sig + ((fam - sig) * wFam) + ((res - sig) * wRes) + ((ring - sig) * wRing)
+        };
+
         SynthDef(\four_strip, {
             arg in_bus, out_bus, own_out, level = 1.0, cutoff = 20000,
                 resonance = 0, filt_type = 0,
                 // COLOR and SPACE: its drive and crush, and how much of it
                 // goes into the shared delay and reverb (dly_out, rev_out)
                 drive = 0, crush = 0, fx_dly = 1, fx_rev = 1, dly_out = 0, rev_out = 0,
+                // THE EFFECT: its type and its two knobs
+                effect = 0, effect_amt = 0.5, effect_rate = 0.5,
                 // the sends INTO this track: snd<m> from track m (its own
                 // stays 0), read from ob<m>, a block late
                 snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
@@ -815,7 +995,7 @@ Engine_Four : CroneEngine {
                 + (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
                 + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
                 + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
-            sig = (In.ar(in_bus, 2) * 2.sqrt) + LeakDC.ar(sendIn).tanh;
+            sig = (In.ar(in_bus, 2) * 2.sqrt) + th.value(LeakDC.ar(sendIn));
             cf = cutoff.clip(20, 20000).lag(0.05);
             res = resonance.lag(0.05);
             wLp = Lag.kr(filt_type < 0.5, 0.02);
@@ -824,8 +1004,8 @@ Engine_Four : CroneEngine {
             dfmClass = "DFM1".asSymbol.asClass;
             sig = dfmClass.notNil.if({
                 try {
-                    var lp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 0, 0) * 2;
-                    var hp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 1, 0) * 2;
+                    var lp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 0, 0) * dfmTrim;
+                    var hp = dfmClass.ar(sig, cf, res.clip(0, 0.9), 0.5, 1, 0) * dfmTrim;
                     (lp * wLp) + (hp * wHp)
                         + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
                 } { |e|
@@ -839,6 +1019,7 @@ Engine_Four : CroneEngine {
                     + (BPF.ar(sig, cf, rq) * (1 + res) * wBp)
             });
             sig = colour.value(sig, drive, crush);
+            sig = fxSlot.value(sig, effect, effect_amt, effect_rate);
             sig = sig * level.lag(0.03);
             Out.ar(own_out, sig);     // what the other tracks' sends read
             Out.ar(out_bus, sig);
@@ -857,6 +1038,8 @@ Engine_Four : CroneEngine {
                 // track 1's COLOR (crush) and SPACE (its sends into the delay
                 // and the reverb); t_dly and t_rev carry the other tracks'
                 crush = 0.0, fx_dly = 1.0, fx_rev = 1.0, t_dly = 0, t_rev = 0,
+                // track 1's EFFECT: its type and its two knobs
+                effect = 0, effect_amt = 0.5, effect_rate = 0.5,
                 // delay + reverb run in their own spawn/free synths; io keeps
                 // only the mix knobs and the send/return buses
                 delay_mix = 0.0, dly_send = 0, dly_ret = 0,
@@ -880,7 +1063,7 @@ Engine_Four : CroneEngine {
             sendIn = (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
                 + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
                 + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
-            wet = wet + LeakDC.ar(sendIn).tanh;
+            wet = wet + th.value(LeakDC.ar(sendIn));
 
             // DFM1 diode-ladder filter, guarded -> stock RLPF/RHPF/BPF fallback
             // if sc3-plugins is absent. Two DFM1s: LP for LP+BP, HP for HP; BP
@@ -912,16 +1095,12 @@ Engine_Four : CroneEngine {
             wet = dfmClass.notNil.if({
                 try {
                     // in, freq, res, inputgain, type(0=LP 1=HP), noiselevel.
-                    // inputgain 0.5 + x2 makeup: DFM1 is a NONLINEAR diode
-                    // model, and the wet path arrives with a fixed 1.5x
-                    // loudness makeup — at unity input gain it saturated
-                    // constantly ("the engine sounds noisy"), which the old
-                    // LINEAR biquads never did. half in / double out keeps
-                    // the loudness and stays clean until `drive` asks for
-                    // dirt. the 0.5/2 pair is the device-tunable knob here.
+                    // inputgain 0.5: DFM1 is a NONLINEAR diode model, and at
+                    // unity input gain it saturated constantly ("the engine
+                    // sounds noisy"). dfmTrim brings its output to unity.
                     // two ladders, LP and HP; BP is the LP peak high-passed
-                    var lp = dfmClass.ar(wet, cf, res, 0.5, 0, 0) * 2;
-                    var hp = dfmClass.ar(wet, cf, res, 0.5, 1, 0) * 2;
+                    var lp = dfmClass.ar(wet, cf, res, 0.5, 0, 0) * dfmTrim;
+                    var hp = dfmClass.ar(wet, cf, res, 0.5, 1, 0) * dfmTrim;
                     (lp * wLp) + (hp * wHp)
                         + (HPF.ar(lp, (cf * 0.5).clip(20, 20000)) * wBp)
                 } { |e| mmFilter.value }
@@ -930,6 +1109,7 @@ Engine_Four : CroneEngine {
             // tracks have their own in their strips (the drive was shared,
             // after the join, before each track had one).
             wet = colour.value(wet, drive, crush);
+            wet = fxSlot.value(wet, effect, effect_amt, effect_rate);
             Out.ar(own_out, wet);     // track 1, filtered and coloured, for the sends
             // tracks 2 to 4 join here, after their own filter and colour
             others = In.ar(t2_ret, 2);
@@ -1093,7 +1273,7 @@ Engine_Four : CroneEngine {
             // that used to sit still now fades about 10 dB over a dozen
             // repeats. Quiet repeats are unaffected. If the infinite hold
             // needs to sustain rather than fade, put softclip back here.
-            LocalOut.ar(LPF.ar(dOut, 3500).tanh);
+            LocalOut.ar(th.value(LPF.ar(dOut, 3500)));
             Out.ar(out_bus, dOut);
         }).add;
 
@@ -1142,7 +1322,7 @@ Engine_Four : CroneEngine {
             pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
             // tanh for the same reason as the delay loop: this recirculates,
             // and a halo is the last place that wants a hard knee in it.
-            shimOut = (pitched * (shimmer > 0)).tanh;
+            shimOut = th.value(pitched * (shimmer > 0));
             LocalOut.ar(shimOut);
             Out.ar(out_bus, rv);
         }).add;

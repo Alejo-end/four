@@ -96,7 +96,7 @@ local min, max = math.min, math.max
 -- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
 -- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "TRACKS", "TAPE", "LAYERS", "FILTER", "DELAY", "REVERB",
+  "TAKE", "VOICE", "TRACKS", "TAPE", "LAYERS", "FILTER", "EFFECT", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
 }
 
@@ -329,6 +329,7 @@ Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 -- the same numbers update_mix sends, so it reads them from here
 ctx.mix_gains = Mtape.gains
 ctx.TAPE_LEN = Mtape.TAPE_LEN         -- the tape's own length (not BUF_SECS)
+ctx.tape_deck = Mtape.deck            -- read only: the page asks where its material is
 ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
 ctx.loop_secs = Mdeck.loop_secs       -- ...and the page prints the same law
 ctx.set_pair = Mdeck.set_pair         -- THE way to move a start/end pair
@@ -339,8 +340,8 @@ Mdeck.init(ctx)
 -- the chain forge on `foundry` auditions cells at 70s, and picking around it
 -- means the branches can merge without a silent buffer collision.
 ctx.layers = {
-  Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60 }),
-  Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60 }),
+  Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60, bins = Mpages.DECK_BINS }),
+  Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60, bins = Mpages.DECK_BINS }),
 }
 ctx.deck_phase = Mdeck.on_phase
 -- which layer the page and its encoders address
@@ -707,7 +708,9 @@ end
 local NTRACKS = 4
 -- the engine voice of a track. APPEND-ONLY: a PSET stores the index
 local MODE_NAMES = { "OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD" }
-local TRACK_PAGES = { TAKE = true, VOICE = true, FILTER = true }
+-- the effect slot of a track (fxSlot in the engine). APPEND-ONLY, like the modes
+local EFFECT_NAMES = { "OFF", "CHORUS", "FLANGE", "WOBBLE", "RESON", "RING" }
+local TRACK_PAGES = { TAKE = true, VOICE = true, FILTER = true, EFFECT = true }
 local function tsel() return clamp(math.floor(pget("track_sel", 1) + 0.5), 1, NTRACKS) end
 local function track2() return tsel() > 1 end   -- any track but track 1
 -- TID[n][id] = "t<n>_<id>", each string built once and cached: the redraw
@@ -756,6 +759,32 @@ local function cycle_mode(id)
   params:set(id, MODE_NEXT[m] or 5)
 end
 local function cycle_type(id) params:set(id, (pget(id, 1) % 3) + 1) end
+-- the EFFECT page's keys on track n. K2 is ON under the punch law (a tap
+-- latches, a hold sounds the effect only while held), and off remembers the
+-- type, so on brings back the effect you had; the first on is CHORUS. K3
+-- steps the type and skips OFF (K2 is the off switch); held, it steps the
+-- focus like VOICE and FILTER.
+local last_effect = {}
+local function effect_keys(n)
+  local id = n == 1 and "effect" or ("t" .. n .. "_effect")
+  last_effect[n] = 2
+  return {
+    k2 = {
+      label = "ON",
+      lit = function() return pget(id, 1) ~= 1 end,
+      pon = function() params:set(id, last_effect[n]) end,
+      poff = function()
+        local e = pget(id, 1)
+        if e ~= 1 then last_effect[n] = e end
+        params:set(id, 1)
+      end,
+    },
+    k3 = { label = "TYPE", tap = function()
+        local e = math.floor(pget(id, 1) + 0.5)
+        params:set(id, e >= #EFFECT_NAMES and 2 or e + 1)
+      end, hold = switch_track, hold_label = "TRK " .. (n % NTRACKS + 1) },
+  }
+end
 -- TAKE's SNAP on tracks 2 to 4: the track's window onto track 1's (the take
 -- as you recorded it), and back. Through set_pair, widening edge first.
 local snap_n = {}
@@ -821,6 +850,7 @@ for n = 1, NTRACKS do
         k3 = { label = "TYPE", tap = function() cycle_type(pre .. "filt_type") end,
           hold = switch_track, hold_label = nxt },
       },
+      EFFECT = effect_keys(n),
     }
   end
   last_mode[n] = 5
@@ -925,6 +955,7 @@ local KEYS = {
     k3 = { label = "TYPE", tap = function() cycle_type("filt_type") end,
       hold = switch_track, hold_label = "TRK 2" },
   },
+  EFFECT = effect_keys(1),
   DELAY = {
     -- INF pins the feedback near max (a dub hold); KILL cuts the echo send.
     -- both round-trip: tap latches, tap again restores the prior value.
@@ -1136,6 +1167,8 @@ local ENC_MAP = {
   TRACKS = { "track_sel", "@route_to", "@trk_level", "@route_amt" },
   TAPE   = { "tape_rate", "tape_pre", "loop_end", "cut_source" },
   FILTER = { "cutoff", "drive", "resonance", "crush" },
+  -- the focused track's effect slot: its two knobs. K1 held has nothing here
+  EFFECT = { "effect_amt", nil, "effect_rate", nil },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
   MIX    = { "mix", "input_level", "out_level", "dry_wet" },
@@ -2478,9 +2511,11 @@ function ctx.fx_dry()
   params:set("shimmer", 0)
   params:set("drive", 0)
   params:set("crush", 0)
+  params:set("effect", 1)
   for n = 2, NTRACKS do
     params:set("t" .. n .. "_drive", 0)
     params:set("t" .. n .. "_crush", 0)
+    params:set("t" .. n .. "_effect", 1)
   end
   params:set("clouds_fb", 0)
   local ft = params:get("filt_type")
@@ -2957,7 +2992,7 @@ local function init_params()
   -- turning the knob re-resolves rather than silently fighting it
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
-  params:add_group("grp_filter", "filter", 5)
+  params:add_group("grp_filter", "filter", 8)
   add_eng_option("filt_type", "filter type", { "LP", "HP", "BP" }, 1)
   add_eng_control("cutoff", "cutoff",
     controlspec.new(20, 20000, "exp", 0, 20000, "hz"))
@@ -2966,6 +3001,12 @@ local function init_params()
   add_eng_control("drive", "drive", unit(0.0))
   -- COLOR: sample rate and bit reduction, after the drive (0 = bypass)
   add_eng_control("crush", "crush", unit(0.0))
+  -- THE EFFECT: one slot after the COLOR. OFF is a true bypass. The two
+  -- knobs mean what the type needs (see fxSlot in the engine): AMOUNT is
+  -- depth, feedback, ring time or mix; RATE is speed, note or frequency.
+  add_eng_option("effect", "effect", EFFECT_NAMES, 1)
+  add_eng_control("effect_amt", "effect amount", unit(0.5))
+  add_eng_control("effect_rate", "effect rate", unit(0.5))
 
   -- ---- tracks 2 to 4 (four) -------------------------------------------
   -- more engine drones on the same take: each its own mode, window, pitch,
@@ -2980,7 +3021,7 @@ local function init_params()
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
-    params:add_group("grp_t" .. n, "track " .. n, 29)
+    params:add_group("grp_t" .. n, "track " .. n, 32)
     -- its own material from a file (the take of track n), like `sample_file`
     params:add_file(pre .. "file", lab .. "load file", _path.audio)
     params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
@@ -3020,6 +3061,10 @@ local function init_params()
     -- COLOR: its own drive and crush (track 1's are `drive` and `crush`)
     add_eng_control(pre .. "drive", lab .. "drive", unit(0.0))
     add_eng_control(pre .. "crush", lab .. "crush", unit(0.0))
+    -- its own EFFECT (track 1's are `effect`, `effect_amt`, `effect_rate`)
+    add_eng_option(pre .. "effect", lab .. "effect", EFFECT_NAMES, 1)
+    add_eng_control(pre .. "effect_amt", lab .. "effect amount", unit(0.5))
+    add_eng_control(pre .. "effect_rate", lab .. "effect rate", unit(0.5))
   end
   -- the sends: one track's filtered output into another track's filter
   -- and each track's SPACE: its send into the delay and the reverb

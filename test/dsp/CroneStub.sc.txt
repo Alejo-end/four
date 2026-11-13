@@ -1,0 +1,20 @@
+// A stand-in for norns' CroneEngine, so that sclang on the Mac can compile
+// lib/Engine_Four.sc and build its SynthDefs with no server and no norns.
+CroneEngine {
+    var <context, <doneCallback, <cmdNames;
+    *new { arg context, doneCallback; ^super.new.init(context, doneCallback) }
+    init { arg c, d;
+        context = c; doneCallback = d; cmdNames = List.new;
+        fork { this.alloc; d.value(this) };
+    }
+    addCommand { arg name, format, func; cmdNames.add(name) }
+    addPoll { arg name, func, periodic = true; }
+    alloc { }
+    free { }
+}
+
+// A server that never runs: it has a sample rate and its sync returns at once.
+FakeServer : Server {
+    sampleRate { ^48000 }
+    sync { ^nil }
+}

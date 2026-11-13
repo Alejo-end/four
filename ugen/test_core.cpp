@@ -1,0 +1,219 @@
+// The proof of four_core.h, with no SuperCollider. Build and run:
+//   clang++ -O2 -std=c++17 -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
+#include "four_core.h"
+#include <cstdio>
+#include <vector>
+#include <random>
+using namespace four;
+static int fails = 0;
+static void expect(bool ok, const char* what, double v) {
+    std::printf("  %-58s %10.2f  %s\n", what, v, ok ? "ok" : "FAIL");
+    if (!ok) fails++;
+}
+static double db(double x) { return 20 * std::log10(x > 1e-15 ? x : 1e-15); }
+static const double PI = 3.14159265358979323846;
+
+// runs the PV: head from p0 at `speed` frames per sample, block 64
+static void run(const std::vector<float>& L, const std::vector<float>& R, double p0, double speed,
+                float pitch, int n, std::vector<float>& oL, std::vector<float>& oR) {
+    static PV pv; pv.init();
+    Buf bl{L.data(), (int)L.size()}, br{R.data(), (int)R.size()};
+    oL.assign(n, 0); oR.assign(n, 0);
+    std::vector<float> pos(64);
+    double p = p0;
+    for (int i = 0; i + 64 <= n; i += 64) {
+        for (int j = 0; j < 64; j++) { pos[j] = (float)std::floor(p + 0.5); p += speed; }
+        pv.process(&oL[i], &oR[i], 64, pos.data(), pitch, bl, br);
+    }
+}
+// level of the bin at f and of everything else, by projection on a Hann window
+static void tone(const std::vector<float>& x, int a, int b, double f, double sr, double& lv, double& off) {
+    double sr_ = 0, si = 0, e = 0, wsum = 0, w2 = 0;
+    int n = b - a;
+    for (int i = 0; i < n; i++) {
+        double w = 0.5 - 0.5 * std::cos(2 * PI * i / n);
+        double v = x[a + i] * w;
+        sr_ += v * std::cos(2 * PI * f * i / sr); si += v * std::sin(2 * PI * f * i / sr);
+        e += v * v; wsum += w; w2 += w * w;
+    }
+    double amp = 2 * std::sqrt(sr_ * sr_ + si * si) / wsum;
+    double toneE = amp * amp / 2 * w2;
+    lv = db(amp); off = 10 * std::log10(std::fmax(e - toneE, 1e-30) / e);
+}
+
+int main() {
+    const double sr = 48000;
+    std::mt19937 rng(7); std::normal_distribution<float> nd(0, 0.1f);
+    int len = 48000 * 6;
+    std::vector<float> nL(len), nR(len), sL(len), sR(len), oL, oR;
+    for (int i = 0; i < len; i++) {
+        nL[i] = nd(rng); nR[i] = nd(rng);
+        sL[i] = 0.5f * (float)std::sin(2 * PI * 1000.0 * i / sr);
+        sR[i] = 0.25f * (float)std::sin(2 * PI * 1000.0 * i / sr + 1.0);
+    }
+    std::printf("PV core\n");
+    {   // 1. identity at speed 1, on stereo noise
+        int n = 48000 * 2; run(nL, nR, 20000, 1.0, 1.0f, n, oL, oR);
+        int delay = N + H; double err = 0, ref = 0;
+        for (int i = 8192; i < n - 64; i++) {
+            pos_t src = 20000 + (i - delay);
+            double d = oL[i] - nL[src], d2 = oR[i] - nR[src];
+            err += d * d + d2 * d2; ref += nL[src] * nL[src] + nR[src] * nR[src];
+        }
+        expect(db(std::sqrt(err / ref)) < -90, "speed 1: residual against the take, dB", db(std::sqrt(err / ref)));
+    }
+    for (double sp : {0.5, 0.25, 0.0, -1.0, 2.0}) {   // 2. a sine stays one sine
+        int n = 48000 * 2; run(sL, sR, 100000, sp, 1.0f, n, oL, oR);
+        double lv, off; tone(oL, 24000, 24000 + 65536, 1000, sr, lv, off);
+        char what[96]; std::snprintf(what, 96, "speed %.2f: 1 kHz sine, energy off the tone, dB", sp);
+        expect(off < -50, what, off);
+        std::snprintf(what, 96, "speed %.2f: level, dBFS (the take is -6.02)", sp);
+        expect(std::fabs(lv + 6.02) < 0.5, what, lv);
+        // the stereo image: level and phase of R against L
+        double a = 0, b = 0, c = 0, d = 0;
+        for (int i = 24000; i < 24000 + 48000; i++) {
+            double ph = 2 * PI * 1000.0 * i / sr;
+            a += oL[i] * std::cos(ph); b += oL[i] * std::sin(ph);
+            c += oR[i] * std::cos(ph); d += oR[i] * std::sin(ph);
+        }
+        double dphi = std::atan2(c, d) - std::atan2(a, b);
+        while (dphi > PI) dphi -= 2 * PI; while (dphi < -PI) dphi += 2 * PI;
+        std::snprintf(what, 96, "speed %.2f: phase of R against L, rad (the take is 1.0)", sp);
+        expect(std::fabs(dphi - 1.0) < 0.02, what, dphi);
+    }
+    for (double pr : {2.0, 1.4983, 0.5}) {   // 3. pitch, independent of speed
+        int n = 48000 * 2; run(sL, sR, 100000, 0.5, (float)pr, n, oL, oR);
+        double lv, off; tone(oL, 24000, 24000 + 65536, 1000 * pr, sr, lv, off);
+        char what[96]; std::snprintf(what, 96, "pitch %.3f at speed 0.5: energy off the tone, dB", pr);
+        expect(off < -50, what, off);
+        std::snprintf(what, 96, "pitch %.3f at speed 0.5: level, dBFS", pr);
+        expect(std::fabs(lv + 6.02) < 0.5, what, lv);
+    }
+    {   // 4. no fold: 15 kHz at pitch 2 must vanish, not land on 18 kHz
+        std::vector<float> h(len);
+        for (int i = 0; i < len; i++) h[i] = 0.5f * (float)std::sin(2 * PI * 15000.0 * i / sr);
+        int n = 48000 * 2; run(h, h, 100000, 1.0, 2.0f, n, oL, oR);
+        double lv, off; tone(oL, 24000, 24000 + 65536, 18000, sr, lv, off);
+        expect(lv < -60, "pitch 2: a 15 kHz tone folded to 18 kHz, dBFS", lv);
+        for (int i = 0; i < len; i++) h[i] = 0.5f * (float)std::sin(2 * PI * 10000.0 * i / sr);
+        run(h, h, 100000, 1.0, 0.5f, n, oL, oR);
+        tone(oL, 24000, 24000 + 65536, 19000, sr, lv, off);
+        expect(lv < -70, "pitch 0.5: the image of a 10 kHz tone at 19 kHz, dBFS", lv);
+    }
+    {   // 5. an attack stays sharp at speed 0.25
+        std::vector<float> c(len, 0.f);
+        for (int i = 0; i < 4800; i++) c[150000 + i] = nd(rng) * 5 * std::exp(-i / 800.0f);
+        int n = 48000 * 2; run(c, c, 150000 - 12000, 0.25, 1.0f, n, oL, oR);
+        // the head reaches the attack after 12000/0.25 samples, plus the delay
+        int at = 48000 + N + H; double pre = 0, post = 0;
+        for (int i = at - 2400; i < at - 600; i++) pre += oL[i] * oL[i];
+        for (int i = at; i < at + 1800; i++) post += oL[i] * oL[i];
+        expect(10 * std::log10((pre + 1e-12) / (post + 1e-12)) < -30, "speed 0.25: energy before the attack against after, dB",
+               10 * std::log10((pre + 1e-12) / (post + 1e-12)));
+    }
+
+    std::printf("WARP core\n");
+    auto runW = [&](const std::vector<float>& L, const std::vector<float>& R, double p0, double speed,
+                    float pitch, float win, float ov, int n) {
+        static Warp w; w.init();
+        Buf bl{L.data(), (int)L.size()}, br{R.data(), (int)R.size()};
+        oL.assign(n, 0); oR.assign(n, 0);
+        std::vector<float> pos(64); double p = p0;
+        for (int i = 0; i + 64 <= n; i += 64) {
+            for (int j = 0; j < 64; j++) { pos[j] = (float)std::floor(p + 0.5); p += speed; }
+            w.process(&oL[i], &oR[i], 64, pos.data(), pitch, win, ov, 0.f, bl, br);
+        }
+    };
+    {   // identity at speed 1
+        int n = 48000 * 2; runW(nL, nR, 20000, 1.0, 1.0f, 12000, 4, n);
+        double err = 0, ref = 0;
+        for (int i = 24000; i < n - 64; i++) {
+            pos_t src = 20000 + i;
+            double d = oL[i] - nL[src], d2 = oR[i] - nR[src];
+            err += d * d + d2 * d2; ref += nL[src] * nL[src] + nR[src] * nR[src];
+        }
+        expect(db(std::sqrt(err / ref)) < -90, "speed 1: residual against the take, dB", db(std::sqrt(err / ref)));
+    }
+    // a harmonic tone with a 220 Hz period: the hard case for a blind overlap
+    std::vector<float> hL(len), hR(len);
+    for (int i = 0; i < len; i++) {
+        double v = 0; for (int h = 1; h <= 20; h++) v += std::sin(2 * PI * 220.0 * h * i / sr + h) / h;
+        hL[i] = (float)(0.2 * v); hR[i] = (float)(0.1 * v);
+    }
+    for (double sp : {0.5, 0.25, 2.0, 0.0}) {
+        int n = 48000 * 3; runW(hL, hR, 100000, sp, 1.0f, 12000, 4, n);
+        // the level of the tone must hold still: RMS over 20 ms steps
+        double mn = 1e9, mx = 0;
+        for (int a = 48000; a + 960 < n - 960; a += 960) {
+            double e = 0; for (int i = 0; i < 960; i++) e += oL[a + i] * oL[a + i];
+            e = std::sqrt(e / 960); if (e < mn) mn = e; if (e > mx) mx = e;
+        }
+        char what[96]; std::snprintf(what, 96, "speed %.2f: harmonic tone, level swing, dB", sp);
+        expect(db(mx / mn) < 1.0, what, db(mx / mn));
+        double a = 0, b = 0; for (int i = 48000; i < n - 960; i++) { a += oL[i] * oL[i]; b += oR[i] * oR[i]; }
+        std::snprintf(what, 96, "speed %.2f: level of R against L, dB (the take is -6.02)", sp);
+        expect(std::fabs(db(std::sqrt(b / a)) + 6.02) < 0.05, what, db(std::sqrt(b / a)));
+    }
+    {   // pitch, at speed 0.5: 1 kHz up a fifth
+        int n = 48000 * 2; runW(sL, sR, 100000, 0.5, 1.4983f, 12000, 4, n);
+        double lv, off; tone(oL, 24000, 24000 + 65536, 1498.3, sr, lv, off);
+        expect(off < -40, "pitch 1.498 at speed 0.5: energy off the tone, dB", off);
+        expect(std::fabs(lv + 6.02) < 0.5, "pitch 1.498 at speed 0.5: level, dBFS", lv);
+    }
+
+    std::printf("PLAY read\n");
+    auto runR = [&](const std::vector<float>& L, double p0, double ratio, int n) {
+        Buf bl{L.data(), (int)L.size()};
+        oL.assign(n, 0); oR.assign(n, 0);
+        double whole = p0, frac = 0;        // the engine's two-part head
+        Kern kn; kn.init();
+        for (int i = 0; i < n; i++) {
+            sincAt(kn, bl, bl, (pos_t)whole, (float)frac, ratio, oL[i], oR[i]);
+            frac += ratio; double f = std::floor(frac); whole += f; frac -= f;
+        }
+    };
+    {
+        std::vector<float> h(len);
+        int n = 48000 * 2; runR(nL, 2600000 % len, 1.0, n);
+        double err = 0; for (int i = 0; i < n; i++) err += std::fabs(oL[i] - nL[(2600000 % len) + i]);
+        expect(err == 0, "pitch 1: the sum of all differences from the take", err);
+        double lv, off;
+        for (int i = 0; i < len; i++) h[i] = 0.5f * (float)std::sin(2 * PI * 15000.0 * i / sr);
+        runR(h, 100000, 2.0, n); tone(oL, 24000, 24000 + 65536, 18000, sr, lv, off);
+        expect(lv < -60, "pitch 2: a 15 kHz tone folded to 18 kHz, dBFS", lv);
+        for (int i = 0; i < len; i++) h[i] = 0.5f * (float)std::sin(2 * PI * 10000.0 * i / sr);
+        runR(h, 100000, 0.5, n); tone(oL, 24000, 24000 + 65536, 19000, sr, lv, off);
+        expect(lv < -70, "pitch 0.5: the image of a 10 kHz tone at 19 kHz, dBFS", lv);
+        for (int i = 0; i < len; i++) h[i] = 0.5f * (float)std::sin(2 * PI * 5000.0 * i / sr);
+        double semi = std::pow(2.0, 1.0 / 12);
+        runR(h, 100000, semi, n); tone(oL, 24000, 24000 + 65536, 5000 * semi, sr, lv, off);
+        expect(off < -70, "plus 1 semitone: 5 kHz tone, energy off the tone, dB", off);
+        expect(std::fabs(lv + 6.02) < 0.1, "plus 1 semitone: level, dBFS", lv);
+    }
+    std::printf("tanh\n");
+    {
+        // every value from -12 to 12 in steps of 1e-4, and the small ones
+        std::vector<float> x, y;
+        for (int i = -120000; i <= 120000; i++) x.push_back(i * 1e-4f);
+        for (int i = -4000; i <= 4000; i++) x.push_back(i * 1e-7f);
+        x.push_back(100.f); x.push_back(-100.f); x.push_back(0.f);
+        while (x.size() % 4) x.push_back(0.f);
+        y.assign(x.size(), 0.f);
+        tanhBlock(x.data(), y.data(), (int)x.size());
+        double worst = 0, worstRel = 0;
+        for (size_t i = 0; i < x.size(); i++) {
+            double ref = std::tanh((double)x[i]), e = std::fabs((double)y[i] - ref);
+            if (e > worst) worst = e;
+            if (std::fabs(ref) > 1e-30 && e / std::fabs(ref) > worstRel) worstRel = e / std::fabs(ref);
+        }
+        expect(worst < 3e-7, "the largest difference from tanh, dB", 20 * std::log10(worst + 1e-30));
+        expect(worstRel < 3e-7, "the largest difference relative to the value, dB", 20 * std::log10(worstRel + 1e-30));
+        std::vector<float> z = x;
+        tanhBlock(z.data(), z.data(), (int)z.size());      // in place, as SuperCollider calls it
+        bool same = true;
+        for (size_t i = 0; i < x.size(); i++) if (z[i] != y[i]) same = false;
+        expect(same, "in place gives the same samples", same ? 1 : 0);
+    }
+    std::printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
+    return fails ? 1 : 0;
+}

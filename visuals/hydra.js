@@ -90,7 +90,7 @@ const newsPic = () => HAVE_VIDEO ? src(s0) : osc(8, 0.05, 1).color(0.6, 0.6, 0.7
 // order. AUTO is 1 and is not a look of its own.
 const NAMES = ["AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS"];
 const AUTO_BY_PAGE = { TAKE: 5, VOICE: 2, TAPE: 5, LAYERS: 5, PADS: 2,
-  FILTER: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4,
+  FILTER: 3, EFFECT: 3, MIX: 3, DELAY: 7, REVERB: 7, MOTION: 8, SCENE: 4,
   TRACK2: 2, TRACKS: 4 };   // four: its track pages
 
 const LOOKS = {
@@ -293,29 +293,40 @@ setInterval(drawOsd, 250);
 s1.init({ src: osd, dynamic: true });
 
 // ---- the doodles ---------------------------------------------------------------
-// Slow, sparse drawings that draw themselves in and fade, and the words of a
-// sampler's screen that type themselves out. The Octatrack (or any MIDI
-// source on the norns) makes them: a note draws a shape (the track picks
-// where and which), a program change types the pattern (A01 to H16), a CC types
-// its number and value, start and stop type PLAY and STOP. With no MIDI, a
-// few ambient ones appear on their own, so the picture is never still.
+// Drawings that draw themselves in and fade, and the words of a sampler's
+// screen that type themselves out. They come ONLY from a played event: the
+// Octatrack (or any MIDI source on the norns) makes them. A note draws a
+// shape (the track picks the column, the colour and the kind; the pitch picks
+// the height; the velocity the size), a program change types the pattern (A01
+// to H16), a CC types its number and value, start and stop type PLAY and
+// STOP. With no MIDI, nothing is drawn: the looks and the tape do the moving.
 const dd = document.createElement("canvas");
 dd.width = 960; dd.height = 540;
 const dx = dd.getContext("2d");
-const PHRASES = ["FUNC + BANK", "PTN 01", "TRK 5", "SCENE A", "SCENE B", "REC AB", "FX1: FILTER",
-  "FX2: DELAY", "LFO", "SLICE 12", "FLEX", "CROSSFADER", "YES/SAVE", "LIVE SAMPLING",
-  "THRU", "GRAIN", "FREEZE", "TAPE", "SEND", "RETURN"];
 const actors = [];
-let nextAmbient = 0;
 const rnd = (a, b) => a + Math.random() * (b - a);
-const pick = (list) => list[Math.floor(Math.random() * list.length)];
+const TAU = Math.PI * 2;
+// one colour per track, all from the warm faded palette of the tape
+const INK = ["#f0ead8", "#e8c98a", "#e39a8a", "#9fd0c4", "#c7a4d8", "#d8d27a", "#a9bfe8", "#f0b27a"];
+const KINDS = ["rings", "mesh", "spiral", "burst", "lattice", "scribble"];
+let lastCcText = 0;
 function addActor(a) {
-  a.t = 0; a.pts = Array.from({ length: 14 }, () => [rnd(-90, 90), rnd(-90, 90)]);
+  a.t = 0;
+  if (a.kind === "scribble") a.pts = Array.from({ length: 22 }, () => [rnd(-100, 100), rnd(-100, 100)]);
+  if (a.kind === "mesh") {          // a low-poly shard: a ring of uneven points around a centre
+    const n = 7 + Math.floor(Math.random() * 4);
+    a.pts = Array.from({ length: n }, (_, i) => {
+      const ang = (i / n) * TAU + rnd(-0.25, 0.25), r = rnd(0.55, 1);
+      return [Math.cos(ang) * r, Math.sin(ang) * r];
+    });
+    a.core = [rnd(-0.2, 0.2), rnd(-0.2, 0.2)];
+  }
+  if (a.kind === "burst") a.rays = Array.from({ length: 16 }, (_, i) => [(i / 16) * TAU + rnd(-0.1, 0.1), rnd(0.4, 1)]);
   actors.push(a);
   if (actors.length > 40) actors.shift();
 }
-function doodle(kind, x, y, size, life) { addActor({ kind, x, y, size, life: life || 360 }); }
-function phrase(text, x, y, size, life) { addActor({ kind: "text", x, y, size, life: life || 300, text }); }
+function doodle(kind, x, y, size, life, ink) { addActor({ kind, x, y, size, life: life || 360, ink: ink || INK[0] }); }
+function phrase(text, x, y, size, life) { addActor({ kind: "text", x, y, size, life: life || 300, text, ink: INK[0] }); }
 const noteName = (n) => ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][n % 12] + (Math.floor(n / 12) - 1);
 
 function onEvent(name, a) {
@@ -324,7 +335,7 @@ function onEvent(name, a) {
     const ch = a[0] | 0, note = a[1] | 0, vel = a[2] | 0;
     const x = 80 + ((ch - 1) % 8) * 100 + rnd(-20, 20);       // the track picks the column
     const y = 540 - 60 - ((note % 48) / 48) * 400;            // the pitch picks the height
-    doodle(["circle", "line", "scribble"][ch % 3], x, y, 40 + vel * 0.7, 300);
+    doodle(KINDS[(ch - 1 + (note % 2)) % KINDS.length], x, y, 50 + vel * 0.9, 300, INK[(ch - 1) % INK.length]);
     if (Math.random() < 0.3) phrase("TRK " + ch + "  " + noteName(note), x, y - 30, 26, 200);
     flash = Math.max(flash, vel / 127 * 0.5);
     otText = "TRK " + ch; otAt = now;
@@ -336,7 +347,8 @@ function onEvent(name, a) {
     otText = "PTN " + pat; otAt = now;
   } else if (name === "cc") {
     const cc = a[1] | 0, val = a[2] | 0;
-    if (Math.random() < 0.15) phrase("CC" + cc + " " + val, rnd(80, 760), rnd(80, 440), 30, 160);
+    // a knob sends many values: the display shows each, a word is typed at most 4 times a second
+    if (now - lastCcText > 250) { lastCcText = now; phrase("CC" + cc + " " + val, rnd(80, 760), rnd(80, 440), 30, 160); }
     otText = "CC" + cc + "  " + val; otAt = now;
   } else if (name === "run") {
     phrase(a[0] ? "PLAY" : "STOP", 480, 270, 130, 300);
@@ -350,32 +362,80 @@ function drawDoodles() {
   dx.fillStyle = "rgba(0,0,0,0.04)";
   dx.fillRect(0, 0, 960, 540);
   dx.globalCompositeOperation = "source-over";
-  if (Date.now() > nextAmbient) {
-    nextAmbient = Date.now() + rnd(3000, 7000);
-    const x = rnd(60, 700), y = rnd(80, 460);
-    if (Math.random() < 0.4) phrase(pick(PHRASES), x, y, rnd(40, 90), 300);
-    else doodle(pick(["circle", "line", "scribble"]), x, y, rnd(60, 200), 360);
-  }
   dx.lineCap = "round"; dx.lineJoin = "round";
   for (const d of actors) {
     d.t++;
     const p = Math.min(d.t / 100, 1);                         // the draw-in
     const breathe = 1 + 0.03 * Math.sin(d.t * 0.03);
     const fade = Math.min(1, (d.life - d.t) / 60);            // the fade out at the end
+    const R = d.size * 0.5 * breathe;
     dx.globalAlpha = Math.max(0, fade) * 0.85;
-    dx.strokeStyle = dx.fillStyle = "#f0ead8";
+    dx.strokeStyle = dx.fillStyle = d.ink;
     if (d.kind === "text") {
       dx.font = "bold " + Math.round(d.size) + "px 'Courier New', monospace";
       dx.textBaseline = "top";
       const n = Math.floor(p * d.text.length);
       dx.fillText(d.text.slice(0, n) + (d.t % 40 < 20 && p < 1 ? "_" : ""), d.x, d.y);
-    } else if (d.kind === "circle") {
+    } else if (d.kind === "rings") {
+      // three rings that close one after another, with tick marks on the outer one
       dx.lineWidth = 3;
-      dx.beginPath(); dx.arc(d.x, d.y, d.size * 0.5 * breathe, 0, p * Math.PI * 2); dx.stroke();
-    } else if (d.kind === "line") {
-      dx.lineWidth = 4;
-      dx.beginPath(); dx.moveTo(d.x, d.y);
-      dx.lineTo(d.x + d.pts[0][0] * 2 * p, d.y + d.pts[0][1] * 2 * p); dx.stroke();
+      for (let i = 0; i < 3; i++) {
+        const q = Math.min(1, Math.max(0, p * 1.6 - i * 0.3));
+        dx.beginPath(); dx.arc(d.x, d.y, R * (1 - i * 0.28), -1.57, -1.57 + q * TAU); dx.stroke();
+      }
+      dx.lineWidth = 2;
+      for (let i = 0; i < 24 * p; i++) {
+        const ang = (i / 24) * TAU + d.t * 0.004;
+        dx.beginPath();
+        dx.moveTo(d.x + Math.cos(ang) * R * 1.08, d.y + Math.sin(ang) * R * 1.08);
+        dx.lineTo(d.x + Math.cos(ang) * R * 1.18, d.y + Math.sin(ang) * R * 1.18); dx.stroke();
+      }
+    } else if (d.kind === "mesh") {
+      // a low-poly shard: a faint fill, the outline, the spokes to the core, a dot on each corner
+      const n = d.pts.length, shown = Math.max(2, Math.ceil(p * n));
+      dx.lineWidth = 2.5;
+      dx.beginPath();
+      for (let i = 0; i < shown; i++) {
+        const px = d.x + d.pts[i][0] * R, py = d.y + d.pts[i][1] * R;
+        if (i === 0) dx.moveTo(px, py); else dx.lineTo(px, py);
+      }
+      if (p >= 1) dx.closePath();
+      dx.globalAlpha *= 0.2; dx.fill(); dx.globalAlpha /= 0.2; dx.stroke();
+      dx.lineWidth = 1.2;
+      for (let i = 0; i < shown; i++) {
+        const px = d.x + d.pts[i][0] * R, py = d.y + d.pts[i][1] * R;
+        dx.beginPath(); dx.moveTo(d.x + d.core[0] * R, d.y + d.core[1] * R); dx.lineTo(px, py); dx.stroke();
+        dx.fillRect(px - 3, py - 3, 6, 6);
+      }
+    } else if (d.kind === "spiral") {
+      dx.lineWidth = 2.5; dx.beginPath();
+      const turns = 3.2 * p;
+      for (let a = 0; a <= turns * TAU; a += 0.15) {
+        const r = R * (a / (3.2 * TAU));
+        const px = d.x + Math.cos(a + d.t * 0.006) * r, py = d.y + Math.sin(a + d.t * 0.006) * r;
+        if (a === 0) dx.moveTo(px, py); else dx.lineTo(px, py);
+      }
+      dx.stroke();
+    } else if (d.kind === "burst") {
+      dx.lineWidth = 2.5;
+      for (const [ang, len] of d.rays) {
+        dx.beginPath();
+        dx.moveTo(d.x + Math.cos(ang) * R * 0.25, d.y + Math.sin(ang) * R * 0.25);
+        dx.lineTo(d.x + Math.cos(ang) * R * (0.25 + len * 0.9 * p), d.y + Math.sin(ang) * R * (0.25 + len * 0.9 * p));
+        dx.stroke();
+      }
+      dx.beginPath(); dx.arc(d.x, d.y, R * 0.18, 0, TAU); dx.stroke();
+    } else if (d.kind === "lattice") {
+      // a square of crossing lines, drawn from the left, with a diagonal through it
+      dx.lineWidth = 1.8;
+      const n = 6, w = R * 1.6;
+      for (let i = 0; i <= n * p; i++) {
+        const o = (i / n) * w - w / 2;
+        dx.beginPath(); dx.moveTo(d.x + o, d.y - w / 2); dx.lineTo(d.x + o, d.y + w / 2); dx.stroke();
+        dx.beginPath(); dx.moveTo(d.x - w / 2, d.y + o); dx.lineTo(d.x + w / 2, d.y + o); dx.stroke();
+      }
+      dx.lineWidth = 3;
+      dx.beginPath(); dx.moveTo(d.x - w / 2, d.y - w / 2); dx.lineTo(d.x - w / 2 + w * p, d.y - w / 2 + w * p); dx.stroke();
     } else {
       dx.lineWidth = 2.5;
       dx.beginPath();

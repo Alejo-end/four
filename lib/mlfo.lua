@@ -45,6 +45,8 @@ local TARGETS = {
   "pos_jitter", "warp_window", "clouds_pos", "clouds_tex", "wear",
   -- four: the COLOR and SPACE of a track, and its level
   "crush", "fx_dly", "fx_rev", "grain_level",
+  -- four: the two knobs of a track's effect (appended: a PSET stores the index)
+  "effect_amt", "effect_rate",
 }
 -- the knobs all four tracks share: the same id whatever the track
 local SHARED = {

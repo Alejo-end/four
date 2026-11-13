@@ -1691,7 +1691,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   four_cmds(sc, add)
-  ok(n == 173, "the engine command count is 173, the expected fingerprint (got " .. n .. ")")
+  ok(n == 185, "the engine command count is 185, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2713,6 +2713,38 @@ do
     "DRY clears every track's drive and crush")
   CTX.throws_forget()
 
+  -- THE EFFECT: its own page for the focused track. E2 and E3 are the two
+  -- knobs, K1 held has nothing; K3 steps the type and skips OFF; K2 is ON
+  -- under the punch law and remembers the type; DRY switches every slot off.
+  T.goto_page("EFFECT")
+  ok(CTX.enc_param(2) == "effect_amt" and CTX.enc_param(3) == "effect_rate",
+    "EFFECT E2/E3 are track 1's effect amount and rate")
+  CTX.alt = true
+  ok(CTX.enc_param(2) == nil and CTX.enc_param(3) == nil, "...and K1 held has no knob there")
+  CTX.alt = false
+  ok(params:get("effect") == 1, "the effect starts OFF")
+  key(3, 1); key(3, 0)
+  ok(params:get("effect") == 2, "EFFECT K3 steps OFF to CHORUS")
+  for _ = 1, 4 do key(3, 1); key(3, 0) end
+  ok(params:get("effect") == 6, "...and on to RING")
+  key(3, 1); key(3, 0)
+  ok(params:get("effect") == 2, "...and wraps to CHORUS, not through OFF")
+  params:set("effect", 4)
+  key(2, 1); key(2, 0)
+  ok(params:get("effect") == 1, "EFFECT K2 switches the effect off")
+  key(2, 1); key(2, 0)
+  ok(params:get("effect") == 4, "...and on again brings back the effect it had")
+  params:set("track_sel", 3)
+  ok(CTX.enc_param(2) == "t3_effect_amt" and CTX.enc_param(3) == "t3_effect_rate",
+    "on track 3 the knobs are track 3's")
+  key(3, 1); key(3, 0)
+  ok(params:get("t3_effect") == 2 and params:get("effect") == 4,
+    "...and K3 steps track 3's effect, not track 1's")
+  CTX.fx_dry()
+  ok(params:get("effect") == 1 and params:get("t3_effect") == 1, "DRY switches every effect off")
+  CTX.throws_forget()
+  params:set("track_sel", 1)
+
   -- SPACE: the FX sends are on the routing grid, full by default
   for n = 1, 4 do
     local d = n == 1 and "fx_dly" or ("t" .. n .. "_fx_dly")
@@ -3389,15 +3421,26 @@ do
   ok(params:get("track_sel") == 1 and Mp.page_title() == "FILTER" and CTX.tsel() == 1,
     "...and round to track 1")
   ok(CTX.enc_param(2) == "cutoff", "...with track 1's knobs again")
-  -- the flag: track 2 sounding lights T2 in the header on any page
-  local HF2
-  for _, f in ipairs(Mp.HFLAGS) do if f.id == "T2" then HF2 = f end end
+  -- the track cells in the header: bright while a track sounds, dim when
+  -- OFF, a box on the track the page edits, an underline on shared pages
   T.goto_page("TAKE")
   redraw()
-  ok(HF2 and HF2.on, "track 2 playing lights the T2 flag")
+  ok(Mp.CELL[2] == "lit", "track 2 playing lights its number in the header")
+  ok(Mp.CELL[1] == "box", "TAKE boxes the track it edits")
   params:set("t2_mode", 1)
   redraw()
-  ok(not HF2.on, "...and OFF puts it out")
+  ok(Mp.CELL[2] == "dim", "...and OFF dims it")
+  T.goto_page("DELAY")
+  redraw()
+  ok(Mp.CELL[1] == "line", "a shared page (DELAY) only underlines the focus: it edits no track")
+  T.goto_page("TAKE")
+  -- recording: the focused cell blinks, and TAKE says what it records
+  params:set("rec", 1)
+  local seen = {}
+  for _ = 1, 4 do _h.run_ticks(1); redraw(); seen[Mp.CELL[1]] = true end
+  ok(seen.rec, "recording turns the focused track's cell into the REC box")
+  params:set("rec", 0)
+  _h.run_ticks(1)
   params:set("t2_filt_type", 1); params:set("t2_cutoff", 20000)
   params:set("mode", 5)
 end

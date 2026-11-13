@@ -15,18 +15,26 @@ block current, and add a change-log entry for every change.
   data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The one-track
   mangler is retired: git tag `mangler-1`. The OSC addresses stay `/mangler/...`, because
   the visuals bridge reads them. The log lines still start with `mangler:`.
-- **The fingerprint:** after a RESTART maiden must read **`count: 173`**. That is
-  mangler's 66, plus crush and the two FX sends of track 1, 30 for each of tracks 2 to 4,
-  12 sends, rec_track and buf_track.
+- **The fingerprint:** after a RESTART maiden must read **`count: 185`**. That is
+  mangler's 66, plus crush, the two FX sends and the three effect commands of track 1,
+  33 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
 - **The instrument:** four tracks, each with its OWN material (four 60 s buffers). K1+E1
   picks the track. Each track has its own voice (OFF GRAIN WARP PV PLAY CLOUD), window,
-  filter, COLOR (drive, crush) and SPACE (delay and reverb sends, on the TRACKS grid).
+  filter, COLOR (drive, crush), one EFFECT slot (OFF CHORUS FLANGE WOBBLE RESON RING, with
+  an amount and a rate) and SPACE (delay and reverb sends, on the TRACKS grid).
   The four modulators can sit on any track. GRAIN is a granulator that reads the take
   (stereo grain pairs, spray, regular to Poisson timing); CLOUD is MiClouds.
-- **TRACKS** (after VOICE) is the hub: E2 picks the focused track, which TAKE, VOICE and
-  FILTER then edit; K1 held shows its sends.
-- **On the device 2026-11-12:** `count: 173`. The worst case takes 45% of the scsynth
+- **TRACKS** (after VOICE) is the hub: E2 picks the focused track, which TAKE, VOICE,
+  FILTER and EFFECT then edit; K1 held shows its sends.
+- **On the device 2026-11-12:** `count: 185`. The worst case takes 45% of the scsynth
   thread, with 0 xruns over 60 s (doc/measurements/2026-11-12/). Nobody has listened yet.
+- **The effect slot (four, third and fourth changes):** engine, params and the EFFECT
+  page (after FILTER, thirteen pages now: E2 amount, E3 rate, K2 ON, K3 TYPE). Measured
+  on the device: each type
+  changes the output and the slot adds no CPU that the measurement can see
+  (doc/measurements/2026-11-12/effect-slot.md). RESON's level was raised in the fifth
+  change and now sits within about 4 dB of the dry signal.
+- The history below says 173 in places; read 185.
 - The history below the line is mangler's, from before the merge; where it says 66 or
   `Engine_Mangler`, read 173 and `Engine_Four`.
 
@@ -59,15 +67,47 @@ block current, and add a change-log entry for every change.
   loop seams, STOP and filter type changes; delay and limiter timing; the deck loop on a
   preset reload. On the device 2026-11-11: compiles, `count: 66`, all defs built, modes
   cycle with no leftover synths, CPU about 19%. Nobody has listened yet.
-- **Next work:** doc/plan.md (the engine batch for the device session, then the rest).
+- **SuperCollider on the Mac (2026-11-13):** 3.14.1 is installed, without sc3-plugins or
+  mi-UGens (DFM1, JPverb and MiClouds take their fallbacks there). `test/dsp/run_engine.sh`
+  compiles the real engine with a stand-in for CroneEngine, prints the command count and
+  renders the SynthDefs offline; `an_engine.py` measures them. Invariant 3 below is out of
+  date for stock UGens. The DSP plan and the measurements: doc/dsp-plan.md.
+- **The exact read head (four, sixth change), on the device since 2026-11-13:** PLAY, PV
+  and CLOUD read through `exactRd` (a head in whole frames plus a fraction), bit exact at
+  pitch 1. CHORUS and WOBBLE set their depth in cents. `count: 185`; four PLAY tracks
+  take 41.8% of the thread with the stock voices. Nobody has listened yet.
+- **FourStretch (four, seventh to ninth changes), ON the device since 2026-11-13:**
+  `ugen/` holds our own UGens (FourPV, FourWarp, FourRead) and their proof
+  (`ugen/test_core.cpp`, plain C++). `lib/FourStretch.sc` is their ONLY class file: the
+  binary goes alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`, never
+  with a second class file. The engine uses them when it finds the binary and logs
+  `mangler: FourStretch on`; absent, it builds the stock voices. Build steps:
+  ugen/README.md (on the norns, with `-DFOUR_FFTW`). The plugin also holds `FourTanh`,
+  which every `tanh` of the engine uses (ninth change): install the binary BEFORE an
+  engine that names a new UGen. Measured: `count: 185`, four PV tracks at pitch 1 take
+  49% of the thread, four WARP 39%, four PLAY 36%; four PV at pitch 2 take 64%, OVER
+  the budget (doc/measurements/2026-11-13/fourstretch.md). The user listened on
+  2026-11-13 (before the ninth change) and liked the sound. Next CPU step: pause what
+  is not heard in a track (the second DFM1 pair, the unused effects, the crusher).
+- **Unity gain (four, tenth change), on the device 2026-11-13:** DFM1's makeup was x2
+  on a filter that is already 1 dB hot, so every track ran 7 dB loud and the master
+  limiter squashed any mix of three or four tracks. `dfmTrim` (0.891) makes one PLAY
+  track leave the engine at the level of its take. The output is 7 dB quieter than
+  before; four tracks now peak at -2.7 dBFS (doc/measurements/2026-11-13/mud.md).
+  Nobody has listened yet. Drive and RESON bite later on the knob now.
+- **Deck pages (four, eleventh change), on the device 2026-11-13:** a deck strip (TAPE,
+  LAYERS, the tape lane of MIX) shows the LOOP, not the 60 s deck (`deck_view` in
+  lib/mpages.lua), from a 1024-bin picture. TAPE says `SILENT / SEE MIX` when the MIX
+  crossfade hides it. Screenshots taken on the device; the user did not see it yet.
+- **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 173` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 185` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
-   source no longer adds up to 66.
+   source no longer adds up to 185.
 
 Lua-only changes skip all this: save and reload the script.
 

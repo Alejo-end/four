@@ -15,9 +15,9 @@ modulators; with a modulator selected the other knobs are its own.
 Tracks (four): four engine tracks and one focus. On TRACKS, E2 picks the
 focused track and E3 sets its level; K2 turns it on and off, K3 cycles its
 mode. Hold K1 there for its sends: K1+E2 picks the track it sends to, K1+E3
-how much. TAKE, VOICE and FILTER then edit the focused track (TAKE 2, VOICE 2
+how much. TAKE, VOICE, FILTER and EFFECT then edit the focused track (TAKE 2, VOICE 2
 ...), with the same knobs reaching its `t<n>_` params; on TAKE 2 to 4, SNAP puts
-the window on track 1's and back. K3 held on VOICE or FILTER also steps the
+the window on track 1's and back. K3 held on VOICE, FILTER or EFFECT also steps the
 focus. Tracks 2 to 4 have no erosion: VOICE in PLAY keeps scan and pitch on
 K1 and FRZ on K2 there. Drive and dry/wet are shared by every track.
 
@@ -32,6 +32,7 @@ K1 and FRZ on K2 there. Drive and dry/wet are shared by every track.
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
 | LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
 | FILTER | `cutoff` | `resonance` | `drive` | `crush` | OPEN | TYPE, hold TRK 2 | no |
+| EFFECT | `effect_amt` | `effect_rate` | none | none | ON | TYPE, hold TRK 2 | no |
 | DELAY | `delay_mix` | `delay_fb` | `delay_time` | `delay_sync` | INF | KILL | no |
 | REVERB | `rev_mix` | `rev_decay` | `rev_size` | `rev_damp` | WASH | BLOOM | no |
 | MIX | `mix` | `out_level` | `input_level` | `dry_wet` | ENG | TAPE | no |
