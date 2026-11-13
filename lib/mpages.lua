@@ -1631,58 +1631,91 @@ local function body_DELAY(frame)
   end
 end
 
+-- REVERB: FOUR SQUARES (doc/space-plan.md, 12.2). The room spreads a sound in
+-- four steps, and each step turns every echo into eight. So the page draws
+-- four squares around one point, each denser than the one inside it.
+--   SIZE   is the size of the squares
+--   DECAY  is how long a square glows after the sound reached it
+--   DAMP   is the weight of the lines: a dark room draws them double
+--   the four tracks stand at the four corners, and a line from a corner to
+--   the squares is that track's send, as bright as it is open
+-- A pulse leaves the centre only while a track that sends is sounding: the
+-- picture moves when sound goes in, and rests when none does.
+local RV_GAP = { 4, 3, 2, 1 }                  -- a dot every so many pixels, ring 1 to 4
+local RV_CX, RV_CY = 64, 31
+local RV_TX = { 5, 119, 5, 119 }               -- the tracks' corners
+local RV_TY = { 13, 13, 45, 45 }
+local RV_SEND = { "fx_rev", "t2_fx_rev", "t3_fx_rev", "t4_fx_rev" }
+local RV_NAME = { "1", "2", "3", "4" }
+local RV_PERIOD = 14                           -- frames from one pulse to the next
 local function body_REVERB(frame)
   local vmix = pget("rev_mix", 0)
-  if not spc_frame(vmix > 0.005) then return end
-  -- the reverb tail: a filled slope whose reach IS the decay
-  local tau = max(pget("rev_decay", 2), 0.1) * SPC_PPS / 6.9
-  local A = 4 + vmix * 26
-  screen.level(3)
-  for x = SPC_X0 + 1, 124 do
-    local h = A * exp(-(x - SPC_X0) / tau)
-    if h >= 1 then
-      screen.move(x, SPC_BASE - h)
-      screen.line(x, SPC_BASE - 1)
-    end
-  end
-  screen.stroke()
-  -- discrete reflections riding the slope: rev_size spaces them (a bigger
-  -- room = sparser, later reflections), rev_damp darkens them toward the
-  -- tail-end (high frequencies absorbed) — so both encoders READ on the page.
-  local step = 2 + floor(pget("rev_size", 1))          -- 2 (tight) .. 7 (vast)
+  local live = vmix > 0.005
+  local size = clamp((pget("rev_size", 1) - 0.5) / 4.5, 0, 1)
+  local r1 = 4 + size                            -- the squares: 4, 8, 12, 16 up to 5, 10, 15, 20
   local damp = pget("rev_damp", 0.3)
-  local span = 124 - SPC_X0
-  for x = SPC_X0 + 1, 124, step do
-    local h = A * exp(-(x - SPC_X0) / tau)
-    if h >= 1 then
-      screen.level(max(2, floor(9 - damp * 7 * (x - SPC_X0) / span)))
-      screen.rect(x, SPC_BASE - h, 1, 1)
-      screen.fill()
+  local tau = max(pget("rev_decay", 2), 0.1) * FPS / 6.9     -- frames for one e-fold
+  -- who feeds the room
+  local feeding = false
+  for n = 1, 4 do
+    local v = pget(RV_SEND[n], 1)
+    local on = live and v > 0.01 and track_sounds(n)
+    if on then feeding = true end
+    ptext(RV_NAME[n], RV_TX[n], RV_TY[n], 1, on and 12 or 3)
+    if live and v > 0.01 then
+      local r4 = floor(r1 * 4 + 0.5)
+      local sx = RV_TX[n] < 64 and 1 or -1
+      local sy = RV_TY[n] < 30 and 1 or -1
+      screen.level(on and floor(3 + 9 * clamp(v, 0, 1)) or 2)
+      screen.move(RV_TX[n] + (sx > 0 and 6 or -2), RV_TY[n] + (sy > 0 and 6 or -2))
+      screen.line(RV_CX - sx * r4, RV_CY - sy * r4)
+      screen.stroke()
     end
   end
-  -- "this will not stop soon": the tail runs into the hatched margin
-  if A * exp(-(124 - SPC_X0) / tau) >= 1 then
-    screen.level(9)
-    for y = 14, SPC_BASE do
-      local xx = 125 + ((y + 125) % 3)
-      if xx <= 127 then screen.rect(xx, y, 1, 1) end
+  -- the four squares
+  local p = frame % RV_PERIOD
+  for k = 1, 4 do
+    local r = floor(r1 * k + 0.5)
+    local lv = live and 3 or 1
+    if feeding then
+      local age = (p - 2 * k) % RV_PERIOD          -- frames since the pulse reached this square
+      lv = floor(3 + 12 * (0.25 + 0.75 * vmix) * exp(-age / tau) + 0.5)
+    end
+    screen.level(clamp(lv, 1, 15))
+    local gap = RV_GAP[k]
+    for d = -r, r - 1, gap do
+      screen.rect(RV_CX + d, RV_CY - r, 1, 1)       -- top, left to right
+      screen.rect(RV_CX + r, RV_CY + d, 1, 1)       -- right, down
+      screen.rect(RV_CX - d, RV_CY + r, 1, 1)       -- bottom, right to left
+      screen.rect(RV_CX - r, RV_CY - d, 1, 1)       -- left, up
+    end
+    if damp > 0.5 and r > 2 then                    -- a dark room: the lines are double
+      for d = -r + 1, r - 2, gap do
+        screen.rect(RV_CX + d, RV_CY - r + 1, 1, 1)
+        screen.rect(RV_CX + r - 1, RV_CY + d, 1, 1)
+        screen.rect(RV_CX - d, RV_CY + r - 1, 1, 1)
+        screen.rect(RV_CX - r + 1, RV_CY - d, 1, 1)
+      end
     end
     screen.fill()
   end
-  -- shimmer: motes climbing off the tail
+  -- the point the sound enters at
+  screen.level(feeding and 15 or (live and 5 or 2))
+  screen.rect(RV_CX - 1, RV_CY - 1, 2, 2)
+  screen.fill()
+  -- shimmer: motes that climb off the outer square
   local shim = pget("shimmer", 0)
-  if shim > 0.01 then
+  if live and shim > 0.01 then
+    local r4 = floor(r1 * 4 + 0.5)
     local spd = 0.4 + value_norm("shimmer_pitch", pget("shimmer_pitch", 12)) * 1.4
-    local n = 3 + floor(shim * 15)
     screen.level(7)
-    for i = 1, n do
-      local mx = SPC_X0 + 4 + hash(i, 3, 0) * 100
-      local ph = (frame * spd + hash(i, 5, 0) * 100) % 28
-      screen.rect(mx, SPC_BASE - 4 - ph, 1, 1)
+    for i = 1, 3 + floor(shim * 9) do
+      local mx = RV_CX - r4 + hash(i, 3, 0) * 2 * r4
+      local ph = (frame * spd + hash(i, 5, 0) * 100) % 8
+      screen.rect(mx, RV_CY - r4 - 2 - ph, 1, 1)
     end
     screen.fill()
   end
-  spc_onset()
 end
 
 -- ============================================================================

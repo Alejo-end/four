@@ -4135,3 +4135,17 @@ doc/space-plan.md.
   comb of FLANGE and ECHO (`DelayFb`) had the same fault and has the same repair.
 To do on the device: build the plugin, install it BEFORE the engine, restart, read
 `count: 197`, measure the delay's cost, and confirm that silence costs nothing.
+
+four, eighteenth change: **REVERB draws four squares (Lua only). NOT on the device.**
+The page is the room's own mechanism (doc/space-plan.md, 12.2): four squares around
+one point, each denser than the one inside it, as each of the room's four steps turns
+an echo into eight.
+- SIZE is the size of the squares (4, 8, 12, 16 pixels up to 5, 10, 15, 20).
+- DECAY is how long a square glows after a pulse reached it. DAMP above the middle
+  draws the lines double: a dark room.
+- The four tracks stand at the four corners. A line from a corner to the squares is
+  that track's reverb send, bright while the track sounds.
+- A pulse leaves the centre only while a track that sends is sounding. At a mix of 0
+  the page rests, dim.
+- Shimmer's motes climb off the outer square.
+The time axis and the slope of the old page are gone from REVERB. DELAY is unchanged.
