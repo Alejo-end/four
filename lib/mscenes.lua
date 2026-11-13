@@ -385,7 +385,7 @@ end
 
 local function say(msg, detail, slot)
   M.msg, M.msg_at, M.msg_slot = msg, C.frame, slot
-  print("mangler: " .. (detail or msg))
+  print("four: " .. (detail or msg))
 end
 
 local function say_recall(slot, n, moved)
@@ -1137,7 +1137,7 @@ end
 function M.pset_write(number)
   local ok, err = pcall(tab.save,
     { v = 1, slots = M.slots, safe = M.safe }, path_for(number))
-  if not ok then print("mangler: scene save failed — " .. tostring(err)) end
+  if not ok then print("four: scene save failed — " .. tostring(err)) end
 end
 
 function M.pset_read(number)
@@ -1163,7 +1163,7 @@ function M.pset_read(number)
   if not util.file_exists(path) then return end
   local ok, t = pcall(tab.load, path)
   if not (ok and type(t) == "table" and type(t.slots) == "table") then
-    print("mangler: scene file unreadable — " .. tostring(t))
+    print("four: scene file unreadable — " .. tostring(t))
     return
   end
   for i = 1, NUM_SLOTS do

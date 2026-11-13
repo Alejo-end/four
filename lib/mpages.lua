@@ -2593,7 +2593,52 @@ local function draw_page_flash()
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
+-- THE OPENING: about two seconds, once, when the script starts. Four bars
+-- rise one after the other (the four tracks), the name lands on them, and the
+-- line "ALL MANKIND" types itself under it. Any key or knob ends it at once.
+local SPLASH_FRAMES = 34
+local SPLASH_LINE = "ALL MANKIND"
+local function draw_splash(t)
+  local fade = t > 28 and (SPLASH_FRAMES - t) / 6 or 1      -- out over the last frames
+  local function lv(l) return max(1, floor(l * fade + 0.5)) end
+  -- the four bars, each rising for five frames, two frames apart
+  for k = 0, 3 do
+    local g = clamp((t - k * 2) / 5, 0, 1)
+    if g > 0 then
+      local h = floor(22 * g * (2 - g) + 0.5)                -- ease out
+      screen.level(lv(t < 12 and 12 or 3))
+      screen.rect(37 + k * 14, 36 - h, 10, h)
+      screen.fill()
+    end
+  end
+  if t >= 11 then
+    -- the name, cut out of the bars' place and brightening
+    local b = clamp((t - 11) / 4, 0, 1)
+    local w = text_w("FOUR", 3)
+    screen.level(0)
+    screen.rect(64 - w / 2 - 2, 17, w + 4, 19)
+    screen.fill()
+    ptext_c("FOUR", 64, 19, 3, lv(4 + floor(11 * b)))
+  end
+  if t >= 15 then
+    local n = min(#SPLASH_LINE, t - 14)
+    local full = text_w(SPLASH_LINE, 1)
+    ptext(SPLASH_LINE:sub(1, n), floor(64 - full / 2), 44, 1, lv(9))
+  end
+end
+
 function M.redraw()
+  if C.splash_from then
+    local t = C.frame - C.splash_from
+    if t >= SPLASH_FRAMES or t < 0 or C.last_input > C.splash_from then
+      C.splash_from = nil
+    else
+      screen.clear()
+      draw_splash(t)
+      screen.update()
+      return
+    end
+  end
   if orig_level == nil then
     orig_level = screen.level
     dim_level = function(l)

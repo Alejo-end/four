@@ -641,3 +641,15 @@ else
 end
 
 print("done: " .. _h.ticks() .. " ticks")
+
+-- the opening picture (Mpages' draw_splash), at five moments of its two seconds
+if not VARIANT then
+  local c = script_ctx()
+  for _, t in ipairs({ 4, 9, 14, 22, 31 }) do
+    c.splash_from = c.frame - t
+    c.last_input = c.splash_from - 1
+    redraw()
+    export(string.format("%s_00_SPLASH_%02d", PREFIX, t))
+  end
+  c.splash_from = nil
+end

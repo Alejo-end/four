@@ -322,7 +322,7 @@ function M.set_armed(on)
           local s = C.clock_length(M.rec_len / FPS)
           if s then
             fixed = clamp(floor(s * FPS + 0.5), MIN_LEN, MAX_LEN)
-            print(string.format("mangler: MOTION loop %.2fs -> %.2fs, on the clock",
+            print(string.format("four: MOTION loop %.2fs -> %.2fs, on the clock",
               M.rec_len / FPS, fixed / FPS))
           end
         end
@@ -434,7 +434,7 @@ function M.tick()
       -- (arming an overdub starts playback; getting here means it was stopped
       -- afterwards, by hand).
       params:set("motion_rec", 0)
-      print("mangler: MOTION overdub needs the loop running — disarmed")
+      print("four: MOTION overdub needs the loop running — disarmed")
     end
   end
   -- 2) playback: advance the playhead and fire each lane's due events
@@ -523,7 +523,7 @@ function M.pset_write(number)
     t.ids[i], t.lanes[id] = id, { f = f, v = v }
   end
   local ok, err = pcall(tab.save, t, path_for(number))
-  if not ok then print("mangler: motion save failed — " .. tostring(err)) end
+  if not ok then print("four: motion save failed — " .. tostring(err)) end
 end
 
 function M.pset_read(number)

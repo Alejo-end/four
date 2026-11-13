@@ -340,7 +340,7 @@ class Norns:
         time.sleep(0.5)
         tail = self.transcript("sc")[-4000:]
         tree = tail[tail.rfind("NODE TREE"):] if "NODE TREE" in tail else ""
-        return re.findall(r"\d+ (mangler_\w+)", tree)
+        return re.findall(r"\d+ (four_\w+)", tree)
 
     def take_dump(self, stem="/tmp/mg"):
         """Write the take's two buffers to float WAVs on the device, and wait for them.

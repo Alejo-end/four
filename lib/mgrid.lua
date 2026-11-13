@@ -57,9 +57,9 @@ do
     if ok and mg then
       grid_mod = mg
       M.midigrid_loaded = true
-      print("mangler: midigrid loaded — midi grid controllers welcome")
+      print("four: midigrid loaded — midi grid controllers welcome")
     else
-      print("mangler: midigrid present but failed to load: " .. tostring(mg))
+      print("four: midigrid present but failed to load: " .. tostring(mg))
     end
   end
 end
@@ -728,9 +728,9 @@ function M.connect()
       if ok and cand then
         gg = cand
         M.have_launchpad = true
-        print("mangler: Launchpad Mini MK3 colour driver — " .. tostring(lp.name))
+        print("four: Launchpad Mini MK3 colour driver — " .. tostring(lp.name))
       else
-        print("mangler: Mini MK3 found but colour driver failed; using fallback")
+        print("four: Mini MK3 found but colour driver failed; using fallback")
       end
     end
   end

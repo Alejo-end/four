@@ -1,68 +1,84 @@
--- mangler — a live stereo sampler + mangler for norns
--- =====================================================
+-- four: a 4-track sampler
+-- record any sound, then
+-- loop, stretch and grain
+-- it on four tracks.
+-- four all mankind.
 --
--- record external gear (synth, drum machine, anything line-level), then play
--- it back and mangle it. a fresh take loops back DRY — exactly what you
--- recorded. you ADD effects on top; they are never forced on.
+-- START
+-- 1 plug a sound into the
+--   norns input.
+-- 2 press K2 to record.
+--   press K2 again. your
+--   take loops, clean.
+-- 3 turn E1 to walk the
+--   pages.
 --
---   IN -> REC -> [ DRONE  +  PADS ] -> FILTER -> DELAY -> REVERB -> OUT
---                  clean loop /        (filter open, drive/delay/reverb
---                  granular /           all start at zero — dial them in)
---                  stretch / spectral
+-- ON EVERY PAGE
+-- E1    change the page
+-- E2 E3 the two knobs
+-- K2 K3 the two keys
+--       (the foot of the
+--       screen names them)
+-- K1    hold for a second
+--       pair of knobs
+-- K1+E1 pick track 1 to 4
+-- K1+K2 stop or start all
+-- K1+K3 tap: all effects
+--       off. hold: erase
+--       what the page holds
 --
--- the drone defaults to CLEAN PLAY — a straight loop of your take, exactly as
--- recorded. GRAIN / WARP / PV are mangling modes you switch on from VOICE.
+-- KEYS
+-- tap a key and it stays
+-- on. hold it and it is on
+-- only while you hold.
 --
--- PLAY IT (the redesign, doc/redesign.md)
---   TAKE    K2, play a phrase, K2 — the window snaps to your take and loops
---           it, dry. the ◇ by the title = "you hear the recording, verbatim"
---   VOICE   K3 cycles PLAY (clean) · GRAIN · WARP · PV; the texture IS the mode
---   DELAY   echoes: time · feedback (few → many → near-infinite) · mix
---   REVERB  the tail: decay · size · damp · mix — starts silent
---   PADS    the take chopped into 8 playable slices, each sound-locked
---   SCENE   capture whole sounds; HOLD K2 to peek, tap to keep; ◄ = way back
+-- PAGES
+-- TAKE   record a sound
+--        and set its loop
+-- VOICE  how the track
+--        plays the sound:
+--   PLAY   a clean loop
+--   GRAIN  a cloud of
+--          small pieces
+--   WARP   slow or fast,
+--          same pitch
+--   PV     freeze, smear
+--   CLOUD  texture
+-- TRACKS the four tracks:
+--        on, level, and
+--        sends (hold K1)
+-- TAPE   loop the whole
+--        output
+-- FILTER tone and drive
+-- EFFECT two for a track:
+--        chorus, flange,
+--        wobble, reson,
+--        ring, echo
+-- DELAY  echo, shared
+-- REVERB space, shared
+-- MIX    the levels
+-- PADS   8 slices to play
+-- MOTION record a knob
+--        move, set LFOs
+-- SCENE  keep a sound,
+--        call it back,
+--        morph to it
 --
--- THE PUNCH LAW (every key, every page):
---   press = engage NOW · release quickly = it latches · held = a punch,
---   release disengages · already latched = any press turns it off.
+-- GOOD TO KNOW
+-- each track has its own
+-- sound. pick a track with
+-- K1+E1, then TAKE records
+-- into it.
+-- a fresh take plays dry.
+-- you add the effects.
+-- every knob maps to MIDI
+-- in PARAMS.
+-- a grid is welcome, and
+-- never needed.
 --
--- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (twelve stations, by family: TAKE VOICE TRACKS · TAPE
---          · FILTER EFFECT DELAY REVERB · MIX · PADS MOTION SCENE; the page name
---          pops big while you scroll)
---   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
---          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
---   K1     shift (hold). the footer swaps whole while it's down
---   K2/K3  the page's two gestures, named in the footer, punch law above
---   K1+K2  STOP / START — GLOBAL, every page, no exceptions. tap = choke
---          (title inverts), tap again = the exact mix back, hold = mute stab
---          (also SPACE on a typing keyboard · grid row 2 · MIDI `stop all`)
---   K1+K3  DRY (tap): playback path thrown clean — delay/reverb/shimmer/
---          drive/clouds-fb zero, filter open. HELD ~1s = the ERASER: an arc
---          fills, and at the ring the page's material is wiped (take / tape
---          loop / lane / slot). GLOBAL, every page.
---   K1+E1  (four) the TRACK, from anywhere; the morph is on SCENE. was: the MORPH: sweep toward the selected scene; back
---          to zero lands exactly home
---
--- SCENE   8 slots + the ◄ cell. K3 captures, K2 recalls (HOLD = peek: borrow
---   the scene, release comes home; tap = commit), E3 morphs from LIVE toward
---   the selected slot. every commit parks the previous sound in ◄
---   automatically — select ◄ and tap K2 to undo. `chaos throw` (PARAMS/grid):
---   hold for bounded mayhem, release to land back on ◄.
---
--- NOTES   a MIDI keyboard (or USB typing keyboard, ableton-style: A-row =
---   white keys, W-row = black, Z/X = octave) retunes the sample chromatically;
---   with pad input on they trigger the PADS slices instead. PARAMS > keys.
---
--- GRID (optional, never required)   a monome grid, a Launchpad Mini MK3 (its
---   own colour driver), or another launchpad-style controller via midigrid
---   adds the scene bank, a transport strip, a workspace that follows the page,
---   and one piano octave. see lib/mgrid.lua.
---
--- BEST SOUND (optional, auto-detected)   JPverb (sc3-plugins) reverb + MiClouds
---   (mi-UGens) granular are used when installed, else stock FreeVerb / GrainBuf.
---   guarded at build time — a missing plugin can never hang loading.
---
+-- the full guide is in
+-- README.md
+
 -- -----------------------------------------------------------------------------
 -- this file is the orchestrator: state + params + key/encoder handlers. the
 -- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
@@ -76,7 +92,7 @@ engine.name = "Four"
 
 -- bring-up diagnostics: load milestones in maiden. If "script file executed"
 -- appears without "init() called", the engine died in alloc — check the SC tab.
-print("mangler: script file executed")
+print("four: script file executed")
 
 local mu = require "musicutil"
 
@@ -389,7 +405,7 @@ end
 -- full story to the log
 local function take_say(msg, detail)
   ctx.take_msg, ctx.take_msg_at = msg, ctx.frame or 0
-  print("mangler: " .. (detail or msg))
+  print("four: " .. (detail or msg))
 end
 ctx.take_say = take_say
 
@@ -601,7 +617,7 @@ end
 local function switch_track()
   params:set("track_sel", tsel() % NTRACKS + 1)
   flash_page()
-  print("mangler: the focus is track " .. tsel())
+  print("four: the focus is track " .. tsel())
 end
 -- MODE cycles PLAY->GRAIN->WARP->PV->CLOUD->PLAY, skipping OFF (a silence
 -- pothole mid-set; stopping is STOP's job — OFF stays reachable in PARAMS).
@@ -1206,13 +1222,13 @@ function ctx.pads_uncut() ctx.pad_cuts = nil end
 -- file under a scan still reading it. `background`: see take_to_wav.
 local function scan_take(tag, scan, background)
   if not ctx.wave_any then
-    print("mangler: " .. tag .. " — nothing recorded yet")
+    print("four: " .. tag .. " — nothing recorded yet")
     return
   end
   local tmp = norns.state.data .. "mscan-tmp.wav"
   ctx.take_to_wav(tmp, function(ok)
     if not ok then
-      print("mangler: " .. tag .. " — the take dump did not land")
+      print("four: " .. tag .. " — the take dump did not land")
       return
     end
     local lo, hi = window_bounds()
@@ -1225,7 +1241,7 @@ function ctx.take_tighten()
   scan_take("TIGHTEN", function(tmp, lo, hi)
     local a, b = Mwav.onset_bounds(tmp, lo, hi, BUF_SECS, nil, ctx.task_yield)
     if not a then
-      print("mangler: TIGHTEN — the window is silent, left alone")
+      print("four: TIGHTEN — the window is silent, left alone")
       return
     end
     -- a hair of room either side so a soft attack is never clipped off
@@ -1233,12 +1249,12 @@ function ctx.take_tighten()
     a = clamp(a - pad, lo, hi)
     b = clamp(b + pad, lo, hi)
     if b - a < 0.002 then
-      print("mangler: TIGHTEN — too little sound to window, left alone")
+      print("four: TIGHTEN — too little sound to window, left alone")
       return
     end
     -- both edges move INWARD (a >= lo, b <= hi), so the pair cannot cross
     Mdeck.set_pair(WIN[1], WIN[2], a, b)
-    print(string.format("mangler: TIGHTEN — window is %.2fs of sound (was %.2fs)",
+    print(string.format("four: TIGHTEN — window is %.2fs of sound (was %.2fs)",
       (b - a) * BUF_SECS, (hi - lo) * BUF_SECS))
   end)
 end
@@ -1253,12 +1269,12 @@ function ctx.pad_chop()
       ctx.task_yield)
     if not cuts or #cuts < 2 then
       ctx.pads_uncut()
-      print("mangler: CHOP found no transients — pads back to even slices")
+      print("four: CHOP found no transients — pads back to even slices")
       return
     end
     cuts[#cuts + 1] = hi            -- the last slice runs to the window end
     ctx.pad_cuts = cuts
-    print(string.format("mangler: CHOP — %d slices, on the attacks", #cuts - 1))
+    print(string.format("four: CHOP — %d slices, on the attacks", #cuts - 1))
   end)
 end
 
@@ -1433,7 +1449,7 @@ local function tick_rec_wait()
   local from = rec_quiet - REC_PREROLL / BUF_SECS
   from = rec_quiet >= arm and max(from, arm) or max(from, 0)
   ctx.rec_arm_phase, rec_moved = from, true
-  print(string.format("mangler: sound at %.2fs into the pass, the take starts there",
+  print(string.format("four: sound at %.2fs into the pass, the take starts there",
     ((ctx.rec_phase - arm) % 1) * BUF_SECS))
 end
 
@@ -1468,7 +1484,7 @@ end
 -- drawing one that isn't there.
 function ctx.clear_recording()
   if not engine.clear then
-    print("mangler: engine has no `clear` — SYSTEM > RESTART for the new engine")
+    print("four: engine has no `clear` — SYSTEM > RESTART for the new engine")
     return
   end
   -- disarm first, like the TAPE erase: wiping while armed kept
@@ -1496,7 +1512,7 @@ function ctx.clear_recording()
   if params:get("sample_file") ~= "" then params:set("sample_file", "") end
   Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
   ctx.undo_mark()   -- empty is a state UNDO can go back from
-  print("mangler: recording cleared")
+  print("four: recording cleared")
 end
 
 -- put a file in the take buffer and make every page agree about it. The
@@ -1510,12 +1526,12 @@ local function read_into_buffer(path, shown)
   buffer_replaced(dur)   -- the loaded length bounds a PSET save
   if dur then
     Mdeck.set_pair(WIN[1], WIN[2], 0, clamp(dur / BUF_SECS, 0.002, 1))
-    print(string.format("mangler: loaded %s (%.1fs) — window snapped to it",
+    print(string.format("four: loaded %s (%.1fs) — window snapped to it",
       shown or path, dur))
   else
     -- audible, but no picture for this format (8-bit / aiff): leave the window
     -- for the performer to set rather than draw a lie
-    print("mangler: loaded " .. (shown or path)
+    print("four: loaded " .. (shown or path)
       .. " (playing; no waveform preview for this format)")
   end
   ctx.undo_mark()
@@ -1534,7 +1550,7 @@ end
 local function load_at_rate(path, tmp, cap_secs, what, land, gen)
   if path == nil or path == "" or path == "-" or path == _path.audio then return end
   if not util.file_exists(path) then
-    print("mangler: no such file — " .. tostring(path))
+    print("four: no such file — " .. tostring(path))
     return
   end
   local okp, _, _, in_sr = pcall(Mwav.wav_info, path)
@@ -1542,7 +1558,7 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen)
     land(path)                     -- already at rate, or a format we can't probe
     return
   end
-  print(string.format("mangler: %d Hz file — resampling to %d before the %s load"
+  print(string.format("four: %d Hz file — resampling to %d before the %s load"
     .. " (it would play at %.2fx otherwise)", in_sr, SERVER_SR, what,
     SERVER_SR / in_sr))
   local g = gen()
@@ -1560,14 +1576,14 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen)
     if not ok and gen() == g then error(err or "conversion failed", 0) end
   end, function(ok, err)
     if gen() ~= g then
-      print("mangler: " .. path .. " dropped before it landed: the " .. what
+      print("four: " .. path .. " dropped before it landed: the " .. what
         .. " changed meanwhile, the newer material stays")
       return
     end
     if ok then
       land(tmp, path)
     else
-      print("mangler: resample failed (" .. tostring(err)
+      print("four: resample failed (" .. tostring(err)
         .. ") — loading at the original rate, it will play sharp")
       land(path)
     end
@@ -1581,11 +1597,11 @@ end
 local srconv_path
 function ctx.load_sample(path)
   if path and path ~= "" and path ~= "-" and not engine.read_file then
-    print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
+    print("four: engine has no `read_file` — SYSTEM > RESTART for the new engine")
     return
   end
   take_gen = take_gen + 1     -- the newest request wins over one still converting
-  srconv_path = srconv_path or (norns.state.data .. "mangler-srconv.wav")
+  srconv_path = srconv_path or (norns.state.data .. "four-srconv.wav")
   load_at_rate(path, srconv_path, BUF_SECS + 1, "take", read_into_buffer,
     function() return take_gen end)
 end
@@ -1817,7 +1833,7 @@ local track_gen = { 0, 0, 0, 0 }
 function ctx.track_load(n, path)
   if n == FOCUS then return ctx.load_sample(path) end
   if path and path ~= "" and path ~= "-" and not engine.read_file then
-    print("mangler: engine has no `read_file` — SYSTEM > RESTART for the new engine")
+    print("four: engine has no `read_file` — SYSTEM > RESTART for the new engine")
     return
   end
   track_gen[n] = track_gen[n] + 1
@@ -1836,7 +1852,7 @@ function ctx.track_load(n, path)
       if dur then
         Mdeck.set_pair(tid_n(n, "pos_start"), tid_n(n, "pos_end"), 0, t.take_len)
       end
-      print(string.format("mangler: %s -> track %d%s", shown or file, n,
+      print(string.format("four: %s -> track %d%s", shown or file, n,
         dur and string.format(" (%.1fs)", dur) or ""))
     end,
     function() return track_gen[n] end)
@@ -1884,7 +1900,7 @@ function ctx.padlock_pset_write(number)
   -- guarded like every other pset writer here: a write failure must PRINT, not
   -- throw out of params.action_write and abort the rest of the save
   local ok, err = pcall(tab.save, t, padlock_path(number))
-  if not ok then print("mangler: pad-lock save failed — " .. tostring(err)) end
+  if not ok then print("four: pad-lock save failed — " .. tostring(err)) end
 end
 
 function ctx.padlock_pset_read(number)
@@ -1929,7 +1945,7 @@ local function start_next_task()
   task_clock = clock.run(function()
     local ok, err = pcall(job[1], ctx.task_yield)
     task_clock = nil
-    if not ok then print("mangler: background job failed — " .. tostring(err)) end
+    if not ok then print("four: background job failed — " .. tostring(err)) end
     if job[2] then job[2](ok, err) end
     start_next_task()
   end)
@@ -1938,7 +1954,7 @@ end
 function ctx.run_task(fn, on_done)
   task_queue[#task_queue + 1] = { fn, on_done }
   if task_clock then
-    print("mangler: queued behind the background job already running")
+    print("four: queued behind the background job already running")
   else
     start_next_task()
   end
@@ -1981,14 +1997,14 @@ end
 -- The duration is LIVE: record_stop ends it now, record_limit re-aims the end.
 local pass, pass_clock
 function ctx.record_pass(path, secs, on_tick, done)
-  if pass then print("mangler: a recording pass is already running"); return false end
+  if pass then print("four: a recording pass is already running"); return false end
   if not (audio.tape_record_open and audio.tape_record_start) then
-    print("mangler: no system tape API — cannot record"); return false
+    print("four: no system tape API — cannot record"); return false
   end
   -- recording a CHOKED output would capture silence, and a caller that then
   -- loads the result would wipe the take with nothing
   if pget("stop_all", 0) == 1 then
-    print("mangler: pass refused — output is stopped (K1+K2 to start)")
+    print("four: pass refused — output is stopped (K1+K2 to start)")
     return false
   end
   pass = { n = math.max(1, math.floor(secs * FPS + 0.5)), i = 0 }
@@ -2047,23 +2063,23 @@ function ctx.print_take(sweep)
     local _, _, span = window_bounds()
     secs = clamp(span * BUF_SECS, 0.5, BUF_SECS)
   end
-  local name = next_audio_name("mangler-print")
+  local name = next_audio_name("four-print")
   if not name then
-    print("mangler: 999 prints in dust/audio — clear some out first")
+    print("four: 999 prints in dust/audio — clear some out first")
     return
   end
   local ok = ctx.record_pass(_path.audio .. name, secs, sweep,
     function(finished, path)
       if not finished then
         os.remove(path)        -- a part-silent bounce is not worth keeping
-        print("mangler: PRINT aborted by STOP — the take is untouched")
+        print("four: PRINT aborted by STOP — the take is untouched")
         return
       end
       ctx.load_sample(path)
-      print("mangler: PRINT done — " .. name .. " is the new take")
+      print("four: PRINT done — " .. name .. " is the new take")
     end)
   if ok then
-    print(string.format("mangler: PRINT — recording the master mix, %.1fs", secs))
+    print(string.format("four: PRINT — recording the master mix, %.1fs", secs))
   end
 end
 
@@ -2076,12 +2092,12 @@ end
 -- dump that arrives while a background one runs waits for it, in one slot.
 function ctx.take_to_wav(out, done, background)
   if not engine.write_take then
-    print("mangler: engine has no write_take — SYSTEM > RESTART")
+    print("four: engine has no write_take — SYSTEM > RESTART")
     if done then done(false) end
     return
   end
   if not ctx.wave_any then
-    print("mangler: nothing to render — the buffer is empty")
+    print("four: nothing to render — the buffer is empty")
     if done then done(false) end
     return
   end
@@ -2093,10 +2109,10 @@ function ctx.take_to_wav(out, done, background)
   if export_clock then
     if export_bg and not background and not export_next then
       export_next = { out, done }
-      print("mangler: take dump queued behind the strip repaint")
+      print("four: take dump queued behind the strip repaint")
       return
     end
-    print("mangler: a take dump is already running")
+    print("four: a take dump is already running")
     if done then done(false) end
     return
   end
@@ -2137,7 +2153,7 @@ function ctx.take_to_wav(out, done, background)
     -- under it. Under pcall, so a throw cannot leave the guard set forever.
     if done then
       local okd, err = pcall(done, ok, out)
-      if not okd then print("mangler: the step after the take dump failed: " .. tostring(err)) end
+      if not okd then print("four: the step after the take dump failed: " .. tostring(err)) end
     end
     export_clock, export_bg = nil, false
     local nxt = export_next
@@ -2151,12 +2167,12 @@ end
 function ctx.export_take(name)
   name = name or next_audio_name("four")
   if not name then
-    print("mangler: 999 exports in dust/audio — clear some out first")
+    print("four: 999 exports in dust/audio — clear some out first")
     return
   end
   local out = _path.audio .. name
   ctx.take_to_wav(out, function(ok)
-    print(ok and ("mangler: exported " .. out) or "mangler: export FAILED")
+    print(ok and ("four: exported " .. out) or "four: export FAILED")
   end)
 end
 
@@ -2208,7 +2224,7 @@ local function sync_window_len()
   win_lo, win_hi = lo, hi
 end
 
--- BEAT REPEAT (the engine's \mangler_repeat). Held, it waits for the next
+-- BEAT REPEAT (the engine's \four_repeat). Held, it waits for the next
 -- division of the clock, then the engine captures that much of the output
 -- and loops it until you let go: a stutter on the beat. Turning the division
 -- while it holds re-captures at once (a roll to a shorter one). A STOP
@@ -2237,7 +2253,7 @@ local function repeat_release()
 end
 local function repeat_start()
   if not engine.beat_repeat then
-    print("mangler: engine has no `beat_repeat` — SYSTEM > RESTART for the new engine")
+    print("four: engine has no `beat_repeat` — SYSTEM > RESTART for the new engine")
     return
   end
   if pget("stop_all", 0) == 1 then return end
@@ -2453,7 +2469,7 @@ local function init_params()
     rec_open = false
     if ctx.rec_waiting then
       ctx.rec_waiting = false
-      print("mangler: no sound crossed the threshold — the take is the whole pass")
+      print("four: no sound crossed the threshold — the take is the whole pass")
     end
     -- the window writes go through set_pair, widening edge first: a take
     -- laid down past the old window's end used to cross the pair for a moment
@@ -2902,7 +2918,7 @@ local function init_params()
   add_momentary("pad_chop", "chop to transients", ctx.pad_chop)
   add_momentary("pad_even", "back to even slices", function()
     ctx.pads_uncut()
-    print("mangler: pads back to even slices")
+    print("four: pads back to even slices")
   end)
 
   -- the pad SEQUENCER (lib/mseq.lua): a generated pattern on the clock that
@@ -2913,7 +2929,7 @@ local function init_params()
   params:set_action("step_run", function(v)
     if v == 1 then
       Mseq.start()
-      print("mangler: sequencer running — " .. math.floor(pget("step_fill", 4) + 0.5)
+      print("four: sequencer running — " .. math.floor(pget("step_fill", 4) + 0.5)
         .. " of " .. math.floor(pget("step_len", 4) + 0.5) .. " steps play the pads")
     else
       Mseq.stop()
@@ -3092,7 +3108,7 @@ local function init_params()
     for _, part in ipairs(PSET_PARTS) do
       local ok, err = pcall(part[k], number)
       if not ok then
-        print("mangler: pset " .. part[4] .. " failed — " .. tostring(err))
+        print("four: pset " .. part[4] .. " failed — " .. tostring(err))
       end
     end
   end
@@ -3119,7 +3135,7 @@ end
 -- ============================================================================
 
 function init()
-  print("mangler: init() called")
+  print("four: init() called")
   init_params()
   ctx.undo_forget()   -- an undo pair from the last session is not this one's
   Mtape.init_tape()
@@ -3136,13 +3152,14 @@ function init()
     if prev_midi_remove then prev_midi_remove(dev) end
     Mgrid.hotplug(dev)   -- still in midi.devices while this runs
   end
-  print("mangler: init() done, params built")
+  ctx.splash_from = ctx.frame      -- the opening picture, see Mpages.redraw
+  print("four: init() done, params built")
 
   -- the norns SYSTEM aux reverb sits after the engine and colors everything;
   -- if another script left it on, "dry" playback isn't — say so at load
   if params.lookup["reverb"]
       and tostring(params:string("reverb")):lower() ~= "off" then
-    print("mangler: NOTE — the SYSTEM reverb is ON; it adds reverb mangler"
+    print("four: NOTE — the SYSTEM reverb is ON; it adds reverb four"
       .. " does not control (turn it off under PARAMS > REVERB)")
   end
 
@@ -3151,7 +3168,7 @@ function init()
     -- compiled engine after a deploy without restart) — warn, don't crash
     local p = poll.set(name, fn)
     if p == nil then
-      print("mangler: poll '" .. name .. "' missing — old engine? RESTART needed")
+      print("four: poll '" .. name .. "' missing — old engine? RESTART needed")
       return
     end
     p.time = 1 / FPS
@@ -3208,7 +3225,7 @@ function init()
       local ok, err = pcall(frame_tick)
       if not ok and ctx.frame - last_err_frame >= FPS * 5 then
         last_err_frame = ctx.frame
-        print("mangler: frame error, the instrument keeps running — " .. tostring(err))
+        print("four: frame error, the instrument keeps running — " .. tostring(err))
       end
     end
   end)

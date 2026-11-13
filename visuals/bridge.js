@@ -4,7 +4,7 @@
 //
 //   node visuals/bridge.js [--osc-port 9000] [--ws-port 8080]
 //
-// The norns sends /mangler/<key> with one argument. Each message goes to every
+// The norns sends /four/<key> with one argument. Each message goes to every
 // connected page as {"k":"size","v":0.42}. A page that connects gets the whole
 // last-known state first as {"state":{...}}. The WebSocket listens on
 // 127.0.0.1 only (unless MANGLER_LAN=1), so only this computer can read it.
@@ -21,7 +21,7 @@ function argOf(name, dflt) {
 }
 const OSC_PORT = argOf("--osc-port", 9000);
 const WS_PORT = argOf("--ws-port", 8080);
-const PREFIX = "/mangler/";
+const PREFIX = "/four/";
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 // ---- OSC parsing (messages and bundles; i f s d T F N) -------------------

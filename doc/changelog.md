@@ -4060,3 +4060,19 @@ plugin and Lua, the count stays 197, needs a RESTART and the new binary first)**
   mistake, with the drone's).
 On the device: `count: 197`, the user's 100% set takes 57.3% with no xruns. Nobody has
 listened to the flanger or the echo yet.
+
+four, fifteenth change: **the name everywhere, the opening text, and an opening picture
+(engine and Lua, the count stays 197, needs a RESTART)**.
+- The log lines start with `four:` (they said `mangler:`), in the engine and the Lua.
+- The OSC addresses are `/four/...`, in `lib/mosc.lua` and `visuals/bridge.js` together.
+- Printed and converted files are `four-print*` and `four-srconv.wav`.
+- The device tools looked for `mangler_*` synth names, which no longer exist: the
+  reverb, delay, erode and repeat checks of `gate.py` read `four_*` now.
+- The comment at the top of `four.lua` is what norns shows when you select the script.
+  It is new: what the script is, how to start, every key and knob, each page in a line.
+  Its lines are short enough for the norns screen. The notes for a developer are a
+  second comment block under it.
+- The script opens with a two second picture: four bars rise, the name lands on them,
+  and "ALL MANKIND" types itself under it. Any key or knob ends it.
+- `main` is pushed, and the GitHub repository is `four`.
+On the device: `count: 197`, the log says `four: FourStretch on`, the opening draws.

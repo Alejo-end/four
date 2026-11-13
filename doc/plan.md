@@ -14,7 +14,7 @@ judged by that: can a tired player on a dark stage read it at once?
 - **Name.** mangler2 replaced the one-track mangler and is now called **four**:
   `four.lua`, `Engine_Four` in `lib/Engine_Four.sc`, `engine.name = 'Four'`,
   SynthDefs `\four_*`. The old mangler is the git tag `mangler-1`. The OSC
-  addresses stay `/mangler/...`, because the visuals read them.
+  addresses are `/four/...` and the log lines start with `four:` (2026-11-13).
 - **Fingerprint.** After a RESTART, maiden must read `count: 197`.
 - **What four is.** Four tracks, each with its own 60 s of material. Each track
   has a voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window, a filter, COLOR
@@ -38,8 +38,7 @@ judged by that: can a tired player on a dark stage read it at once?
 
 ### Git state (read `git status` first)
 
-- **Branch `main`.** It is the four version and is NOT pushed. `origin/main` is
-  still the one-track mangler. When the user says so, push it.
+- **Branch `main`.** It is the four version, pushed on 2026-11-13.
 - **Uncommitted, from this session: the screen change** ("four, second change"
   in doc/changelog.md):
   - The header track cells.
@@ -56,8 +55,8 @@ judged by that: can a tired player on a dark stage read it at once?
 - **The `../mangler2` folder.** It is a git worktree on branch `mangler2`. It is
   fully merged and can be removed with `git worktree remove ../mangler2` once
   the user agrees.
-- **GitHub.** The repo and the local folder are still named `mangler`. A rename
-  is the user's decision.
+- **GitHub.** The repo is `Alejo-end/four` since 2026-11-13. The local folder is
+  still named `mangler`: the user moves it, with no session open in it.
 
 ## Phase 1: the show checks (needs the user at the hardware)
 
@@ -210,8 +209,8 @@ beat the S-4. It has a DIY 16x8 grid in `../grid128`, which is not ordered yet.
 
 Each one needs a yes or a no. Ask the user. Do not decide.
 
-1. Push `main` (the four version) to GitHub?
-2. Rename the GitHub repo and the local folder from mangler to four?
+1. (done 2026-11-13: `main` is pushed and the GitHub repo is `four`.)
+2. Rename the local folder from mangler to four?
 3. Remove the `../mangler2` worktree?
 4. Deploy the rebuilt presets with `deploy_set.sh`? It deletes the takes in
    slots 1 to 12 of `data/four`.

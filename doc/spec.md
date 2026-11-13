@@ -72,7 +72,7 @@ MIX · REC · WINDOW · GRAIN · STRETCH · TAPE · FILTER · DELAY · REVERB
 
 Every controllable value is a real norns param. norns auto-exposes
 `add_control / add_taper / add_number / add_option / add_binary` to MIDI-learn (PARAMS menu →
-long-press → assign CC), saved per-script in `data/mangler/mangler.pmap`.
+long-press → assign CC), saved per-script in `data/four/mangler.pmap`.
 `add_separator / add_group / add_trigger / add_text` are **not** mappable — so:
 
 - continuous values → `add_control` / `add_taper`
@@ -1007,7 +1007,7 @@ else. Gallery regenerated (+ scene.png).
    cannot see any of it):** hold grid (3,2) tape-reverse → E1 to SEQ → release → the tape must
    NOT stay backwards. Hold SCENE (4,8) chaos → E1 to another page → release → chaos must let go.
    Hold a note pad → E1 to SEQ/SCENE → release → the voice must lift.
-10. PSET SAVE, change scenes, PSET LOAD → the bank comes back (`data/mangler/scenes-<n>.lua`).
+10. PSET SAVE, change scenes, PSET LOAD → the bank comes back (`data/four/scenes-<n>.lua`).
     Then the **clobber** case: morph to ~0.5, hand-tweak cutoff, SAVE, move on, LOAD → cutoff
     must stay where the pset put it (it must not jump a frame later).
 11. **The tape-loop seam:** with the tape playing, recall a scene whose loop is somewhere else

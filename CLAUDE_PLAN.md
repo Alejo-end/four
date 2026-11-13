@@ -26,7 +26,7 @@ A stereo engine that **records** live input and plays it back through several ma
 - **MIDI mapping is native, not a feature to build.** Every parameter added through norns'
   `params:add_control / add_taper / add_number / add_option / add_binary` is automatically
   MIDI-learnable from the PARAMS menu and persisted per-script in a **PMAP** file
-  (`data/mangler/mangler.pmap`). `add_separator / add_group / add_trigger / add_text` are
+  (`data/four/mangler.pmap`). `add_separator / add_group / add_trigger / add_text` are
   *not* mappable. ⇒ **Architectural rule: every controllable value is a real param; keys,
   encoders, and MIDI all drive params. Params are the single source of truth.** This gets
   "MIDI for each parameter" essentially for free and keeps key/encoder/MIDI in sync.
@@ -108,7 +108,7 @@ it can carry its own dry/wet to match the user's "dry/wet mixer for each FX" —
 └── .gitignore                # .claude/scheduled_tasks.lock, .DS_Store
 ```
 norns-idiomatic: the git repo *is* the script. Deploy =
-`rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/`
+`rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/four/`
 (`--delete` guards against an orphaned old engine lingering on the device).
 
 ## Control surface (3 keys + 3 encoders)
@@ -191,6 +191,6 @@ Their full design (command tables, SynthDef args, param lists, acceptance tests)
 - `luac5.3 -p mangler.lua` passes (only static check available locally).
 - `git status` clean of stale tracked files; `.gitignore` covers the lock + OS cruft; the
   rewritten README no longer points at non-existent folders.
-- **On-device Stage-0 gate (user runs):** `rsync` the repo to `~/dust/code/mangler/`,
+- **On-device Stage-0 gate (user runs):** `rsync` the repo to `~/dust/code/four/`,
   `;restart`; script loads to its home page with **no LOADING hang** and no SC errors in
   maiden; E1 changes the page indicator, keys register. Passing this gate unlocks Stage 1.

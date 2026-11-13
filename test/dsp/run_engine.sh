@@ -22,4 +22,4 @@ rm -f "$WORK/elog.txt"
 for i in $(seq 1 90); do sleep 2; grep -q "BENCH_DONE\|ERROR" "$WORK/elog.txt" 2>/dev/null && break; done
 sleep 2; pkill -f "test/dsp/engine.scd" || true
 grep -A8 "ERROR" "$WORK/elog.txt" && exit 1
-grep "COMMANDS\|BENCH_DONE\|FourStretch\|FAIL\|not installed\|exception" "$WORK/elog.txt"
+grep "COMMANDS\|BENCH_DONE\|FourStretch\|four: \|FAIL\|not installed\|exception" "$WORK/elog.txt"

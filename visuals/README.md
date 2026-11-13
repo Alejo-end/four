@@ -15,7 +15,7 @@ the instrument (OSC over Wi-Fi).
 The computer and the norns must be on the same Wi-Fi network. If the network is new,
 set the norns once: PARAMS, "visuals out (osc)", "osc host" to this computer's name
 (`<name>.local`, `doctor.command` prints it) and "osc out" on. The norns writes this to
-`dust/data/mangler/osc.cfg` and sends there from then on. A name is better than a number,
+`dust/data/four/osc.cfg` and sends there from then on. A name is better than a number,
 because the norns looks the name up every minute and finds the computer again when the
 network gives it a new address. A PSET never changes these settings.
 
@@ -96,7 +96,7 @@ Octatrack does not send on, or switch "keys enable" off.
 
 ## What goes out
 
-Every field is one message, /mangler/<key>, one argument. fields.json lists them. A knob goes
+Every field is one message, /four/<key>, one argument. fields.json lists them. A knob goes
 out as 0 to 1 on its own scale. The norns sends a field when it changes, and the whole state
 again every two seconds and when you switch on or change the host or port. The rate is the
 frame rate of mangler (15 per second). Hydra smooths between messages.

@@ -4,7 +4,7 @@
 -- of the fields below at full precision.
 --
 -- It writes nothing in the instrument. Every field is its own message,
--- /mangler/<key> with one argument, sent only when its value changed. A new
+-- /four/<key> with one argument, sent only when its value changed. A new
 -- address, port or switch-on, and a refresh every two seconds, send every
 -- field again: UDP drops packets, and a visual that starts late must still
 -- learn the state. A param field goes out normalised 0..1 through its own
@@ -20,7 +20,7 @@ local REFRESH = 2          -- seconds between full resends
 local FIELDS = {}          -- { key, path, id | read, norm, last }
 
 local function add(key, id_or_fn, norm)
-  local f = { key = key, path = "/mangler/" .. key, norm = norm }
+  local f = { key = key, path = "/four/" .. key, norm = norm }
   if type(id_or_fn) == "string" then f.id = id_or_fn else f.read = id_or_fn end
   FIELDS[#FIELDS + 1] = f
 end
@@ -103,7 +103,7 @@ local function resolve(h)
     p:close()
     local ip = line and line:match("^(%d+%.%d+%.%d+%.%d+)")
     if ip then
-      if ip ~= resolved then print("mangler: osc host " .. h .. " is " .. ip) end
+      if ip ~= resolved then print("four: osc host " .. h .. " is " .. ip) end
       resolved = ip
     end
   end
@@ -155,7 +155,7 @@ function M.tick()
       one[1] = v
       if not pcall(osc.send, dest, f.path, one) then
         M.errors = M.errors + 1
-        if M.errors == 1 then print("mangler: osc send failed to " .. host .. ":" .. port) end
+        if M.errors == 1 then print("four: osc send failed to " .. host .. ":" .. port) end
       end
     end
   end
@@ -169,7 +169,7 @@ end
 -- MIDI events for the picture (an Octatrack on the TRS MIDI input, or any
 -- other MIDI source). lib/minput.lua hands every message of every port here.
 -- A note, a CC, a program change and the transport go out at once as
--- /mangler/ev/<name> with integer arguments, so a hit lands on the beat
+-- /four/ev/<name> with integer arguments, so a hit lands on the beat
 -- instead of waiting for the next frame. A CC that did not change is not
 -- sent again. At most EVENT_CAP events leave per frame, so a knob sweep or a
 -- busy pattern cannot flood the Wi-Fi. Clock messages are never forwarded.
@@ -182,7 +182,7 @@ local evrun = { 0 }
 local function ev_send(name, args)
   if sent_ev >= EVENT_CAP then return end
   sent_ev = sent_ev + 1
-  if not pcall(osc.send, dest, "/mangler/ev/" .. name, args) then
+  if not pcall(osc.send, dest, "/four/ev/" .. name, args) then
     M.errors = M.errors + 1
   end
 end
@@ -217,7 +217,7 @@ M.LOOKS = { "AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WA
 -- is switched on tomorrow sends to the same computer with no setup. A pset
 -- does not carry them: they are about this room, not about a sound.
 local function cfg_path()
-  return (_path and _path.data or "/home/we/dust/data/") .. "mangler/osc.cfg"
+  return (_path and _path.data or "/home/we/dust/data/") .. "four/osc.cfg"
 end
 
 local loading, reading = false, false

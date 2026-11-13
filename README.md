@@ -253,9 +253,9 @@ loaded. In pad mode the piano rows light the keys whose pad is sounding. Details
 
 ## Architecture
 
-One SuperCollider engine (`lib/Engine_Mangler.sc`, exactly one copy on the device) does
+One SuperCollider engine (`lib/Engine_Four.sc`, exactly one copy on the device) does
 recording, playback voices and effects. softcut runs the tape deck on its own core. The Lua
 side is `four.lua` plus modules in `lib/` sharing one context table, with the params
-system as the single source of truth for every value. `dist/mangler_single.lua` is a
+system as the single source of truth for every value. `dist/four_single.lua` is a
 generated single file build; edit the modules, not that file. `test/uisim/` renders every
 page offscreen for testing without hardware.

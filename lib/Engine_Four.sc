@@ -655,7 +655,7 @@ Engine_Four : CroneEngine {
                 })
             }
         };
-        ("mangler: FourStretch " ++ stretchOn.if({ "on" },
+        ("four: FourStretch " ++ stretchOn.if({ "on" },
             { "absent, WARP and PV are the stock voices" })).postln;
         // tanh, for every def below. The C library's tanh costs 0.4% of the
         // audio thread for each channel on the norns, and the engine has 28
@@ -937,7 +937,7 @@ Engine_Four : CroneEngine {
                 hasClouds = true;
             } { arg err;
                 hasClouds = false;
-                ("mangler: MiClouds def failed — using GrainBuf. "
+                ("four: MiClouds def failed — using GrainBuf. "
                     ++ err.errorString).postln;
             };
         });
@@ -1670,7 +1670,7 @@ Engine_Four : CroneEngine {
                 this.updateDelay;
                 this.updateReverb(revMixV);
             };
-            "mangler: engine buffer cleared".postln;
+            "four: engine buffer cleared".postln;
         });
 
         // load any wav/aiff into the buffer. no SR conversion — a 44.1k file at
@@ -1688,10 +1688,10 @@ Engine_Four : CroneEngine {
                 bl.readChannel(path, 0, frames, 0, false, [0]);
                 // a mono file feeds BOTH sides from channel 0
                 br.readChannel(path, 0, frames, 0, false, [(nch - 1).min(1)]);
-                ("mangler: loaded " ++ path ++ " — " ++ frames ++ " frames, "
+                ("four: loaded " ++ path ++ " — " ++ frames ++ " frames, "
                     ++ nch ++ "ch").postln;
             }, {
-                ("mangler: CANNOT READ " ++ path).postln;
+                ("four: CANNOT READ " ++ path).postln;
             });
         });
 
@@ -1713,7 +1713,7 @@ Engine_Four : CroneEngine {
             if(n <= 0, { n = -1 });
             bufLs[opIdx].write(stem ++ "_L.wav", "wav", "int24", n);
             bufRs[opIdx].write(stem ++ "_R.wav", "wav", "int24", n);
-            ("mangler: wrote take " ++ stem ++ " ("
+            ("four: wrote take " ++ stem ++ " ("
                 ++ (n < 0).if("full", { n.asString ++ " frames" }) ++ ")").postln;
         });
 
@@ -1734,10 +1734,10 @@ Engine_Four : CroneEngine {
                 br.zero;
                 bl.readChannel(pathL, 0, frames, 0, false, [0]);
                 br.readChannel(pathR, 0, frames, 0, false, [0]);
-                ("mangler: restored take " ++ stem ++ " — "
+                ("four: restored take " ++ stem ++ " — "
                     ++ frames ++ " frames").postln;
             }, {
-                ("mangler: CANNOT READ take " ++ stem).postln;
+                ("four: CANNOT READ take " ++ stem).postln;
             });
         });
 

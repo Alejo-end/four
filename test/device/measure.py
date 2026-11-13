@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure what mangler costs on a connected norns.
+"""Measure what four costs on a connected norns.
 
     export NORNS_CTL=<control socket>       # see norns.py
     python3 test/device/measure.py system states pages voices two_server patch soak
@@ -76,7 +76,7 @@ def states():
     save("state", "no script", avg=cpu[0], peak=cpu[1], idle=idle, threads=[f"{t[0]} {t[1]}" for t in threads])
 
     n.load_script()
-    sample("mangler loaded, empty take")
+    sample("four loaded, empty take")
     fresh_take()
     sample("PLAY")
     for mode in ("OFF", "GRAIN", "WARP", "PV"):

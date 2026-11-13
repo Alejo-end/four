@@ -162,7 +162,7 @@ function M.tick(amp)
       -- the knob it left gets its own value back (unless the other one
       -- still swings it: that one's send below then wins)
       if m.id then send(m.id, pget(m.id, 0)) end
-      if id then print("mangler: LFO " .. i .. " moves " .. params:lookup_param(id).name) end
+      if id then print("four: LFO " .. i .. " moves " .. params:lookup_param(id).name) end
       m.id = id
     end
     -- the wave runs whether or not it moves a knob: `out` (0..1) is also a

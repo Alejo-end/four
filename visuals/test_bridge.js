@@ -63,8 +63,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   await wait(500);
-  send(msg("/mangler/size", "f", 0.25));          // before any page connects
-  send(msg("/mangler/page_name", "s", "GRAIN"));
+  send(msg("/four/size", "f", 0.25));          // before any page connects
+  send(msg("/four/page_name", "s", "GRAIN"));
   send(msg("/other/thing", "f", 1));              // not ours: ignored
   send(Buffer.from("garbage"));                    // unreadable: must not crash
   await wait(200);
@@ -75,20 +75,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const snap = p.got.map((g) => { try { return JSON.parse(g); } catch (e) { return null; } }).find((j) => j && j.state);
   ok(snap && Math.abs(snap.state.size - 0.25) < 1e-6, "a new page gets the last state first");
   ok(snap && snap.state.page_name === "GRAIN", "...including a string field");
-  ok(snap && !("thing" in snap.state), "...and nothing outside /mangler/");
-  send(msg("/mangler/density", "f", 0.5));
-  send(msg("/mangler/mode", "i", 3));
+  ok(snap && !("thing" in snap.state), "...and nothing outside /four/");
+  send(msg("/four/density", "f", 0.5));
+  send(msg("/four/mode", "i", 3));
   await wait(300);
   const live = p.got.map((g) => { try { return JSON.parse(g); } catch (e) { return null; } }).filter((j) => j && j.k);
   ok(live.some((j) => j.k === "density" && Math.abs(j.v - 0.5) < 1e-6), "a float goes out as {k,v}");
   ok(live.some((j) => j.k === "mode" && j.v === 3), "an int goes out as {k,v}");
   // an event has several arguments and is not kept as state
-  send(msg3("/mangler/ev/note", 3, 60, 100));
+  send(msg3("/four/ev/note", 3, 60, 100));
   await wait(300);
   const evs = p.got.map((g) => { try { return JSON.parse(g); } catch (e) { return null; } }).filter((j) => j && j.ev);
   ok(evs.some((j) => j.ev === "note" && j.a.join() === "3,60,100"), "an event goes out as {ev,a} with all its arguments");
   // a bundle with two messages
-  const a = msg("/mangler/cutoff", "f", 0.75), b = msg("/mangler/rev_mix", "f", 0.1);
+  const a = msg("/four/cutoff", "f", 0.75), b = msg("/four/rev_mix", "f", 0.1);
   const sz = (m) => { const x = Buffer.alloc(4); x.writeInt32BE(m.length); return x; };
   send(Buffer.concat([str("#bundle"), Buffer.alloc(8), sz(a), a, sz(b), b]));
   await wait(300);
@@ -110,7 +110,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   p.sock.destroy();
   const p2 = await page();
   await wait(200);
-  send(msg("/mangler/size", "f", 0.9));
+  send(msg("/four/size", "f", 0.9));
   await wait(200);
   ok(p2.got.some((g) => { try { const j = JSON.parse(g); return j.k === "size" && Math.abs(j.v - 0.9) < 1e-6; } catch (e) { return false; } }), "a second page gets live messages after the first left");
   ok(bridge.exitCode === null, "the bridge survived garbage and a closed page");

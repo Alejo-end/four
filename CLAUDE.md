@@ -13,8 +13,9 @@ block current, and add a change-log entry for every change.
 - **Names:** script `four.lua`, class `Engine_Four`, file `lib/Engine_Four.sc`,
   `engine.name = 'Four'`, SynthDefs `\four_*`. It deploys to `~/dust/code/four/`, and its
   data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The one-track
-  mangler is retired: git tag `mangler-1`. The OSC addresses stay `/mangler/...`, because
-  the visuals bridge reads them. The log lines still start with `mangler:`.
+  mangler is retired: git tag `mangler-1`. The OSC addresses are `/four/...` (lib/mosc.lua
+  and visuals/bridge.js must agree), and the log lines start with `four:`. The GitHub
+  repository is `Alejo-end/four` since 2026-11-13; the old address redirects.
 - **The fingerprint:** after a RESTART maiden must read **`count: 197`**. That is
   mangler's 66, plus crush, the two FX sends and the six effect commands of track 1
   (two slots), 36 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
@@ -81,7 +82,7 @@ block current, and add a change-log entry for every change.
   (`ugen/test_core.cpp`, plain C++). `lib/FourStretch.sc` is their ONLY class file: the
   binary goes alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`, never
   with a second class file. The engine uses them when it finds the binary and logs
-  `mangler: FourStretch on`; absent, it builds the stock voices. Build steps:
+  `four: FourStretch on`; absent, it builds the stock voices. Build steps:
   ugen/README.md (on the norns, with `-DFOUR_FFTW`). The plugin also holds `FourTanh`,
   which every `tanh` of the engine uses (ninth change): install the binary BEFORE an
   engine that names a new UGen. Measured: `count: 185`, four PV tracks at pitch 1 take
@@ -136,7 +137,7 @@ Lua-only changes skip all this: save and reload the script.
 
 ---
 
-## What mangler is
+## What four is
 
 A performance-first **stereo sample-mangling instrument** for external line-level gear
 (synth, drum machine, anything line-level). Built for norns **shield XL on Raspberry Pi 4**,
@@ -218,8 +219,8 @@ add_text` are **not** mappable.
   count. Reserved (verified on hardware): `output_level, input_level, monitor_level,
   engine_level, softcut_level, tape_level, monitor_mode, headphone_gain, reverb,
   compressor, comp_*, cut_input_*, clock_*, link_*`, and the system reverb's own `rev_*`
-  ids (`rev_eng_input`, `rev_return_level`, `rev_pre_delay`, ...; mangler's `rev_mix`,
-  `rev_decay` and siblings do not collide). mangler uses `cut_level` for the softcut
+  ids (`rev_eng_input`, `rev_return_level`, `rev_pre_delay`, ...; four's `rev_mix`,
+  `rev_decay` and siblings do not collide). four uses `cut_level` for the softcut
   path's level.
 - **The ~60 system params (LEVELS/REVERB/COMPRESSOR/SOFTCUT/CLOCK) appearing in
   `params.count` is normal** — they are not leftovers from another script.
@@ -246,8 +247,8 @@ add_text` are **not** mappable.
   library); reloading the script is not enough.
 - **midi dispatch is dual-path: norns fires BOTH `midi.devices[id].event` (device
   level) and `midi.vports[port].event` (vport level) for the same message.** midigrid
-  binds device-level; mangler's note input binds vport-level on all 16 slots — so a
-  grid controller's pad note-ons reach both handlers unless filtered. mangler's
+  binds device-level; four's note input binds vport-level on all 16 slots — so a
+  grid controller's pad note-ons reach both handlers unless filtered. four's
   `is_grid_vport()` skips the vport whose device midigrid claimed (compared by
   identity and by name against `gg.device`). Symptom when this breaks: every pad
   press also slams `pitch` to an extreme (raw launchpad note numbers are far from
@@ -264,7 +265,7 @@ add_text` are **not** mappable.
   work, open one SSH session, restart, and keep that session open to the end of the work.
 - **`clock.lua:62 bad argument #1 to 'resume' (thread expected)`** is a system-level race
   (a clock timer fires for an already-dead coroutine, often on script reload) and wedges
-  clock state until restart. It is not specific to one script, but: keep mangler's clock
+  clock state until restart. It is not specific to one script, but: keep four's clock
   usage minimal, always `clock.cancel` in `cleanup`, and when this error appears, restart
   before drawing conclusions about whichever script loaded last.
 

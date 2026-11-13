@@ -32,7 +32,7 @@ earlier ones held, and a false failure downstream will cost you an hour.
 ## Stage 0 — Deploy · FAIL-STOP
 
 ```sh
-rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/mangler/
+rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/four/
 ```
 
 Then on the norns: **SYSTEM > RESTART**. Not a script reload — sclang only

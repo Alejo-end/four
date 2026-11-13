@@ -302,8 +302,8 @@ def stage2():
         n.load_script()
         record_take(6, "drums")
         before = n.take_hash()
-        n.ssh("ls ~/dust/audio | grep -c mangler-print || true")
-        files0 = n.ssh("ls ~/dust/audio/mangler-print* 2>/dev/null | wc -l").strip()
+        n.ssh("ls ~/dust/audio | grep -c four-print || true")
+        files0 = n.ssh("ls ~/dust/audio/four-print* 2>/dev/null | wc -l").strip()
         n.set("print_len", 8)
         start = mark()
         n.ctx("c.print_take() ")
@@ -313,7 +313,7 @@ def stage2():
         text = transcript_since("lua", start)
         stop(False)
         after = n.take_hash()
-        files1 = n.ssh("ls ~/dust/audio/mangler-print* 2>/dev/null | wc -l").strip()
+        files1 = n.ssh("ls ~/dust/audio/four-print* 2>/dev/null | wc -l").strip()
         ok = "PRINT aborted by STOP" in text and before == after and files0 == files1
         return verdict(ok, f"aborted message={'PRINT aborted by STOP' in text}; take digest same={before == after}; print files {files0} to {files1}")
 
@@ -519,8 +519,8 @@ def stage4():
         time.sleep(1)
         off = n.nodes()
         cpu_off = n.cpu(3)
-        ok = "mangler_reverb" in on and "mangler_reverb" not in off and cpu_off[0] < cpu_on[0]
-        return verdict(ok, f"reverb node on={'mangler_reverb' in on}, off={'mangler_reverb' in off}; CPU {cpu_on[0]}% to {cpu_off[0]}%")
+        ok = "four_reverb" in on and "four_reverb" not in off and cpu_off[0] < cpu_on[0]
+        return verdict(ok, f"reverb node on={'four_reverb' in on}, off={'four_reverb' in off}; CPU {cpu_on[0]}% to {cpu_off[0]}%")
 
     def c47():
         n.set("rev_mix", 0.5)
@@ -642,7 +642,7 @@ def stage4():
         nodes = n.nodes()
         time.sleep(180)
         b = n.take_hash()
-        return verdict(a == b and "mangler_erode" not in nodes, f"erode 0: digest {a} = {b} after 3 min; no erode node")
+        return verdict(a == b and "four_erode" not in nodes, f"erode 0: digest {a} = {b} after 3 min; no erode node")
 
     def bright(name):
         rate, chans = engine_rec(name, 4)
@@ -917,7 +917,7 @@ def stage5():
         n.goto("TAKE")
         shot("5.9_print")
         ok = "is the new take" in text and wave == "true" and abs(length * 60 - 2) < 0.3
-        n.ssh("rm -f ~/dust/audio/mangler-print-*.wav ~/dust/audio/mangler-print*.wav")
+        n.ssh("rm -f ~/dust/audio/four-print-*.wav ~/dust/audio/four-print*.wav")
         return verdict(ok, f"{[x for x in text.splitlines() if 'PRINT' in x]}; take {length * 60:.2f}s")
 
     for cid, fn in (("5.1", c51), ("5.2", c52), ("5.3", c53), ("5.4", c54), ("5.5", c55), ("5.6", c56),
@@ -1278,7 +1278,7 @@ def stage8():
 
     def c81():
         time.sleep(1)
-        return verdict("mangler_reverb" not in n.nodes(), f"nodes {n.nodes()}; scsynth {n.cpu(4)}")
+        return verdict("four_reverb" not in n.nodes(), f"nodes {n.nodes()}; scsynth {n.cpu(4)}")
 
     def c82():
         set_mode("GRAIN")
@@ -1366,7 +1366,7 @@ def stage10():
 
         rate, chans = during(ride, "10.1_ride", 3)
         n.set("delay_time", 0.3)
-        return verdict("mangler_delay" in nodes and b > a, f"{a} dB dry, {b} dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav", "measured")
+        return verdict("four_delay" in nodes and b > a, f"{a} dB dry, {b} dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav", "measured")
 
     def c102():
         on = n.cpu(4)
@@ -1374,7 +1374,7 @@ def stage10():
         time.sleep(1)
         off = n.cpu(4)
         nodes = n.nodes()
-        return verdict("mangler_delay" not in nodes, f"delay on {on}, off {off}: the node is gone, the difference is under the noise. No older build to compare", "measured")
+        return verdict("four_delay" not in nodes, f"delay on {on}, off {off}: the node is gone, the difference is under the noise. No older build to compare", "measured")
 
     def c103():
         n.goto("DELAY")
@@ -1797,7 +1797,7 @@ def stage14():
     def c141():
         time.sleep(0.5)
         nodes = n.nodes()
-        return verdict("mangler_erode" not in nodes, f"nodes {nodes}")
+        return verdict("four_erode" not in nodes, f"nodes {nodes}")
 
     def c142():
         s = n.get("pos_start")
@@ -1810,7 +1810,7 @@ def stage14():
         n.set("erode", 0)
         time.sleep(0.5)
         after = n.take_hash()
-        return verdict("mangler_erode" in nodes and before != after, f"erode node present; the take changed={before != after}")
+        return verdict("four_erode" in nodes and before != after, f"erode node present; the take changed={before != after}")
 
     def c143():
         n.goto("VOICE")
@@ -1831,7 +1831,7 @@ def stage14():
         out = {}
         for name in ("PLAY", "GRAIN", "WARP", "PV", "PLAY"):
             set_mode(name)
-            out.setdefault(name, []).append("mangler_erode" in n.nodes())
+            out.setdefault(name, []).append("four_erode" in n.nodes())
         n.set("erode", 0)
         return verdict(out["PLAY"] == [True, True] and not any(out["GRAIN"] + out["WARP"] + out["PV"]), f"erode node by mode {out}")
 
@@ -2064,7 +2064,7 @@ def stage16():
         n.set("lfo2_depth", 0)
         time.sleep(1.5)
         off = n.nodes()
-        return verdict("mangler_reverb" in on and "mangler_reverb" not in off, f"reverb node with the LFO={'mangler_reverb' in on}, at depth 0={'mangler_reverb' in off}; CPU {cpu}")
+        return verdict("four_reverb" in on and "four_reverb" not in off, f"reverb node with the LFO={'four_reverb' in on}, at depth 0={'four_reverb' in off}; CPU {cpu}")
 
     def c1610():
         n.load_script()
@@ -2160,7 +2160,7 @@ def stage17():
         nodes = []
         rate, chans = during(hold, "17.2_repeat", 6)
         env = audio.envelope(chans[0], rate, 0.05)
-        return verdict("mangler_repeat" in nodes, f"repeat node present while held; sounding share {sum(1 for e in env if e > -50) / max(len(env), 1):.2f}. On the beat: listen to 17.2_repeat.wav", "measured")
+        return verdict("four_repeat" in nodes, f"repeat node present while held; sounding share {sum(1 for e in env if e > -50) / max(len(env), 1):.2f}. On the beat: listen to 17.2_repeat.wav", "measured")
 
     def c173():
         record_take(4, "tone")
@@ -2205,7 +2205,7 @@ def stage17():
         time.sleep(0.5)
         nodes2 = n.nodes()
         n.set("beat_repeat", 0)
-        return verdict(a < -70 and "mangler_repeat" not in nodes and "mangler_repeat" not in nodes2, f"STOP {a} dB, node gone={'mangler_repeat' not in nodes}; erase, node gone={'mangler_repeat' not in nodes2}")
+        return verdict(a < -70 and "four_repeat" not in nodes and "four_repeat" not in nodes2, f"STOP {a} dB, node gone={'four_repeat' not in nodes}; erase, node gone={'four_repeat' not in nodes2}")
 
     def c177():
         record_take(4, "drums")
