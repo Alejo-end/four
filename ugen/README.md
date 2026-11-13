@@ -55,7 +55,7 @@ These steps ran on 2026-11-13. The results are in
    class file with an older binary gives `UGen not installed`, and the
    engine makes no sound.
 5. Restart with the engine ritual. The SuperCollider log must say
-   `four: FourStretch on`, and the count must stay 197.
+   `four: FourStretch on`, and the count must stay 198.
 
 `-DFOUR_FFTW` makes the transforms come from FFTW, the library that
 SuperCollider uses on the norns. It has NEON code and is three times as fast

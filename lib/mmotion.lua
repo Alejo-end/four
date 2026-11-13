@@ -109,6 +109,8 @@ do
       MOTION_IDS[#MOTION_IDS + 1] = pre .. k
     end
   end
+  -- the echoes into the reverb (appended, as above)
+  MOTION_IDS[#MOTION_IDS + 1] = "dly_rev"
 end
 
 -- the entries of MOTION_IDS that are tombstones: ids of deleted params, kept

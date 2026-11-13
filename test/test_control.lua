@@ -1424,7 +1424,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   four_cmds(sc, add)
-  ok(n == 197, "the engine command count is 197, the expected fingerprint (got " .. n .. ")")
+  ok(n == 198, "the engine command count is 198, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2484,12 +2484,12 @@ do
   CTX.throws_forget()
   params:set("track_sel", 1)
 
-  -- SPACE: the FX sends are on the routing grid, full by default
+  -- SPACE: the FX sends are on the routing grid, closed by default
   for n = 1, 4 do
     local d = n == 1 and "fx_dly" or ("t" .. n .. "_fx_dly")
     local r = n == 1 and "fx_rev" or ("t" .. n .. "_fx_rev")
-    ok(params:get(d) == 1 and params:get(r) == 1,
-      "track " .. n .. " sends everything to the delay and reverb by default")
+    ok(params:get(d) == 0 and params:get(r) == 0,
+      "track " .. n .. " sends nothing to the delay and reverb by default")
   end
   T.goto_page("TRACKS")
   params:set("track_sel", 2)

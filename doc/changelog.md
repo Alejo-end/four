@@ -4149,3 +4149,19 @@ an echo into eight.
   the page rests, dim.
 - Shimmer's motes climb off the outer square.
 The time axis and the slope of the old page are gone from REVERB. DELAY is unchanged.
+
+four, nineteenth change: **SPACE is sends (engine and Lua, the count goes from 197 to
+198, needs a RESTART). NOT on the device.** Section 3 of doc/space-plan.md.
+- Each track's send to the delay (`fx_dly`, `t<n>_fx_dly`) and to the reverb (`fx_rev`,
+  `t<n>_fx_rev`) starts at 0. It started at 1: every track sent everything.
+- The two returns are added to the dry sum, and the dry sum never ducks. `delay_mix`
+  was a crossfade that lowered the dry sound. It is now the level of the echoes, as
+  `rev_mix` is the level of the tail.
+- `dly_rev` (new, 0 by default) sends the echoes into the reverb. Before, they always
+  went in.
+- DELAY and REVERB write `NO SEND - TRACKS K1` when the effect is up and no track
+  sends into it. The sends are on TRACKS with K1 held, as before.
+- The twelve presets are built again. They say `fx_dly = 1`, `fx_rev = 1` and
+  `dly_rev = 1` for track 1 and track 4, so they sound as they were made.
+A PSET saved before this change names its sends, so it loads as it was. A fresh
+script is different: the delay and the reverb are silent until a track sends.

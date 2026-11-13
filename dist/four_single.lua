@@ -2067,6 +2067,8 @@ do
       MOTION_IDS[#MOTION_IDS + 1] = pre .. k
     end
   end
+  -- the echoes into the reverb (appended, as above)
+  MOTION_IDS[#MOTION_IDS + 1] = "dly_rev"
 end
 
 -- the entries of MOTION_IDS that are tombstones: ids of deleted params, kept
@@ -3464,7 +3466,7 @@ local TIMBRE_IDS = {
 
 local SPACE_IDS = {
   "cutoff", "resonance", "drive",
-  "delay_time", "delay_fb", "delay_mix",
+  "delay_time", "delay_fb", "delay_mix", "dly_rev",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix",
@@ -5471,7 +5473,7 @@ local SHORT = {
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
   cut_source = "SRC",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
-  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK",
+  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK", dly_rev = "D>REV",
   delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "VERB",
   rev_decay = "DECAY", rev_damp = "DMP", rev_early = "DIFF",
@@ -6795,9 +6797,18 @@ local function spc_onset()             -- the shared onset spike
   screen.fill()
 end
 
+-- SPACE is sends: an effect that is up while no track sends into it makes
+-- no sound, and the page must say why
+local SPC_DLY = { "fx_dly", "t2_fx_dly", "t3_fx_dly", "t4_fx_dly" }
+local SPC_HINT = "NO SEND - TRACKS K1"
+local function no_send(ids)
+  for n = 1, 4 do if pget(ids[n], 0) > 0.005 then return false end end
+  return true
+end
 local function body_DELAY(frame)
   local emix = pget("delay_mix", 0)
   if not spc_frame(emix > 0.005) then return end
+  if no_send(SPC_DLY) then ptext_c(SPC_HINT, 64, 12, 1, 9) end
   spc_onset()
   -- echo taps: spacing = delay_time, height decaying by the ACTUAL feedback
   -- coefficient (the knob is curved through ctx.delay_fb_curve, so the taps
@@ -6843,7 +6854,7 @@ local function body_REVERB(frame)
   -- who feeds the room
   local feeding = false
   for n = 1, 4 do
-    local v = pget(RV_SEND[n], 1)
+    local v = pget(RV_SEND[n], 0)
     local on = live and v > 0.01 and track_sounds(n)
     if on then feeding = true end
     ptext(RV_NAME[n], RV_TX[n], RV_TY[n], 1, on and 12 or 3)
@@ -6883,6 +6894,12 @@ local function body_REVERB(frame)
       end
     end
     screen.fill()
+  end
+  if live and no_send(RV_SEND) then
+    screen.level(0)
+    screen.rect(24, 11, 80, 7)
+    screen.fill()
+    ptext_c(SPC_HINT, 64, 12, 1, 9)
   end
   -- the point the sound enters at
   screen.level(feeding and 15 or (live and 5 or 2))
@@ -8375,8 +8392,8 @@ end
 -- The S-4's sends: each track's filtered output can feed any other track's
 -- filter, `send_<from>_<to>`, twelve in all. SPACE: each track also has its
 -- own send into the shared delay (to = 5, `fx_dly` / `t<n>_fx_dly`) and
--- reverb (to = 6, `fx_rev` / `t<n>_fx_rev`), at 1 by default (everything
--- goes in, the sound from before). ROUTES walks them row by row (row = from,
+-- reverb (to = 6, `fx_rev` / `t<n>_fx_rev`), at 0 by default: a track goes
+-- into the delay and the reverb only as far as you send it. ROUTES walks them row by row (row = from,
 -- column = to). On TRACKS with K1 held, the grid shows and the encoders
 -- reach the FOCUSED track's row: K1+E2 picks where it sends (`route_sel`),
 -- K1+E3 how much.
@@ -10430,13 +10447,13 @@ local function init_params()
   for _, r in ipairs(ROUTES) do
     if r.fx then
       add_eng_control(r.id, "t" .. r.from .. (r.to == NTRACKS + 1 and " > delay" or " > reverb"),
-        unit(1.0))
+        unit(0.0))
     else
       add_eng_control(r.id, "send " .. r.from .. " > " .. r.to, unit(0.0))
     end
   end
 
-  params:add_group("grp_delay", "delay", 4)
+  params:add_group("grp_delay", "delay", 5)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 2, "exp", 0, 0.3, "s"))
   -- tempo sync (DELAY K1+E3): FREE = the time knob; a division = delay_time
@@ -10452,6 +10469,8 @@ local function init_params()
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
   -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
+  -- how much of the echoes goes on into the reverb (0: the two are apart)
+  add_eng_control("dly_rev", "delay > reverb", unit(0.0))
 
   -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing

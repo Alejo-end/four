@@ -746,8 +746,8 @@ end
 -- The S-4's sends: each track's filtered output can feed any other track's
 -- filter, `send_<from>_<to>`, twelve in all. SPACE: each track also has its
 -- own send into the shared delay (to = 5, `fx_dly` / `t<n>_fx_dly`) and
--- reverb (to = 6, `fx_rev` / `t<n>_fx_rev`), at 1 by default (everything
--- goes in, the sound from before). ROUTES walks them row by row (row = from,
+-- reverb (to = 6, `fx_rev` / `t<n>_fx_rev`), at 0 by default: a track goes
+-- into the delay and the reverb only as far as you send it. ROUTES walks them row by row (row = from,
 -- column = to). On TRACKS with K1 held, the grid shows and the encoders
 -- reach the FOCUSED track's row: K1+E2 picks where it sends (`route_sel`),
 -- K1+E3 how much.
@@ -2801,13 +2801,13 @@ local function init_params()
   for _, r in ipairs(ROUTES) do
     if r.fx then
       add_eng_control(r.id, "t" .. r.from .. (r.to == NTRACKS + 1 and " > delay" or " > reverb"),
-        unit(1.0))
+        unit(0.0))
     else
       add_eng_control(r.id, "send " .. r.from .. " > " .. r.to, unit(0.0))
     end
   end
 
-  params:add_group("grp_delay", "delay", 4)
+  params:add_group("grp_delay", "delay", 5)
   add_eng_control("delay_time", "delay time",
     controlspec.new(0.01, 2, "exp", 0, 0.3, "s"))
   -- tempo sync (DELAY K1+E3): FREE = the time knob; a division = delay_time
@@ -2823,6 +2823,8 @@ local function init_params()
   -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
   -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
+  -- how much of the echoes goes on into the reverb (0: the two are apart)
+  add_eng_control("dly_rev", "delay > reverb", unit(0.0))
 
   -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
   -- fallback in the engine). every knob maps to a real JPverb arg — nothing

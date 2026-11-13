@@ -500,7 +500,7 @@ Engine_Four : CroneEngine {
                 params: Dictionary.new,
                 stripParams: Dictionary[\level -> 1.0, \cutoff -> 20000,
                     \resonance -> 0.0, \filt_type -> 0,
-                    \drive -> 0.0, \crush -> 0.0, \fx_dly -> 1.0, \fx_rev -> 1.0,
+                    \drive -> 0.0, \crush -> 0.0, \fx_dly -> 0.0, \fx_rev -> 0.0,
                     \effect -> 0, \effect_amt -> 0.5, \effect_rate -> 0.5,
                     \effect2 -> 0, \effect2_amt -> 0.5, \effect2_rate -> 0.5]);
             playParams.keysValuesDo({ arg k, v;
@@ -519,7 +519,7 @@ Engine_Four : CroneEngine {
             \filt_type, \cutoff, \resonance, \drive, \crush,
             \effect, \effect_amt, \effect_rate,
             \effect2, \effect2_amt, \effect2_rate,
-            \delay_mix, \fx_dly,
+            \delay_mix, \fx_dly, \dly_rev,
             \rev_mix, \fx_rev];
         revParams = Dictionary[
             \rev_size -> 1.0, \rev_decay -> 2.0, \rev_damp -> 0.3, \rev_early -> 0.7,
@@ -1232,7 +1232,7 @@ Engine_Four : CroneEngine {
         }).add;
         // out (tracks 2 to 4): the level, and where the track goes
         SynthDef(\four_lane_out, {
-            arg pbus, out_bus, own_out, level = 1.0, fx_dly = 1, fx_rev = 1,
+            arg pbus, out_bus, own_out, level = 1.0, fx_dly = 0, fx_rev = 0,
                 dly_out = 0, rev_out = 0;
             var sig = In.ar(pbus, 2) * level.lag(0.03);
             Out.ar(own_out, sig);     // what the other tracks' sends read
@@ -1251,7 +1251,7 @@ Engine_Four : CroneEngine {
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
                 // track 1's COLOR (crush) and SPACE (its sends into the delay
                 // and the reverb); t_dly and t_rev carry the other tracks'
-                crush = 0.0, fx_dly = 1.0, fx_rev = 1.0, t_dly = 0, t_rev = 0,
+                crush = 0.0, fx_dly = 0.0, fx_rev = 0.0, t_dly = 0, t_rev = 0, dly_rev = 0.0,
                 // track 1's EFFECT: its type and its two knobs
                 effect = 0, effect_amt = 0.5, effect_rate = 0.5,
                 // delay + reverb run in their own spawn/free synths; io keeps
@@ -1286,16 +1286,19 @@ Engine_Four : CroneEngine {
             // return reads 0.
             dm = delay_mix.lag(0.03);
             Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(t_dly, 2));
-            dlyRet = InFeedback.ar(dly_ret, 2);
+            dlyRet = InFeedback.ar(dly_ret, 2) * dm.sqrt;
 
-            // reverb + shimmer run in a spawn/free synth (\four_reverb, only
-            // while rev_mix > 0). It gets each track's own reverb send through
-            // the delay's crossfade (so at fx_rev 1 it is the post-delay wet,
-            // as before), and the tail comes back one block late.
-            revIn = (((wet * fx_rev.lag(0.03)) + In.ar(t_rev, 2)) * (1 - dm).sqrt)
-                + (dlyRet * dm.sqrt);
+            // SPACE is two SENDS (doc/space-plan.md, section 3). A track goes
+            // to the delay by its fx_dly and to the reverb by its fx_rev, both
+            // 0 at the start, and the two returns are ADDED to the dry sum.
+            // The dry sum never ducks: delay_mix is the level of the echoes,
+            // as rev_mix is the level of the tail. (Before, the delay was a
+            // crossfade that lowered the dry sound, and each track sent
+            // everything.) dly_rev sends the echoes into the reverb.
+            revIn = (wet * fx_rev.lag(0.03)) + In.ar(t_rev, 2)
+                + (dlyRet * dly_rev.lag(0.03));
             Out.ar(rev_send, revIn);
-            wet = ((wet + others) * (1 - dm).sqrt) + (dlyRet * dm.sqrt);
+            wet = wet + others + dlyRet;
             rvRet = InFeedback.ar(rev_ret, 2);
             // SEND-style (OT-like): the direct sound stays at full level and
             // rev_mix only scales how much tail is ADDED. Lua squares the

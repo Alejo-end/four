@@ -97,7 +97,7 @@ local TIMBRE_IDS = {
 
 local SPACE_IDS = {
   "cutoff", "resonance", "drive",
-  "delay_time", "delay_fb", "delay_mix",
+  "delay_time", "delay_fb", "delay_mix", "dly_rev",
   "rev_decay", "rev_damp", "rev_size", "rev_early", "rev_moddepth",
   "rev_modfreq", "rev_low", "rev_mid", "rev_high", "rev_lowcut",
   "rev_highcut", "rev_mix",

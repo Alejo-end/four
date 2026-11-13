@@ -16,9 +16,9 @@ block current, and add a change-log entry for every change.
   mangler is retired: git tag `mangler-1`. The OSC addresses are `/four/...` (lib/mosc.lua
   and visuals/bridge.js must agree), and the log lines start with `four:`. The GitHub
   repository is `Alejo-end/four` since 2026-11-13; the old address redirects.
-- **The fingerprint:** after a RESTART maiden must read **`count: 197`**. That is
+- **The fingerprint:** after a RESTART maiden must read **`count: 198`**. That is
   mangler's 66, plus crush, the two FX sends and the six effect commands of track 1
-  (two slots), 36 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
+  (two slots), `dly_rev`, 36 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
 - **The instrument:** four tracks, each with its OWN material (four 60 s buffers). K1+E1
   picks the track. Each track has its own voice (OFF GRAIN WARP PV PLAY CLOUD), window,
   filter, COLOR (drive, crush), two EFFECT slots in series (OFF CHORUS FLANGE WOBBLE RESON
@@ -35,7 +35,7 @@ block current, and add a change-log entry for every change.
   changes the output and the slot adds no CPU that the measurement can see
   (doc/measurements/2026-11-12/effect-slot.md). RESON's level was raised in the fifth
   change and now sits within about 4 dB of the dry signal.
-- The history below says 173 or 185 in places; read 197.
+- The history below says 173 or 185 in places; read 198.
 - The history below the line is mangler's, from before the merge; where it says 66 or
   `Engine_Mangler`, read 173 and `Engine_Four`.
 
@@ -135,15 +135,20 @@ block current, and add a change-log entry for every change.
   build the plugin there, install it BEFORE the engine, restart, read `count: 197`,
   measure its cost and make sure that silence costs nothing (a denormal repair is
   unconfirmed there). doc/space-plan.md section 15.
+- **Sends (four, nineteenth change), NOT on the device:** SPACE is two sends. Each
+  track's `fx_dly` and `fx_rev` start at 0, the returns are added and the dry sum never
+  ducks, and `dly_rev` sends the echoes into the reverb. `count: 198`. The presets in
+  `data/` say `fx_dly = 1` and so on for the tracks that sent before. DELAY and REVERB
+  say `NO SEND - TRACKS K1` when the effect is up and nothing feeds it.
 - **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 197` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 198` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
-   source no longer adds up to 197.
+   source no longer adds up to 198.
 
 Lua-only changes skip all this: save and reload the script.
 

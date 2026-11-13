@@ -286,7 +286,7 @@ local SHORT = {
   tape_rate = "RATE", tape_pre = "PRE", loop_start = "STRT", loop_end = "LOOP",
   cut_source = "SRC",
   cutoff = "CUT", resonance = "RES", drive = "DRV",
-  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK",
+  delay_mix = "ECHO", delay_time = "TIME", delay_fb = "FDBK", dly_rev = "D>REV",
   delay_sync = "SYNC",
   rev_size = "SIZE", rev_mix = "VERB",
   rev_decay = "DECAY", rev_damp = "DMP", rev_early = "DIFF",
@@ -1610,9 +1610,18 @@ local function spc_onset()             -- the shared onset spike
   screen.fill()
 end
 
+-- SPACE is sends: an effect that is up while no track sends into it makes
+-- no sound, and the page must say why
+local SPC_DLY = { "fx_dly", "t2_fx_dly", "t3_fx_dly", "t4_fx_dly" }
+local SPC_HINT = "NO SEND - TRACKS K1"
+local function no_send(ids)
+  for n = 1, 4 do if pget(ids[n], 0) > 0.005 then return false end end
+  return true
+end
 local function body_DELAY(frame)
   local emix = pget("delay_mix", 0)
   if not spc_frame(emix > 0.005) then return end
+  if no_send(SPC_DLY) then ptext_c(SPC_HINT, 64, 12, 1, 9) end
   spc_onset()
   -- echo taps: spacing = delay_time, height decaying by the ACTUAL feedback
   -- coefficient (the knob is curved through ctx.delay_fb_curve, so the taps
@@ -1658,7 +1667,7 @@ local function body_REVERB(frame)
   -- who feeds the room
   local feeding = false
   for n = 1, 4 do
-    local v = pget(RV_SEND[n], 1)
+    local v = pget(RV_SEND[n], 0)
     local on = live and v > 0.01 and track_sounds(n)
     if on then feeding = true end
     ptext(RV_NAME[n], RV_TX[n], RV_TY[n], 1, on and 12 or 3)
@@ -1698,6 +1707,12 @@ local function body_REVERB(frame)
       end
     end
     screen.fill()
+  end
+  if live and no_send(RV_SEND) then
+    screen.level(0)
+    screen.rect(24, 11, 80, 7)
+    screen.fill()
+    ptext_c(SPC_HINT, 64, 12, 1, 9)
   end
   -- the point the sound enters at
   screen.level(feeding and 15 or (live and 5 or 2))
