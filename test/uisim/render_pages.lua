@@ -111,19 +111,6 @@ else
       if th < tl then tl, th = th, tl end
       local tp = tl + ((t * 0.009) % 1) * (th - tl)
       _h.phase(1, tp * 60)
-      -- the layer decks run on their own voices and their own buffer regions,
-      -- and each free-runs at its own rate — which is the point of having them.
-      -- The real poll reports a position in SECONDS into the whole buffer, so
-      -- the stub has to as well, or the deck's phase maths would never be
-      -- exercised offscreen.
-      for n, dk in ipairs({ { v = 3, from = 120, rate = 0.013 },
-                            { v = 5, from = 180, rate = 0.021 } }) do
-        local id = "lay" .. n
-        local a1, b1 = params:get(id .. "_start"), params:get(id .. "_end")
-        if b1 < a1 then a1, b1 = b1, a1 end
-        local ph = a1 + ((t * dk.rate) % 1) * (b1 - a1)
-        _h.phase(dk.v, dk.from + ph * 60)
-      end
     end
   end
 end
@@ -500,38 +487,6 @@ else
   params:set("step_run", 0)
   params:set("step_len", 4); params:set("step_fill", 4)
   clock.run = real_run
-  -- LAYERS with material: L1 recording (blinking write flag, DUB), L2 looping
-  -- a shorter region at a different rate — the drift that makes two decks worth
-  -- having
-  goto_page("LAYERS")
-  params:set("lay1_rec", 1)
-  params:set("lay2_rate", 0.75)
-  params:set("lay2_start", 0.15)
-  params:set("lay2_end", 0.6)
-  run_ticks(120)
-  params:set("layer_sel", 2)
-  run_ticks(4)
-  redraw()
-  export(pfx("LAYERS", "_LIVE"))
-  -- the footer while a layer encoder is TURNING: it used to read "--" because
-  -- the compound target had no anchor param to resolve to
-  enc(3, 2)
-  run_ticks(2)
-  redraw()
-  export(pfx("LAYERS", "_TURN"))
-  params:set("lay1_rec", 0)
-  params:set("layer_sel", 1)
-  -- SNAP: the loop length lands on a musical ratio of whatever else is
-  -- playing, and SAYS so. A snap that finds the loop already on the grid
-  -- moves nothing on screen, which is exactly why the page has to speak.
-  run_ticks(20)                       -- let the encoder flash expire first
-  params:set("lay1_start", 0.1)
-  params:set("lay1_end", 0.1 + 5.3 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  run_ticks(2)
-  redraw()
-  export(pfx("LAYERS", "_SNAP"))
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
   -- master STOP: the title chip inverts, on every page
   goto_page("MIX")
   params:set("stop_all", 1)
@@ -672,9 +627,9 @@ else
   -- fit shrink to dots and pips, and none of them drops off. Shot in the
   -- blink's lit phase, so the write letters show. The sequencer's and the
   -- repeat's clocks are not run (env's clock.run replaces the frame loop).
-  goto_page("LAYERS")
+  goto_page("REVERB")
   clock.run = function() return {} end
-  for _, id in ipairs({ "rec", "tape_rec", "motion_rec", "lay1_rec", "freeze",
+  for _, id in ipairs({ "rec", "tape_rec", "motion_rec", "freeze",
       "tape_freeze", "beat_repeat", "step_run" }) do
     params:set(id, 1)
   end
@@ -682,7 +637,7 @@ else
   run_ticks(1)
   while script_ctx().frame % 4 >= 2 do run_ticks(1) end
   redraw()
-  export(pfx("LAYERS", "_FLAGS"))
+  export(pfx("REVERB", "_FLAGS"))
 end
 
 print("done: " .. _h.ticks() .. " ticks")

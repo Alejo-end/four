@@ -36,3 +36,27 @@ thread (measured: 6 pairs +1.1%, 17 pairs +4.1%), and that set asked for about 1
 Tracks 1 and 3, in PLAY, 3 s captures: every effect type changes the sound in slot 1,
 slot 2 adds to it, HP, BP and LP act, drive and crush act, and the synth count goes
 from 22 to 24 and back to 22 as slots go on and off.
+
+## The fourteenth change: our own cloud, the new flanger, ECHO
+
+`FourGrain` against two stock `GrainBuf` on the same inputs, rendered offline
+(`test/dsp/grain_eq.scd`): the stock grain equals the written law to -139 dB when its
+start place is rounded to a float, as `GrainBuf` rounds it. Ours equals the law to
+-146 dB with the exact place. The first grain of a synth differs by one sample: the
+stock UGen runs one sample at its start and keeps the step.
+
+Cost of a grain pair on the norns: stock 0.27% of the thread, ours 0.17%.
+
+After a restart, `count: 197`, with captures running (a capture adds a few xruns):
+
+| State | Thread |
+|---|---|
+| Preset 1 as it loads | 18.3% |
+| Four GRAIN tracks, density 20, size 0.1 s | 26.1% |
+| Four GRAIN tracks, density 200, size 0.5 s (cap 48) | 57.3% |
+| Two PV at pitch 2 and 2.5, two such GRAIN | 57.3%, 0 xruns |
+| Track 1 PLAY | 17.8% |
+| Track 1 PLAY with FLANGE | 18.6% |
+| Track 1 PLAY with ECHO | 18.4% |
+
+With a cap of 128 the four dense clouds took 95%, so the cap is 48.

@@ -687,6 +687,214 @@ struct Warp {
     }
 };
 
+// GRAIN's cloud: what two stock GrainBuf UGens did (one on the left buffer,
+// one on the right, each panned), as one loop. A grain is a PAIR: it reads
+// both buffers at the same place and speed under one window, and each side
+// has its own equal-power pan. The laws are GrainBuf's own, so the sound is
+// the same: the start is the trigger's sample, the read is the 4-point cubic,
+// the built-in window is the Hann that a sine recurrence draws, and a window
+// buffer is read between its points. What changed is the work: one window and
+// one read place for the pair, and four samples at a time with NEON.
+#ifdef FOUR_NEON
+// the 4-point cubic of four samples at once. t0..t3 each hold ONE sample's
+// four taps; they are turned so that each vector holds one tap of all four.
+static inline float32x4_t cubic4(float32x4_t t0, float32x4_t t1, float32x4_t t2, float32x4_t t3,
+                                 float32x4_t x) {
+    const float32x4x2_t p = vtrnq_f32(t0, t1), q = vtrnq_f32(t2, t3);
+    const float32x4_t y0 = vcombine_f32(vget_low_f32(p.val[0]), vget_low_f32(q.val[0]));
+    const float32x4_t y1 = vcombine_f32(vget_low_f32(p.val[1]), vget_low_f32(q.val[1]));
+    const float32x4_t y2 = vcombine_f32(vget_high_f32(p.val[0]), vget_high_f32(q.val[0]));
+    const float32x4_t y3 = vcombine_f32(vget_high_f32(p.val[1]), vget_high_f32(q.val[1]));
+    const float32x4_t half = vdupq_n_f32(0.5f);
+    const float32x4_t c1 = vmulq_f32(half, vsubq_f32(y2, y0));
+    const float32x4_t c2 = vsubq_f32(vaddq_f32(vsubq_f32(y0, vmulq_f32(y1, vdupq_n_f32(2.5f))),
+                                               vaddq_f32(y2, y2)), vmulq_f32(half, y3));
+    const float32x4_t c3 = vaddq_f32(vmulq_f32(half, vsubq_f32(y3, y0)),
+                                     vmulq_f32(vsubq_f32(y1, y2), vdupq_n_f32(1.5f)));
+    float32x4_t r = vaddq_f32(vmulq_f32(c3, x), c2);
+    r = vaddq_f32(vmulq_f32(r, x), c1);
+    return vaddq_f32(vmulq_f32(r, x), y1);
+}
+#endif
+
+struct Grains {
+    static const int MAXG = 128;
+    struct G {
+        double phase, rate;           // the read place and its step, in frames
+        double winPos, winInc;        // the place in a window buffer
+        double b1, y1, y2;            // the Hann recurrence (doubles: in floats a long
+                                      // grain's 2 cos(w) is 2, and the window a ramp)
+        float gL1, gL2, gR1, gR2;     // left sample to out 1 and 2, right sample to out 1 and 2
+        int left;                     // samples still to make
+    };
+    G g[MAXG];
+    int n;
+    float lastTrig;
+
+    void init() { n = 0; lastTrig = 0.f; }
+
+    static inline float cubic(float x, float y0, float y1, float y2, float y3) {
+        float c1 = 0.5f * (y2 - y0);
+        float c2 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
+        float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+        return ((c3 * x + c2) * x + c1) * x + y1;
+    }
+
+    // `count` samples of one grain, added to outL and outR
+    void run(G& gr, float* outL, float* outR, int count, const Buf& bl, const Buf& br,
+             const float* win, int winFrames) {
+        const int frames = bl.frames < br.frames ? bl.frames : br.frames;
+        if (frames < 4) { gr.left = 0; return; }
+        const double fmax = (double)frames;
+        int i = 0;
+        float amp[4];
+        while (i < count) {
+            // the windows of the next four samples (or fewer at the end)
+            const int m = count - i < 4 ? count - i : 4;
+            for (int k = 0; k < m; k++) {
+                if (win) {
+                    int wi = (int)gr.winPos;
+                    if (wi > winFrames - 1) wi = winFrames - 1;
+                    const float wf = (float)(gr.winPos - (double)wi);
+                    const float a = win[wi], b = wi + 1 < winFrames ? win[wi + 1] : win[0];
+                    amp[k] = a + wf * (b - a);
+                    gr.winPos += gr.winInc;
+                } else {
+                    amp[k] = (float)(gr.y1 * gr.y1);
+                    const double y0 = gr.b1 * gr.y1 - gr.y2;
+                    gr.y2 = gr.y1; gr.y1 = y0;
+                }
+            }
+            const double last = gr.phase + gr.rate * (m - 1);
+            const double lo = gr.phase < last ? gr.phase : last, hi = gr.phase < last ? last : gr.phase;
+#ifdef FOUR_NEON
+            if (m == 4 && lo >= 1.0 && hi < fmax - 3.0) {
+                // all sixteen taps are inside the buffers: no wrap to think of.
+                // Each sample's four taps are loaded as one vector (cubic4).
+                const float* dl = bl.data - 1; const float* dr = br.data - 1;
+                double ph = gr.phase;
+                const int i0 = (int)ph; const float f0 = (float)(ph - (double)i0); ph += gr.rate;
+                const int i1 = (int)ph; const float f1 = (float)(ph - (double)i1); ph += gr.rate;
+                const int i2 = (int)ph; const float f2 = (float)(ph - (double)i2); ph += gr.rate;
+                const int i3 = (int)ph; const float f3 = (float)(ph - (double)i3); ph += gr.rate;
+                gr.phase = ph;
+                const float fx[4] = {f0, f1, f2, f3};
+                const float32x4_t x = vld1q_f32(fx), a = vld1q_f32(amp);
+                const float32x4_t l = vmulq_f32(a, cubic4(vld1q_f32(dl + i0), vld1q_f32(dl + i1),
+                                                          vld1q_f32(dl + i2), vld1q_f32(dl + i3), x));
+                const float32x4_t r = vmulq_f32(a, cubic4(vld1q_f32(dr + i0), vld1q_f32(dr + i1),
+                                                          vld1q_f32(dr + i2), vld1q_f32(dr + i3), x));
+                const float32x4_t g1 = vdupq_n_f32(gr.gL1), g2 = vdupq_n_f32(gr.gL2);
+                const float32x4_t g3 = vdupq_n_f32(gr.gR1), g4 = vdupq_n_f32(gr.gR2);
+                vst1q_f32(outL + i, vaddq_f32(vld1q_f32(outL + i), vaddq_f32(vmulq_f32(l, g1), vmulq_f32(r, g3))));
+                vst1q_f32(outR + i, vaddq_f32(vld1q_f32(outR + i), vaddq_f32(vmulq_f32(l, g2), vmulq_f32(r, g4))));
+                i += 4;
+                continue;
+            }
+#endif
+            (void)lo; (void)hi;
+            for (int k = 0; k < m; k++) {
+                // the plain path: any place, with the buffer read as a loop
+                double ph = gr.phase;
+                if (ph >= fmax) { ph -= fmax * std::floor(ph / fmax); }
+                else if (ph < 0) { ph += fmax * std::ceil(-ph / fmax); if (ph >= fmax) ph -= fmax; }
+                const int ip = (int)ph;
+                const float x = (float)(ph - (double)ip);
+                int i0 = ip - 1; if (i0 < 0) i0 += frames;
+                int i2 = ip + 1; if (i2 >= frames) i2 -= frames;
+                int i3 = i2 + 1; if (i3 >= frames) i3 -= frames;
+                const float l = amp[k] * cubic(x, bl.data[i0], bl.data[ip], bl.data[i2], bl.data[i3]);
+                const float r = amp[k] * cubic(x, br.data[i0], br.data[ip], br.data[i2], br.data[i3]);
+                outL[i + k] += l * gr.gL1 + r * gr.gR1;
+                outR[i + k] += l * gr.gL2 + r * gr.gR2;
+                gr.phase = ph + gr.rate;
+            }
+            i += m;
+        }
+        gr.left -= count;
+    }
+
+    // One block. Each input is one value for each sample. win is the window
+    // buffer (winFrames long) or null for the Hann. maxG: the most grains at
+    // once (a trigger beyond it starts nothing, without a word).
+    void process(float* outL, float* outR, int nsmp, const float* trig, const float* dur,
+                 const float* rate, const float* pos, const float* panL, const float* panR,
+                 const Buf& bl, const Buf& br, const float* win, int winFrames,
+                 int maxG, double sr, double rateScale) {
+        std::memset(outL, 0, nsmp * sizeof(float));
+        std::memset(outR, 0, nsmp * sizeof(float));
+        if (maxG > MAXG) maxG = MAXG;
+        for (int j = 0; j < n;) {
+            const int c = g[j].left < nsmp ? g[j].left : nsmp;
+            run(g[j], outL, outR, c, bl, br, win, winFrames);
+            if (g[j].left <= 0) g[j] = g[--n]; else j++;
+        }
+        const double pi = 3.14159265358979323846;
+        for (int i = 0; i < nsmp; i++) {
+            const float t = trig[i];
+            if (t > 0.f && lastTrig <= 0.f && n < maxG && bl.frames >= 4 && br.frames >= 4) {
+                G& gr = g[n];
+                double counter = (double)dur[i] * sr;
+                if (counter < 4.0) counter = 4.0;
+                gr.left = (int)counter;
+                gr.rate = (double)rate[i] * rateScale;
+                gr.phase = (double)pos[i] * (double)bl.frames;
+                if (win) { gr.winPos = 0.0; gr.winInc = (double)winFrames / counter; }
+                else {
+                    const double w = pi / counter;
+                    gr.b1 = 2.0 * std::cos(w); gr.y1 = std::sin(w); gr.y2 = 0.0;
+                }
+                auto pan = [&](float p, float& g1, float& g2) {
+                    p = p * 0.5f + 0.5f;
+                    if (p < 0.f) p = 0.f; else if (p > 1.f) p = 1.f;
+                    g1 = (float)std::cos((double)p * (pi / 2)); g2 = (float)std::sin((double)p * (pi / 2));
+                };
+                pan(panL[i], gr.gL1, gr.gL2);
+                pan(panR[i], gr.gR1, gr.gR2);
+                const int c = gr.left < nsmp - i ? gr.left : nsmp - i;
+                run(gr, outL + i, outR + i, c, bl, br, win, winFrames);
+                if (gr.left > 0) n++;
+            }
+            lastTrig = t;
+        }
+    }
+};
+
+// A delay line with a filtered, bounded feedback path, for FLANGE and ECHO.
+// The stock comb has neither: its feedback is the bare delayed signal, which
+// rings thin and metallic. Here the signal that goes back in passes a one-pole
+// low-pass (each pass round the loop is a little darker, as on tape) and a
+// soft clip, so high feedback sings without running away.
+//   read: 4-point Hermite between the samples, so a moving delay does not click
+//   clip: s - (4/27) s^3 up to 1.5, flat at 1 beyond: slope 1 at 0, no corner
+struct DelayFb {
+    float* line; int mask; int w; float lp, back;
+    void init(float* mem, int size) {      // size is a power of two
+        line = mem; mask = size - 1; w = 0; lp = 0; back = 0;
+        std::memset(mem, 0, size * sizeof(float));
+    }
+    // d: the delay in samples. k: the low-pass coefficient (0..1).
+    inline float tick(float in, float d, float fb, float k) {
+        line[w] = in + fb * back;
+        if (d < 2.f) d = 2.f;
+        if (d > (float)(mask - 4)) d = (float)(mask - 4);
+        const int di = (int)d;
+        const float fr = d - (float)di;            // the read place is w - di - fr
+        const float y0 = line[(w - di + 1) & mask], y1 = line[(w - di) & mask];
+        const float y2 = line[(w - di - 1) & mask], y3 = line[(w - di - 2) & mask];
+        const float c1 = 0.5f * (y2 - y0);
+        const float c2 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
+        const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+        const float y = ((c3 * fr + c2) * fr + c1) * fr + y1;
+        lp += k * (y - lp);
+        float s = lp;
+        if (s > 1.5f) s = 1.5f; else if (s < -1.5f) s = -1.5f;
+        back = s - (4.f / 27.f) * s * s * s;
+        w = (w + 1) & mask;
+        return y;
+    }
+};
+
 // tanh for a block of samples. The C library's tanhf takes about 130 cycles
 // for each sample on the norns, and the engine calls it on 28 channels. This
 // one is the same curve to about 2e-7 (below the last bit of 24-bit audio):

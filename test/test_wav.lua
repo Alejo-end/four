@@ -355,9 +355,15 @@ do
   ok(list ~= nil and short ~= nil, "MOTION_IDS and SHORT are both readable")
   local have = {}
   for k in (short or ""):gmatch("([%w_]+)%s*=%s*\"") do have[k] = true end
+  -- a tombstone names a deleted param and holds its place in the list: it
+  -- can never be a lane, so it needs no label
+  local tombs = mm:match("local MOTION_TOMBSTONES = %{(.-)\n%}")
+  ok(tombs ~= nil, "MOTION_TOMBSTONES is readable")
+  local tomb = {}
+  for id in (tombs or ""):gmatch("\"([%w_]+)\"") do tomb[id] = true end
   local missing = {}
   for id in (list or ""):gmatch("\"([%w_]+)\"") do
-    if not have[id] then missing[#missing + 1] = id end
+    if not have[id] and not tomb[id] then missing[#missing + 1] = id end
   end
   ok(#missing == 0,
     "every MOTION_IDS entry has a SHORT label (missing: "
@@ -365,7 +371,7 @@ do
 end
 
 -- ---- the async bin-fill queue ----------------------------------------------
--- One queue now serves every strip (the take, the tape, the layer decks — the
+-- One queue now serves every strip (the take and the tape: the
 -- pset restore repaints all of them). Drive a REAL mpages instance: fills for
 -- different targets coexist, a fill for the SAME target supersedes the queued
 -- one, and each fill spans its own seconds so a short file parks at the left

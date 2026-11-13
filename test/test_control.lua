@@ -3,8 +3,7 @@
 -- The render suite proves the instrument DRAWS correctly. It never turns an
 -- encoder or presses a key, which is why a whole class of bug walks past it:
 -- an encoder target that resolves to nothing, a master level that reaches three
--- decks out of four, a key that re-arms the thing it was meant to cancel. Three
--- of the four defects found reviewing the layer decks were exactly that shape.
+-- decks out of four, a key that re-arms the thing it was meant to cancel.
 --
 -- So this drives the REAL script through enc() and key() and asserts what
 -- reaches the params. It runs on the SAME offscreen norns as the render suite
@@ -93,8 +92,8 @@ params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, 
 -- A compound target ("@...") is not a param id. Three things have to know about
 -- each one or it half-works: the encoder (to move something), ctx.enc_target
 -- (so the footer can print a value instead of "--"), and the SHORT table (so it
--- has a name). The layer targets shipped knowing only the first, which is
--- invisible until you turn that knob on the device.
+-- has a name). A target that knows only the first is invisible until you turn
+-- that knob on the device.
 do
   local src = io.open("four.lua"):read("a")
   local pages = io.open("lib/mpages.lua"):read("a")
@@ -177,50 +176,43 @@ do
 end
 
 -- ============================================================================
--- 2b · the zoom-aware fine step covers the layer loops too
+-- 2b · the zoom-aware fine step covers the pair move too
 -- ============================================================================
 -- the window and the tape loop tighten their encoder steps as the region
--- narrows; the layer loop move goes through the same move_pair, and it used
--- to skip the scaling, so a tight layer loop nudged at full coarseness.
+-- narrows; the window move goes through move_pair, which once skipped the
+-- scaling, so a tight region nudged at full coarseness.
 do
-  local names = T.pages()
-  local li
-  for i, n in ipairs(names) do if n == "LAYERS" then li = i end end
-  goto_page(li)
-  params:set("layer_sel", 1)
-  params:set("lay1_start", 0); params:set("lay1_end", 0.5)
-  key(1, 1)                                  -- hold K1: E3 is the loop move
-  enc(3, 1)
-  local wide = params:get("lay1_start")
-  params:set("lay1_start", 0.2); params:set("lay1_end", 0.21)
-  enc(3, 1)
-  local tight = params:get("lay1_start") - 0.2
+  goto_page("TAKE")
+  params:set("pos_start", 0); params:set("pos_end", 0.5)
+  key(1, 1)                                  -- hold K1: E2 is the window move
+  enc(2, 1)
+  local wide = params:get("pos_start")
+  CTX.set_pair("pos_start", "pos_end", 0.2, 0.21)
+  enc(2, 1)
+  local tight = params:get("pos_start") - 0.2
   key(1, 0)
-  ok(tight > 0, "a tight layer loop still moves")
+  ok(tight > 0, "a tight window still moves")
   ok(tight < wide * 0.5,
-    "...but by a FINER step than a wide one (span-scaled, like the window)")
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
+    "...but by a FINER step than a wide one (span-scaled)")
+  CTX.set_pair("pos_start", "pos_end", 0, 1)
 end
 
 -- ============================================================================
 -- 3 · the master reaches everything that makes sound
 -- ============================================================================
--- out_level used to drive the engine and the tape only, leaving the layer decks
--- at full level. One master, every deck, no exceptions.
+-- One master, every deck, no exceptions.
 do
   sc_calls = {}
   params:set("out_level", 0.25)
   local lv = {}
-  for v = 1, 6 do
+  for v = 1, 2 do
     local c = sc_last("level", v)
     lv[v] = c and c[3] or nil
   end
   ok(lv[1] ~= nil and lv[2] ~= nil, "the master reaches the tape voices")
-  ok(lv[3] ~= nil and lv[4] ~= nil, "...and layer 1")
-  ok(lv[5] ~= nil and lv[6] ~= nil, "...and layer 2")
-  for v = 3, 6 do
+  for v = 1, 2 do
     if lv[v] then
-      ok(lv[v] < 0.8, "layer voice " .. v .. " is scaled by the master (" .. lv[v] .. ")")
+      ok(lv[v] < 0.8, "tape voice " .. v .. " is scaled by the master (" .. lv[v] .. ")")
     end
   end
   params:set("out_level", 1)
@@ -232,15 +224,16 @@ end
 do
   sc_calls = {}
   params:set("stop_all", 1)
-  for v = 1, 6 do
+  for v = 1, 2 do
     local c = sc_last("level", v)
+    ok(c ~= nil, "STOP reaches softcut voice " .. v)
     if c then near(c[3], 0, 1e-6, "STOP silences softcut voice " .. v) end
   end
   params:set("stop_all", 0)
   sc_calls = {}
   params:set("out_level", 0.9)   -- a REAL change, so the action definitely fires
-  local back = sc_last("level", 3)
-  ok(back and back[3] > 0, "START brings the layers back")
+  local back = sc_last("level", 1)
+  ok(back and back[3] > 0, "START brings the tape back")
 end
 
 -- ============================================================================
@@ -248,20 +241,12 @@ end
 -- ============================================================================
 -- Tapping a LIT key must cancel it and NOT re-arm. That inversion shipped once.
 do
-  local names = T.pages()
-  local layers_idx
-  for i, n in ipairs(names) do if n == "LAYERS" then layers_idx = i end end
-  if layers_idx then
-    goto_page(layers_idx)
-    params:set("layer_sel", 1)
-    params:set("lay1_rec", 0)
-    key(2, 1); key(2, 0)                      -- tap: latches
-    ok(params:get("lay1_rec") == 1, "a tap on REC latches it")
-    key(2, 1); key(2, 0)                      -- tap again: cancels
-    ok(params:get("lay1_rec") == 0, "tapping the lit key cancels it, and does not re-arm")
-  else
-    ok(false, "LAYERS page not found")
-  end
+  goto_page("TAPE")
+  params:set("tape_rec", 0)
+  key(2, 1); key(2, 0)                      -- tap: latches
+  ok(params:get("tape_rec") == 1, "a tap on REC latches it")
+  key(2, 1); key(2, 0)                      -- tap again: cancels
+  ok(params:get("tape_rec") == 0, "tapping the lit key cancels it, and does not re-arm")
 
   -- A def with BOTH `lit` and `tap` is the only shape that can hit the
   -- press-while-lit path, where a cancel must NOT then fire the tap. That
@@ -360,65 +345,43 @@ do
   local page = T.goto_page
 
   -- the page-independent spine: row 2 must reach the same params from anywhere
-  page("LAYERS")
+  page("TAPE")
   local before = params:get("rec")
   g.key(1, 2, 1); g.key(1, 2, 0)
-  ok(params:get("rec") ~= before, "the state strip reaches `rec` from the LAYERS page")
+  ok(params:get("rec") ~= before, "the state strip reaches `rec` from the TAPE page")
   g.key(1, 2, 1); g.key(1, 2, 0)
 
-  -- the LAYERS workspace: a two-pad span sets that deck's loop
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  g.key(3, 3, 1); g.key(6, 3, 1); g.key(3, 3, 0); g.key(6, 3, 0)
-  near(params:get("lay1_start"), 2 / 8, 1e-6, "a grid span sets layer 1's loop start")
-  near(params:get("lay1_end"), 6 / 8, 1e-6, "...and its end")
-  -- and it addresses the RIGHT deck: row 4 is layer 2, and layer 1 must not move
-  local l1s, l1e = params:get("lay1_start"), params:get("lay1_end")
-  g.key(1, 4, 1); g.key(4, 4, 1); g.key(1, 4, 0); g.key(4, 4, 0)
-  near(params:get("lay2_end"), 4 / 8, 1e-6, "row 4 sets layer 2's loop")
-  near(params:get("lay1_start"), l1s, 1e-9, "...and layer 1 is untouched")
-  near(params:get("lay1_end"), l1e, 1e-9, "...both edges")
-
-  -- transports
-  params:set("lay1_rec", 0)
-  g.key(1, 5, 1); g.key(1, 5, 0)
-  ok(params:get("lay1_rec") == 1, "grid row 5 arms the deck")
-  g.key(1, 5, 1); g.key(1, 5, 0)
-  ok(params:get("lay1_rec") == 0, "...and disarms it")
-  params:set("lay2_play", 1)
-  g.key(2, 6, 1); g.key(2, 6, 0)
-  ok(params:get("lay2_play") == 0, "grid row 6 mutes the SECOND deck")
-  params:set("lay2_play", 1)
+  -- the main workspace: a two-pad span on row 4 sets the tape loop
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  g.key(3, 4, 1); g.key(6, 4, 1); g.key(3, 4, 0); g.key(6, 4, 0)
+  near(params:get("loop_start"), 2 / 8, 1e-6, "a grid span sets the tape loop start")
+  near(params:get("loop_end"), 6 / 8, 1e-6, "...and its end")
+  -- and it addresses the RIGHT pair: row 3 is the window, and the loop must not move
+  local l1s, l1e = params:get("loop_start"), params:get("loop_end")
+  g.key(1, 3, 1); g.key(4, 3, 1); g.key(1, 3, 0); g.key(4, 3, 0)
+  near(params:get("pos_end"), 4 / 8, 1e-6, "row 3 sets the window")
+  near(params:get("loop_start"), l1s, 1e-9, "...and the tape loop is untouched")
+  near(params:get("loop_end"), l1e, 1e-9, "...both edges")
+  CTX.set_pair("pos_start", "pos_end", 0, 1)
 
   -- the workspace follows the page: the same pad means something else elsewhere
   page("PADS")
-  local l1 = params:get("lay1_start")
-  g.key(3, 3, 1); g.key(3, 3, 0)
-  near(params:get("lay1_start"), l1, 1e-9,
-    "on PADS, row 3 is a slice pad — it must NOT move a layer's loop")
+  local l1 = params:get("loop_start")
+  g.key(3, 4, 1); g.key(3, 4, 0)
+  near(params:get("loop_start"), l1, 1e-9,
+    "on PADS, row 4 is not a loop span: it must NOT move the tape loop")
 
-  -- and the LEDs actually light on the layers workspace
-  page("LAYERS")
+  -- and the LEDs actually light on the main workspace
+  page("TAPE")
   g.leds = {}
   _h.run_ticks(2)
   local lit, rows = 0, {}
   for _, l in ipairs(g.leds) do
     if l.y and (l.z or 0) > 0 then lit = lit + 1; rows[l.y] = true end
   end
-  ok(lit > 0, "the layers workspace lights pads (" .. lit .. ")")
-  ok(rows[3] and rows[4], "...on both deck rows")
-
-  -- a loop NARROWER than one eighth must still light the pad it touches.
-  -- the containment law this row used to carry left it entirely dark (@lay_move
-  -- and MIDI park loops at arbitrary fractions; grid-set spans hid the bug)
-  params:set("lay1_play", 1)
-  params:set("lay1_start", 0.4); params:set("lay1_end", 0.45)
-  g.leds = {}
-  _h.run_ticks(2)
-  local narrow = 0
-  for _, l in ipairs(g.leds) do
-    if l.y == 3 and l.x == 4 and (l.z or 0) >= 4 then narrow = narrow + 1 end
-  end
-  ok(narrow > 0, "a sub-eighth layer loop still lights its pad")
+  ok(lit > 0, "the main workspace lights pads (" .. lit .. ")")
+  ok(rows[3] and rows[4], "...on the window row and the loop row")
+  params:set("loop_start", 0); params:set("loop_end", 1)
 end
 
 -- ============================================================================
@@ -435,15 +398,15 @@ do
   -- and changing page used to hand the release to a layout that ignored it, so
   -- tape_reverse latched forever and held note pads stranded voices.
   page("TAPE")
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  page("LAYERS")
-  g.key(2, 3, 1)                       -- press on the LAYERS workspace
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  g.key(2, 4, 1)                       -- press on the main workspace
   page("PADS")                         -- ...navigate away while still held
-  g.key(2, 3, 0)                       -- ...and release
-  page("LAYERS")
-  g.key(5, 3, 1); g.key(5, 3, 0)       -- a fresh single-pad span
-  near(params:get("lay1_start"), 4 / 8, 1e-6,
+  g.key(2, 4, 0)                       -- ...and release
+  page("TAPE")
+  g.key(5, 4, 1); g.key(5, 4, 0)       -- a fresh single-pad span
+  near(params:get("loop_start"), 4 / 8, 1e-6,
     "a span after a cross-page release still anchors on the NEW press")
+  params:set("loop_start", 0); params:set("loop_end", 1)
 
   -- (b) note-offs are NOT gated on keys_enable: toggling note input mid-hold
   -- must not strand a polyphonic voice
@@ -485,7 +448,7 @@ do
 
   -- (d) the spine is page-independent: row 2 reaches the same param everywhere
   local seen = {}
-  for _, pg in ipairs({ "TAKE", "VOICE", "MIX", "SCENE", "LAYERS" }) do
+  for _, pg in ipairs({ "TAKE", "VOICE", "MIX", "SCENE", "TAPE" }) do
     page(pg)
     local before = params:get("tape_rec")
     g.key(2, 2, 1); g.key(2, 2, 0)
@@ -496,13 +459,14 @@ do
   for _, v in ipairs(seen) do all = all and v end
   ok(all, "row 2 reaches tape_rec from every page (the spine is page-independent)")
 
-  -- (e) STOP on the grid is the same STOP: it must silence the layer decks too
+  -- (e) STOP on the grid is the same STOP: it must silence the tape too
   page("VOICE")
   sc_calls = {}
   g.key(8, 2, 1); g.key(8, 2, 0)
   ok(params:get("stop_all") == 1, "grid (8,2) engages the master STOP")
-  local q = sc_last("level", 3)
-  if q then near(q[3], 0, 1e-6, "...and it reaches the layer decks") end
+  local q = sc_last("level", 1)
+  ok(q ~= nil, "...and it reaches softcut")
+  if q then near(q[3], 0, 1e-6, "...and it silences the tape") end
   g.key(8, 2, 1); g.key(8, 2, 0)
   ok(params:get("stop_all") == 0, "...and releases it")
 end
@@ -512,8 +476,8 @@ end
 -- ============================================================================
 -- The recurring defect in this codebase's history is a NEW param missing one
 -- of the hand-maintained lists its siblings joined: the scene lists, the
--- motion list, the edge pairs, the fine step, the rate format — the layers
--- alone missed four of them in one change. The lists stay where they are,
+-- motion list, the edge pairs, the fine step, the rate format. The lists
+-- stay where they are,
 -- with their ordering and their reasons; what is new is that membership is
 -- TOTAL. Every param must sit in a list or in that list's explicit exclude,
 -- never neither and never both, so the next param FAILS here until someone
@@ -529,15 +493,18 @@ do
     for _, id in ipairs(list) do s[id] = true end
     return s
   end
-  local function check(name, includes, excludes)
+  -- `tombs`: ids of deleted params that an APPEND-ONLY list keeps in place,
+  -- so that no later entry moves. Only those may name a missing param.
+  local function check(name, includes, excludes, tombs)
     local inc, exc = set_of(includes), set_of(excludes)
+    local tomb = set_of(tombs or {})
     local neither, both, stale = {}, {}, {}
     for _, id in ipairs(MANGLER_IDS) do
       if not inc[id] and not exc[id] then neither[#neither + 1] = id end
       if inc[id] and exc[id] then both[#both + 1] = id end
     end
     for _, id in ipairs(includes) do
-      if not lookup[id] then stale[#stale + 1] = id end
+      if not lookup[id] and not tomb[id] then stale[#stale + 1] = id end
     end
     for _, id in ipairs(excludes) do
       if not lookup[id] then stale[#stale + 1] = id end
@@ -550,7 +517,25 @@ do
       .. table.concat(stale, ","))
   end
   check("scenes", Msc.SCENE_RECALL_IDS, Msc.SCENE_EXCLUDE)
-  check("motion", Mmo.MOTION_IDS, Mmo.MOTION_EXCLUDE)
+  check("motion", Mmo.MOTION_IDS, Mmo.MOTION_EXCLUDE, Mmo.MOTION_TOMBSTONES)
+  -- a tombstone is honest only while it names nothing and still holds its
+  -- place: one that became a param again, or that left the list, is a bug
+  do
+    local at = {}
+    for i, id in ipairs(Mmo.MOTION_IDS) do at[id] = i end
+    local alive, lost = {}, {}
+    for _, id in ipairs(Mmo.MOTION_TOMBSTONES) do
+      if lookup[id] then alive[#alive + 1] = id end
+      if not at[id] then lost[#lost + 1] = id end
+    end
+    ok(#alive == 0, "no motion tombstone names a live param (" .. table.concat(alive, ",") .. ")")
+    ok(#lost == 0, "every motion tombstone still holds its place (" .. table.concat(lost, ",") .. ")")
+    -- the places themselves: the first entry after the tombstones stays where
+    -- every preset made before the removal expects it
+    ok(at.lay1_level == 60 and at.scene_morph_amt == 74,
+      "the lanes after the tombstones did not move (lay1_level "
+        .. tostring(at.lay1_level) .. ", scene_morph_amt " .. tostring(at.scene_morph_amt) .. ")")
+  end
 
   -- every *_start/*_end pair is a REGION: it must move widening-edge-first
   -- in the scenes (EDGE_PAIRS) and take the span-scaled fine step (FINE_IDS)
@@ -614,6 +599,24 @@ do
   -- the one system param a preset sets on purpose: the clock the sequencer and
   -- the beat-locked modulators run on (the paramset here is mangler's alone)
   local SYSTEM_IDS = { clock_tempo = true }
+  -- data/layers/ holds the old presets of the `layers` build, kept until the
+  -- user decides about them. They name the params of the two layer decks,
+  -- which are gone (four, thirteenth change). Those ids, and no others, are
+  -- allowed to be dead there, and nowhere else.
+  local LAYER_IDS = { layer_sel = true, layer_wet = true }
+  for n = 1, 2 do
+    for _, k in ipairs({ "rec", "play", "level", "rate", "reverse", "start",
+        "end", "pre", "file", "fade", "width", "snap" }) do
+      LAYER_IDS["lay" .. n .. "_" .. k] = true
+    end
+  end
+  for id in pairs(LAYER_IDS) do
+    ok(not lookup[id], "the layer param " .. id .. " is gone from the paramset")
+  end
+  local function dead_ok(path, id)
+    return SYSTEM_IDS[id]
+      or (path:find("^data/layers/") ~= nil and LAYER_IDS[id] == true)
+  end
   local checked, dead = 0, {}
   local sets = { "data/four.pmap.example",
     "data/layers/layers.pmap.example" }
@@ -626,7 +629,7 @@ do
     if ids then
       checked = checked + 1
       for _, id in ipairs(ids) do
-        if not lookup[id] and not SYSTEM_IDS[id] then
+        if not lookup[id] and not dead_ok(path, id) then
           dead[#dead + 1] = path:match("[^/]+$") .. ":" .. id
         end
       end
@@ -648,7 +651,7 @@ do
         for line in f:lines() do
           local id = line:match('^%s*%["([%w_]+)"%]=')
           if id and id ~= "slots" and id ~= "safe" and id ~= "v"
-              and not lookup[id] then
+              and not lookup[id] and not dead_ok(path, id) then
             sdead[#sdead + 1] = path:match("[^/]+$") .. ":" .. id
           end
         end
@@ -933,29 +936,23 @@ do
 end
 
 -- ============================================================================
--- 14 · the layer BOUNCE and the FX capture scope
+-- 14 · the tape's record source and the FX capture scope
 -- ============================================================================
--- the bounce: arming a layer records the processed engine output (WET) and
--- disarming restores the knob's source — resampling is one key. observed at
--- the audio sends Mtape.set_source drives, which is what softcut records.
+-- cut_source is the one thing that decides what softcut records. observed at
+-- the audio sends Mtape.set_source drives.
 do
   local adc, eng
   audio.level_adc_cut = function(v) adc = v end
   audio.level_eng_cut = function(v) eng = v end
-  params:set("layer_wet", 1)
   params:set("cut_source", 0.5)   -- move it so the set back to 0 fires
+  near(eng or -1, 0.5, 1e-6, "cut_source at half sends half of the engine output")
+  near(adc or -1, 0.5, 1e-6, "...and half of the input tap")
   params:set("cut_source", 0)     -- (an equal set is equality-guarded)
-  near(eng or -1, 0, 1e-6, "at rest the decks record the input (knob DRY)")
-  params:set("lay1_rec", 1)
-  near(eng or -1, 1, 1e-6, "arming a layer throws the source WET (the bounce)")
-  near(adc or -1, 0, 1e-6, "...and drops the input tap")
-  params:set("lay1_rec", 0)
-  near(eng or -1, 0, 1e-6, "disarming restores the knob's source")
-  params:set("layer_wet", 0)
-  params:set("lay2_rec", 1)
-  near(eng or -1, 0, 1e-6, "layer_wet OFF: arming leaves the source alone")
-  params:set("lay2_rec", 0)
-  params:set("layer_wet", 1)
+  near(eng or -1, 0, 1e-6, "at rest the tape records the input (knob DRY)")
+  near(adc or -1, 1, 1e-6, "...through the full input tap")
+  params:set("tape_rec", 1)
+  near(eng or -1, 0, 1e-6, "arming the tape leaves the source alone")
+  params:set("tape_rec", 0)
   audio.level_adc_cut, audio.level_eng_cut = nil, nil   -- back to the env nop
 
   -- FX capture scope: an FX slot carries the wet path and NOTHING else, so
@@ -984,14 +981,12 @@ end
 do
   params:set("stop_all", 0)
   params:set("tape_rate", 1); params:set("tape_reverse", 0)
-  params:set("lay1_rate", 1); params:set("lay2_rate", 1)
-  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
   local rec_sent
   engine.rec = function(v) rec_sent = v end
   params:set("rec", 1)
   ok(rec_sent == 1, "arming opens the engine record head")
   params:set("stop_all", 1)
-  for v = 1, 6 do
+  for v = 1, 2 do
     local c = sc_last("rate", v)
     ok(c ~= nil and math.abs(c[3]) < 1e-9,
       "STOP halts softcut voice " .. v .. "'s head")
@@ -1003,217 +998,8 @@ do
   ok(rec_sent == 1, "START resumes the armed head")
   local c = sc_last("rate", 1)
   ok(c ~= nil and math.abs(c[3] - 1) < 1e-6, "START restores the tape rate")
-  c = sc_last("rate", 3)
-  ok(c ~= nil and math.abs(c[3] - 1) < 1e-6, "...and the layer decks' rates")
   params:set("rec", 0)
   engine.rec = nil
-end
-
--- ============================================================================
--- 16 · SNAP: a layer's loop length lands on a musical grid
--- ============================================================================
--- Two decks at 3.97s and 4.02s walk apart inside a minute; two that are an
--- exact 1x or 2x of each other stay locked forever. What has to hold: the
--- reference is picked in the right order, the ratio is chosen in LOG space
--- (so 1/2 and 2 are equally near), only the loop END moves, and the automatic
--- pass at the end of a record takes a near miss while leaving a length you
--- clearly chose exactly as you played it.
-do
-  local li
-  for i, name in ipairs(T.pages()) do if name == "LAYERS" then li = i end end
-  params:set("orbit_on", 0)
-  params:set("motion_rec", 0); params:set("motion_play", 0)
-  params:set("stop_all", 0)
-  params:set("scene_morph_amt", 0); _h.run_ticks(2)
-  -- a 6-second take to reference: 0.1 of the 60s buffer
-  params:set("pos_start", 0); params:set("pos_end", 0.1)
-  params:set("lay2_start", 0); params:set("lay2_end", 1)   -- L2 holds nothing
-
-  -- a loop a little over 3 seconds, against a 6-second take, is a half
-  params:set("lay1_start", 0)
-  params:set("lay1_end", 3.2 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near(params:get("lay1_end") * 60, 3.0, 0.01,
-    "SNAP takes a 3.2s loop to half of the 6s take")
-  near(params:get("lay1_start"), 0, 1e-9, "...moving only the END, never the start")
-
-  -- and a little over 12 seconds is a double: the nearest ratio in LOG space,
-  -- not the nearest absolute length (which would pull everything downward)
-  params:set("lay1_end", 12.5 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near(params:get("lay1_end") * 60, 12.0, 0.01, "...and a 12.5s loop to double it")
-
-  -- the loop start is honoured: the snapped length runs from wherever the
-  -- recording began, not from zero
-  params:set("lay1_start", 0.2)
-  params:set("lay1_end", 0.2 + 5.7 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 6.0, 0.01,
-    "a loop that starts late still snaps its LENGTH")
-  near(params:get("lay1_start"), 0.2, 1e-9, "...from where it starts")
-
-  -- a loop parked at the far right cannot GROW past the region, so a ratio
-  -- that would round it up halves until it fits, rather than truncating to a
-  -- length that is on no grid at all. 5.5s of the 5.7s left rounds to 6s.
-  params:set("lay1_start", 0.905)
-  params:set("lay1_end", 0.905 + 5.5 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  ok(params:get("lay1_end") <= 1 + 1e-9, "a snap at the region edge stays inside it")
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 3.0, 0.02,
-    "...by halving to a ratio that fits, not truncating to one on no grid")
-
-  -- the OTHER deck outranks the take once it holds audio. 15.4s reads as 3 x
-  -- L2's 5s loop but 3 x the take's 6s would be 18s, so the two answers are
-  -- distinguishable and this asserts WHICH reference was used.
-  -- arming a layer throws the softcut record source WET (the bounce), so it
-  -- is the OUTPUT meter that decides whether the deck heard anything
-  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
-  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5); _h.run_ticks(1)
-  _h.phase(5, 180)
-  params:set("lay2_rec", 1)
-  for i = 1, 6 do _h.phase(5, 180 + i); _h.run_ticks(1) end
-  params:set("lay2_rec", 0)
-  params:set("lay2_start", 0); params:set("lay2_end", 5 / 60)
-  params:set("lay1_start", 0); params:set("lay1_end", 15.4 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near(params:get("lay1_end") * 60, 15.0, 0.02,
-    "the other deck's loop outranks the take as the reference once it has audio")
-
-  -- the AUTOMATIC pass, through the real record gesture on an EMPTY deck.
-  -- arming opens the loop, disarming closes it around what was played, and a
-  -- near miss rounds onto the grid with no key involved at all.
-  _h.phase(3, 120)
-  params:set("lay1_rec", 1)
-  near(params:get("lay1_end"), 1, 1e-9, "arming an empty layer opens its loop")
-  for i = 1, 10 do _h.phase(3, 120 + i * 0.51); _h.run_ticks(1) end   -- ~5.1s
-  params:set("lay1_rec", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 5.0, 0.02,
-    "a 5.1s pass against a 5s reference rounds onto it, hands-free")
-
-  -- ...but a length you clearly CHOSE is left exactly as you played it. 12s
-  -- against a 5s reference sits midway between 2x and 3x, nowhere near a
-  -- ratio, so the automatic pass declines and the loop stays 12s.
-  goto_page(li)
-  params:set("layer_sel", 1)
-  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
-  ok(params:get("lay1_end") == 1, "the LAYERS erase empties the deck it is on")
-  _h.phase(3, 120)
-  params:set("lay1_rec", 1)
-  for i = 1, 10 do _h.phase(3, 120 + i * 1.2); _h.run_ticks(1) end    -- 12.0s
-  params:set("lay1_rec", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 12.0, 0.05,
-    "a length that is on no grid is left exactly as played")
-
-  -- and the same length under a FORCED snap does land: it was the tolerance
-  -- that declined, not a snap that cannot reach
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 10.0, 0.05,
-    "a FORCED snap lands where the automatic pass declined")
-
-  -- a deck collapsed to a point is not something to measure against. It used
-  -- to be offered as a reference anyway, whereupon SNAP refused SILENTLY: a
-  -- key that fires, moves nothing and says nothing.
-  params:set("lay2_start", 0.5); params:set("lay2_end", 0.5)
-  params:set("lay1_start", 0); params:set("lay1_end", 3.2 / 60)
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near(params:get("lay1_end") * 60, 3.0, 0.02,
-    "a collapsed deck is skipped as a reference, not answered with silence")
-
-  -- and a loop with no room left refuses OUT LOUD rather than manufacturing a
-  -- 100ms loop and labelling it a ratio it is not on
-  params:set("lay2_start", 0); params:set("lay2_end", 1)
-  params:set("lay1_start", 1); params:set("lay1_end", 1)
-  -- the page chip lives on a ctx local, but the SAME text goes to maiden, so
-  -- capturing print is a test of what the player is actually told
-  local said = {}
-  local real_print = print
-  print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  print = real_print
-  near(params:get("lay1_end"), 1, 1e-9, "a snap with no room left moves nothing")
-  ok(#said > 0 and said[#said]:find("refused") ~= nil,
-    "...and says so, instead of reporting a length it did not produce")
-
-  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  params:set("lay2_start", 0); params:set("lay2_end", 1)
-end
-
--- ============================================================================
--- 17 - SNAP under the states the loop pair can actually be in
--- ============================================================================
-do
-  params:set("orbit_on", 0)
-  params:set("stop_all", 0)
-  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
-  params:set("pos_start", 0); params:set("pos_end", 0.1)      -- a 6s take
-
-  -- a CROSSED pair is a legal loop: update_loop sorts it and loop_secs takes
-  -- the absolute difference. SNAP anchored on the START param alone, so a
-  -- loop already on the grid was RELOCATED to a different span of the region
-  -- while the page reported that nothing had moved.
-  params:set("lay2_start", 0); params:set("lay2_end", 1)      -- L2's loop: 60s
-  params:set("lay1_start", 0.5); params:set("lay1_end", 0.25) -- 15s = 1/4 of it
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  local lo = math.min(params:get("lay1_start"), params:get("lay1_end"))
-  local hi = math.max(params:get("lay1_start"), params:get("lay1_end"))
-  near(lo, 0.25, 1e-9, "SNAP anchors a crossed loop on its LOW edge")
-  near(hi, 0.50, 1e-9, "...so a loop already on the grid stays where it was")
-  near((hi - lo) * 60, 15.0, 0.02, "...at the length it already had")
-
-  -- a snap that moves nothing must not move the HEAD either: two decks hold
-  -- their drift only while both heads keep running, which is the same reason
-  -- MUTE silences a deck instead of stopping it.
-  params:set("lay2_start", 0); params:set("lay2_end", 6 / 60)   -- reference 6s
-  params:set("lay1_start", 0); params:set("lay1_end", 6 / 60)   -- already 1 x L2
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  sc_calls = {}
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 6.0, 0.02,
-    "a loop already on the grid stays where it is")
-  ok(sc_last("position", 3) == nil,
-    "...and a no-op SNAP leaves the head running instead of re-cueing it")
-  -- the other half, or "never jump" would pass this too: a snap that DOES
-  -- move the loop must re-cue, or the head is left outside its own loop.
-  params:set("lay1_end", 7.1 / 60)
-  sc_calls = {}
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  near((params:get("lay1_end") - params:get("lay1_start")) * 60, 8.0, 0.02,
-    "a snap that moves the loop moves it (7.1s -> 4/3 x the 6s reference)")
-  ok(sc_last("position", 3) ~= nil, "...and re-cues the head to the new start")
-
-  -- a deck whose own record pass is still OPEN is not a reference: arm_loop
-  -- holds its loop at the full region for the length of the pass, and `any`
-  -- goes true as soon as it hears anything, so it reads as 60 seconds of
-  -- material. The reference NAME is what the assertion reads, because that is
-  -- the thing that was wrong: an eighth of a region boundary, called musical.
-  -- an EMPTY deck, because that is when arm_loop opens the loop: erase L2
-  -- through the real K1+K3 arc, then arm it, which is the two-hand looper
-  -- gesture (grid row 5, both decks) this has to survive.
-  local li2
-  for i, name in ipairs(T.pages()) do if name == "LAYERS" then li2 = i end end
-  goto_page(li2)
-  params:set("layer_sel", 2)
-  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)
-  params:set("layer_sel", 1)
-  _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
-  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5); _h.run_ticks(1)
-  _h.phase(5, 180)
-  params:set("lay2_rec", 1)
-  for i = 1, 4 do _h.phase(5, 180 + i); _h.run_ticks(1) end    -- L2 mid-pass
-  params:set("lay1_start", 0); params:set("lay1_end", 7.6 / 60)
-  local said = {}
-  local real_print = print
-  print = function(...) said[#said + 1] = table.concat({ ... }, " ") end
-  params:set("lay1_snap", 1); params:set("lay1_snap", 0)
-  print = real_print
-  local msg = said[#said] or ""
-  ok(msg:find("TAKE") ~= nil and msg:find("L2") == nil,
-    "a deck mid-record is skipped, so SNAP falls through to the take")
-  params:set("lay2_rec", 0)
-
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  params:set("lay2_start", 0); params:set("lay2_end", 1)
 end
 
 -- ============================================================================
@@ -1310,25 +1096,8 @@ do
   params:set("scene_scope", 1)
   clear_bank()
 
-  -- (a) LAYERS keys resolve their deck at the PRESS. Hold REC on L1, turn E2
-  -- to L2, let go: the release used to go to L2 and leave L1 recording.
-  page("LAYERS")
-  params:set("layer_sel", 1)
-  params:set("lay1_rec", 0); params:set("lay2_rec", 0)
-  key(2, 1); _h.run_ticks(8)               -- held past the tap window: a punch
-  ok(params:get("lay1_rec") == 1, "holding LAYERS K2 records L1")
-  enc(2, 1)                                -- E2 = layer select -> L2
-  key(2, 0)
-  ok(params:get("lay1_rec") == 0, "a punched L1 REC releases on L1 after E2 moved to L2")
-  ok(params:get("lay2_rec") == 0, "...and never arms L2")
-  params:set("layer_sel", 1)
-  params:set("lay1_play", 1)
-  key(3, 1); _h.run_ticks(8)               -- punch MUTE on L1
-  enc(2, 1)
-  key(3, 0)
-  ok(params:get("lay1_play") == 1, "a punched L1 MUTE un-mutes L1 after E2 moved to L2")
-  params:set("layer_sel", 1)
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  -- (a) was the LAYERS keys, which resolved their deck at the press. It went
+  -- with the layer decks (four, thirteenth change).
 
   -- (b) the pad steal mirror follows the engine on a RE-STRUCK note. The
   -- engine re-queues a re-struck id as newest; keeping its old place made the
@@ -1366,8 +1135,8 @@ do
   near(params:get("loop_start"), 0.2, 1e-9, "a PSET-restored tape loop survives the first disarm")
   near(params:get("loop_end"), 0.3, 1e-9, "...both edges")
 
-  -- (d) a tape pass too short to be a loop gives the loop back (the layers
-  -- have done this since the 77th change; the tape left 60 seconds open)
+  -- (d) a tape pass too short to be a loop gives the loop back (the tape
+  -- once left 60 seconds open)
   params:set("loop_start", 0.2); params:set("loop_end", 0.4)
   _h.phase(1, 0.3 * 60)
   params:set("tape_rec", 1)
@@ -1376,7 +1145,7 @@ do
   near(params:get("loop_start"), 0.2, 1e-9, "a declined tape pass gives back the loop it widened")
   near(params:get("loop_end"), 0.4, 1e-9, "...both edges")
 
-  -- (e) the tape seam is capped like the layers': a long fade on a short loop
+  -- (e) the tape seam is capped by the deck law: a long fade on a short loop
   params:set("loop_start", 0.1); params:set("loop_end", 0.1 + 0.3 / 60)
   sc_calls = {}
   params:set("tape_fade", 0.4)
@@ -1385,7 +1154,7 @@ do
   params:set("tape_fade", 0.05)
   params:set("loop_start", 0); params:set("loop_end", 1)
 
-  -- (f) the TAKE eraser disarms first, like TAPE and LAYERS
+  -- (f) the TAKE eraser disarms first, like TAPE
   local had_clear = engine.clear
   engine.clear = function() end
   params:set("rec", 1)
@@ -1445,27 +1214,6 @@ do
   finish(table.remove(jobs, 1))            -- job 2 runs next
   ok(#reads == 1 and reads[1]:find("srconv", 1, true) ~= nil,
     "...and the queued file loads CONVERTED, in tune")
-  -- a layer file picked by hand that converts clears the deck meanwhile, as
-  -- a PSET restore does: the old audio used to play on (and take an overdub)
-  -- under the new file's name until the conversion landed
-  local d1 = CTX.layers[1]
-  d1.any, d1.wave[1] = true, 0.5
-  sc_calls = {}
-  params:set("lay1_file", src44)
-  ok(#jobs == 1 and d1.any == false and d1.wave[1] == 0
-    and sc_last("buffer_clear_region") ~= nil,
-    "a layer file that converts leaves the deck empty and silent meanwhile")
-  finish(table.remove(jobs, 1))
-  ok(sc_last("buffer_read_stereo") ~= nil and d1.any == true,
-    "...and lands once it is converted")
-  -- the layer decks share the same guard: erase while converting
-  CTX.layer_load(d1, src44)
-  page("LAYERS"); params:set("layer_sel", 1)
-  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase L1
-  sc_calls = {}
-  finish(table.remove(jobs, 1))
-  ok(sc_last("buffer_read_stereo") == nil and sc_last("buffer_read_mono") == nil,
-    "a layer conversion that finishes after the deck was erased is dropped")
   os.remove(src44); os.remove(src44b)
   engine.read_file = nil
   engine.clear = had_clear
@@ -1541,27 +1289,12 @@ do
   near(params:get("delay_fb"), 0.1, 1e-6, "...and releasing chaos keeps it, not the madness")
   near(params:get("rev_mix"), 0, 1e-6, "...for every param")
 
-  -- (n) a stored LAYER loop is clamped to the deck's material on recall, the
-  -- way the take window is: capture with an empty deck (loop 0..1), record 4s,
-  -- recall, and the loop used to reopen over 60 seconds of nothing
-  page("LAYERS"); params:set("layer_sel", 1)
-  key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase L1
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  fill_slot(6)
+  -- (n) a stored TAPE loop is clamped to the deck's material on recall, the
+  -- way the take window is: capture with an empty tape (loop 0..1), record 4s,
+  -- recall, and the loop used to reopen over 60 seconds of nothing. The tape
+  -- keeps its extent from its own phase events
   _h.push("amp_in_l", 0.5); _h.push("amp_in_r", 0.5)
   _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5)
-  _h.phase(3, 120)
-  params:set("lay1_rec", 1)
-  for i = 1, 16 do _h.phase(3, 120 + i * 0.25) end
-  params:set("lay1_rec", 0)
-  local closed = params:get("lay1_end")
-  ok(closed < 0.2, "the first pass closed the layer loop around 4s (end " .. closed .. ")")
-  params:set("scene_slot", 6); pulse("scene_recall")
-  ok(params:get("lay1_end") < 0.2,
-    "recalling a scene captured on an empty deck keeps the loop on the material (end "
-    .. params:get("lay1_end") .. ")")
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
-  -- the TAPE keeps its extent the same way, from its own phase events
   page("TAPE")
   key(1, 1); key(3, 1); _h.run_ticks(20); key(3, 0); key(1, 0)   -- erase the tape
   params:set("tape_pre", 0)
@@ -1608,16 +1341,16 @@ do
   local real_set = params.set
   params.set = function(self, id, v)
     real_set(self, id, v)
-    if (id == "lay1_start" or id == "lay1_end")
-        and params:get("lay1_start") > params:get("lay1_end") + 1e-9 then
+    if (id == "loop_start" or id == "loop_end")
+        and params:get("loop_start") > params:get("loop_end") + 1e-9 then
       crossed = crossed + 1
     end
   end
-  params:set("lay1_start", 0.10); params:set("lay1_end", 0.15)
+  params:set("loop_start", 0.10); params:set("loop_end", 0.15)
   params:set("motion_rec", 1); _h.run_ticks(2)
-  params:set("lay1_end", 0.65); params:set("lay1_start", 0.60)   -- a hand slide right
+  params:set("loop_end", 0.65); params:set("loop_start", 0.60)   -- a hand slide right
   _h.run_ticks(3)
-  params:set("lay1_start", 0.10); params:set("lay1_end", 0.15)   -- and back left
+  params:set("loop_start", 0.10); params:set("loop_end", 0.15)   -- and back left
   _h.run_ticks(3)
   params:set("motion_rec", 0)
   crossed = 0
@@ -1631,7 +1364,7 @@ do
   params:set("motion_len", 4)
   ok(mo.loop_len == 0, "...so a later motion_len move builds no phantom loop")
   params:set("motion_len", 0)
-  params:set("lay1_start", 0); params:set("lay1_end", 1)
+  params:set("loop_start", 0); params:set("loop_end", 1)
 
   -- (t) motion depth blends in the WARPED space: half depth on an exp
   -- param lands half way up the knob, not most of the way
@@ -1706,7 +1439,7 @@ do
   for _, dir in ipairs({ "data/", "data/layers/" }) do
     for k = 1, 10 do
       local path = string.format("%s%s-%02d.pset", dir,
-        dir == "data/" and "mangler" or "layers", k)
+        dir == "data/" and "four" or "layers", k)
       local f = io.open(path)
       if f then
         for line in f:lines() do
@@ -2729,6 +2462,8 @@ do
   ok(params:get("effect") == 2, "EFFECT K3 steps OFF to CHORUS")
   for _ = 1, 4 do key(3, 1); key(3, 0) end
   ok(params:get("effect") == 6, "...and on to RING")
+  key(3, 1); key(3, 0)
+  ok(params:get("effect") == 7, "...and to ECHO, the last type")
   key(3, 1); key(3, 0)
   ok(params:get("effect") == 2, "...and wraps to CHORUS, not through OFF")
   params:set("effect", 4)

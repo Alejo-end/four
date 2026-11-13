@@ -42,3 +42,24 @@ FourTanh : UGen {
         ^this.multiNew('audio', in)
     }
 }
+
+// A delay with a low-pass and a soft clip in its feedback path, for FLANGE
+// and ECHO. delay is in seconds, damp in Hz, maxdelay is fixed at the start.
+FourDelay : UGen {
+    *ar { arg in, delay = 0.005, feedback = 0, damp = 6000, maxdelay = 0.05;
+        ^this.multiNew('audio', in, delay, feedback, damp, maxdelay)
+    }
+}
+
+// GRAIN's cloud: a pair of stock GrainBuf (one for each buffer, each panned)
+// as one UGen, with the same laws. envbuf -1 is the Hann window.
+FourGrain : MultiOutUGen {
+    *ar { arg bufL, bufR, trig, dur = 0.1, rate = 1, pos = 0, panL = -1, panR = 1,
+            envbuf = -1, maxGrains = 64;
+        ^this.multiNew('audio', bufL, bufR, trig, dur, rate, pos, panL, panR, envbuf, maxGrains)
+    }
+    init { arg ... theInputs;
+        inputs = theInputs;
+        ^this.initOutputs(2, rate)
+    }
+}

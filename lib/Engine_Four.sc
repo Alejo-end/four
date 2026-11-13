@@ -92,6 +92,9 @@ Engine_Four : CroneEngine {
     // HEARD exist: one filter family, the colour while drive or crush is up,
     // and an effect synth for each slot that is on. See buildLane.
     var <lanes;
+    // true when the FourStretch plugin is there: FLANGE and ECHO then have
+    // their own synths (laneFx)
+    var <hasStretch;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -213,9 +216,9 @@ Engine_Four : CroneEngine {
     // an effect slot (0 or 1): the synth of the type's kind, or none for OFF
     laneFx { arg lane, slot;
         var pre = (slot == 0).if({ "effect" }, { "effect2" });
-        var type = (lane[\p][pre.asSymbol] ? 0).round.asInteger.clip(0, 5);
-        var kind = [nil, \four_fx_mod, \four_fx_mod, \four_fx_mod,
-            \four_fx_reson, \four_fx_ring].at(type);
+        var type = (lane[\p][pre.asSymbol] ? 0).round.asInteger.clip(0, 6);
+        var kind = [nil, \four_fx_mod, hasStretch.if({ \four_fx_flange }, { \four_fx_mod }),
+            \four_fx_mod, \four_fx_reson, \four_fx_ring, \four_fx_echo].at(type);
         (kind == lane[\fxKind][slot]).if({
             lane[\fx][slot].notNil.if({ lane[\fx][slot].set(\type, type) });
         }, {
@@ -416,7 +419,8 @@ Engine_Four : CroneEngine {
         var s = context.server;
         var allKeys;
         var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
-        var stretchOn, pvClass, warpClass, readClass, tanhClass, th, dfmTrim;
+        var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, th, dfmTrim;
+        var grainCap;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -640,8 +644,11 @@ Engine_Four : CroneEngine {
         warpClass = "FourWarp".asSymbol.asClass;
         readClass = "FourRead".asSymbol.asClass;
         tanhClass = "FourTanh".asSymbol.asClass;
+        delayClass = "FourDelay".asSymbol.asClass;
+        grainClass = "FourGrain".asSymbol.asClass;
         stretchOn = pvClass.notNil and: { warpClass.notNil } and: { readClass.notNil }
-            and: { tanhClass.notNil } and: {
+            and: { tanhClass.notNil } and: { delayClass.notNil }
+            and: { grainClass.notNil } and: {
             "FOUR_STRETCH".getenv.notNil or: {
                 ["FourStretch.so", "FourStretch.scx"].any({ arg f;
                     File.exists(Platform.userExtensionDir +/+ "FourStretch" +/+ f)
@@ -654,6 +661,15 @@ Engine_Four : CroneEngine {
         // audio thread for each channel on the norns, and the engine has 28
         // of them. FourTanh is the same curve to 2e-7 at a tenth of the cost.
         th = { arg x; stretchOn.if({ tanhClass.ar(x) }, { x.tanh }) };
+        hasStretch = stretchOn;
+        // how many grain pairs a cloud holds, and where its level law stops.
+        // A stock pair (two GrainBuf) costs 0.27% of the audio thread on
+        // the norns, and four clouds of 64 ran the engine to 100%. FourGrain
+        // is the same law at 0.17% a pair, and it drops a grain beyond the
+        // cap without a word (GrainBuf posts "Too many grains!" each time).
+        // Four full clouds must fit the budget: 48 pairs with the plugin,
+        // 32 without it.
+        grainCap = stretchOn.if({ 48 }, { 32 });
         // DFM1's makeup. At inputgain 0.5 the filter itself passes a tone
         // 1.0dB LOUDER than it came in (measured on the device, low-pass and
         // high-pass, any cutoff). The makeup was x2, so every track left its
@@ -705,24 +721,24 @@ Engine_Four : CroneEngine {
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // equal loudness across density x size (boost below unity
             // overlap, up to 2x; attenuate above it as 1/sqrt(overlap), to
-            // -15dB at an overlap of 32: capped at 16, a dense cloud measured
+            // -17dB at an overlap of 48 (grainCap): capped at 16, a dense cloud measured
             // 4 dB above PLAY on the device),
             // and over spread: a pair thrown to one place sums its two
             // channels, so the top of spread is 3dB down. x0.8: grain
             // pairs overlap coherently, so they peak harder than PLAY; on the
             // device the default cloud came out 1.3 dB above PLAY with the
             // limiter at work in 2% of it, and 9% when dense
-            comp = (density * size).clip(0.25, 32).sqrt.reciprocal
+            comp = (density * size).clip(0.25, grainCap).sqrt.reciprocal
                 * (1 + spread.squared).sqrt.reciprocal * 0.8;
-            // maxGrains 32: a cloud holds 32 grain pairs at most, and the
-            // level law above stops there too. A pair costs 0.27% of the
-            // audio thread on the norns. Density 200 with size 0.5s asked
-            // for 100 pairs on one track: two such tracks ran the engine to
-            // 100%, and four still did with a cap of 64. At 32, four full
-            // clouds take about 60%. A grain UGen of our own is the way to
-            // lift this (doc/dsp-plan.md).
-            sig = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel, 32)
-                + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel, 32)) * comp;
+            // FourGrain is the pair of GrainBuf as one UGen, measured against
+            // them: the same samples to -139dB once the start place is
+            // rounded the way GrainBuf rounds it (ours keeps it exact).
+            sig = stretchOn.if({
+                grainClass.ar(buf_l, buf_r, trig, dur, pch, pos, panL, panR, envSel, 48)
+            }, {
+                GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel, 32)
+                    + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel, 32)
+            }) * comp;
             Out.ar(play_bus, sig * drEnv.(gate));
         }).add;
 
@@ -962,7 +978,7 @@ Engine_Four : CroneEngine {
             wid = 1 - spread;
             envSel = Select.kr(grain_shape.clip(0, 2), [-1, grain_env1, grain_env2]);
             // the drone's loudness law, halved for a chord of pads
-            comp = (density * size).clip(0.25, 32).sqrt.reciprocal * 0.5
+            comp = (density * size).clip(0.25, 64).sqrt.reciprocal * 0.5
                 * (1 + spread.squared).sqrt.reciprocal;
             cloud = (GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, (r - wid).clip(-1, 1), envSel)
                 + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, (r + wid).clip(-1, 1), envSel)) * comp;
@@ -1042,6 +1058,8 @@ Engine_Four : CroneEngine {
         //             semitones), amt is how long it rings and the mix
         //   5 RING    the signal times a sine. rate is its frequency (20Hz
         //             to 4kHz), amt is the mix
+        //   6 ECHO    a delay of the track's own. rate is the time (30ms to
+        //             1.2s), amt is the feedback and the echo level
         // Types 1 to 3 share ONE comb pair (they are all a moving delay), so
         // a change between them glides the delay time for 100ms. A track has
         // TWO slots in series (effect, effect2), and a slot that is OFF has
@@ -1116,6 +1134,38 @@ Engine_Four : CroneEngine {
         });
         fxSlot.value(\four_fx_ring, { arg sig, type, a, r;
             LinXFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r)), (a * 2 - 1))
+        });
+        // FLANGE with the plugin (without it, type 2 of \four_fx_mod). The
+        // first one sounded harsh, for three reasons, and each has its answer:
+        //   the sweep moved evenly in TIME, so it raced through the top. It
+        //     now moves evenly in PITCH: 0.25ms to 8ms on an exponential law
+        //   the feedback was the bare comb. It now passes a 5kHz low-pass and
+        //     a soft clip (FourDelay), so the resonance is round, not metallic
+        //   it never reached zero. The dry signal is now 1.41ms late, the
+        //     middle of the sweep, so the wet one passes THROUGH it: the
+        //     notches run up out of hearing and come back, as on two tapes
+        // amt is the feedback and the mix, rate is the sweep speed.
+        stretchOn.if({ fxSlot.value(\four_fx_flange, { arg sig, type, a, r;
+            var lfo = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
+            var d = 0.0014142 * (5.657 ** lfo);
+            var wet = 2.collect({ arg ch;
+                delayClass.ar(sig[ch], d[ch], a * 0.9, 5000, 0.02) });
+            (DelayN.ar(sig, 0.002, 0.0014142) + (wet * a)) * (1 + (0.5 * a)).reciprocal
+        }) });
+        // ECHO: a delay of the track's own, 30ms to 1.2s. rate is the time
+        // (it glides like tape when turned), amt is the feedback and the
+        // level of the echoes. The loop darkens and saturates softly.
+        fxSlot.value(\four_fx_echo, { arg sig, type, a, r;
+            var t = (0.03 * (40 ** r)).lag(0.3);
+            var wet = stretchOn.if({
+                2.collect({ arg ch; delayClass.ar(sig[ch], t, a * 0.8, 3500, 1.3) })
+            }, {
+                // stock: a comb. Its decay is the time for the same feedback
+                // to fall by 60dB
+                2.collect({ arg ch; CombC.ar(sig[ch], 1.3, t,
+                    t * (0.001.log / (a * 0.8).max(0.001).log)) })
+            });
+            sig + (wet * a)
         });
 
         // ---- the lane's other synths

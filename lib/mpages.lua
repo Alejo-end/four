@@ -32,7 +32,7 @@ local wave = waves[1]
 local wave_bin = 0
 
 -- same idea for the tape loop: bins indexed by the tape head while recording
--- The loop decks (the tape and the two layers) keep a FINER picture than the
+-- A loop deck (the tape) keeps a FINER picture than the
 -- take: 1024 bins over their 60s, 59ms each. A deck page zooms onto the loop,
 -- and a 4s loop was 8 bins of the old 128: it never looked recorded.
 local DECK_BINS = 1024
@@ -46,7 +46,7 @@ local twave_bin = 0
 -- seamless, and reverse playback paints in the right direction. entering a
 -- fresh bin, previous content survives by `pre` (the overdub picture).
 -- A JUMP is not a walk: no head travels more than a bin per frame (the
--- fastest, a layer at 4x, moves about 0.6), so a gap of several bins is a
+-- fastest, a deck at 4x, moves about 0.6), so a gap of several bins is a
 -- loop wrapping round or a pass re-armed somewhere else. Walking it painted
 -- the whole loop with one moment's level (every seam of a DUB loop drew a
 -- solid block). Only the landing bin is painted.
@@ -75,7 +75,7 @@ local function paint_bins(bins, last, bin, amp, pre)
   return bin
 end
 local M = {}
-M.paint_bins = paint_bins   -- the layer decks paint their own pictures
+M.paint_bins = paint_bins   -- a deck paints its own picture (lib/mdeck.lua)
 M.DECK_BINS = DECK_BINS
 
 -- track the buffer's contents as the write head passes over it. STOP holds
@@ -106,8 +106,7 @@ function M.update_tape_wave()
   end
 end
 
--- wipe ANY strip, cancelling its own queued repaint (the layer decks own
--- their bins and erase through here)
+-- wipe ANY strip, cancelling its own queued repaint
 function M.clear_bins(bins)
   W.cancel_fill(bins)
   for i = 1, #bins do bins[i] = 0 end
@@ -149,8 +148,8 @@ function M.load_wave(path, buf_secs)
   return dur
 end
 
--- fill an ARBITRARY 128-bin strip from a wav — the layer decks own their bins
--- and hand them here when a pset restores their audio (lua cannot read the
+-- fill an ARBITRARY strip from a wav: a track's strip or the tape's, when a
+-- pset restores its audio (lua cannot read the
 -- softcut buffer, but the wav it was restored FROM is right there; without
 -- this a restored loop played audibly under a blank picture).
 function M.fill_wave_bins(path, bins, secs)
@@ -248,8 +247,7 @@ local function view_x(ph, x0, x1, lo, span)
 end
 
 -- the record-SOURCE flag: a deck printing PROCESSED audio is never a hidden
--- mode. DRY (the default) draws nothing. Reads the EFFECTIVE source, so a
--- layer bounce throwing it WET shows on every page that records it.
+-- mode. DRY (the default) draws nothing. Reads the EFFECTIVE source.
 local function src_flag(x, y)
   local src = C.eff_cut_source()
   if src > 0.02 then
@@ -311,14 +309,6 @@ local SHORT = {
   pad_level = "PLVL",
   scene_slot = "SLOT", scene_morph_amt = "MRF",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
-  layer_sel = "LAYER",
-  lay1_level = "L1 LV", lay1_rate = "L1 RT", lay1_reverse = "L1 REV",
-  lay1_start = "L1 ST", lay1_end = "L1 EN", lay1_pre = "L1 DUB",
-  lay1_width = "L1 WIDE",
-  lay2_level = "L2 LV", lay2_rate = "L2 RT", lay2_reverse = "L2 REV",
-  lay2_start = "L2 ST", lay2_end = "L2 EN", lay2_pre = "L2 DUB",
-  lay2_width = "L2 WIDE",
-  ["@lay_level"] = "LVL", ["@lay_rate"] = "RATE", ["@lay_move"] = "LOOP",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
   mode = "MODE", filt_type = "FILT", pan = "PAN", freeze = "FRZ",
@@ -391,7 +381,6 @@ local FULL = {
   pad_pitch = "PITCH", pad_voice = "VOICE",
   scene_morph_amt = "MORPH",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE",
-  ["@lay_level"] = "LEVEL",
 }
 
 -- normalized 0..1 of a value for a param: controlspec unmap, option index,
@@ -415,7 +404,6 @@ local function value_norm(id, v) return pnorm(lookup_p(id), v) end
 -- a plain 0..1 linear control reads as a percentage; everything else falls
 -- back to the norns string.
 local RATE_IDS = { scan = true, tape_rate = true,
-                   lay1_rate = true, lay2_rate = true,
                    t2_scan = true, t2_pitch = true,
                    t3_scan = true, t3_pitch = true,
                    t4_scan = true, t4_pitch = true }
@@ -509,6 +497,10 @@ local function fmt_value(id)
       return hz >= 1000 and string.format("%.1fKHZ", hz / 1000)
         or string.format("%dHZ", floor(hz + 0.5))
     end
+    if fx == 7 then                     -- ECHO: its time
+      local t = 0.03 * 40 ^ v
+      return t >= 1 and string.format("%.2fS", t) or string.format("%dMS", floor(t * 1000 + 0.5))
+    end
     return string.format("%d%%", floor(v * 100 + 0.5))
   end
   if key == "cutoff" then
@@ -553,7 +545,7 @@ end
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
   route_sel = true, track_sel = true, ["@route_to"] = true,
-  seq_slice = true, motion_lane = true, scene_slot = true, layer_sel = true,
+  seq_slice = true, motion_lane = true, scene_slot = true,
   ["@mo_sel"] = true,
 }
 
@@ -747,7 +739,7 @@ local TK_MID, TK_HALF = 30, 11
 -- "ON SND" while a record would wait for sound, so you know before you arm.
 -- Left: "<" while an UNDO is kept, then the chips of a writer that re-touches
 -- the buffer (RSMP, REGN). What K3's SNAP or UNDO just did takes the whole row
--- for a moment (LAYERS' rule): the action proves it happened.
+-- for a moment: the action proves it happened.
 local REC_INTO = { "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4" }
 local REC_THEN = { "THEN 2", "THEN 3", "THEN 4" }
 local REC_LAST = "THEN STOP"
@@ -1380,126 +1372,6 @@ local function body_TAPE(frame)
 end
 
 -- ============================================================================
--- 4 · LAYERS - the loop decks beside the tape
--- ============================================================================
--- Two strips, one per deck. Each shows what is actually recorded in it, the
--- loop bracket over that, and the head. The SELECTED deck is bright and the
--- other dim -- the audibility rule everywhere else in this instrument: if a
--- thing is not the one you are working on, it does not compete for your eye.
--- A deck whose level is down, or that is not playing, dims further, so you can
--- always see which of them you are actually hearing.
-local function layer_strip(d, y, sel, frame)
-  local rec = pget(C.deck_p(d, "rec"), 0) == 1
-  local playing = pget(C.deck_p(d, "play"), 1) == 1
-  local lv = pget(C.deck_p(d, "level"), 0.8)
-  local audible = playing and lv > 0.01 and pget("stop_all", 0) == 0
-  local base = sel and (audible and 10 or 6) or (audible and 5 or 3)
-
-  -- name, and the state in words rather than an icon to decode
-  ptext(d.name, 3, y - 6, 1, sel and 15 or 6)
-  if rec then
-    -- steady: the header's L is the one blink that says WRITING
-    screen.level(15); screen.rect(15, y - 5, 3, 3); screen.fill()
-    ptext(pget(C.deck_p(d, "pre"), 1) > 0.5 and "DUB" or "REP", 20, y - 6, 1, 12)
-  elseif not playing then
-    -- MUTE, not STOP: the head keeps rolling. That is deliberate — two decks at
-    -- different rates only stay in their drifting relationship if neither one
-    -- restarts, so silencing a layer must not move it. The word has to say so.
-    ptext("MUTE", 20, y - 6, 1, 5)
-  end
-
-  local x0, x1 = 38, 124
-  local w = x1 - x0
-  local ls = clamp(pget(C.deck_p(d, "start"), 0), 0, 1)
-  local le = clamp(pget(C.deck_p(d, "end"), 1), 0, 1)
-  -- the strip is the loop, or the pass that is still open (deck_view)
-  local vlo, vspan = deck_view(ls, le, d.mat_lo, d.mat_hi, d.len)
-  -- the material
-  screen.level(base)
-  wave_lane(d.wave, x0, x1, y, 5, 1, 5, vlo, vspan)
-  -- the loop bracket: where this deck actually reads from
-  local bx0 = x0 + floor(clamp((min(ls, le) - vlo) / vspan, 0, 1) * w)
-  local bx1 = x0 + floor(clamp((max(ls, le) - vlo) / vspan, 0, 1) * w)
-  -- (not while a first pass is open: there is no loop yet, and the strip is
-  -- the pass)
-  local looped = math.abs(le - ls) < 0.999 or not d.any
-  if looped then
-    screen.level(sel and 12 or 5)
-    screen.rect(bx0, y - 6, 1, 13)
-    screen.rect(bx1, y - 6, 1, 13)
-    screen.rect(bx0, y - 6, bx1 - bx0, 1)
-    screen.fill()
-  end
-
-  -- the invitation goes over the bracket (which is drawn across the same
-  -- space), so it knocks out a pocket first — the rule the footer follows when
-  -- a swelling value meets the key words
-  if not d.any then
-    local msg = sel and "EMPTY - K2 REC" or "EMPTY"
-    local tw = text_w(msg, 1)
-    local tx = floor((x0 + x1) / 2 - tw / 2)
-    screen.level(0)
-    screen.rect(tx - 2, y - 2, tw + 4, 9)
-    screen.fill()
-    ptext(msg, tx, y + 3, 1, sel and 10 or 3)
-  end
-
-  -- the head, drawn last so it is never hidden
-  local hx = view_x(clamp(d.phase, 0, 1), x0, x1, vlo, vspan)
-  if hx then
-    screen.level(audible and 15 or 6)
-    screen.rect(hx, y - 5, 1, 11)
-    screen.fill()
-  end
-  -- where the strip sits in the deck's 60s
-  if d.any then view_map(x0, x1, y + 8, vlo, vspan, sel and 8 or 4) end
-
-  -- level, as a short bar under the name
-  screen.level(sel and 8 or 4)
-  screen.rect(3, y + 4, floor(clamp(lv, 0, 1) * 30), 1)
-  screen.fill()
-end
-
-local function body_LAYERS(frame)
-  local sel = floor(pget("layer_sel", 1) + 0.5)
-  local decks = C.layers or {}
-  if #decks == 0 then
-    ptext_c("NO LAYER DECKS", 64, 30, 1, 5)
-    return
-  end
-  -- the rate of the selected deck, top right: the number that makes two decks
-  -- drift against each other, which is the whole reason for having two
-  local d = decks[sel] or decks[1]
-  local r = pget(C.deck_p(d, "rate"), 1) * (pget(C.deck_p(d, "reverse"), 0) == 1 and -1 or 1)
-  ptext_r(string.format("%.2fX", r), 126, 12, 1, 5)
-  -- the selected deck's LOOP LENGTH. With its rate on the other side these are
-  -- the two numbers that decide whether two decks stay locked or walk apart,
-  -- and this is what makes SNAP visible even in the case where it moves
-  -- nothing because the loop was already on the grid.
-  if C.loop_secs then
-    ptext(string.format("%.2fS", C.loop_secs(d)), 2, 12, 1, 5)
-  end
-  -- what the decks RECORD: the EFFECTIVE source (the knob, or the bounce's
-  -- WET override while a layer is armed). Flag a processed print, or the
-  -- resample rig is a hidden mode. DRY draws nothing, same law as TAPE's.
-  src_flag(44, 12)
-  for i = 1, math.min(#decks, 2) do
-    layer_strip(decks[i], i == 1 and 27 or 45, sel == i, frame)
-  end
-  -- what SNAP just did, over the readout row it replaces for a moment. A snap
-  -- that lands on the length you already had moves nothing on screen, and a
-  -- page that cannot say so is indistinguishable from a key that did nothing.
-  if C.lay_msg and (frame - (C.lay_msg_at or -1e9)) < FPS * 1.2 then
-    -- the WHOLE row: a pocket cut only behind the words leaves the loop
-    -- seconds and the rate peeking out either side of the message, which
-    -- reads as garbage. A fresh action is the more urgent news, so it takes
-    -- the row outright and the readouts come back when it expires.
-    screen.level(0); screen.rect(0, 11, 128, 7); screen.fill()
-    ptext_c(C.lay_msg, 64, 12, 1, 12)
-  end
-end
-
--- ============================================================================
 -- 5 · FILTER — tone (approx DFM1 response, with labeled measurement rails;
 --     drive = grit on the line, not a number)
 -- ============================================================================
@@ -1673,6 +1545,22 @@ local function body_EFFECT(frame)
     screen.rect(0, FX_YM - 3, 1, 7)
     screen.rect(127, FX_YM - 3, 1, 7)
     screen.fill()
+  elseif fx == 7 then
+    -- ECHO: one burst and its repeats, as far apart as the time is long and
+    -- fading as the feedback says
+    local gap = 10 + r * 44
+    local g = 1
+    for n = 0, 5 do
+      local x0 = 6 + floor(n * gap)
+      if x0 > 120 or g < 0.06 then break end
+      screen.level(n == 0 and hi or max(1, floor(lo + (hi - lo) * g)))
+      for x = x0, min(127, x0 + 6) do
+        local h = 10 * g * sin((x - x0) * 0.52)
+        screen.rect(x, FX_YM - h, 1, max(1, 2 * h))
+      end
+      screen.fill()
+      g = g * (0.15 + a * 0.7)
+    end
   else
     local k = 0.25 + r * 1.6
     for x = 0, 127 do
@@ -1799,8 +1687,7 @@ end
 
 -- ============================================================================
 -- 8 · MIX — the console (in meter → the two decks at their REAL gains →
---     master VU). the layer decks live on their own page; this console is
---     the engine <> tape crossfade.
+--     master VU). this console is the engine <> tape crossfade.
 -- ============================================================================
 -- one console meter: frame, the signal bar (sqrt law), and a peak pip that
 -- decays slowly. `k` picks its peak slot; the pip decays once per frame.
@@ -2414,7 +2301,6 @@ end
 -- each page draws its body through this dispatch table, selected by name;
 -- built ONCE at load, so the redraw stays allocation-free
 local BODY = {
-  LAYERS = body_LAYERS,
   TAKE = body_TAKE, VOICE = body_VOICE, TAPE = body_TAPE,
   FILTER = body_FILTER, EFFECT = body_EFFECT, DELAY = body_DELAY, REVERB = body_REVERB, MIX = body_MIX,
   PADS = body_PADS, MOTION = body_MOTION, SCENE = body_SCENE,
@@ -2482,16 +2368,6 @@ local function purity()
       or pget("resonance", 0) > 0.02 then return false end
   -- the tape deck must not be adding its own material
   if C.twave_any and pget("mix", 0.5) > 0.02 then return false end
-  -- ...and neither may the layer decks: material present and audibly playing
-  -- means the output is not just the take (the same rule, per deck)
-  local decks = C.layers
-  if decks then
-    for i = 1, #decks do
-      local d = decks[i]
-      if d.any and pget(C.deck_p(d, "play"), 1) == 1
-          and pget(C.deck_p(d, "level"), 0.8) > 0.01 then return false end
-    end
-  end
   return true
 end
 
@@ -2499,7 +2375,7 @@ end
 -- the left are the TRACKS (see draw_tracks); STOP inverts the title chip.
 -- A writer's dot carries the ONLY fast blink (its letter stays, so a flag
 -- never vanishes); holds and runs are steady. The flags, in priority order:
--- the writers (T the tape, M the motion looper, L a layer deck; the take's
+-- the writers (T the tape, M the motion looper; the take's
 -- REC is the blinking track cell), the holds (FZ, TF, RP a beat repeat),
 -- then the machines that play on their own (SQ the pad sequencer, LF a
 -- modulator). A flag that does not fit whole shrinks: a writer to its
@@ -2509,7 +2385,7 @@ end
 -- leaves `x` and `full` for the tests.
 local HFLAGS = {
   { ch = "T", write = true },
-  { ch = "M", write = true }, { ch = "L", write = true },
+  { ch = "M", write = true },
   { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
   { ch = "SQ", lvl = 7 }, { ch = "LF", lvl = 7 },
 }
@@ -2530,14 +2406,6 @@ local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 -- a 1px gap too. They were 4 and 2, but four's thirteen page dots and its
 -- track flag left the worst case short of the dots.)
 local function hflag_pip(f) return f.write and f.w + 1 or 3 end
-local function any_layer_rec()
-  local decks = C.layers
-  if not decks then return false end
-  for i = 1, #decks do
-    if pget(C.deck_p(decks[i], "rec"), 0) == 1 then return true end
-  end
-  return false
-end
 -- draw the lit flags from x, keeping clear of `lim` (the page dots)
 local function draw_hflags(x, lim, blink)
   local n = #HFLAGS
@@ -2684,7 +2552,6 @@ local function draw_header()
   local dx0 = M.DOT_X0
   HF.T.on = pget("tape_rec", 0) == 1
   HF.M.on = pget("motion_rec", 0) == 1
-  HF.L.on = any_layer_rec()
   HF.FZ.on = pget("pv_freeze", 0) == 1 or pget("freeze", 0) == 1
   HF.TF.on = pget("tape_freeze", 0) == 1
   -- RP bright while the engine loops, dim while a press waits for its beat

@@ -7,9 +7,7 @@ Everywhere: E1 selects the page, K1 is shift, K1+E1 picks the track (the
 scene morph is on SCENE's E3), K1+K2 is STOP, and K1+K3 is DRY on a tap or erases the page's
 material when held for about a second.
 
-Compound targets: `@win_move` slides the take window, `@lay_move` slides the
-selected layer's loop, `@lay_level` and `@lay_rate` set the selected layer's
-level and rate. `@mo_sel` walks MOTION's rows: the lanes, then the two
+Compound targets: `@win_move` slides the take window. `@mo_sel` walks MOTION's rows: the lanes, then the two
 modulators; with a modulator selected the other knobs are its own.
 
 Tracks (four): four engine tracks and one focus. On TRACKS, E2 picks the
@@ -30,7 +28,6 @@ K1 and FRZ on K2 there. Drive and dry/wet are shared by every track.
 | VOICE (PV) | `scan` | `pitch` | `scan` | `pitch` | FRZ | MODE, hold TRK 2 | no |
 | TRACKS | `track_sel` | `@trk_level` | `@route_to` | `@route_amt` | ON | MODE | no |
 | TAPE | `tape_rate` | `loop_end` | `tape_pre` | `cut_source` | REC | REV | yes |
-| LAYERS | `layer_sel` | `@lay_level` | `@lay_rate` | `@lay_move` | REC | MUTE | yes |
 | FILTER | `cutoff` | `resonance` | `drive` | `crush` | OPEN | TYPE, hold TRK 2 | no |
 | EFFECT | `effect_amt` | `effect_rate` | `effect2_amt` | `effect2_rate` | ON | TYPE, hold TRK 2 | no |
 | DELAY | `delay_mix` | `delay_fb` | `delay_time` | `delay_sync` | INF | KILL | no |

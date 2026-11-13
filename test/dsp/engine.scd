@@ -7,7 +7,8 @@ var ctx = (server: s, xg: Group.basicNew(s, 1),
     in_b: [Bus.audio(s, 1), Bus.audio(s, 1)], out_b: Bus.audio(s, 2));
 var semi = 2 ** (1/12);
 Engine_Four.new(ctx, { arg eng;
-    var def = { |n| SynthDescLib.global[n].def.asBytes };
+    // nil for a def this build does not have (FLANGE needs the plugin)
+    var def = { |n| var d = SynthDescLib.global[n]; d.notNil.if({ d.def.asBytes }) };
     var src = SynthDef(\src, { |out| Out.ar(out, SinOsc.ar(1000) * 0.25 ! 2) });
     var jobs, run;
     var opts = ServerOptions.new.memSize_(131072);
@@ -53,11 +54,30 @@ Engine_Four.new(ctx, { arg eng;
                 ++ (c[0] > 0).if({ [[0.003, [\s_new, \four_fx_mod, 1100 + i, 1, 0,
                     \pbus, 80 + (i * 2), \type, c[0], \amt, c[1], \rate, c[2]]]] }, { [] })
                 ++ [[0.004, [\s_new, \copy, 1200 + i, 1, 0, \from, 80 + (i * 2), \to, i * 2]]] }).flatten(1)]
+        ,
+        // the plugin's FLANGE and ECHO (only with FOUR_PLUGIN_DIR): white noise
+        // through the flanger at four settings, and one click through the echo
+        ["FOUR_PLUGIN_DIR".getenv.notNil.if({ \delay }, { \skip }), 6, 10, [],
+            [[0.0, [\d_recv, def.(\four_fx_flange) ? src.asBytes]], [0.0, [\d_recv, def.(\four_fx_echo)]],
+             [0.0, [\d_recv, SynthDef(\copy, { |from, to| Out.ar(to, In.ar(from, 2)) }).asBytes]],
+             [0.0, [\d_recv, SynthDef(\noise, { |out| Out.ar(out, WhiteNoise.ar(0.2) ! 2) }).asBytes]],
+             [0.0, [\d_recv, SynthDef(\click, { |out| Out.ar(out, Impulse.ar(0) * 0.5 ! 2) }).asBytes]],
+             [0.001, [\s_new, \noise, 900, 0, 0, \out, 40]],
+             [0.5, [\s_new, \click, 901, 0, 0, \out, 44]]]
+            ++ [[0, 0.5], [0.5, 0.5], [1, 0.5], [1, 0.9]].collect({ |c, i|
+                [[0.002, [\s_new, \copy, 1000 + i, 1, 0, \from, 40, \to, 80 + (i * 2)]],
+                 [0.003, [\s_new, \four_fx_flange, 1100 + i, 1, 0,
+                    \pbus, 80 + (i * 2), \type, 2, \amt, c[0], \rate, c[1]]],
+                 [0.004, [\s_new, \copy, 1200 + i, 1, 0, \from, 80 + (i * 2), \to, i * 2]]] }).flatten(1)
+            ++ [[0.002, [\s_new, \copy, 1010, 1, 0, \from, 44, \to, 90]],
+                [0.003, [\s_new, \four_fx_echo, 1110, 1, 0, \pbus, 90, \type, 6, \amt, 0.7, \rate, 0.5]],
+                [0.004, [\s_new, \copy, 1210, 1, 0, \from, 90, \to, 8]]]]
     ];
     run = { |i|
         if (i >= jobs.size) { "BENCH_DONE".postln; 0.exit } {
             var name, dur, nch, bufs, msgs, score;
             #name, dur, nch, bufs, msgs = jobs[i];
+            (name == \skip).if({ run.(i + 1) }, {
             score = bufs.collect({ |b| [0.0, [\b_allocRead, b[0], dir +/+ b[1]]] })
                 ++ msgs ++ [[dur, [\c_set, 0, 0]]];
             score = score.sort({ |a, b| a[0] < b[0] });
@@ -66,6 +86,7 @@ Engine_Four.new(ctx, { arg eng;
                 sampleRate: 48000, headerFormat: "WAV", sampleFormat: "float",
                 options: opts.numOutputBusChannels_(nch),
                 duration: dur, action: { ("done " ++ name).postln; run.(i + 1) });
+            });
         };
     };
     run.(0);

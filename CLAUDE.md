@@ -29,7 +29,7 @@ block current, and add a change-log entry for every change.
 - **On the device 2026-11-12:** `count: 185`. The worst case takes 45% of the scsynth
   thread, with 0 xruns over 60 s (doc/measurements/2026-11-12/). Nobody has listened yet.
 - **The effect slot (four, third and fourth changes):** engine, params and the EFFECT
-  page (after FILTER, thirteen pages now: E2 amount, E3 rate, K2 ON, K3 TYPE). Measured
+  page (after FILTER, twelve pages now: E2 amount, E3 rate, K2 ON, K3 TYPE). Measured
   on the device: each type
   changes the output and the slot adds no CPU that the measurement can see
   (doc/measurements/2026-11-12/effect-slot.md). RESON's level was raised in the fifth
@@ -96,7 +96,7 @@ block current, and add a change-log entry for every change.
   before; four tracks now peak at -2.7 dBFS (doc/measurements/2026-11-13/mud.md).
   Nobody has listened yet. Drive and RESON bite later on the knob now.
 - **Deck pages (four, eleventh change), on the device 2026-11-13:** a deck strip (TAPE,
-  LAYERS, the tape lane of MIX) shows the LOOP, not the 60 s deck (`deck_view` in
+  the tape lane of MIX) shows the LOOP, not the 60 s deck (`deck_view` in
   lib/mpages.lua), from a 1024-bin picture. TAPE says `SILENT / SEE MIX` when the MIX
   crossfade hides it. Screenshots taken on the device; the user did not see it yet.
 - **Lanes and the second slot (four, twelfth change), on the device 2026-11-13:** each
@@ -107,6 +107,21 @@ block current, and add a change-log entry for every change.
   53%. A cloud holds 32 grain pairs at most: denser settings ran the engine to 100%.
   The second slot has params and K1+E2/E3 on EFFECT, but no key for its type yet (it
   is in PARAMS). doc/measurements/2026-11-13/lanes.md. Nobody has listened yet.
+- **The layer decks are gone (four, thirteenth change), NOT on the device yet:** the
+  LAYERS page, the decks `lay1` and `lay2` and their 26 params are removed (Lua only,
+  the count stays 197). Twelve pages. The tape is the one softcut deck, on the deck law
+  in lib/mdeck.lua. In the shipped presets tracks 2 and 3 play what the decks played
+  (PLAY, the deck's level, the deck's rate as pitch, no sends, no drive), and the scenes
+  fade the take with `grain_level`. `MOTION_IDS` keeps the fourteen layer ids in place
+  as tombstones (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md are old and
+  still there. Nobody has heard the migrated presets.
+- **Cloud, flanger, ECHO (four, fourteenth change), on the device 2026-11-13:** the
+  plugin also holds `FourGrain` (GRAIN's cloud, 48 pairs at most), `FourDelay` (the new
+  FLANGE and the ECHO effect type, appended as type 7). The proof of the cloud against
+  `GrainBuf` is test/dsp/grain_eq.scd. Nobody has listened to the new flanger or ECHO.
+  The album presets in `data/` are regenerated (the deck parts play on
+  tracks 2 and 3), but they are NOT on the device: `test/deploy_set.sh` overwrites
+  slots 1 to 12 there, and the user has not said yes.
 - **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
@@ -135,7 +150,7 @@ clouds, **tape-like** varispeed/looping, a **playback window** (slice start/stop
 **Every parameter is MIDI-mappable.**
 
 Architecture: softcut (a separate audio core, nearly free) does everything it can (the
-tape, the layer decks); scsynth does only what softcut cannot (granular, time-stretch,
+tape); scsynth does only what softcut cannot (granular, time-stretch,
 the filter, delay and reverb). GRAIN/WARP/PV/PLAY are a **mode switch** on a single SC
 voice, never run together: a Pi 4 has one scsynth core, and it xruns past about 60%.
 
@@ -274,12 +289,14 @@ Each line was learned the hard way; the change log has the story.
   or `MOTION_EXCLUDE`; a `*_start`/`*_end` pair joins `EDGE_PAIRS` and `FINE_IDS`; an
   x-rate joins `RATE_IDS`; an encoder target gets a `SHORT` word. Every `add_group` count
   must match. test_control enforces all of it.
+- `MOTION_IDS` is append-only: an id whose param is deleted stays in its place and joins
+  `MOTION_TOMBSTONES`. test_control lets only a tombstone name a missing param.
 - Every new audio source must join `purity()` (the ◇ mark has lied three times).
 - A guard added to one of two sibling paths makes the other one a bug with a witness.
   When a fix names a limitation in ANOTHER module, that is an unfixed bug, not a note.
 - A release belongs to whatever took the press: `key_state` routes a key release to the
   def resolved at the press, the grid routes a workspace release to the surface that
-  took it, and a def must not look its target up again at release (`LAYER_KEYS`).
+  took it, and a def must not look its target up again at release.
 - Note RELEASES are never gated (keys_enable, the MIDI channel, the menu): a gated
   release strands a polyphonic voice forever. Key voice ids on the physical key or pad.
 - Every write of a start/end pair goes through `Mdeck.set_pair` (the widening edge
@@ -305,7 +322,7 @@ Each line was learned the hard way; the change log has the story.
 - Moving code into a module turns an assignment to a former upvalue into a write to a
   global, silently. A local referenced above its declaration also reads as a global.
 - A performance page must prove it worked: every action says what it did (`say`,
-  `layer_say`), including the "nothing moved" case.
+  `take_say`), including the "nothing moved" case.
 - Screen text: measure with `text_w` first; 124px is the centred limit. `ptext`'s y is
   the TOP row of the 1x font (y..y+4).
 - Tests that read params over ticks must first silence the background movers (orbit,
@@ -320,8 +337,6 @@ Each line was learned the hard way; the change log has the story.
 - Freeing the reverb and delay synths at mix 0 cuts their tails: the CPU win is the point.
 - The DELAY page's bouncing echoes are the keeper; the top-down REVERB room and the
   8-boxes-on-the-wave PADS were rejected. Do not restore them unasked.
-- SNAP names two gestures (TAKE K3 fits the window; the layer loop quantize). A rename
-  is a product decision.
 - NORMALIZE (a fourth buffer writer) waits until rec, regen and erode are heard on
   hardware.
 - `morph(1)` is not `recall(B)` by design (holds, routing, writers and the voice cap do

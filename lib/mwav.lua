@@ -29,7 +29,7 @@ end
 -- caller knows the duration at once) runs in queue_fill; the slow per-bin peak
 -- read is deferred to load_tick (BINS_PER_TICK bins a frame on the redraw
 -- clock), so a long file draws IN over about a second instead of freezing the
--- screen. ONE queue serves every strip — the take, the tape, the layer decks
+-- screen. ONE queue serves every strip — the take, the tape
 -- — so a pset restore can repaint all of them; a new fill for the SAME bins
 -- table supersedes the queued one, and fills for different targets coexist.
 -- cancel_fill stops only ITS strip's fill (a CLR must stop the very repaint

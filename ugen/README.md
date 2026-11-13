@@ -10,6 +10,8 @@ not, so the instrument plays either way.
 | `FourWarp` | WARP | WSOLA: each grain starts where it continues the last one. |
 | `FourRead` | PLAY | A windowed sinc read in place of the cubic. |
 | `FourTanh` | every `tanh` of the engine | The same curve to 2e-7, about ten times as fast on the norns. |
+| `FourGrain` | GRAIN | The pair of stock `GrainBuf` as one UGen, with the same laws and an exact start place. |
+| `FourDelay` | FLANGE, ECHO | A delay with a low-pass and a soft clip in its feedback path. |
 
 All three return the take sample for sample at speed 1 and pitch 1.
 

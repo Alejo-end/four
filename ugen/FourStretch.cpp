@@ -122,14 +122,91 @@ static void FourTanh_Ctor(FourTanh* unit) {
     OUT0(0) = std::tanh(IN0(0));
 }
 
+// FourDelay.ar(in, delay, feedback, damp, maxdelay): see DelayFb in four_core.h.
+// delay is in seconds (control rate is ramped over the block), damp in Hz.
+struct FourDelay : public Unit { four::DelayFb core; float* mem; float lastD; };
+static void FourDelay_next(FourDelay* unit, int inNumSamples) {
+    const float* in = IN(0); float* out = OUT(0);
+    const float sr = (float)SAMPLERATE;
+    const float fb = sc_clip(IN0(2), -0.98f, 0.98f);
+    const float k = 1.f - std::exp(-6.2831853f * sc_clip(IN0(3), 20.f, 20000.f) / sr);
+    if (INRATE(1) == calc_FullRate) {
+        const float* d = IN(1);
+        for (int i = 0; i < inNumSamples; i++) out[i] = unit->core.tick(in[i], d[i] * sr, fb, k);
+    } else {
+        float d = unit->lastD; const float target = IN0(1) * sr;
+        const float step = (target - d) / (float)inNumSamples;
+        for (int i = 0; i < inNumSamples; i++) { d += step; out[i] = unit->core.tick(in[i], d, fb, k); }
+        unit->lastD = target;
+    }
+}
+static void FourDelay_Ctor(FourDelay* unit) {
+    int need = (int)(sc_max(IN0(4), 0.001f) * SAMPLERATE) + 8, size = 64;
+    while (size < need) size <<= 1;
+    unit->mem = (float*)RTAlloc(unit->mWorld, size * sizeof(float));
+    if (!unit->mem) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    unit->core.init(unit->mem, size);
+    unit->lastD = IN0(1) * (float)SAMPLERATE;
+    SETCALC(FourDelay_next);
+    OUT0(0) = 0.f;
+}
+static void FourDelay_Dtor(FourDelay* unit) {
+    if (unit->mem) RTFree(unit->mWorld, unit->mem);
+}
+
+// FourGrain.ar(bufL, bufR, trig, dur, rate, pos, panL, panR, envbuf, maxGrains)
+// See Grains in four_core.h. Every input from trig to panR is read at the
+// sample of its trigger, whatever rate it runs at.
+struct FourGrain : public Unit { four::Grains* core; };
+static void FourGrain_next(FourGrain* unit, int inNumSamples) {
+    float* outL = OUT(0); float* outR = OUT(1);
+    four::Buf bl = bufOf(unit, IN0(0)), br = bufOf(unit, IN0(1));
+    float tmp[6][64];
+    const float* win = nullptr; int winFrames = 0;
+    if (IN0(8) >= 0.f) {
+        four::Buf w = bufOf(unit, IN0(8));
+        if (w.data && w.frames > 1) { win = w.data; winFrames = w.frames; }
+    }
+    double scale = 1.0;
+    {
+        uint32 bn = (uint32)sc_max(IN0(0), 0.f);
+        if (bn < unit->mWorld->mNumSndBufs) {
+            SndBuf* b = unit->mWorld->mSndBufs + bn;
+            if (b->samplerate > 0) scale = b->samplerate / SAMPLERATE;
+        }
+    }
+    for (int done = 0; done < inNumSamples; done += 64) {
+        int n = sc_min(64, inNumSamples - done);
+        const float* in[6];
+        for (int k = 0; k < 6; k++)
+            in[k] = INRATE(2 + k) == calc_FullRate ? IN(2 + k) + done : headOf(unit, 2 + k, tmp[k], n);
+        unit->core->process(outL + done, outR + done, n, in[0], in[1], in[2], in[3], in[4], in[5],
+                            bl, br, win, winFrames, (int)IN0(9), SAMPLERATE, scale);
+    }
+}
+static void FourGrain_Ctor(FourGrain* unit) {
+    unit->core = (four::Grains*)RTAlloc(unit->mWorld, sizeof(four::Grains));
+    if (!unit->core) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    unit->core->init();
+    SETCALC(FourGrain_next);
+    OUT0(0) = 0.f; OUT0(1) = 0.f;
+}
+static void FourGrain_Dtor(FourGrain* unit) {
+    if (unit->core) RTFree(unit->mWorld, unit->core);
+}
+
 PluginLoad(FourStretch) {
     ft = inTable;
     four::tables();     // built here, off the audio thread
 #ifdef FOUR_FFTW
     four::plans();
 #endif
-    DefineDtorUnit(FourPV);
-    DefineDtorUnit(FourWarp);
-    DefineSimpleUnit(FourRead);
+    DefineDtorCantAliasUnit(FourPV);
+    DefineDtorCantAliasUnit(FourWarp);
+    // (CantAlias: an output buffer is never one of the inputs. The cloud clears
+    // its outputs before it reads its inputs, which wiped an input that shared one.)
+    DefineSimpleCantAliasUnit(FourRead);
     DefineSimpleUnit(FourTanh);
+    DefineDtorCantAliasUnit(FourDelay);
+    DefineDtorCantAliasUnit(FourGrain);
 }

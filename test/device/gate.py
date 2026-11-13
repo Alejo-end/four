@@ -34,6 +34,8 @@ SCREENS = os.path.join(OUT, "screens")
 ENGINE_OUT = ("SuperCollider:out_1", "SuperCollider:out_2")
 DECKS_OUT = ("softcut:output_1", "softcut:output_2")
 PSET = 97  # a slot that no shipped preset uses; cleaned up by cleanup()
+# the pages, in the order E1 walks them (PAGES in four.lua)
+PAGES = "TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE"
 
 for path in (OUT, WAVS, SCREENS):
     os.makedirs(path, exist_ok=True)
@@ -204,7 +206,7 @@ def stage1():
     def c11():
         start = mark()
         seen = []
-        for page in "TAKE VOICE TAPE LAYERS FILTER DELAY REVERB MIX PADS MOTION SCENE".split():
+        for page in PAGES.split():
             n.goto(page)
             time.sleep(0.25)
             shot("1_" + page)
@@ -214,11 +216,11 @@ def stage1():
         time.sleep(0.5)
         f1 = int(num(n.ctx("c.frame")))
         ok = all(seen) and f1 > f0 and not traced(start)
-        return verdict(ok, f"11 pages drawn, frame counter moves ({f0} to {f1}), no traceback")
+        return verdict(ok, f"{len(PAGES.split())} pages drawn, frame counter moves ({f0} to {f1}), no traceback")
 
     def c12():
         pages = n.lua('print(table.concat(__ctx.PAGES," "))')
-        return verdict(pages == "TAKE VOICE TAPE LAYERS FILTER DELAY REVERB MIX PADS MOTION SCENE", pages)
+        return verdict(pages == PAGES, pages)
 
     def c13():
         # only since sclang last started: an older error belongs to an older run
@@ -1333,154 +1335,11 @@ def stage8():
         check(cid, fn)
 
 
-# ---- stage 9: layers ---------------------------------------------------------
-def record_layer(deck, secs=4, kind="tone", amp=None):
-    """Record into a layer deck with the LAYERS keys."""
-    n.goto("LAYERS")
-    n.set("layer_sel", deck)
-    time.sleep(0.2)
-    if kind:
-        n.signal(kind, amp)
-    time.sleep(0.2)
-    n.tap(2, 0.08)
-    time.sleep(secs)
-    n.tap(2, 0.08)
-    time.sleep(0.5)
-    if kind:
-        n.signal(None)
-    time.sleep(0.3)
-
-
-def deck_span(deck):
-    return (n.get(f"lay{deck}_end") - n.get(f"lay{deck}_start"))
-
-
+# ---- stage 9: layers (removed) ------------------------------------------------
+# The two layer decks are gone (four, thirteenth change), and checks 9.1 to 9.8
+# went with them. The stage number stays, so the stages after it keep theirs.
 def stage9():
-    n.load_script()
-    n.set("layer_wet", 0) if False else None
-    record_take(4, "drums")
-    set_mode("PLAY")
-    n.set("dry_wet", 1)
-
-    def c91():
-        record_take(3, "drums")
-        set_mode("PLAY")
-        record_layer(1, 4)
-        d = level("9.1_decks", 2, DECKS_OUT)
-        e = level("9.1_engine", 2)
-        return verdict(d > -50 and e > -50, f"softcut {d} dB and engine {e} dB at the same time")
-
-    def tone_decks():
-        # layer_wet records the mix, which holds the take's drums. A click count
-        # needs a pure tone, so the decks record the input here.
-        n.load_script()
-        n.set("layer_wet", 0)
-        n.set("cut_source", 0)
-        n.set("dry_wet", 1)
-        set_mode("OFF")
-
-    def c92():
-        tone_decks()
-        record_layer(1, 4, "tone")
-        record_layer(2, 4, "tone", 0.15)
-        n.set("lay1_rate", 0.5)
-        n.set("lay2_rate", 1)
-        time.sleep(1)
-        rate, chans = engine_rec("9.2_drift", 12, DECKS_OUT)
-        hits = audio.clicks(chans[0], rate)
-        n.set("lay1_rate", 1)
-        return verdict(not hits, f"12s at rates 0.5 and 1: clicks {hits[:8]}. Drift: listen to 9.2_drift.wav", "measured")
-
-    def c93():
-        tone_decks()
-        record_layer(1, 4, "tone")
-        n.set("lay2_play", 0)
-        n.set("lay1_pre", 1)
-        time.sleep(0.5)
-        a = level("9.3_before", 2, DECKS_OUT)
-        record_layer(1, 3, None)
-        b = level("9.3_pre1_silence", 2, DECKS_OUT)
-        n.set("lay1_pre", 0)
-        record_layer(1, 6, None)
-        c = level("9.3_pre0_silence", 2, DECKS_OUT)
-        n.set("lay1_pre", 1)
-        n.set("lay2_play", 1)
-        n.set("layer_wet", 1)
-        return verdict(b > a - 3 and c < a - 15, f"{a} dB; after overdub of silence at pre 1 {b} dB; at pre 0 {c} dB")
-
-    def c94():
-        record_layer(1, 3, "tone")
-        n.set("lay2_play", 0)
-        time.sleep(0.5)
-        a = level("9.4_l1", 2, DECKS_OUT)
-        n.set("lay2_play", 1)
-        n.set("lay1_play", 0)
-        time.sleep(0.5)
-        b = level("9.4_l2", 2, DECKS_OUT)
-        n.set("lay1_play", 1)
-        n.set("layer_sel", 1)
-        erase_page("LAYERS")
-        n.set("lay2_play", 0)
-        time.sleep(0.5)
-        c = level("9.4_l1_erased", 2, DECKS_OUT)
-        n.set("lay2_play", 1)
-        n.set("lay1_play", 0)
-        time.sleep(0.5)
-        d = level("9.4_l2_kept", 2, DECKS_OUT)
-        n.set("lay1_play", 1)
-        return verdict(c < -60 and abs(d - b) < 2, f"L1 {a} to {c} dB; L2 {b} to {d} dB")
-
-    def c95():
-        record_layer(1, 3, "tone")
-        a = level("9.5_before", 2, DECKS_OUT)
-        stop(True)
-        time.sleep(1)
-        b = level("9.5_stopped", 2, DECKS_OUT)
-        c = level("9.5_stopped_engine", 1)
-        stop(False)
-        time.sleep(0.5)
-        d = level("9.5_after", 2, DECKS_OUT)
-        return verdict(b < -70 and c < -70 and abs(a - d) < 3, f"softcut {a}, stopped {b}, engine stopped {c}, after {d} dB")
-
-    def c96():
-        n.load_script()
-        n.set("dry_wet", 1)
-        record_take(3, "drums")
-        set_mode("PLAY")
-        record_layer(1, 3)
-        n.lua(f'params:write({PSET}, "gate")')
-        wait_save()
-        files = n.ssh(f"ls ~/dust/data/four | grep -E 'lay[12]-{PSET}' | tr '\\n' ' '").strip()
-        a = level("9.6_before", 2, DECKS_OUT)
-        n.load_script()
-        n.lua(f"params:read({PSET})")
-        wait_save()
-        n.helpers()
-        b = level("9.6_after", 2, DECKS_OUT)
-        return verdict(bool(files) and b > -50 and abs(a - b) < 6, f"files: {files}; softcut {a} dB before, {b} dB after")
-
-    def c98():
-        n.goto("TAPE")
-        n.signal("tone")
-        n.tap(2, 0.08)
-        time.sleep(3)
-        n.tap(2, 0.08)
-        time.sleep(0.3)
-        n.signal(None)
-        set_mode("GRAIN")
-        x0 = n.xruns()
-        n.set("density", 40)
-        time.sleep(1)
-        cpu = n.cpu(20)
-        idle, threads = n.threads(5)
-        x1 = n.xruns()
-        n.set("density", 20)
-        return verdict(x1 == x0, f"take in GRAIN, tape and both layers: scsynth {cpu}; system idle {idle}%; xruns {x1 - x0}; threads {threads[:5]}")
-
-    for cid, fn in (("9.1", c91), ("9.2", c92), ("9.3", c93), ("9.4", c94), ("9.5", c95), ("9.6", c96)):
-        check(cid, fn)
-    you("9.7", why=f"needs a physical grid; connected: {grid_state()}")
-    check("9.8", c98)
+    print("stage 9 tested the two layer decks. The decks are gone: nothing to run.")
 
 
 # ---- stage 10: delay, true STOP, clear ---------------------------------------
@@ -1567,21 +1426,20 @@ def stage10():
         n.tap(2, 0.08)
         time.sleep(0.3)
         n.signal(None)
-        record_layer(1, 3)
         rows = []
         stop(True)
         time.sleep(1.2)
-        p1 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")), num(n.ctx("c.layers[1].phase")))
+        p1 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")))
         time.sleep(2)
-        p2 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")), num(n.ctx("c.layers[1].phase")))
+        p2 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")))
         shot("10.5_stopped")
         stop(False)
         time.sleep(1.5)
-        p3 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")), num(n.ctx("c.layers[1].phase")))
+        p3 = (num(n.ctx("c.play_phase")), num(n.ctx("c.tape_phase")))
         _ = rows
         still = all(abs(a - b) < 0.0005 for a, b in zip(p1, p2))
         moved = all(abs(a - b) > 0.0001 for a, b in zip(p2, p3))
-        return verdict(still and moved, f"take, tape, L1 heads: {p1} and {p2} under STOP, {p3} after START")
+        return verdict(still and moved, f"take and tape heads: {p1} and {p2} under STOP, {p3} after START")
 
     def c106():
         n.goto("TAKE")
@@ -1675,61 +1533,8 @@ def stage11():
     record_take(6, "drums")
     set_mode("PLAY")
 
-    def c111():
-        record_layer(1, 4)
-        span = deck_span(1) * 60
-        heard = level("11.1_first_pass", 3, DECKS_OUT)
-        return verdict(heard > -50 and 3.2 < span < 5.5, f"a fresh layer's first pass: the loop is {span:.2f}s and plays {heard} dB")
-
-    def softcut_peak(start, secs):
-        """Where the loudest sample of voice 1's buffer is, in a stretch of it."""
-        n.lua(f'softcut.buffer_write_mono("/tmp/mg_sc.wav", {start}, {secs}, 1)')
-        time.sleep(2.5)
-        code = (
-            "d=open('/tmp/mg_sc.wav','rb').read(); i=d.find(b'data')+8; best=0; at=0\n"
-            "for k in range(i,len(d)-2,3*8):\n"
-            "  v=abs(int.from_bytes(d[k:k+3],'little',signed=True))\n"
-            "  if v>best: best=v; at=k\n"
-            "print((at-i)//3/48000, best/8388608)\n"
-        )
-        pos, peak = n.ssh(f'python3 -c "{code}"', timeout=60).split()
-        return float(pos), float(peak)
-
-    def c112b():
-        # a punch in the middle of a loop must land where the head is
-        n.load_script()
-        n.set("layer_wet", 0)
-        n.set("cut_source", 0)
-        n.set("dry_wet", 1)
-        set_mode("OFF")
-        record_layer(1, 4, "tone", 0.02)
-        start, end = n.get("lay1_start"), n.get("lay1_end")
-        for _ in range(100):
-            ph = (num(n.ctx("c.layers[1].phase")) - start) / (end - start)
-            if 0.45 < ph < 0.55:
-                break
-            time.sleep(0.05)
-        head = num(n.ctx("c.layers[1].phase")) * 60
-        n.tap(2, 0.08)
-        n.signal("hit", 0.9)
-        time.sleep(0.5)
-        n.tap(2, 0.08)
-        time.sleep(0.4)
-        pos, peak = softcut_peak(120, 60)
-        return verdict(abs(pos - head) < 0.6 and peak > 0.2, f"the head was at {head:.2f}s in the region, and the hit landed at {pos:.2f}s (peak {peak:.2f})")
-
-    def c112c():
-        # the rec flag stays on, so an idle deck must not change a single sample
-        n.lua('softcut.buffer_write_mono("/tmp/mg_a.wav", 120, 60, 1)')
-        time.sleep(2.5)
-        n.ssh("mv /tmp/mg_a.wav /tmp/mg_a1.wav")
-        time.sleep(15)
-        n.lua('softcut.buffer_write_mono("/tmp/mg_a.wav", 120, 60, 1)')
-        time.sleep(2.5)
-        code = ("a=open('/tmp/mg_a1.wav','rb').read(); b=open('/tmp/mg_a.wav','rb').read(); "
-                "i=a.find(b'data')+8; j=b.find(b'data')+8; print(a[i:]==b[j:], len(a)-i)")
-        same = n.ssh(f'python3 -c "{code}"', timeout=60).strip()
-        return verdict(same.startswith("True"), f"the deck's whole region is the same after 15s at rest: {same}")
+    # (11.1, 11.2, 11.2b, 11.2c and 11.3 to 11.8 tested the two layer decks:
+    # the loop pedal, SNAP, the seam and the width. They went with the decks.)
 
     def c112d():
         n.load_script()
@@ -1746,117 +1551,6 @@ def stage11():
         time.sleep(0.3)
         v = level("11.2d_tape_first_pass", 3, DECKS_OUT)
         return verdict(v > -40, f"the tape's first pass, after 3s of playing: softcut {v} dB")
-
-    def c112():
-        a = deck_span(1)
-        record_layer(1, 2, "hit")
-        b = deck_span(1)
-        return verdict(a == b, f"loop {a * 60:.3f}s before and after an overdub")
-
-    def c113():
-        n.load_script()
-        n.set("dry_wet", 1)
-        record_take(6, "drums")
-        set_mode("PLAY")
-        record_layer(1, 4.3)
-        span = deck_span(1) * 60
-        return verdict(3.9 < span < 5.2 and abs(span - 6) > 0.5 and abs(span - 3) > 0.5, f"take 6.1s, played about 4.5s, loop {span:.2f}s")
-
-    def c114():
-        n.load_script()
-        n.set("dry_wet", 1)
-        record_take(6, "drums")
-        set_mode("PLAY")
-        take = (n.get("pos_end") - n.get("pos_start")) * 60
-        record_layer(1, take / 2 - 0.25)
-        span = deck_span(1) * 60
-        msg = n.ctx("c.lay_msg")
-        shot("11.4_snap")
-        return verdict(abs(span - take / 2) < 0.01, f"take {take:.3f}s; loop {span:.3f}s. See 11.4_snap.png. {msg}")
-
-    def c115():
-        record_layer(2, deck_span(1) * 60 * 2 - 0.25, "hit")
-        s1, s2 = deck_span(1), deck_span(2)
-
-        def phase_gap():
-            gaps = []
-            for _ in range(5):
-                a = num(n.ctx("c.layers[1].phase"))
-                b = num(n.ctx("c.layers[2].phase"))
-                x = ((a - n.get("lay1_start")) / s1) % 1
-                y = ((b - n.get("lay2_start")) / s2 * round(s2 / s1, 3)) % 1
-                gaps.append((x - y) % 1)
-                time.sleep(0.3)
-            return sorted(gaps)[2]
-
-        g0 = phase_gap()
-        time.sleep(300)
-        g1 = phase_gap()
-        walk = min(abs(g1 - g0), 1 - abs(g1 - g0))
-        return verdict(walk < 0.03, f"lengths {s1 * 60:.3f}s and {s2 * 60:.3f}s, ratio {s2 / s1:.4f}. Phase gap {g0:.3f} then {g1:.3f} after 5 min; walked {walk:.3f} of a cycle")
-
-    def c116():
-        n.load_script()
-        n.set("dry_wet", 1)
-        record_take(6, "drums")
-        set_mode("PLAY")
-        take = (n.get("pos_end") - n.get("pos_start")) * 60
-        record_layer(1, 4.3)
-        a = deck_span(1) * 60
-        n.set("lay1_snap", 1)
-        time.sleep(0.2)
-        n.set("lay1_snap", 0)
-        time.sleep(0.3)
-        b = deck_span(1) * 60
-        msg = n.ctx("c.lay_msg")
-        return ("measured", f"take {take:.3f}s; the loop goes {a:.3f}s to {b:.3f}s with lay1_snap; the page says {msg}. Footswitch and grid: yours")
-
-    def c116b():
-        n.set("lay1_end", 1)
-        n.set("lay1_start", 0.9999)
-        time.sleep(0.3)
-        a = (n.get("lay1_start"), n.get("lay1_end"))
-        n.set("lay1_snap", 1)
-        time.sleep(0.2)
-        n.set("lay1_snap", 0)
-        time.sleep(0.3)
-        msg = n.lua('print(__ctx.lay_msg or "")')
-        b = (n.get("lay1_start"), n.get("lay1_end"))
-        n.goto("LAYERS")
-        shot("11.6b_no_room")
-        n.set("lay1_start", 0)
-        return verdict(a == b, f"loop unchanged {a}. Message on the page: see 11.6b_no_room.png. {msg}", "measured")
-
-    def c117():
-        n.load_script()
-        n.set("dry_wet", 1)
-        n.set("layer_wet", 0)
-        n.set("cut_source", 0)
-        set_mode("OFF")
-        record_layer(1, 3, "drums")
-        out = {}
-        for f in (0.001, 0.2):
-            n.set("lay1_fade", f)
-            time.sleep(1)
-            out[f] = level(f"11.7_fade{f}", 6, DECKS_OUT)
-        return ("measured", f"RMS by seam {out}. Hard downbeat or blend: listen to 11.7_fade0.001.wav and 11.7_fade0.2.wav")
-
-    def c118():
-        n.load_script()
-        n.set("dry_wet", 1)
-        n.set("layer_wet", 0)
-        n.set("cut_source", 0)
-        n.ssh("jack_disconnect scsig:out_2 crone:input_2")
-        record_layer(2, 3, "tone")
-        n.ssh("jack_connect scsig:out_2 crone:input_2")
-        out = {}
-        for w in (1, 0):
-            n.set("lay2_width", w)
-            time.sleep(0.4)
-            rate, chans = engine_rec(f"11.8_width{w}", 2, DECKS_OUT)
-            out[w] = (audio.stats(chans[0])["rms_db"], audio.stats(chans[1])["rms_db"])
-        ok = abs(out[0][0] - out[0][1]) < 1 and abs(out[1][0] - out[1][1]) > 10
-        return verdict(ok, f"L and R dB of a deck recorded on the left only, by width: {out}")
 
     def c119():
         n.load_script()
@@ -1910,8 +1604,7 @@ def stage11():
             out[name] = (secs, min(frames) if frames else None)
         return ("measured", f"Pi 4: seconds to load, and lowest frames per second while it converts: {out}. long44k is 30s of audio, long96k is 10s")
 
-    for cid, fn in (("11.1", c111), ("11.2", c112), ("11.2b", c112b), ("11.2c", c112c), ("11.2d", c112d), ("11.3", c113), ("11.4", c114), ("11.5", c115), ("11.6", c116),
-                    ("11.6b", c116b), ("11.7", c117), ("11.8", c118), ("11.9", c119), ("11.10", c1110),
+    for cid, fn in (("11.2d", c112d), ("11.9", c119), ("11.10", c1110),
                     ("11.11", c1111), ("11.12", c1112)):
         check(cid, fn)
     you("11.13", "11.14", why="only an ear can judge these. Use resample 0.5 and a slammed INF delay")
@@ -1948,18 +1641,6 @@ def stage12():
         wait_save()
         size = n.ssh(f"soxi -D ~/dust/data/four/take-{PSET}_L.wav").strip()
         return verdict(whole > 59 and 3.8 < snapped < 5 and float(size) < 6, f"first tap {whole:.2f}s, second tap back on the take {snapped:.2f}s; the PSET file holds {size}s")
-
-    def c123():
-        n.load_script()
-        n.goto("LAYERS")
-        n.set("layer_sel", 1)
-        n.key(2, 1)
-        time.sleep(0.6)
-        n.enc(2, 1)
-        time.sleep(0.2)
-        n.key(2, 0)
-        time.sleep(0.3)
-        return verdict(n.get("lay1_rec") == 0 and n.get("lay2_rec") == 0, f"L1 rec {n.get('lay1_rec')}, L2 rec {n.get('lay2_rec')}, selected {n.get('layer_sel')}")
 
     def c125():
         n.goto("TAPE")
@@ -2028,7 +1709,7 @@ def stage12():
         secs, frames = wait_loaded(start, 300)
         return verdict(frames and min(frames) >= 8, f"{secs}s to load 10s at 96k; lowest frames per second {min(frames) if frames else None}")
 
-    for cid, fn in (("12.1", c121), ("12.2", c122), ("12.3", c123), ("12.5", c125), ("12.6", c126), ("12.7", c127),
+    for cid, fn in (("12.1", c121), ("12.2", c122), ("12.5", c125), ("12.6", c126), ("12.7", c127),
                     ("12.9", c129), ("12.10", c1210), ("12.14", c1214)):
         check(cid, fn)
     you("12.4", "12.11", "12.12", "12.13", why="test/test_control covers the logic offscreen. Try these by hand")
@@ -2100,20 +1781,7 @@ def stage13():
         opt("delay_sync", "FREE")
         return verdict(abs(a - 0.5) < 0.01 and abs(b - 0.5) < 0.01, f"delay_time {a} synced at 120 BPM, {b} after a recall")
 
-    def c135():
-        n.load_script()
-        record_layer(1, 4)
-        n.lua(f'params:write({PSET}, "gate")')
-        wait_save()
-        secs = n.ssh(f"soxi -D ~/dust/data/four/lay1-{PSET}.wav").strip()
-        n.load_script()
-        n.lua(f"params:read({PSET})")
-        wait_save()
-        n.helpers()
-        heard = level("13.5_short_deck", 3, DECKS_OUT)
-        return verdict(float(secs) < 8 and heard > -50, f"the file holds {secs}s; softcut {heard} dB after the load")
-
-    for cid, fn in (("13.1", c131), ("13.2", c132), ("13.4", c134), ("13.5", c135)):
+    for cid, fn in (("13.1", c131), ("13.2", c132), ("13.4", c134)):
         check(cid, fn)
     you("13.3", "13.6", "13.10", why="test/test_control covers the logic offscreen. Try these by hand")
     you("13.7", "13.8", "13.9", why="needs a Launchpad Mini MK3 or a grid")
@@ -2618,7 +2286,7 @@ def stage18():
 
     for cid, fn in (("18.4", c184), ("18.11", c1811), ("18.12", c1812)):
         check(cid, fn)
-    for page in "TAKE VOICE TAPE LAYERS FILTER DELAY REVERB MIX PADS MOTION SCENE".split():
+    for page in PAGES.split():
         n.goto(page)
         time.sleep(0.25)
         shot("18_" + page)

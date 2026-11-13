@@ -27,8 +27,8 @@
 --   release disengages · already latched = any press turns it off.
 --
 -- CONTROLS   (3 keys + 3 encoders; every param is MIDI-mappable via PARAMS)
---   E1     select page (eleven stations, by family: TAKE VOICE · TAPE LAYERS
---          · FILTER DELAY REVERB · MIX · PADS MOTION SCENE; the page name
+--   E1     select page (twelve stations, by family: TAKE VOICE TRACKS · TAPE
+--          · FILTER EFFECT DELAY REVERB · MIX · PADS MOTION SCENE; the page name
 --          pops big while you scroll)
 --   E2/E3  the page's two shaping knobs (hold K1: the alt pair). values show
 --          only while turning; selector pages (SLICE/LANE/SLOT) read at rest
@@ -66,7 +66,7 @@
 -- -----------------------------------------------------------------------------
 -- this file is the orchestrator: state + params + key/encoder handlers. the
 -- rest lives in lib/ modules (script-internal, NOT norns engines): mfont (pixel
--- font), mtape (the softcut tape + the mix law), mdeck (the layer loop decks),
+-- font), mtape (the softcut tape + the mix law), mdeck (the loop deck law),
 -- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
 -- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
 -- the wav file reader). they share one `ctx` table and params are the single
@@ -86,9 +86,9 @@ local min, max = math.min, math.max
 -- state (shared with the lib/ modules through ctx)
 -- ============================================================================
 
--- eleven stations, ordered by FAMILY so neighbours belong together:
--- the take (TAKE VOICE) · the loop decks (TAPE LAYERS) · the tone
--- (FILTER DELAY REVERB) · the console (MIX) · the performance layer
+-- twelve stations, ordered by FAMILY so neighbours belong together:
+-- the take (TAKE VOICE TRACKS) · the loop deck (TAPE) · the tone
+-- (FILTER EFFECT DELAY REVERB) · the console (MIX) · the performance layer
 -- (PADS MOTION SCENE). EROSION and ORBIT are no longer pages: erosion only
 -- ever worked in PLAY mode, so its controls live on VOICE's PLAY face (the
 -- alt pair, which was a redundant scan/pitch copy there); the orbit drives
@@ -96,7 +96,7 @@ local min, max = math.min, math.max
 -- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
 -- renamed), only their surfaces moved.
 local PAGES = {
-  "TAKE", "VOICE", "TRACKS", "TAPE", "LAYERS", "FILTER", "EFFECT", "DELAY", "REVERB",
+  "TAKE", "VOICE", "TRACKS", "TAPE", "FILTER", "EFFECT", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
 }
 
@@ -137,15 +137,13 @@ local function window_bounds()
   return lo, hi, max(hi - lo, 0.001)
 end
 
--- zoom-aware fine control: window/loop/layer edge params scale their encoder
+-- zoom-aware fine control: window/loop edge params scale their encoder
 -- deltas by the current span, so steps shrink as the region tightens —
 -- a wide-open window moves fast, a tight loop nudges by milliseconds.
 -- (combined with the 0.002 quantum on these specs: ~10ms at the finest.)
 -- every value other than "win" is the param-id prefix of a loop pair.
 local FINE_IDS = { pos_start = "win", pos_end = "win",
                    loop_start = "loop", loop_end = "loop",
-                   lay1_start = "lay1", lay1_end = "lay1",
-                   lay2_start = "lay2", lay2_end = "lay2",
                    t2_pos_start = "t2_pos", t2_pos_end = "t2_pos",
                    t3_pos_start = "t3_pos", t3_pos_end = "t3_pos",
                    t4_pos_start = "t4_pos", t4_pos_end = "t4_pos" }
@@ -253,10 +251,8 @@ ctx.osc = Mosc
 -- the tape display model lives in mpages; mtape clears it when a pset restores
 -- an empty tape, so it needs a way to reach it
 ctx.clear_twave = Mpages.clear_twave
--- ...and repaints it from the PSET wav on restore (plus the layer decks'
--- strips, which own their bins and hand them in)
+-- ...and repaints it from the PSET wav on restore
 ctx.repaint_twave = Mpages.repaint_twave
-ctx.wave_from_file = Mpages.fill_wave_bins
 ctx.clear_bins = Mpages.clear_bins     -- a deck erase stops its own repaint
 ctx.wav_info = Mwav.wav_info
 
@@ -293,31 +289,20 @@ function ctx.tempo()
   return 120
 end
 
--- the EFFECTIVE softcut record source. cut_source is the knob; the layer
--- BOUNCE overrides it: while `layer_wet` is on and any layer is armed, the
--- decks record the processed engine output (WET), so "resample into a layer"
--- is just arming one — no trip to the TAPE page first. the send is global,
--- so the tape records the same thing while a bounce runs; both pages' SRC
--- flags read THIS, never the raw knob, so the override is never hidden.
+-- the EFFECTIVE softcut record source: the cut_source knob. The SRC flag and
+-- the meters read THIS, never the raw param, so one place decides it.
 function ctx.eff_cut_source()
-  if pget("layer_wet", 1) == 1 then
-    for _, d in ipairs(ctx.layers or {}) do
-      if pget(Mdeck.p(d, "rec"), 0) == 1 then return 1 end
-    end
-  end
   return pget("cut_source", 0)
 end
 
--- ONE writer for the softcut input sends: everything that can change the
--- effective source (the knob, a layer arming/disarming, the layer_wet toggle)
--- funnels through here, so the routing can never disagree with the flags.
+-- ONE writer for the softcut input sends, so the routing can never disagree
+-- with the flags.
 function ctx.update_cut_source()
   Mtape.set_source(ctx.eff_cut_source())
 end
 
 -- what the softcut decks RECORD right now, for the meters: the ADC tap, the
--- engine output (WET), or the blend. one law for the tape picture (mpages)
--- and the layer decks' pictures (mdeck).
+-- engine output (WET), or the blend. the law of the tape picture (mpages).
 function ctx.cut_rec_amp()
   local cs = ctx.eff_cut_source()
   return max(ctx.amp_in[1], ctx.amp_in[2]) * (1 - cs)
@@ -330,80 +315,42 @@ Mtape.init(ctx, Mdeck)   -- the tape borrows the deck mechanics (see mtape)
 ctx.mix_gains = Mtape.gains
 ctx.TAPE_LEN = Mtape.TAPE_LEN         -- the tape's own length (not BUF_SECS)
 ctx.tape_deck = Mtape.deck            -- read only: the page asks where its material is
-ctx.paint_bins = Mpages.paint_bins    -- decks paint their own pictures
-ctx.loop_secs = Mdeck.loop_secs       -- ...and the page prints the same law
+ctx.paint_bins = Mpages.paint_bins    -- a deck paints its own picture
 ctx.set_pair = Mdeck.set_pair         -- THE way to move a start/end pair
-ctx.deck_p = Mdeck.p                  -- a deck's param id (keymap-aware)
 Mdeck.init(ctx)
--- TWO more loop decks beside the tape, on softcut voices the script does not
--- otherwise use. Their buffer regions start at 120s, leaving 60-120 clear:
--- the chain forge on `foundry` auditions cells at 70s, and picking around it
--- means the branches can merge without a silent buffer collision.
-ctx.layers = {
-  Mdeck.new({ id = "lay1", name = "L1", va = 3, vb = 4, from = 120, len = 60, bins = Mpages.DECK_BINS }),
-  Mdeck.new({ id = "lay2", name = "L2", va = 5, vb = 6, from = 180, len = 60, bins = Mpages.DECK_BINS }),
-}
-ctx.deck_phase = Mdeck.on_phase
--- which layer the page and its encoders address
-function ctx.layer_sel()
-  return ctx.layers[math.floor(pget("layer_sel", 1) + 0.5)] or ctx.layers[1]
-end
 -- a compound encoder target ("@...") resolves to a REAL param id: the one the
 -- footer should print and the dial should point at. Pair-movers report their
 -- anchor, the low edge. ONE resolver, because the encoder, the footer value and
 -- the footer dial each need the same answer and two of them used to not have it
--- (the layer targets read "--" and drew no pointer).
+-- (a compound target read "--" and drew no pointer).
 function ctx.enc_target(id)
   if id == "@win_move" then return WIN[1] end
   if id == "@mo_sel" then
     return pget("mod_focus", 1) > 1.5 and "mod_focus" or "motion_lane"
   end
-  if id == "@lay_move" then return Mdeck.p(ctx.layer_sel(), "start") end
-  if id == "@lay_level" then return Mdeck.p(ctx.layer_sel(), "level") end
-  if id == "@lay_rate" then return Mdeck.p(ctx.layer_sel(), "rate") end
   if id == "@route_amt" then return ctx.route_cur().id end
   if id == "@route_to" then return "route_sel" end
   if id == "@trk_level" then return ctx.LEVEL_ID[ctx.tsel()] end
   return id
 end
 
--- re-send every deck's level: the master, the transport and the global STOP
--- all fold into it, so anything that moves one of those has to come through here
-function ctx.layers_relevel()
-  for _, d in ipairs(ctx.layers) do Mdeck.update_level(d) end
-end
-
--- where a loop deck's MATERIAL is (Mdeck.extent), for the scene clamp:
--- "tape" or a layer id. nil = no material, which leaves a stored loop exactly
--- as it was.
+-- where a loop deck's MATERIAL is (Mdeck.extent), for the scene clamp. The
+-- one key is "tape". nil = no material, which leaves a stored loop exactly as
+-- it was.
 function ctx.material(key)
   if key == "tape" then
     if not ctx.twave_any then return nil end
     return Mdeck.extent(Mtape.deck)
   end
-  for _, d in ipairs(ctx.layers) do
-    if d.id == key then
-      if not d.any then return nil end
-      return Mdeck.extent(d)   -- (two values: an `and ... or` would keep one)
-    end
-  end
 end
 
 -- ---------------------------------------------------------------------------
--- SNAP: put a layer's loop LENGTH on the grid
+-- the musical ratios a loop length snaps to
 -- ---------------------------------------------------------------------------
--- Recording a layer gives you exactly the length you played, which is never
--- exactly the length you meant. Two loops of 3.97 and 4.02 seconds drift out
--- of time with each other within a minute. Two that are an exact double, half
--- or three-to-two of each other stay together indefinitely. SNAP is what gets
--- you from the first to the second.
---
--- It rounds the length to match whatever you are most likely playing along
--- with, looking in this order: the other deck if it has anything on it, then
--- the take, then a bar at the current tempo. It only ever moves the END of
--- the loop, because where a loop starts was decided by when you hit record
--- and that is not this code's business to second-guess. It also means you can
--- always undo it by hand.
+-- A hand-played length is never exactly the length you meant. Two loops that
+-- are an exact double, half or three-to-two of each other stay together
+-- indefinitely. The motion looper rounds a first pass onto the clock with
+-- these (ctx.clock_length).
 local SNAP_RATIOS = {
   { 1 / 8, "1/8" }, { 1 / 6, "1/6" }, { 1 / 4, "1/4" }, { 1 / 3, "1/3" },
   { 1 / 2, "1/2" }, { 2 / 3, "2/3" }, { 3 / 4, "3/4" }, { 1, "1" },
@@ -430,7 +377,7 @@ end
 -- a gesture loop's length on the clock: the nearest musical length to a bar
 -- when what was played is already within the snap tolerance, else nil (a
 -- length you clearly chose stays exactly as played). the motion looper asks
--- this when a first pass closes, the way the layers snap theirs.
+-- this when a first pass closes.
 function ctx.clock_length(secs)
   local bar = 240 / ctx.tempo()
   local best, _, err = nearest_ratio(secs, bar)
@@ -438,107 +385,14 @@ function ctx.clock_length(secs)
   return bar * best
 end
 
--- This always hands back a real length. A deck whose loop has been squashed
--- down to nothing still reads as a tenth of a second, so it is skipped here
--- instead of being passed on for SNAP to reject; the take is checked the same
--- way; and four beats is 0.8 seconds even at the fastest tempo the clock
--- allows. Because of that, layer_snap needs no "there is no reference" case.
--- A key that fires, changes nothing and says nothing is the one thing this
--- page must never do.
-local function snap_reference(d)
-  for _, o in ipairs(ctx.layers) do
-    -- ...and not one that is still being recorded. While a deck records its
-    -- first pass its loop is held open at the full 60 seconds, and it counts
-    -- as "has audio" the moment it hears anything, so it would offer 60
-    -- seconds as the length to match. Record both layers at once and stop one
-    -- of them: without this, it snapped to an eighth of 60 seconds, which is
-    -- a number off the buffer and nothing to do with the music.
-    if o ~= d and o.any and not o.arm_phase and Mdeck.loop_secs(o) > 0.1 then
-      return Mdeck.loop_secs(o), o.name
-    end
-  end
-  local _, _, span = window_bounds()
-  if ctx.wave_any and span * BUF_SECS > 0.1 then
-    return span * BUF_SECS, "TAKE"
-  end
-  return 240 / ctx.tempo(), "BAR"            -- four beats of the clock
-end
-
--- One short line on the LAYERS page, and the full story printed to the log.
--- A snap that lands on the length you already had changes nothing you can
--- see, and a page that cannot say so looks exactly like a dead key. The
--- screen gets the short form because a line has to fit in 124 pixels.
---
--- The scene page has its own version of this (mscenes' `say`). Both hold the
--- same two things, the text and the frame it was set on, so merging them into
--- one shared helper later is straightforward. Their LOOK stays separate on
--- purpose: the scene page draws a small inverted box, which suits "SAVED 2"
--- but would be a 111-pixel slab for a sentence like the ones here.
-local function layer_say(msg, detail)
-  ctx.lay_msg, ctx.lay_msg_at = msg, ctx.frame or 0
-  print("mangler: " .. (detail or msg))
-end
--- the same for TAKE: what K3's SNAP and UNDO just did, on its top row
+-- TAKE says what K3's SNAP and UNDO just did, on its top row, and prints the
+-- full story to the log
 local function take_say(msg, detail)
   ctx.take_msg, ctx.take_msg_at = msg, ctx.frame or 0
   print("mangler: " .. (detail or msg))
 end
 ctx.take_say = take_say
 
--- tol = nil forces the snap; tol = a log-ratio only takes it when the length
--- was already that close (the automatic pass at the end of a record).
-function ctx.layer_snap(d, tol)
-  d = d or ctx.layer_sel()
-  local ref, from = snap_reference(d)
-  local cur = Mdeck.loop_secs(d)
-  local best, label, err = nearest_ratio(cur, ref)
-  if tol and err > tol then return end
-  -- Measure from the LOWER of the two edges, not from "start". The loop
-  -- points can legally be the other way round, and everything else that reads
-  -- them sorts them first. Trusting "start" on a back-to-front loop moved it
-  -- to a completely different stretch of the deck, while the message on
-  -- screen said nothing had changed.
-  local lo = math.min(clamp(pget(Mdeck.p(d, "start"), 0), 0, 1),
-    clamp(pget(Mdeck.p(d, "end"), 1), 0, 1))
-  local want = ref * best
-  local len, room = want, (1 - lo) * d.len
-  -- keep it inside the region by halving, because half of a musical length is
-  -- still one. If not even that fits, REFUSE: manufacturing a 100ms loop and
-  -- labelling it a ratio is worse than saying no, and it puts a grid in the
-  -- message that the loop is not on.
-  while len > room and len / 2 >= 0.1 do len = len / 2 end
-  if len > room then
-    layer_say(d.name .. " NO ROOM TO SNAP",
-      string.format("%s SNAP refused: %.2fs left in the region, and the nearest"
-        .. " %s x %s is %.2fs. Move the loop start back first.",
-        d.name, room, label, from, want))
-    return
-  end
-  Mdeck.set_loop(d, lo, clamp(lo + len / d.len, 0, 1))
-  -- report what LANDED, not what was asked for. The region clamp and softcut's
-  -- own 100ms floor can both move it, and this message is the only proof the
-  -- key did anything, so it is the last thing that may guess.
-  local got = Mdeck.loop_secs(d)
-  local on = math.abs(got - want) < 0.005 and (label .. " x " .. from)
-    or ("FIT " .. from)
-  if math.abs(got - cur) < 0.005 then
-    -- The loop did not move, so the playhead must not either. Sending it back
-    -- to the start would restart the phrase mid-performance under a message
-    -- saying nothing changed, and two decks only keep their timing against
-    -- each other while both heads keep running. It is why MUTE lowers a
-    -- deck's volume instead of stopping it.
-    layer_say(string.format("%s ON GRID %s", d.name, on),
-      string.format("%s SNAP: already %s (%.3fs)", d.name, on, cur))
-  else
-    Mdeck.jump(d, lo)
-    layer_say(string.format("%s %.2f>%.2fS %s", d.name, cur, got, on),
-      string.format("%s SNAP: %.3fs -> %.3fs (%s; %s = %.3fs)",
-        d.name, cur, got, on, from, ref))
-  end
-end
-
--- the automatic pass, called by the loop-pedal close in lib/mdeck.lua
-function ctx.layer_quantize(d) ctx.layer_snap(d, SNAP_TOL) end
 Minput.init(ctx)
 Mgrid.init(ctx)
 Mmotion.init(ctx)
@@ -709,7 +563,7 @@ local NTRACKS = 4
 -- the engine voice of a track. APPEND-ONLY: a PSET stores the index
 local MODE_NAMES = { "OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD" }
 -- the effect slot of a track (fxSlot in the engine). APPEND-ONLY, like the modes
-local EFFECT_NAMES = { "OFF", "CHORUS", "FLANGE", "WOBBLE", "RESON", "RING" }
+local EFFECT_NAMES = { "OFF", "CHORUS", "FLANGE", "WOBBLE", "RESON", "RING", "ECHO" }
 local TRACK_PAGES = { TAKE = true, VOICE = true, FILTER = true, EFFECT = true }
 local function tsel() return clamp(math.floor(pget("track_sel", 1) + 0.5), 1, NTRACKS) end
 local function track2() return tsel() > 1 end   -- any track but track 1
@@ -935,7 +789,7 @@ local KEYS = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
     erase = function()
-      -- disarm first, like the LAYERS erase: wiping while armed just
+      -- disarm first: wiping while armed just
       -- re-records the input into the freshly cleared loop
       params:set("tape_rec", 0)
       Mtape.clear_buffer()
@@ -1018,31 +872,6 @@ local KEYS = {
       end
     end,
   },
-  LAYERS = {
-    -- K2/K3 are per deck (LAYER_KEYS below): key_def picks the selected
-    -- deck's pair at the PRESS, so the release lands on the same deck. K1+K3
-    -- erases THIS layer only; the tape and the other layer are untouched
-    -- (mdeck clears by region). The erase fires while K1 is held, when E2 is
-    -- the rate knob rather than the layer selector, so it cannot retarget.
-    erase = function()
-      local d = ctx.layer_sel()
-      -- Cancel any recording in progress BEFORE stopping it. Otherwise the
-      -- deck sets a loop around audio we are one line away from erasing, and
-      -- announces it on screen.
-      Mdeck.abort_loop(d)
-      params:set(Mdeck.p(d, "rec"), 0)
-      Mdeck.clear(d)
-      params:set(Mdeck.p(d, "start"), 0)
-      params:set(Mdeck.p(d, "end"), 1)
-      -- forget the loaded file too, like clear_recording forgets sample_file:
-      -- a PSET saved after this erase must not resurrect the very file you
-      -- wiped ("" is a no-op through layer_load's own guard)
-      local fid = Mdeck.p(d, "file")
-      if params.lookup[fid] and params:get(fid) ~= "" then
-        params:set(fid, "")
-      end
-    end,
-  },
   SCENE = {
     -- RCL under the punch law — hold = PEEK (borrow the scene via the
     -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
@@ -1085,27 +914,6 @@ local KEYS = {
   },
 }
 
--- LAYERS K2/K3, one fixed pair PER DECK. A shared def that looked the deck up
--- again at release sent the release to whichever deck was selected by then:
--- hold REC on L1, turn E2 to L2, let go, and L1 kept recording with no finger
--- on any key.
-local function layer_keys(n)
-  local d = ctx.layers[n]
-  local play = Mdeck.p(d, "play")
-  return {
-    -- REC under the punch law: hold to record while you lean on it, tap to latch
-    k2 = pk("REC", Mdeck.p(d, "rec")),
-    -- MUTE rather than a transport stop: the head keeps rolling so the decks
-    -- hold their drift against each other (see lib/mdeck.lua). Lit = muted.
-    k3 = { label = "MUTE",
-      lit = function() return pget(play, 1) == 0 end,
-      pon = function() params:set(play, 0) end,
-      poff = function() params:set(play, 1) end },
-  }
-end
-local LAYER_KEYS = {}
-for n = 1, #ctx.layers do LAYER_KEYS[n] = layer_keys(n) end
-
 -- the global alt pair — identical on every page
 local ALT_STOP = pk("STOP", "stop_all")
 local ALT_DRY = { label = "DRY", dryerase = true }
@@ -1137,10 +945,6 @@ local function key_def(n)
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
     return VOICE_HEAL
-  end
-  if page == "LAYERS" then
-    local lk = LAYER_KEYS[math.floor(pget("layer_sel", 1) + 0.5)] or LAYER_KEYS[1]
-    return n == 2 and lk.k2 or lk.k3
   end
   local defs = KEYS[page]
   if not defs then return nil end
@@ -1180,7 +984,6 @@ local ENC_MAP = {
   -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
   -- config knob lost its encoder to a performance one.
   SCENE  = { "scene_slot", "orbit_rate", "scene_morph_amt", "orbit_reach" },
-  LAYERS = { "layer_sel", "@lay_rate", "@lay_level", "@lay_move" },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
@@ -1668,7 +1471,7 @@ function ctx.clear_recording()
     print("mangler: engine has no `clear` — SYSTEM > RESTART for the new engine")
     return
   end
-  -- disarm first, like the TAPE and LAYERS erases: wiping while armed kept
+  -- disarm first, like the TAPE erase: wiping while armed kept
   -- recording into the freshly cleared buffer, and the rec-stop later built a
   -- window whose first seconds were the erased silence
   if pget("rec", 0) == 1 then params:set("rec", 0) end
@@ -1724,13 +1527,11 @@ end
 -- window inherits the error. An off-rate file is resampled first, in the
 -- background with the screen live. If the conversion cannot run or cannot
 -- decode the file, it loads as-is: audible-but-sharp beats silence, and the
--- log says which happened. Shared by the take and the layer decks.
+-- log says which happened.
 --   land(file, shown)  puts a file in place (`shown` = the name that was picked)
 --   gen()              the target's generation: a conversion that finishes
 --                      after it moved is dropped rather than landing on top
---   converting()       optional: runs once a conversion is going to start,
---                      before its generation is taken
-local function load_at_rate(path, tmp, cap_secs, what, land, gen, converting)
+local function load_at_rate(path, tmp, cap_secs, what, land, gen)
   if path == nil or path == "" or path == "-" or path == _path.audio then return end
   if not util.file_exists(path) then
     print("mangler: no such file — " .. tostring(path))
@@ -1744,7 +1545,6 @@ local function load_at_rate(path, tmp, cap_secs, what, land, gen, converting)
   print(string.format("mangler: %d Hz file — resampling to %d before the %s load"
     .. " (it would play at %.2fx otherwise)", in_sr, SERVER_SR, what,
     SERVER_SR / in_sr))
-  if converting then converting() end
   local g = gen()
   ctx.run_task(function(yield)
     -- a job whose target moved on (while it waited in the queue, or between
@@ -1788,22 +1588,6 @@ function ctx.load_sample(path)
   srconv_path = srconv_path or (norns.state.data .. "mangler-srconv.wav")
   load_at_rate(path, srconv_path, BUF_SECS + 1, "take", read_into_buffer,
     function() return take_gen end)
-end
-
--- load a wav into a LAYER deck (PARAMS > layers > L1/L2 load file, the answer
--- to "how do I get material into a layer without playing it in live"). Each
--- deck converts into its own temp, so a take load and a layer load can never
--- race over one file the server is still reading. `keep_loop`: a PSET restore
--- keeps the loop points it just restored instead of snapping to the file.
--- A conversion runs in the background, so the deck is cleared when it starts:
--- until the file lands the deck is silent and empty, not the previous audio
--- under the new file's name (an arm would otherwise overdub into it).
-function ctx.layer_load(d, path, keep_loop)
-  d.gen = (d.gen or 0) + 1
-  load_at_rate(path, norns.state.data .. d.id .. "-srconv.wav", d.len + 1, d.name,
-    function(file, shown) Mdeck.load_file(d, file, shown, keep_loop) end,
-    function() return d.gen end,
-    function() Mdeck.clear(d) end)
 end
 
 -- the live take rides the PSET as a private L/R pair beside the
@@ -2130,7 +1914,7 @@ function ctx.task_yield() clock.sleep(0) end
 
 -- run long jobs as coroutines that yield, ONE AT A TIME, in the order they
 -- were asked for. A job that arrives while another runs waits its turn: a PSET
--- can restore an off-rate take and an off-rate layer back to back, and both
+-- can restore two off-rate takes back to back, and both
 -- have to convert (refusing the second loaded it out of tune). Each body runs
 -- under pcall and its `on_done(ok, err)` ALWAYS runs: without that a throw
 -- halfway through (a full card, a bad read) kills the coroutine with the
@@ -2606,10 +2390,7 @@ local function init_params()
   params:set_action("mix", Mtape.update_mix)
   params:add_control("out_level", "out level",
     controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
-  params:set_action("out_level", function()
-    Mtape.update_mix()
-    ctx.layers_relevel()   -- the master masters the layer decks too
-  end)
+  params:set_action("out_level", Mtape.update_mix)
   params:add_control("sc_level", "eng level", unit(1.0))
   params:set_action("sc_level", Mtape.update_mix)
   -- id "tape_level" is RESERVED by the system TAPE deck; "cut_level" avoids it
@@ -2623,7 +2404,6 @@ local function init_params()
   params:set_action("stop_all", function(v)
     if v == 1 then ctx.pads_all_off(); repeat_release() end
     Mtape.update_mix()
-    ctx.layers_relevel()   -- the layer decks choke with everything else
     -- TRUE STOP (S23 B1): the transports HALT too, not just the levels. every
     -- softcut head glides to rate 0 (the slew keeps it click-free) and START
     -- resumes each exactly where it stood — and because they all stop AS ONE,
@@ -2633,10 +2413,6 @@ local function init_params()
     -- read head runs on (level > 0), same law as the erosion/regen heads.
     Mtape.update_tape_rate()
     Mtape.update_tape_rec()
-    for _, d in ipairs(ctx.layers) do
-      Mdeck.update_rate(d)
-      Mdeck.update_rec(d)
-    end
     -- the engine record head pauses with everything else. the param stays
     -- armed, so START resumes the take mid-punch; the rec action gates its
     -- own sends the same way, so arming DURING a stop also waits for START.
@@ -2854,83 +2630,12 @@ local function init_params()
   add_eng_control("warp_rand", "warp rand", unit(0.0))
   add_eng_binary("pv_freeze", "pv freeze")
 
-  -- ---- the layer decks ---------------------------------------------------
-  -- Two more loop decks on softcut, beside the tape. Same shape, their own
-  -- regions of the buffer. See doc/layers.md; the deck itself is lib/mdeck.lua.
-  -- `pre` defaults to 1 (OVERDUB) unlike the tape's 0 (REPLACE): these are
-  -- LAYERS, stacking is the job, and it is the loop-pedal gesture people
-  -- already have in their hands. K1+K3 on the page erases one to start over.
-  params:add_group("grp_layers", "layers", 26)
-  params:add_number("layer_sel", "layer", 1, 2, 1)
-  -- the BOUNCE: while ON (the default), arming a layer records the processed
-  -- engine output instead of the raw input — resampling is just K2 on LAYERS.
-  -- OFF = the decks follow cut_source like the tape always has. the SRC flag
-  -- on TAPE and LAYERS shows the EFFECTIVE source either way.
-  params:add_binary("layer_wet", "layers record the mix", "toggle", 1)
-  params:set_action("layer_wet", function() ctx.update_cut_source() end)
-  for n = 1, 2 do
-    local id = "lay" .. n
-    local function q(k) return id .. "_" .. k end
-    local function deck() return ctx.layers[n] end
-    -- load a wav straight into this deck (norns fileselect; the path rides the
-    -- PSET, so a session reloads its layer material even with no deck wav)
-    params:add_file(q("file"), "L" .. n .. " load file", _path.audio)
-    params:set_action(q("file"), function(f) ctx.layer_load(deck(), f) end)
-    params:add_binary(q("rec"), "L" .. n .. " record", "toggle", 0)
-    params:set_action(q("rec"), function(v)
-      -- arming: settle the record SOURCE before the head opens (the bounce
-      -- may throw it WET), and open the loop so nothing you play is cut off;
-      -- disarming: close the head, then close the loop around what you played
-      if v == 1 then
-        ctx.update_cut_source()
-        Mdeck.arm_loop(deck())
-        Mdeck.update_rec(deck())
-      else
-        Mdeck.update_rec(deck())
-        Mdeck.close_loop(deck())
-        ctx.update_cut_source()
-      end
-    end)
-    params:add_binary(q("play"), "L" .. n .. " play", "toggle", 1)
-    params:set_action(q("play"), function() Mdeck.update_level(deck()) end)
-    params:add_control(q("level"), "L" .. n .. " level", unit(0.8))
-    params:set_action(q("level"), function() Mdeck.update_level(deck()) end)
-    params:add_control(q("rate"), "L" .. n .. " rate",
-      controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
-    params:set_action(q("rate"), function() Mdeck.update_rate(deck()) end)
-    params:add_binary(q("reverse"), "L" .. n .. " reverse", "toggle", 0)
-    params:set_action(q("reverse"), function() Mdeck.update_rate(deck()) end)
-    params:add_control(q("start"), "L" .. n .. " loop start", fine_unit(0.0))
-    params:set_action(q("start"), function() Mdeck.update_loop(deck()) end)
-    params:add_control(q("end"), "L" .. n .. " loop end", fine_unit(1.0))
-    params:set_action(q("end"), function() Mdeck.update_loop(deck()) end)
-    params:add_control(q("pre"), "L" .. n .. " overdub", unit(1.0))
-    params:set_action(q("pre"), function() Mdeck.update_rec(deck()) end)
-    -- The join where the loop starts over. Short is a clean cut and a hard
-    -- downbeat; long is a blend that hides the join landing mid-note.
-    params:add_control(q("fade"), "L" .. n .. " seam",
-      controlspec.new(0.001, 0.5, "exp", 0, 0.02, "s"))
-    params:set_action(q("fade"), function() Mdeck.update_fade(deck()) end)
-    -- Stereo width: 1 is the deck's own full left and right, 0 folds it to
-    -- the middle. Two decks playing related material, both at full width, is
-    -- a wall of sound with no room to hear either one.
-    params:add_control(q("width"), "L" .. n .. " width", unit(1.0))
-    params:set_action(q("width"), function() Mdeck.update_width(deck()) end)
-    -- A momentary switch, so a footswitch can reach it. There is no key left
-    -- for this: LAYERS already uses K2 and K3, and holding K1 is reserved for
-    -- stop and erase on every page. So it lives in PARAMS, on MIDI and on the
-    -- grid, the same as pad_chop. The automatic snap when a recording ends
-    -- needs no key at all.
-    add_momentary(q("snap"), "L" .. n .. " snap loop",
-      function() ctx.layer_snap(deck()) end)
-  end
-
   params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
   -- mirror the SC side's workflow: arming with no overdub opens the loop to
   -- the full tape for a fresh take; stopping snaps the loop around the take
   -- and jumps the head to its start, so it plays back tight immediately.
-  -- The layer decks do the same thing through Mdeck.arm_loop / close_loop.
+  -- lib/mdeck.lua holds the same law as arm_loop / close_loop.
   -- This is the older, hand-written copy, still here on purpose: lib/mtape.lua
   -- explains why and lists where the two differ. Change one, change both.
   params:set_action("tape_rec", function(v)
@@ -2990,8 +2695,7 @@ local function init_params()
   -- engine output — the tape as a print / resample stage. default DRY = the classic parallel-ADC tap, so nothing changes until
   -- you reach for it.
   params:add_control("cut_source", "tape source", unit(0.0))
-  -- through the one source writer: while a layer bounce holds the send WET,
-  -- turning the knob re-resolves rather than silently fighting it
+  -- through the one source writer
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 
   params:add_group("grp_filter", "filter", 11)
@@ -3378,7 +3082,6 @@ local function init_params()
   -- back the chop the take restore drops.
   local PSET_PARTS = {
     { Mtape.pset_write, Mtape.pset_read, Mtape.pset_delete, "tape" },
-    { Mdeck.pset_write, Mdeck.pset_read, Mdeck.pset_delete, "layers" },
     { Mscenes.pset_write, Mscenes.pset_read, Mscenes.pset_delete, "scenes" },
     { Mmotion.pset_write, Mmotion.pset_read, Mmotion.pset_delete, "motion" },
     { ctx.take_pset_write, ctx.take_pset_read, ctx.take_pset_delete, "take" },
@@ -3397,8 +3100,7 @@ local function init_params()
   params.action_read = function(filename, silent, number)
     -- params:read fires tape_rec before the loop points (file order), so a
     -- PSET saved while the tape recorded opened a pass against the OLD
-    -- session; its disarm then re-cut the loop just restored. The deck twin
-    -- of this is Mdeck.pset_read's abort_loop.
+    -- session; its disarm then re-cut the loop just restored.
     tape_arm_phase, tape_arm_was = nil, nil
     -- norns saves a momentary binary like any other, so a PSET saved while
     -- a footswitch held the repeat loads it held, with no release to come
@@ -3421,7 +3123,6 @@ function init()
   init_params()
   ctx.undo_forget()   -- an undo pair from the last session is not this one's
   Mtape.init_tape()
-  for _, d in ipairs(ctx.layers) do Mdeck.start(d) end
   Minput.init_midi()
   Mgrid.connect()
   -- a Launchpad plugged in (or out) after load is picked up: norns calls
@@ -3565,18 +3266,14 @@ function enc(n, d)
       move_pair(tid("pos_start"), tid("pos_end"), d)
     elseif id == "@route_to" then
       route_step(d)
-    -- the LAYERS encoders address whichever deck is selected, so they resolve
-    -- to a param id at turn time rather than being fixed in ENC_MAP
-    elseif id == "@lay_level" or id == "@lay_rate" or id == "@route_amt"
-        or id == "@trk_level" then
+    -- these address whichever track or send is selected, so they resolve to a
+    -- param id at turn time rather than being fixed in ENC_MAP
+    elseif id == "@route_amt" or id == "@trk_level" then
       -- delta the REAL param, but keep `id` as the compound target: the footer
       -- matches its flash against the slot's id, and the resolver turns it back
       -- into a value for display. (@win_move works for exactly this reason.)
       local real = ctx.enc_target(id)
       params:delta(real, fine_delta(real, d))
-    elseif id == "@lay_move" then
-      local dk = ctx.layer_sel()
-      move_pair(Mdeck.p(dk, "start"), Mdeck.p(dk, "end"), d)
     elseif id == "@mo_sel" then
       -- one walk over the rows MOTION draws: no lane (0), the lanes, then
       -- the four modulators

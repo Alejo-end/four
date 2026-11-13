@@ -2,9 +2,11 @@
 --
 -- One of these is a track: its own slice of the softcut buffer, its own loop
 -- points, rate, direction and overdub. Several run at once for almost nothing,
--- because softcut is a separate audio core — which is exactly why the layers
--- live here and not as more scsynth drones (one drone at a time was a CPU
--- decision, not an oversight).
+-- because softcut is a separate audio core.
+--
+-- The instrument builds none with M.new today: the two layer decks (lay1,
+-- lay2) are gone, the four engine tracks replaced them. The tape is the one
+-- deck, and test/test_deck.lua builds its own to drive the law.
 --
 -- What a deck CANNOT do is granulate, warp or spectrally stretch. That is the
 -- engine's buffer and the engine's voice. A deck is a loop.
@@ -28,7 +30,7 @@ M.decks = {}
 -- construction
 -- ---------------------------------------------------------------------------
 -- `o` = { id, name, va, vb, from, len, bins }
---   id       param prefix, e.g. "lay1" -> lay1_rec, lay1_level, ...
+--   id       param prefix, e.g. "dk1" -> dk1_rec, dk1_level, ...
 --   va, vb   the softcut voice pair (lower = left, upper = right)
 --   from     where this deck's region starts, in seconds into the buffer
 --   len      how long the region is, in seconds
@@ -46,7 +48,7 @@ function M.new(o)
     wave = {},          -- the picture, painted as the head passes (o.bins bins)
     wave_bin = 0,
     gen = 0,            -- bumped by anything that replaces the material, so a
-                        -- file conversion that lands late can tell (layer_load)
+                        -- load that lands late can tell
     -- mat_lo / mat_hi: the stretch of the region that holds material (0..1),
     -- nil when there is none. Kept by track_extent, read through M.extent.
   }
@@ -55,8 +57,8 @@ function M.new(o)
   return d
 end
 
--- a param id for this deck: p(d, "rec") -> "lay1_rec". A deck may carry a
--- `keymap` overriding the scheme — the TAPE deck's ids predate the layN_
+-- a param id for this deck: p(d, "rec") -> "dk1_rec". A deck may carry a
+-- `keymap` overriding the scheme — the TAPE deck's ids predate the prefix
 -- naming (loop_start, tape_pre, ...) and ids are never renamed, so the map
 -- is how it borrows these mechanics without touching its params.
 local function p(d, k)
@@ -102,7 +104,7 @@ function M.update_rate(d)
 end
 
 -- rec gates capture; `pre` is what survives a pass. pre 1 = OVERDUB (stack),
--- pre 0 = REPLACE. Layers default to overdub because stacking is their job
+-- pre 0 = REPLACE. A deck defaults to overdub
 -- (a deck may set `pre_default` — the tape's is 0, REPLACE). A deck with a
 -- `freeze` key (the tape) holds instead: capture stops and the loop
 -- regenerates at full pre; decks without one read the default 0 and the
@@ -195,8 +197,8 @@ function M.jump(d, ph)
   both(d, function(v) sc.position(v, at) end)
 end
 
--- how long this deck's loop actually is, in seconds. The number SNAP works
--- on and the page prints. One law, so they cannot disagree.
+-- how long this deck's loop actually is, in seconds. One law for every
+-- reader, so they cannot disagree.
 function M.loop_secs(d)
   local a = clamp(get(d, "start", 0), 0, 1)
   local b = clamp(get(d, "end", 1), 0, 1)
@@ -218,18 +220,16 @@ end
 -- arming opens the loop to the whole region so nothing you play is cut off,
 -- and marks where the head is. Disarming closes the loop around exactly what
 -- you played and drops the head back at its start, so it plays back tight
--- immediately. Without this a fresh layer loops the WHOLE 60-second region,
+-- immediately. Without this a fresh deck loops the WHOLE 60-second region,
 -- which is a deck, not a looper.
 --
 -- A deck that ALREADY holds audio keeps its loop and overdubs into it. That
 -- is the entire difference between defining a loop and adding to one, and it
--- is why the layers default to overdub while the tape defaults to replace.
+-- is why a deck defaults to overdub while the tape defaults to replace.
 --
 -- How accurately it can catch the moment you pressed the key is limited by
 -- how often softcut reports the playhead position, which is every 25 ms. That
--- is close, but never exact, and it is why SNAP exists on top of this:
--- rounding the length to match something else is what puts a hand-played
--- loop properly in time.
+-- is close, but never exact.
 -- THE way to move a start/end pair (a loop, the take window). Each edge is a
 -- separate write, so in between the new start sits against the OLD end; if
 -- that crosses the pair, every reader sorts it into a region that is neither
@@ -291,16 +291,11 @@ function M.close_loop(d)
     return
   end
   set_bounds(d, lo, hi)
-  -- and then let the instrument round the LENGTH onto the grid, if what you
-  -- played was already close to one. Which grid is a musical question (the
-  -- other deck, the take's window, the clock), so it is not this module's to
-  -- answer; the loop-pedal law lives here and the reference lives in ctx.
-  if C.layer_quantize then C.layer_quantize(d) end
   M.jump(d, clamp(get(d, "start", 0), 0, 1))
 end
 
 -- wipe THIS deck only. sc.buffer_clear() would take the whole buffer with it —
--- the tape and the other layers included — which is the one collision that
+-- the tape and every other deck included — which is the one collision that
 -- makes adding decks not purely additive.
 function M.clear(d)
   d.gen = d.gen + 1
@@ -313,40 +308,6 @@ function M.clear(d)
   d.wave_bin = 0
   d.any = false
   d.mat_lo, d.mat_hi = nil, nil
-end
-
--- read a wav into this deck's region (the `layN_file` params land here, via
--- ctx.layer_load, which resamples off-rate files first: softcut's buffer read
--- does no sample-rate conversion either). Stereo lands L/R on the deck's
--- voice pair; a MONO file feeds both sides. The loop opens to the file's
--- length so it plays at once; unknown length (unreadable header) = the whole
--- region. A load IS material: `any` goes true and the strip repaints.
--- `keep_loop`: the PSET restore passes true — params:read has just restored
--- the session's own loop points, and the interactive snap below would stomp
--- them back to the full file on every load. A hand-picked load keeps snapping.
-function M.load_file(d, path, shown, keep_loop)
-  d.gen = d.gen + 1
-  local ch, dur
-  if C.wav_info then ch, dur = C.wav_info(path) end
-  sc.buffer_clear_region(d.from, d.len)
-  if ch == 1 then
-    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 1)
-    sc.buffer_read_mono(path, 0, d.from, d.len, 1, 2)
-  else
-    sc.buffer_read_stereo(path, 0, d.from, d.len)
-  end
-  d.any = true
-  d.wave_bin = 0
-  if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
-  local frac = dur and clamp(math.min(dur, d.len) / d.len, 0.01, 1) or 1
-  d.mat_lo, d.mat_hi = 0, frac        -- a file lands at the region's start
-  if not keep_loop then
-    params:set(p(d, "start"), 0)
-    params:set(p(d, "end"), frac)
-  end
-  print(string.format("mangler: %s -> %s%s", shown or path, d.name,
-    (dur and not keep_loop)
-      and string.format(" (%.1fs, loop snapped)", math.min(dur, d.len)) or ""))
 end
 
 function M.start(d)
@@ -423,8 +384,9 @@ end
 -- ---------------------------------------------------------------------------
 -- the phase poll
 -- ---------------------------------------------------------------------------
--- mtape owns the single sc.event_phase handler and forwards anything that is
--- not the tape's own voice to here. Position drives the page; while recording
+-- mtape owns the single sc.event_phase handler and handles the tape's voice
+-- itself. A deck built with M.new needs its events handed to this. Position
+-- drives the page; while recording
 -- it also paints the picture, because softcut exposes no per-voice output
 -- meter — the amplitude has to come from what is being fed in.
 function M.on_phase(voice, pos)
@@ -443,93 +405,6 @@ function M.on_phase(voice, pos)
       return
     end
   end
-end
-
--- ---------------------------------------------------------------------------
--- the deck audio rides the PSET
--- ---------------------------------------------------------------------------
--- Same rule as the take and the tape: an untouched deck must not dump silence
--- on every save, and a CLEARED one must not resurrect on load — so an empty
--- save DELETES the stale wav, and a load with no wav clears the region rather
--- than leaving whatever happens to be in the live buffer.
-local function path_for(d, number)
-  return norns.state.data .. d.id .. "-" .. number .. ".wav"
-end
-
-function M.pset_write(number)
-  for i = 1, #M.decks do
-    local d = M.decks[i]
-    if d.any then
-      sc.buffer_write_stereo(path_for(d, number), d.from, M.save_secs(d))
-    else
-      os.remove(path_for(d, number))
-    end
-  end
-end
-
--- true when pset `number` stores `id`. A preset may leave a deck's loop out on
--- purpose (the album set does: the file's length decides it). Then a
--- reload of the same file must snap the loop, or the deck keeps whatever slice
--- the player left it on.
-local function pset_stores(number, id)
-  if not (norns.state and norns.state.shortname) then return true end
-  local f = io.open(string.format("%s%s-%02d.pset", norns.state.data,
-    norns.state.shortname, number), "r")
-  if not f then return true end
-  local text = f:read("a") or ""
-  f:close()
-  return text:find('"' .. id .. '":', 1, true) ~= nil
-end
-
-function M.pset_read(number)
-  for i = 1, #M.decks do
-    local d = M.decks[i]
-    d.gen = d.gen + 1      -- a conversion started by params:read must not land
-    -- Save a preset with a deck armed and it stores rec = 1. Loading it sets
-    -- the params one at a time in file order, and rec comes before the loop
-    -- points, so arm_loop ran on a deck that still looked empty and left a
-    -- recording "open" that never happened. The next time the player stopped
-    -- recording, that ghost was used to re-cut the loop the preset had just
-    -- restored. This runs after every value is in, so it is the place to
-    -- forget it. The deck stays armed; only the ghost goes.
-    M.abort_loop(d)
-    local path = path_for(d, number)
-    if util.file_exists(path) then
-      -- a save may hold only the start of the region: clear the rest, or the
-      -- live buffer's old audio would play on past the restored material
-      sc.buffer_clear_region(d.from, d.len)
-      sc.buffer_read_stereo(path, 0, d.from, d.len)
-      d.any = true
-      M.restored_extent(d, path)
-      -- repaint this deck's strip from its wav (same reason as the tape:
-      -- the softcut buffer is unreadable from lua, the file is right there)
-      d.wave_bin = 0
-      if C.wave_from_file then C.wave_from_file(path, d.wave, d.len) end
-    else
-      -- no deck wav, but the pset names a loaded FILE: put the file back
-      -- rather than clearing. The file param's action may not have re-fired
-      -- during params:read if its value did not change across the load. A
-      -- pset whose file param is empty still clears, same rule as the tape.
-      local fp = pget(p(d, "file"), "")
-      if fp ~= "" and fp ~= "-" and (not _path or fp ~= _path.audio)
-          and util.file_exists(fp) then
-        -- keep_loop: when the pset stores loop points they are already
-        -- restored and are authoritative — reloading the audio must not re-snap them. Through
-        -- layer_load when it is there, so an off-rate file is converted here
-        -- too instead of coming back a semitone sharp (layer_load clears the
-        -- deck while it converts).
-        local keep = pset_stores(number, p(d, "start"))
-        if C.layer_load then C.layer_load(d, fp, keep)
-        else M.load_file(d, fp, nil, keep) end
-      else
-        M.clear(d)
-      end
-    end
-  end
-end
-
-function M.pset_delete(number)
-  for i = 1, #M.decks do os.remove(path_for(M.decks[i], number)) end
 end
 
 -- ---------------------------------------------------------------------------

@@ -379,11 +379,6 @@ end
 -- ============================================================================
 local function is_pads_page() return C.PAGES[C.page] == "PADS" end
 local function is_scene_page() return C.PAGES[C.page] == "SCENE" end
-local function is_layers_page() return C.PAGES[C.page] == "LAYERS" end
-
--- a layer deck's param id, through the deck module's own resolver (row 3 is
--- layer 1, row 4 layer 2, the same order the screen draws them)
-local function lay(n, k) return C.deck_p(C.layers[n], k) end
 
 -- the beat repeat on the main workspace's row 6: hold a pad to repeat at its
 -- division (x1 1/2 .. x5 1/32). A second pad while one is held changes the
@@ -466,25 +461,6 @@ local function pads_ws_key(x, y, z)
   end
 end
 
--- LAYERS: one loop-span row per deck (the same two-pad gesture the window and
--- the tape loop use), then rec and mute per deck. The decks are independent, so
--- each gets its own row rather than sharing a selector — on a grid you want to
--- reach the other deck without changing what the screen is showing.
-local function layers_ws_key(x, y, z)
-  if y == 3 or y == 4 then
-    local n = y - 2
-    if C.layers[n] then slice_key(lay(n, "start"), lay(n, "end"), x, z) end
-    return
-  end
-  if z ~= 1 then return end
-  if y == 5 then                      -- rec: x1-2 = deck 1/2
-    if C.layers[x] then ptoggle(lay(x, "rec")) end
-  elseif y == 6 then                  -- mute: x1-2 = deck 1/2, snap: x4-5
-    if x <= 2 and C.layers[x] then ptoggle(lay(x, "play"))
-    elseif (x == 4 or x == 5) and C.layers[x - 3] then C.pulse(lay(x - 3, "snap")) end
-  end
-end
-
 local function scene_ws_key(x, y, z)
   if y == 6 then                             -- modifier / momentary pads
     if x == 1 then scene_mod.cap = (z == 1)
@@ -506,7 +482,6 @@ end
 local function surface()
   if is_pads_page() then return "pads" end
   if is_scene_page() then return "scene" end
-  if is_layers_page() then return "layers" end
   return "main"
 end
 
@@ -545,7 +520,6 @@ local function grid_key(x, y, z)
   end
   if s == "pads" then return pads_ws_key(x, y, z) end
   if s == "scene" then return scene_ws_key(x, y, z) end
-  if s == "layers" then return layers_ws_key(x, y, z) end
   return main_ws_key(x, y, z)
 end
 
@@ -696,41 +670,6 @@ local function draw_pads_ws()
   gg:led(8, 6, pget("pad_input", 0) == 1 and 15 or 5, "yellow")          -- route
 end
 
--- LAYERS: a span row per deck showing where its loop sits and where its head
--- is, then rec and mute. Recording BLINKS, the way every write flag in this
--- instrument does; a muted deck's row dims, so what you hear is what is lit.
-local function draw_layers_ws()
-  local decks = C.layers or {}
-  for n = 1, math.min(#decks, 2) do
-    local d = decks[n]
-    local y = n + 2                       -- deck 1 -> row 3, deck 2 -> row 4
-    local a = clamp(pget(C.deck_p(d, "start"), 0), 0, 1)
-    local b = clamp(pget(C.deck_p(d, "end"), 1), 0, 1)
-    local lo, hi = min(a, b), max(a, b)
-    local playing = pget(C.deck_p(d, "play"), 1) == 1
-    local recing = pget(C.deck_p(d, "rec"), 0) == 1
-    local head = floor(clamp(d.phase, 0, 0.999) * 8) + 1
-    for x = 1, 8 do
-      -- the OVERLAP law, same as draw_main_ws's window/loop rows: a pad lights
-      -- when the region touches any of its eighth. The old containment test
-      -- left a loop narrower than one eighth entirely dark on its own row.
-      local inside = (x - 1) / 8 < hi and x / 8 > lo
-      local lvl = inside and (playing and 8 or 3) or 1
-      if x == head and inside then lvl = 15 end
-      gg:led(x, y, lvl, x == head and "white" or (recing and "red" or "teal"))
-    end
-    -- rec and mute, one column per deck
-    -- the write blink is the state strip's (and the header's) phase
-    gg:led(n, 5, recing and ((C.frame % 4) < 2 and 15 or 5) or 3, "red")
-    gg:led(n, 6, playing and 9 or 3, "green")
-    -- SNAP: round this deck's loop length to match what else is playing.
-    -- LAYERS has no key free for it (K2 and K3 are taken, and holding K1 is
-    -- stop and erase on every page), so the grid and MIDI are where you reach
-    -- it. The automatic snap when a recording ends needs no button at all.
-    gg:led(n + 3, 6, d.any and 6 or 2, "yellow")
-  end
-end
-
 local function draw_scene_ws()
   local sc = C.scene
   local sel = floor(pget("scene_slot", 1) + 0.5)
@@ -772,7 +711,6 @@ function M.redraw()
   gg:all(0)
   draw_spine()
   if s == "pads" then draw_pads_ws()
-  elseif s == "layers" then draw_layers_ws()
   elseif s == "scene" then draw_scene_ws()
   else draw_main_ws() end
   gg:refresh()

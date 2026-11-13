@@ -5,6 +5,12 @@ from the 48th change onward is unverified: about fifteen logged batches,
 several of them engine, and the fingerprint has moved to **66** (the 94th
 change added the `beat_repeat` command).
 
+**The two layer decks are gone (four, thirteenth change).** These rows test them and no
+longer apply: stage 9 (9.1 to 9.8), 11.1, 11.2, 11.2b, 11.2c, 11.3 to 11.8, 12.3, 12.12,
+13.5, 15.7, 15.11 and 18.1. Row 1.2 lists the old pages, and 10.5 and 18.2 name a layer:
+read them without it. The rows keep their numbers. `test/device/gate.py` no longer runs
+the removed ones.
+
 This folds those scattered per-change gates into one ordered pass. The order is
 deliberate — **the checks that would invalidate everything else come first**, and
 checks that share a setup are grouped so you are not re-recording a take five

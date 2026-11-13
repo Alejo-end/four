@@ -70,15 +70,14 @@ do
   ok(HF.M.x and HF.M.full, "a lone write flag draws whole (dot and letter)")
   params:set("motion_rec", 0)
 
-  -- a layer deck that records lights L
-  params:set("lay1_rec", 1)
-  redraw()
-  ok(HF.L.x ~= nil, "a layer deck recording lights the L flag")
-  params:set("lay1_rec", 0)
-
   -- all of them at once, on the longest title, in the blink's lit phase
-  T.goto_page("LAYERS")
-  local ON = { "rec", "tape_rec", "motion_rec", "lay1_rec", "freeze",
+  local WIDEST, widest_w = nil, -1
+  for _, name in ipairs(T.pages()) do
+    local w = CTX.font.text_w(name, 1)
+    if w > widest_w then WIDEST, widest_w = name, w end
+  end
+  T.goto_page(WIDEST)
+  local ON = { "rec", "tape_rec", "motion_rec", "freeze",
     "tape_freeze", "beat_repeat", "step_run" }
   for _, id in ipairs(ON) do params:set(id, 1) end
   params:set("lfo1_target", 2); params:set("lfo1_depth", 0.5)
@@ -242,7 +241,7 @@ end
 -- ============================================================================
 -- 4 · one blink: only the header's write flags blink
 -- ============================================================================
--- A page's own chip for a write (TAPE's REC, LAYERS' dot, MOTION's REC and
+-- A page's own chip for a write (TAPE's REC, MOTION's REC and
 -- frame, TAKE's WAIT) is steady: drawn the same on every phase of the old
 -- blinks (every 4 frames, every 8, every second).
 local function region(x0, y0, x1, y1)
@@ -272,11 +271,6 @@ do
   params:set("tape_rec", 1)
   steady("TAPE's REC chip", 0, 10, 24, 20)
   params:set("tape_rec", 0)
-  T.goto_page("LAYERS")
-  _h.run_ticks(30)
-  params:set("lay1_rec", 1)
-  steady("the LAYERS write dot", 14, 21, 18, 25)
-  params:set("lay1_rec", 0)
   T.goto_page("MOTION")
   _h.run_ticks(30)
   params:set("motion_rec", 1)

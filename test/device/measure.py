@@ -16,7 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 import audio  # noqa: E402
 import gate  # noqa: E402
-from gate import OUT, DECKS_OUT, opt, record_layer, record_take, set_mode  # noqa: E402
+from gate import OUT, DECKS_OUT, PAGES, opt, record_take, set_mode  # noqa: E402
 from norns import Norns, num  # noqa: E402
 
 PATH = os.path.join(OUT, "performance.jsonl")
@@ -128,7 +128,7 @@ def grain():
 def pages():
     """What each page's drawing costs. The take plays, and nothing else moves."""
     fresh_take()
-    for page in "TAKE VOICE TAPE LAYERS FILTER DELAY REVERB MIX PADS MOTION SCENE".split():
+    for page in PAGES.split():
         n.goto(page)
         time.sleep(1)
         sample(page, kind="page", window=6)
@@ -163,19 +163,25 @@ def voices():
     n.set("size", 0.1)
 
 
+def record_tape(secs=3, kind="tone", amp=None):
+    """Record a pass on the tape with the TAPE keys."""
+    n.goto("TAPE")
+    n.signal(kind, amp)
+    time.sleep(0.2)
+    n.tap(2, 0.08)
+    time.sleep(secs)
+    n.tap(2, 0.08)
+    time.sleep(0.5)
+    n.signal(None)
+    time.sleep(0.3)
+
+
 def everything():
     """The whole instrument at once: the budget that a real set must fit in."""
     n.load_script()
     n.set("dry_wet", 1)
     record_take(5, "drums")
-    n.goto("TAPE")
-    n.signal("tone", 0.1)
-    n.tap(2, 0.08)
-    time.sleep(3)
-    n.tap(2, 0.08)
-    n.signal(None)
-    record_layer(1, 3, "tone", 0.1)
-    record_layer(2, 2, "tone", 0.1)
+    record_tape(3, "tone", 0.1)
     set_mode("GRAIN")
     n.set("density", 80)
     n.set("rev_mix", 0.3)
@@ -187,7 +193,7 @@ def everything():
     for i in range(8):
         n.ctx(f"c.pad_trigger({9500 + i}, {i}, 1)")
     time.sleep(2)
-    sample("everything: GRAIN, 8 GRAIN pads, reverb, shimmer, delay, filter, tape, 2 layers", kind="budget", window=30)
+    sample("everything: GRAIN, 8 GRAIN pads, reverb, shimmer, delay, filter, tape", kind="budget", window=30)
 
 
 def patch():
@@ -198,7 +204,7 @@ def patch():
     n.set("cut_source", 0)
     n.set("monitor_level", n.get("monitor_level"))
     time.sleep(0.5)
-    record_layer(1, 3, "tone")
+    record_tape(3, "tone")
     time.sleep(0.5)
     deck = audio.stats(audio.load(gate_rec("patch_softcut", DECKS_OUT))[1][0])
     before = audio.stats(audio.load(gate_rec("patch_engine_before", gate.ENGINE_OUT))[1][0])
@@ -278,7 +284,7 @@ def server_trial(label, second=True, pin=False, targets=(20, 30, 40, 50, 60, 70)
     n.load_script()
     n.set("dry_wet", 1)
     record_take(5, "tone")
-    record_layer(1, 3, "tone", 0.1)
+    record_tape(3, "tone", 0.1)
     set_mode("PLAY")
     n.signal_quit()      # the signal server is a JACK client too; a real set has none
     time.sleep(1.5)

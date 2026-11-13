@@ -58,7 +58,10 @@ local MOTION_IDS = {
   "rev_highcut", "rev_mix", "shimmer", "shimmer_pitch", "shimmer_tone",
   "voice_atk", "voice_rel", "pad_level",
   "cut_source",
-  -- the layer decks (transports excluded, same rule as tape_rec)
+  -- TOMBSTONES: the two layer decks are gone (four, thirteenth change) and
+  -- these fourteen ids name no param. They keep their places so that nothing
+  -- after them moves and motion_lane keeps its range. Every reader of this
+  -- list skips an id with no param. MOTION_TOMBSTONES below names them.
   "lay1_level", "lay1_rate", "lay1_reverse", "lay1_start", "lay1_end", "lay1_pre",
   "lay1_width",
   "lay2_level", "lay2_rate", "lay2_reverse", "lay2_start", "lay2_end", "lay2_pre",
@@ -108,6 +111,16 @@ do
   end
 end
 
+-- the entries of MOTION_IDS that are tombstones: ids of deleted params, kept
+-- in the list so that no later entry moves. test_control lets only these
+-- name a missing param, and fails if one of them comes back as a param.
+local MOTION_TOMBSTONES = {
+  "lay1_level", "lay1_rate", "lay1_reverse", "lay1_start", "lay1_end", "lay1_pre",
+  "lay1_width",
+  "lay2_level", "lay2_rate", "lay2_reverse", "lay2_start", "lay2_end", "lay2_pre",
+  "lay2_width",
+}
+
 -- WHAT THE LOOPER DELIBERATELY DOES NOT RECORD — the other half of the list.
 -- membership is TOTAL: test/test_control.lua asserts every param sits in
 -- MOTION_IDS or here, never neither and never both, so a new param cannot
@@ -123,18 +136,15 @@ local MOTION_EXCLUDE = {
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
   "print_len", "pad_chop", "pad_even",
-  "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
-  "lay1_file", "lay2_file", "layer_wet",
-  "lay1_snap", "lay2_snap",   -- a gesture that MOVES the loop, like pad_chop
   -- PARAMS-only discretes: no performance surface reaches them
-  "grain_shape", "warp_overlaps", "tape_fade", "lay1_fade", "lay2_fade",
+  "grain_shape", "warp_overlaps", "tape_fade",
   "t2_grain_shape", "t2_warp_overlaps",
   "t3_grain_shape", "t3_warp_overlaps", "t4_grain_shape", "t4_warp_overlaps",
   -- routing + structure (see the header: pad_input re-points the keyboard,
   -- the voices cap re-caps the allocator)
   "pad_input", "voices",
   -- UI cursors + the per-pad lock editors
-  "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  "seq_slice", "pad_voice", "pad_pitch",
   "track_sel",   -- four: which track VOICE and FILTER address
   "route_sel",   -- four: the ROUTE grid's cursor
   -- a clock rule, set and left (a replayed one would jump the window)
@@ -178,6 +188,7 @@ local M = {
   lanes = {},       -- lanes[id] = { f, v, n, cur }
   -- exposed for the harness's totality check (see MOTION_EXCLUDE above)
   MOTION_IDS = MOTION_IDS,
+  MOTION_TOMBSTONES = MOTION_TOMBSTONES,
   MOTION_EXCLUDE = MOTION_EXCLUDE,
 }
 
@@ -304,7 +315,7 @@ function M.set_armed(on)
         M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
         local fixed = len_frames(pget("motion_len", 0))
         -- AUTO: a pass played close to a musical length is put ON it (the
-        -- layers' snap law), so the loop stays in time with the clock, the
+        -- snap ratios), so the loop stays in time with the clock, the
         -- synced delay and the decks. The gesture itself is untouched:
         -- playback reads it through src_of, so this only retimes it.
         if not fixed and C.clock_length then
@@ -492,7 +503,7 @@ end
 -- ===========================================================================
 -- the loop rides the PSET
 -- ===========================================================================
--- Scenes, the take, the tape and the layers all come back with a session; the
+-- Scenes, the take and the tape all come back with a session; the
 -- gesture loop does too. The lanes save as a plain table beside the pset
 -- (motion-N.lua). A loop with no lanes deletes the file, and a pset with no
 -- file loads with no loop: the loop belongs to the session being loaded.

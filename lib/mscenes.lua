@@ -84,14 +84,6 @@ local TIMBRE_IDS = {
   "tape_rate", "loop_start", "loop_end", "tape_pre", "tape_fade", "cut_source",
   -- polyphonic pad voices
   "voices", "voice_atk", "voice_rel", "pad_level",
-  -- the layer decks: their loops, speeds and levels are performance state and
-  -- belong in a scene. rec/play are TRANSPORTS and stay out, exactly like
-  -- tape_rec — a scene changes how it sounds, never whether it is running.
-  -- layer_sel stays out too: it is a UI cursor, like scene_slot.
-  "lay1_level", "lay1_rate", "lay1_start", "lay1_end", "lay1_pre",
-  "lay1_fade", "lay1_width",
-  "lay2_level", "lay2_rate", "lay2_start", "lay2_end", "lay2_pre",
-  "lay2_fade", "lay2_width",
   -- track 2 (four): the same knobs as track 1, so a scene keeps both
   "t2_level", "t2_pos_start", "t2_pos_end", "t2_scan", "t2_pitch", "t2_pan",
   "t2_pos_jitter", "t2_size", "t2_density", "t2_spread", "t2_grain_jitter",
@@ -130,7 +122,6 @@ local SWITCH_IDS = {
   "win_beats",    -- ...and whether the window's length does
   "freeze", "pv_freeze", "tape_freeze", "pad_input",
   "tape_reverse",   -- tape direction is a LATCHING state under the punch law
-  "lay1_reverse", "lay2_reverse",   -- ...and so is each layer's
   "vis_look",   -- the look the visuals show: a scene can bring its own
   "t2_filt_type", "t2_clouds_mode", "t2_grain_shape", "t2_pv_freeze",
   -- THE EFFECT (four): which effect each track's slot holds
@@ -246,7 +237,7 @@ append(SAFE_SNAPSHOT_IDS, SCENE_RECALL_IDS)
 -- membership is TOTAL: test/test_control.lua asserts every param in the
 -- paramset is in SCENE_RECALL_IDS or here, never neither and never both, so
 -- a NEW param cannot silently miss the decision (the defect that recurred:
--- purity, FINE_IDS, RATE_IDS and these lists each missed a layers param).
+-- purity, FINE_IDS, RATE_IDS and these lists each missed a new param).
 -- adding a param now FAILS the harness until it is placed on one side.
 local SCENE_EXCLUDE = {
   -- the master + STOP: a scene must never rewrite stage volume or unmute
@@ -260,12 +251,9 @@ local SCENE_EXCLUDE = {
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
-  "lay1_rec", "lay1_play", "lay2_rec", "lay2_play",
-  "lay1_file", "lay2_file", "layer_wet",
-  "lay1_snap", "lay2_snap",   -- a gesture, not state: it acts on the loop now
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
-  "seq_slice", "layer_sel", "pad_voice", "pad_pitch",
+  "seq_slice", "pad_voice", "pad_pitch",
   "track_sel",   -- four: which track VOICE and FILTER address
   "route_sel",   -- four: the ROUTE grid's cursor
   -- config / keys
@@ -434,7 +422,6 @@ end
 -- edge that widens the region FIRST, and every intermediate contains a real
 -- region instead of a bogus one. `start` key -> `end` key.
 local EDGE_PAIRS = { pos_start = "pos_end", loop_start = "loop_end",
-                     lay1_start = "lay1_end", lay2_start = "lay2_end",
                      t2_pos_start = "t2_pos_end", t3_pos_start = "t3_pos_end",
                      t4_pos_start = "t4_pos_end" }
 M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
@@ -452,19 +439,18 @@ M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 -- open the window wherever it likes, and a sweep coming home restores the
 -- origin verbatim (morph_from bypasses this).
 --
--- The LOOP DECKS have the same trap: capture a scene while a layer is empty
+-- The TAPE has the same trap: capture a scene while the tape is empty
 -- (its loop 0..1), record a 4s pass (the loop closes around it), recall, and
 -- the loop reopened over 60 seconds of nothing. A deck's material does not
--- start at 0, so the decks clamp to the EXTENT that was written (C.material:
+-- start at 0, so the tape clamps to the EXTENT that was written (C.material:
 -- lo, hi in the deck's own 0..1), and only when the stored loop is more than
--- TWICE the material and overlaps it. A loop's LENGTH is musical (SNAP puts
--- it on a grid), so a loop that is merely a little longer than what was
+-- TWICE the material and overlaps it. A loop's LENGTH is musical,
+-- so a loop that is merely a little longer than what was
 -- played into it is left alone; and a stored loop entirely elsewhere points
 -- at something we cannot know about, and stays exactly as stored.
 local WINDOW_IDS = { pos_start = true, pos_end = true }
 local EXTENT_OF = {
   loop_start = "tape", loop_end = "tape",
-  lay1_start = "lay1", lay1_end = "lay1", lay2_start = "lay2", lay2_end = "lay2",
 }
 -- the same pairs, both ways round (shared with motion replay)
 local PARTNER = {}

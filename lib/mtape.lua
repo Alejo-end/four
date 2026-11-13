@@ -18,7 +18,7 @@ local D     -- the deck module (lib/mdeck), handed in at init — `include` has
 -- borrows is the deck MECHANICS: rate and direction, rec/pre/freeze gating,
 -- the loop bounds with the 100ms floor held inside the region, and the
 -- region-scoped clear. Those laws existed twice, verbatim, and had already
--- drifted once before the layers review caught it; now they exist once.
+-- drifted once before a review caught it; now they exist once.
 local TAPE = {
   id = "tape", name = "TAPE", va = 1, vb = 2, from = 0, len = TAPE_LEN,
   pre_default = 0,   -- classic tape: REPLACE unless tape_pre is raised
@@ -79,13 +79,12 @@ end
 --
 -- The two now agree that stopping a recording may only re-cut the loop if
 -- starting it opened one, that a pass too short to be a loop gives back the
--- loop it widened, that a PSET load forgets an open pass, and both move their
--- edges through D.set_loop. Three things still differ:
+-- loop it widened, and both move their
+-- edges through D.set_loop. Two things still differ:
 --   * the shortest recording the tape accepts is measured against the whole
 --     tape; mdeck measures 100ms against the deck's own region
 --   * mdeck checks which way the playhead was moving, so a deck playing
 --     backwards closes its loop correctly. The tape does not.
---   * only mdeck offers the finished loop to SNAP.
 -- If you change one of them, change both.
 function M.update_tape_rate() D.update_rate(TAPE) end
 function M.update_tape_rec() D.update_rec(TAPE) end
@@ -96,7 +95,7 @@ function M.set_loop(lo, hi) D.set_loop(TAPE, lo, hi) end
 
 -- Put both playheads at a position given as 0 to 1 across the tape. Stopping
 -- a recording uses this to drop the head at the start of what was just
--- played, so it loops back straight away. Shared with the layer decks: two
+-- played, so it loops back straight away. Through the deck law: two
 -- copies of "put the head here" is how the loop maths drifted apart before.
 function M.jump_to(pos) D.jump(TAPE, pos) end
 
@@ -106,8 +105,8 @@ function M.jump_to(pos) D.jump(TAPE, pos) end
 function M.set_fade() D.update_fade(TAPE) end
 
 -- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
--- audio with it, so once the layer decks share this buffer a TAPE erase would
--- silently wipe them too. (Mdeck.clear also resets the descriptor's unused
+-- audio with it, so a TAPE erase would silently wipe any other deck that
+-- shares the buffer. (Mdeck.clear also resets the descriptor's unused
 -- display fields — harmless; the tape picture is mpages' twave.)
 function M.clear_buffer()
   D.clear(TAPE)
@@ -154,18 +153,16 @@ function M.init_tape()
   -- tape head position events drive the TAPE page needle AND the loop
   -- snap points — 25ms quant keeps snapped loops tight (0.1 was audible)
   sc.phase_quant(1, 0.025)
-  -- ONE softcut phase handler exists, and it lives here. Anything that is not
-  -- the tape's own voice is forwarded, so the layer decks can drive their own
-  -- playheads and waveforms off the same poll.
+  -- ONE softcut phase handler exists, and it lives here.
   sc.event_phase(function(v, pos)
     if v == 1 then
       C.tape_phase = pos / TAPE_LEN
       D.settle_rec(TAPE)
-      -- the written stretch, from the same 25ms events the layers use
+      -- the written stretch, from the 25ms phase events
       if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
         D.track_extent(TAPE, C.tape_phase)
       end
-    elseif C.deck_phase then C.deck_phase(v, pos) end
+    end
   end)
   sc.poll_start_phase()
 end

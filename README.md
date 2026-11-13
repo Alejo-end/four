@@ -77,7 +77,7 @@ The full map of every page's knobs and keys, generated from the code, is in
 
 ## Pages
 
-The stations sit in families: the take (TAKE, VOICE), the loop decks (TAPE, LAYERS), the
+The stations sit in families: the take (TAKE, VOICE, TRACKS), the loop deck (TAPE), the
 tone (FILTER, EFFECT, DELAY, REVERB), the console (MIX), and the performance layer (PADS, MOTION,
 SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives on SCENE.
 
@@ -86,7 +86,6 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | TAKE | Record and frame the material | K2 record, K3 tap snap window, hold undo |
 | VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In GRAIN the picture is the grain cloud, left channel at the top. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
 | TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
-| LAYERS | Two more loop decks, for building a piece in parts | K2 record, K3 mute |
 | FILTER | Diode ladder filter plus drive | K2 open, K3 type |
 | EFFECT | One effect for the focused track: chorus, flange, wobble, reson or ring. E2 is the amount, E3 the rate. | K2 on and off, K3 next effect |
 | DELAY | Feedback echoes, optionally clocked | K2 infinite hold, K3 kill |
@@ -96,38 +95,12 @@ SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives 
 | MOTION | Record and replay knob movements, and the two modulators | K2 record, K3 play |
 | SCENE | Capture, recall and morph whole sounds. The alt knobs run the orbit. | K2 recall or peek, K3 capture |
 
-The header shows what runs, from any page. A blinking R, T, M or L means the take, the
-tape, the motion looper or a layer deck is recording. FZ and TF are the freezes, RP a held
+The header shows what runs, from any page. A blinking R, T or M means the take, the
+tape or the motion looper is recording. FZ and TF are the freezes, RP a held
 beat repeat, SQ the pad sequencer and LF a modulator. When many are lit, a flag shrinks to
 its letter or to a short bar, but it never disappears.
 
 Notes on the less obvious ones.
-
-LAYERS gives you two independent loop decks beside the tape, so you can keep playing while
-you record the next part. **They work like a loop pedal**: press K2 on an empty deck, play
-a phrase, press it again, and the loop is exactly that phrase, playing from its start.
-Press K2 again and you are overdubbing into it. The length is set by the first pass and
-nothing after that moves it. **Arming a layer records the processed engine output by
-default**: resampling the mangled sound into a loop is just K2, and both deck pages say
-SRC WET while it happens. Turn `layers record the mix` off in PARAMS and the decks follow
-the tape's source switch instead (dry input, or the processed output, on TAPE). A wav can
-also be loaded straight into a deck: PARAMS > layers > load file, with the loop snapping to
-the file. What a deck cannot do is granulate or stretch: that is the engine's take, and
-only the take gets it. MUTE silences a deck without stopping its head, so two decks never
-lose their drift against each other. For a full-mix bounce that becomes the new take, use
-print (below).
-
-Hand-played loops are never quite the length you meant, and two decks at 3.97 and 4.02
-seconds walk apart inside a minute. **SNAP puts a loop's length on a musical grid**: a
-half, a double, a three-to-two of whatever else is playing. The other deck if it holds
-audio, otherwise the take's window, otherwise a bar of the clock. It only moves the loop
-end, so it is undoable by hand. When you close a recording that already landed within a few
-percent of a ratio, it rounds on its own and says so; anything further out is a length you
-chose and is left exactly as played. To force it, map `L1 snap loop` to a footswitch or use
-the grid (LAYERS row 6, pads 4 and 5). Watch the name: TAKE's K3 is also SNAP, and it does
-the other thing, fitting the window to where the sound is. Each deck also has its own loop
-**seam** (a hard edit for a drum loop, a long blend for a pad) and **width**, so two decks
-on related material do not have to be the same wall of stereo.
 
 The orbit lives on SCENE: it picks a stored scene, morphs partway toward it, parks there,
 then picks another, never fully arriving, so it keeps finding sounds between the ones you
@@ -143,8 +116,8 @@ a crossfade instead of a jump. Turning the morph or the selector mid-glide stops
 it stands.
 
 A MOTION loop's first pass, played within a few percent of a musical length of the clock,
-loops exactly on that length (the same rule as the layers' SNAP), so it stays in time with
-the clock, the synced delay and the decks.
+loops exactly on that length, so it stays in time with the clock, the synced delay and
+the tape.
 
 Erosion lives on VOICE and works in PLAY mode, the one mode the engine erodes in. With
 erode up (hold K1 for erode and wear), every pass of the loop rewrites the window slightly
@@ -234,8 +207,7 @@ Load: PARAMS > take > load sample reads WAV in 8, 16, 24 or 32 bit, integer or f
 window snaps to the file. A file at any sample rate loads in tune: off-rate files are resampled on the way in
 through a windowed-sinc kernel. That matters most coming DOWN from 88.2k or 96k: there,
 everything above the server's own limit has to be removed before resampling or it folds
-back into the audible band as tones that were never in the file. PARAMS > layers > load
-file does the same into a layer deck.
+back into the audible band as tones that were never in the file.
 
 Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo
 24-bit WAV. The take rides PSET save and load at the same depth.
@@ -247,10 +219,10 @@ footswitch and resampling becomes one stomp.
 
 ## Saving
 
-PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape and
-layer audio, the scene bank, the motion loop and the per slice settings. Loading restores
+PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape
+audio, the scene bank, the motion loop and the per slice settings. Loading restores
 the whole session, sound included, and the motion loop comes back playing if it was.
-The decks save only as far as they hold material, so a short loop makes a small file.
+The tape saves only as far as it holds material, so a short loop makes a small file.
 
 ## Grid
 

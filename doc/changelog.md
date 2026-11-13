@@ -3992,3 +3992,71 @@ effect slot (engine and Lua, the count goes from 185 to 197, needs a RESTART)**.
   as `bus`). They are `sbus` and `pbus`.
 On the device: `count: 197`, four PLAY tracks 25.2% of the thread (36.0% before), four
 PV at pitch 2 53.0% (64.1%). doc/measurements/2026-11-13/lanes.md. Nobody has listened.
+
+four, thirteenth change: **the two layer decks are gone (Lua only, the count stays 197)**.
+The four engine tracks replaced them. The tape stays, on the deck law in lib/mdeck.lua.
+- Removed from four.lua: the decks `lay1` and `lay2`, the LAYERS page with its keys and
+  its encoder targets (`@lay_level`, `@lay_rate`, `@lay_move`), the group `grp_layers`
+  with its 26 params (`layer_sel`, `layer_wet`, and for each deck file, rec, play, level,
+  rate, reverse, start, end, pre, fade, width, snap), the layer file load, the layer
+  SNAP, the bounce that threw the record source WET while a layer was armed, and the
+  layer audio in a PSET. There are twelve pages. `cut_source` alone decides what the
+  tape records.
+- Removed from the modules: `body_LAYERS`, `layer_strip` and the header's L flag
+  (mpages), the LAYERS workspace of the grid (mgrid), the layer ids in the scene lists,
+  the edge pairs and the extent clamp (mscenes), and the forward of softcut phase
+  events to other decks (mtape). mdeck lost `load_file`, the three `pset_` functions and
+  the `layer_quantize` hook. It keeps `new`, the level, the width, `on_phase` and the
+  loop-pedal law: the tape waits to fold onto that law, and test_deck drives it.
+- `MOTION_IDS` is append-only, so the fourteen layer ids stay in their places as
+  tombstones, named in `MOTION_TOMBSTONES`. `motion_lane` keeps its range. A lane is
+  saved by id, and a saved lane that names a deleted param is skipped on load, as before.
+  test_control lets only a tombstone name a missing param, fails if a tombstone becomes
+  a param again, and pins the places (lay1_level 60, scene_morph_amt 74). The modulator
+  `TARGETS` held no layer id.
+- The album presets (test/make_set.lua, rebuilt): track 2 does what deck 1
+  did and track 3 what deck 2 did. Deck playing is mode PLAY. The deck's level is the
+  track's level, the same linear gain. The deck's rate r is the track's pitch r at scan
+  1, and a reversed deck is scan -1. Width and seam have no equivalent and are dropped.
+  A deck was outside the engine, so the two tracks send nothing into the delay and the
+  reverb and take no drive (only track 4 mirrors the drive now). `sc_level` scales the
+  whole engine, the two tracks included, so every scene that lowered the take with
+  `sc_level` now uses `grain_level`. Only the three OUT scenes still close `sc_level`.
+- What is not the same: a track passes its own filter (open here) and the master
+  limiter, the delay's crossfade ducks it a little (0.4 dB at a delay mix of 0.3), and
+  three PLAY voices now run on scsynth where softcut ran two decks at no cost.
+- Tests: the layer tests are deleted. Tests that used a layer to prove a general law
+  now use the tape or the window (the fine step, the punch law, the grid span, the
+  release after a page change, STOP, the scene clamp, the motion pair). test_deck builds
+  its own decks `dk1` and `dk2`. The presets in `data/layers/` belong to the old
+  `layers` build: test_control lets them name the removed layer ids and nothing else.
+- test/device: stage 9, checks 11.1 to 11.8 (not 11.2d), 12.3 and 13.5 are removed from
+  gate.py, and 10.5 reads the take and the tape. measure.py records the tape where it
+  recorded a layer. doc/device-gate.md still lists the old rows.
+`check.lua` passes on Lua 5.3. Nothing ran on the device, and nobody has heard the
+presets. doc/layers.md and `data/layers/` are old and still there.
+
+four, fourteenth change: **our own grain cloud, a new flanger and an ECHO type (engine,
+plugin and Lua, the count stays 197, needs a RESTART and the new binary first)**.
+- `FourGrain` is the pair of `GrainBuf` of GRAIN as one UGen, with the same laws: the
+  start at the trigger's sample, the 4-point cubic, the Hann from a sine recurrence, a
+  window buffer read between its points, the equal-power pan. It keeps a grain's start
+  place exact where `GrainBuf` rounds it to a float (a quarter of a sample late in a
+  60 s buffer). It costs 0.17% of the thread for a pair, against 0.27%. A cloud holds
+  48 pairs with the plugin and 32 without it, and four full clouds take 57%.
+- A first version filled small arrays and read them back as vectors. A prefetch of the
+  next block's memory changed nothing, and was removed.
+- FLANGE was harsh. It has its own synth now: the sweep moves evenly in pitch (0.25 ms
+  to 8 ms), the feedback passes a 5 kHz low-pass and a soft clip, and the dry signal
+  is 1.41 ms late so the wet one sweeps through zero. Without the plugin the old
+  flanger stays.
+- `FourDelay` is the delay behind it: a 4-point read, and a low-pass and a soft clip
+  in its feedback path. ECHO (effect type 7, appended) uses it for a delay of the
+  track's own, 30 ms to 1.2 s. RATE is the time and reads in ms, AMOUNT is the
+  feedback and the echo level.
+- The plugin's UGens no longer share a buffer between an input and an output: the
+  cloud cleared its outputs first and wiped an input that way.
+- The level law of the note voices went back to 64 (the twelfth change lowered it by
+  mistake, with the drone's).
+On the device: `count: 197`, the user's 100% set takes 57.3% with no xruns. Nobody has
+listened to the flanger or the echo yet.
