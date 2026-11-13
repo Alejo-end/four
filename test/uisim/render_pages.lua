@@ -54,6 +54,12 @@ params:add_control("output_level", "output", controlspec.new(0, 1, "lin", 0, 0.7
 params:add_control("monitor_level", "monitor", controlspec.new(0, 1, "lin", 0, 0.45, ""))
 params:add_control("headphone_gain", "hp", controlspec.new(0, 1, "lin", 0, 0.6, ""))
 
+-- the gallery (gallery.py) wants DELAY and REVERB with something in them: a fresh
+-- script sends nothing, and both pages then say NO SEND
+if os.getenv("FOUR_SENDS") then
+  params:set("fx_dly", 1); params:set("fx_rev", 1)
+end
+
 
 
 if EMPTY then

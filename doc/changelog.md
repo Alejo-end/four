@@ -4078,17 +4078,6 @@ four, fifteenth change: **the name everywhere, the opening text, and an opening 
 - `main` is pushed, and the GitHub repository is `four`.
 On the device: `count: 197`, the log says `four: FourStretch on`, the opening draws.
 
-four, sixteenth change: **the README as a norns script page, new pictures and a new
-signal flow drawing (documents only, no code of the instrument changes)**.
-- README.md is rewritten for four: what it is, the requirements, the install line for
-  maiden, a first session, each page with its pictures, and the plan of
-  doc/space-plan.md as "what comes next", marked as not built. The old text named one
-  track, two modulators, the LAYERS page and `count: 66`.
-- `test/uisim/gallery.py` rebuilds `doc/ui/` from the offscreen renders: 37 pictures and
-  `four.png`, the twelve pages in one picture. The old pictures were from October and
-  showed LAYERS. No render has CLOUD or ECHO yet, so neither has a picture.
-- `doc/signal-flow.svg` is redrawn by hand for four tracks, the sends and the tape.
-
 four, sixteenth change: **THE ROOM: a reverb of our own in place of JPverb (engine and
 plugin, the count stays 197, needs a RESTART and the new binary first)**. Step 3 of
 doc/space-plan.md, done before the delay because the reverb was the heaviest part.
@@ -4165,3 +4154,16 @@ four, nineteenth change: **SPACE is sends (engine and Lua, the count goes from 1
   `dly_rev = 1` for track 1 and track 4, so they sound as they were made.
 A PSET saved before this change names its sends, so it loads as it was. A fresh
 script is different: the delay and the reverb are silent until a track sends.
+
+four, twentieth change: **the README as a norns script page, new pictures and a new
+signal flow drawing (documents and a test tool only)**.
+- README.md is rewritten for four: what it is, the requirements, the install line for
+  maiden, a first session, each page with its pictures, and what is left of
+  doc/space-plan.md as "what comes next". The old text named one track, two modulators,
+  the LAYERS page and `count: 66`.
+- `test/uisim/gallery.py` rebuilds `doc/ui/` from the offscreen renders: 37 pictures and
+  `four.png`, the twelve pages in one picture. The old pictures were from October and
+  showed LAYERS. No render has CLOUD or ECHO yet, so neither has a picture.
+- The gallery sets `FOUR_SENDS`, and `render_pages.lua` then opens track 1's two sends.
+  Without it DELAY and REVERB say `NO SEND`. The render suite does not set it.
+- `doc/signal-flow.svg` is redrawn by hand for four tracks, the sends and the tape.

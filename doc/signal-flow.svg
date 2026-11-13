@@ -1,54 +1,101 @@
-<svg width="100%" viewBox="0 0 680 300" role="img" style="" xmlns="http://www.w3.org/2000/svg">
-<title style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">mangler signal flow</title>
-<desc style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">Signal chain: input into record into the drone plus pads source stage, then filter, delay and reverb effects to output. Effects start dry.</desc>
+<svg width="100%" viewBox="0 0 760 390" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>four signal flow</title>
+<desc>The input records into one of four tracks. Each track plays its own take through a voice, a filter, colour and two effects. Each track sends to the other tracks, to the shared delay and to the shared reverb. The sum goes to the output, and the tape loops the output.</desc>
 <defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="rgb(137,135,129)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<style>
+text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; dominant-baseline: central; }
+.t { font-size: 13px; font-weight: 600; }
+.s { font-size: 11px; }
+.io { fill: rgb(241,239,232); stroke: rgb(95,94,90); }
+.io-t { fill: rgb(68,68,65); }
+.src { fill: rgb(225,245,238); stroke: rgb(15,110,86); }
+.src-t { fill: rgb(8,80,65); }
+.fx { fill: rgb(250,236,231); stroke: rgb(153,60,29); }
+.fx-t { fill: rgb(113,43,19); }
+.frame { fill: rgb(250,249,245); stroke: rgb(137,135,129); stroke-dasharray: 4 3; }
+.ghost { fill: rgb(250,249,245); stroke: rgb(137,135,129); }
+.note { fill: rgb(82,81,78); }
+.w { fill: none; stroke: rgb(137,135,129); stroke-width: 1.5; }
+rect { stroke-width: 0.75; }
+</style>
 </defs>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="40" y="60" width="64" height="52" rx="8" stroke-width="0.5" style="fill:rgb(241, 239, 232);stroke:rgb(95, 94, 90);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="72" y="86" text-anchor="middle" dominant-baseline="central" style="fill:rgb(68, 68, 65);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">IN</text>
-</g>
+<rect x="0" y="0" width="760" height="390" rx="10" fill="rgb(255,255,255)"/>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="150" y="60" width="80" height="52" rx="8" stroke-width="0.5" style="fill:rgb(241, 239, 232);stroke:rgb(95, 94, 90);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="190" y="86" text-anchor="middle" dominant-baseline="central" style="fill:rgb(68, 68, 65);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">REC</text>
-</g>
+<!-- three more tracks behind the first -->
+<rect class="ghost" x="134" y="46" width="484" height="112" rx="10"/>
+<rect class="ghost" x="128" y="40" width="484" height="112" rx="10"/>
+<rect class="ghost" x="122" y="34" width="484" height="112" rx="10"/>
+<rect class="frame" x="116" y="28" width="484" height="112" rx="10"/>
+<text class="s note" x="358" y="42">one of four tracks, each with its own 60 s take</text>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="276" y="52" width="180" height="68" rx="8" stroke-width="0.5" style="fill:rgb(225, 245, 238);stroke:rgb(15, 110, 86);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="366" y="76" text-anchor="middle" dominant-baseline="central" style="fill:rgb(8, 80, 65);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">DRONE + PADS</text>
-<text x="366" y="98" text-anchor="middle" dominant-baseline="central" style="fill:rgb(15, 110, 86);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">granular / stretch / spectral</text>
-</g>
+<rect class="io" x="20" y="72" width="64" height="44" rx="8"/>
+<text class="t io-t" x="52" y="94">IN</text>
 
-<line x1="104" y1="86" x2="146" y2="86" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<line x1="230" y1="86" x2="272" y2="86" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+<rect class="src" x="130" y="64" width="78" height="60" rx="8"/>
+<text class="t src-t" x="169" y="86">TAKE</text>
+<text class="s src-t" x="169" y="104">record, load</text>
 
-<path d="M366 120 L366 150 L95 150 L95 178" fill="none" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+<rect class="src" x="226" y="64" width="96" height="60" rx="8"/>
+<text class="t src-t" x="274" y="80">VOICE</text>
+<text class="s src-t" x="274" y="96">PLAY GRAIN</text>
+<text class="s src-t" x="274" y="110">WARP PV CLOUD</text>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="40" y="180" width="110" height="52" rx="8" stroke-width="0.5" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="95" y="206" text-anchor="middle" dominant-baseline="central" style="fill:rgb(113, 43, 19);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">FILTER</text>
-</g>
+<rect class="fx" x="340" y="64" width="72" height="60" rx="8"/>
+<text class="t fx-t" x="376" y="86">FILTER</text>
+<text class="s fx-t" x="376" y="104">LP HP BP</text>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="190" y="180" width="110" height="52" rx="8" stroke-width="0.5" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="245" y="206" text-anchor="middle" dominant-baseline="central" style="fill:rgb(113, 43, 19);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">DELAY</text>
-</g>
+<rect class="fx" x="430" y="64" width="72" height="60" rx="8"/>
+<text class="t fx-t" x="466" y="86">COLOR</text>
+<text class="s fx-t" x="466" y="104">drive, crush</text>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="340" y="180" width="110" height="52" rx="8" stroke-width="0.5" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="395" y="206" text-anchor="middle" dominant-baseline="central" style="fill:rgb(113, 43, 19);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">REVERB</text>
-</g>
+<rect class="fx" x="520" y="64" width="68" height="60" rx="8"/>
+<text class="t fx-t" x="554" y="86">EFFECT</text>
+<text class="s fx-t" x="554" y="104">two slots</text>
 
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="490" y="180" width="64" height="52" rx="8" stroke-width="0.5" style="fill:rgb(241, 239, 232);stroke:rgb(95, 94, 90);color:rgb(11, 11, 11);stroke-width:0.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="522" y="206" text-anchor="middle" dominant-baseline="central" style="fill:rgb(68, 68, 65);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500;text-anchor:middle;dominant-baseline:central">OUT</text>
-</g>
+<line class="w" x1="84" y1="94" x2="126" y2="94" marker-end="url(#arrow)"/>
+<line class="w" x1="208" y1="94" x2="222" y2="94" marker-end="url(#arrow)"/>
+<line class="w" x1="322" y1="94" x2="336" y2="94" marker-end="url(#arrow)"/>
+<line class="w" x1="412" y1="94" x2="426" y2="94" marker-end="url(#arrow)"/>
+<line class="w" x1="502" y1="94" x2="516" y2="94" marker-end="url(#arrow)"/>
 
-<line x1="150" y1="206" x2="186" y2="206" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<line x1="300" y1="206" x2="336" y2="206" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<line x1="450" y1="206" x2="486" y2="206" marker-end="url(#arrow)" style="fill:none;stroke:rgb(137, 135, 129);color:rgb(11, 11, 11);stroke-width:1.5px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+<!-- the track's level, then the sum -->
+<rect class="io" x="646" y="72" width="94" height="44" rx="8"/>
+<text class="t io-t" x="693" y="87">LEVEL</text>
+<text class="s io-t" x="693" y="103">four tracks sum</text>
+<line class="w" x1="588" y1="94" x2="642" y2="94" marker-end="url(#arrow)"/>
 
-<text x="245" y="262" text-anchor="middle" style="fill:rgb(82, 81, 78);stroke:none;color:rgb(11, 11, 11);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">Everything starts dry. You add the effects on top, never forced on.</text>
+<!-- the sends -->
+<path class="w" d="M614 94 L614 232" />
+<path class="w" d="M614 190 L274 190 L274 162" marker-end="url(#arrow)"/>
+<text class="s note" x="420" y="178">send to another track</text>
+<path class="w" d="M614 232 L560 232" marker-end="url(#arrow)"/>
+<path class="w" d="M614 232 L614 296 L560 296" marker-end="url(#arrow)"/>
+<text class="s note" x="640" y="264">sends</text>
+
+<rect class="fx" x="446" y="210" width="110" height="44" rx="8"/>
+<text class="t fx-t" x="501" y="232">DELAY</text>
+<rect class="fx" x="446" y="274" width="110" height="44" rx="8"/>
+<text class="t fx-t" x="501" y="296">REVERB</text>
+<text class="s note" x="501" y="332">shared by the four tracks</text>
+
+<!-- the mix and the tape -->
+<rect class="io" x="246" y="242" width="110" height="44" rx="8"/>
+<text class="t io-t" x="301" y="264">MIX</text>
+<path class="w" d="M446 232 L400 232 L400 256 L360 256" marker-end="url(#arrow)"/>
+<path class="w" d="M446 296 L400 296 L400 272 L360 272" marker-end="url(#arrow)"/>
+<path class="w" d="M693 116 L693 352 L301 352 L301 290" marker-end="url(#arrow)"/>
+
+<rect class="src" x="110" y="304" width="116" height="44" rx="8"/>
+<text class="t src-t" x="168" y="319">TAPE</text>
+<text class="s src-t" x="168" y="335">loops input or mix</text>
+<path class="w" d="M270 286 L270 326 L230 326" marker-end="url(#arrow)"/>
+<path class="w" d="M178 304 L178 264 L242 264" marker-end="url(#arrow)"/>
+
+<rect class="io" x="20" y="242" width="64" height="44" rx="8"/>
+<text class="t io-t" x="52" y="264">OUT</text>
+<path class="w" d="M246 250 L88 250" marker-end="url(#arrow)"/>
+
+<text class="s note" x="380" y="374">A fresh take plays dry. Every send and every effect starts at zero.</text>
 </svg>

@@ -1,261 +1,332 @@
 # four
 
-A live stereo sampler for [norns](https://monome.org/norns/) with four tracks. Each track
-records or loads its own material and has its own voice, filter, colour and effect sends;
-tracks can feed each other. It was called mangler. Record anything line level,
-loop it back exactly as recorded, then process it: time stretch, granular, tape varispeed,
-filter, delay, reverb, playable slices, a gesture looper, scene morphing, and controlled
-decay. Three keys and three encoders run everything. A grid is optional. Every parameter is
-MIDI mappable.
+A four-track live sampler for [norns](https://monome.org/docs/norns/).
 
-Built and tested on a norns shield XL with a Raspberry Pi 4. Older hardware is untested.
+Record any sound, then loop, stretch and grain it on four tracks.
 
-![Signal flow](doc/signal-flow.svg)
+![The twelve pages of four](doc/ui/four.png)
 
-Status: in active development, built in stages that are each verified on hardware.
-[CLAUDE.md](CLAUDE.md) holds the build log, [doc/spec.md](doc/spec.md) the engine spec,
-[doc/engine-map.md](doc/engine-map.md) explains every engine decision in plain words.
-Rendered screens for every page are in `doc/ui/`.
+Each track has its own take of up to 60 seconds, its own voice, filter, colour and two
+effects. A track can send to the other tracks, to the delay and to the reverb. Three keys
+and three encoders reach everything. A grid is welcome and never needed. Every parameter
+maps to MIDI.
+
+four was called mangler. It is in active development: each change is measured on the
+device, and the newest sounds still wait for a listening session.
 
 ## Requirements
 
-A norns on current software. Optional: a MIDI controller, a USB typing keyboard, and a grid
-(monome, Launchpad Mini MK3 driven natively in color, or other Launchpad and APC models
-through [midigrid](https://github.com/jaggednz/midigrid)). JPverb (sc3-plugins) and MiClouds
-(mi-UGens) are used automatically when installed and are never required.
+- A norns with current software. four is built and measured on a shield XL with a
+  Raspberry Pi 4. Older hardware is not tested.
+- A sound at line level on the norns input.
+- Optional: a MIDI controller, a USB typing keyboard, a crow.
+- Optional: a grid. A monome grid and a Launchpad Mini MK3 work directly. Other Launchpad
+  and APC models work through [midigrid](https://github.com/jaggednz/midigrid).
+- Optional: the `FourStretch` plugin, JPverb (sc3-plugins) and MiClouds (mi-UGens). If
+  the engine finds one, it uses it. The engine also plays without them.
 
 ## Install
+
+In maiden, type this line and then SYSTEM > RESTART:
+
+```
+;install https://github.com/Alejo-end/four
+```
+
+The repository is private at the moment, so that line works only with access. From a
+clone, copy the script to the norns:
 
 ```sh
 rsync -av --delete --exclude='.git' ./ we@norns.local:~/dust/code/four/
 ```
 
-Then SYSTEM > RESTART on the norns and pick four in SELECT. Two rules:
+Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
 
-1. `--delete` matters. A stale second copy of `Engine_Four.sc` anywhere under
-   `dust/code` hangs every norns script on LOADING.
-2. Any change to the engine file needs SYSTEM > RESTART. Lua changes only need a script
-   reload. After a restart the maiden log prints the engine command count. It must read
-   `count: 197`; any other number means an old engine is still running.
+1. Keep `--delete`. A second copy of `Engine_Four.sc` under `dust/code` hangs every norns
+   script on LOADING.
+2. If the engine file changes, do SYSTEM > RESTART. A Lua change needs only a script
+   reload.
+3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
+   A different number means that an old engine still runs.
+
+The `FourStretch` plugin holds the instrument's own stretch, grain and delay code. It is
+built on the norns: the steps are in [ugen/README.md](ugen/README.md). With it, the
+SuperCollider log says `four: FourStretch on`.
 
 ## First session
 
-1. Plug in your gear. On TAKE press K2, play a phrase, press K2 again. The window snaps to
-   what you played and loops it back dry. The small diamond next to the title means you are
-   hearing the recording exactly.
-2. Turn E2 and E3 to move the window edges. On VOICE, K3 cycles PLAY, GRAIN, WARP, PV. The
-   screen texture shows the active mode.
-3. FILTER, DELAY and REVERB all start at zero. Dial them in. Reverb adds tail without ever
-   lowering the recording itself.
-4. On PADS, E2 selects one of eight slices and K2 plays it. Each slice can have its own
-   voice type and pitch. Plug in a MIDI or typing keyboard and tap K3 to play slices
-   polyphonically.
-5. On SCENE, K3 captures the whole current sound into a slot. Change everything, then turn
-   E3 to morph from where you are toward the stored scene. Back to zero returns you exactly
-   home. K2 recalls. Holding K2 borrows the scene and releasing comes back.
-6. Two reflexes work on every page. K1 plus K2 stops and restarts all sound. K1 plus K3
-   makes playback dry instantly, and holding it about a second erases the current page's
-   material.
+1. Plug in your gear. On TAKE, press K2, play a phrase and press K2 again. The take loops
+   back dry. The small diamond beside the title means that you hear the recording exactly.
+2. Turn E2 and E3 to move the edges of the loop.
+3. Turn E1 to VOICE. K3 steps through PLAY, GRAIN, WARP, PV and CLOUD. The picture is the
+   voice's own mechanism.
+4. FILTER and EFFECT start at zero. Turn them up.
+5. DELAY and REVERB are silent until a track sends to them. On TRACKS, hold K1 and open
+   the send D or R of the track.
+6. Hold K1 and turn E1 to pick track 2. TAKE now records into track 2. TRACKS shows the
+   four tracks together.
+7. On SCENE, K3 keeps the whole sound in a slot. Change everything, then turn E3 to morph
+   toward the stored scene.
+8. Two moves work on every page. K1 plus K2 stops and starts all sound. A tap of K1 plus
+   K3 turns all effects off.
+
+| | |
+|---|---|
+| ![TAKE, empty](doc/ui/take-empty.png) | ![TAKE, recording](doc/ui/take-rec.png) |
+| An empty track asks for a take. | K2 records. The bar shows the input level. |
 
 ## Controls
 
-Every key follows one rule: press engages immediately, a quick release latches it, a longer
-hold acts while held and releases when you do, and pressing a latched key turns it off.
+Every key follows one rule. A tap turns the key on, and it stays on. A longer hold keeps it
+on only while you hold. A press on a key that is on turns it off.
 
 | Control | Action |
 |---|---|
-| E1 | Select page. The destination's name pops up big while you scroll. |
-| E2, E3 | The page's two knobs. Hold K1 for the second pair. Values show while turning. |
-| K1 | Shift, hold |
-| K2, K3 | The page's two actions, named in the footer |
-| K1 + K2 | Stop and start everything, from any page. Every head freezes and resumes in place. |
-| K1 + K3 | Tap: dry playback. Hold about a second: erase this page's material. |
-| K1 + E1 | Morph toward the selected scene, from any page |
+| E1 | Change the page. The name of the page shows large for a moment. |
+| E2, E3 | The two knobs of the page. The value shows while you turn. |
+| K1 | Hold for the second pair of knobs. |
+| K2, K3 | The two keys of the page. The foot of the screen names them. |
+| K1 + E1 | Pick track 1 to 4. |
+| K1 + K2 | Stop or start everything. Every head resumes in its place. |
+| K1 + K3 | Tap: all effects off. Hold for a second: erase what the page holds. |
 
-The full map of every page's knobs and keys, generated from the code, is in
-[doc/controls.md](doc/controls.md).
+[doc/controls.md](doc/controls.md) holds the full map of each page. It is generated from
+the code.
 
 ## Pages
 
-The stations sit in families: the take (TAKE, VOICE, TRACKS), the loop deck (TAPE), the
-tone (FILTER, EFFECT, DELAY, REVERB), the console (MIX), and the performance layer (PADS, MOTION,
-SCENE). Erosion lives on VOICE (it only works in PLAY mode) and the orbit lives on SCENE.
+| Page | What it does | K2 | K3 |
+|---|---|---|---|
+| TAKE | Record a sound and set its loop | record | snap the loop, hold: undo |
+| VOICE | How the track plays the take | freeze (heal in PLAY) | next voice |
+| TRACKS | The four tracks: on, level and sends | track on | next voice |
+| TAPE | A loop deck for the input or the whole mix | record | reverse |
+| FILTER | Low-pass, high-pass or band-pass, with drive and crush | open | type |
+| EFFECT | Two effects in series for the track | on | type |
+| DELAY | The echoes of the tracks that send to it | hold forever | kill |
+| REVERB | A room for the tracks that send to it | wash | bloom |
+| MIX | Input, engine, tape and output levels | throw the engine | throw the tape |
+| PADS | The take as eight slices to play | play the slice | route notes |
+| MOTION | Record knob moves, and set the four modulators | record | play |
+| SCENE | Keep a sound, call it back, morph to it | recall, hold: peek | capture |
 
-| Page | What it does | Keys |
-|---|---|---|
-| TAKE | Record and frame the material | K2 record, K3 tap snap window, hold undo |
-| VOICE | How the take plays: PLAY, GRAIN, WARP, PV. In GRAIN the picture is the grain cloud, left channel at the top. In PLAY the alt knobs erode the take. | K2 freeze (heal in PLAY), K3 mode |
-| TAPE | A second loop deck with its own speed and direction | K2 record, K3 reverse |
-| FILTER | Diode ladder filter plus drive | K2 open, K3 type |
-| EFFECT | One effect for the focused track: chorus, flange, wobble, reson or ring. E2 is the amount, E3 the rate. | K2 on and off, K3 next effect |
-| DELAY | Feedback echoes, optionally clocked | K2 infinite hold, K3 kill |
-| REVERB | Tail and shimmer, added on top of the dry sound | K2 wash, K3 shimmer bloom |
-| MIX | Input, both decks, output | K2 engine throw, K3 tape throw |
-| PADS | The take chopped into eight playable slices | K2 play slice, K3 route notes |
-| MOTION | Record and replay knob movements, and the two modulators | K2 record, K3 play |
-| SCENE | Capture, recall and morph whole sounds. The alt knobs run the orbit. | K2 recall or peek, K3 capture |
+TAKE, VOICE, FILTER and EFFECT edit the focused track. The header shows the focus as
+1 2 3 4.
 
-The header shows what runs, from any page. A blinking R, T or M means the take, the
-tape or the motion looper is recording. FZ and TF are the freezes, RP a held
-beat repeat, SQ the pad sequencer and LF a modulator. When many are lit, a flag shrinks to
-its letter or to a short bar, but it never disappears.
+### VOICE
 
-Notes on the less obvious ones.
+| | |
+|---|---|
+| ![PLAY](doc/ui/voice-play.png) | ![GRAIN](doc/ui/voice-grain.png) |
+| PLAY: a clean loop, exact at pitch 1. | GRAIN: a cloud of small pieces of the take. |
+| ![WARP](doc/ui/voice-warp.png) | ![PV](doc/ui/voice-pv.png) |
+| WARP: slow or fast at the same pitch. | PV: a phase vocoder. A held head is a freeze. |
 
-The orbit lives on SCENE: it picks a stored scene, morphs partway toward it, parks there,
-then picks another, never fully arriving, so it keeps finding sounds between the ones you
-saved. Hold K1 on SCENE for its two knobs (drift time and reach); start and stop it with
-the `orbit run` parameter (MIDI-map a footswitch) or the grid's scene row, and an ORBIT
-chip blinks on the page while it wanders. CAP during a wander bottles the in-between sound
-into the first empty slot. Move the morph yourself (K1+E1, a MIDI fader, a peek) and the
-orbit stands still; two seconds after you let go it carries on from where you left it.
+CLOUD is MiClouds, for texture. OFF silences the track and frees its CPU.
 
-The `recall quantize` parameter decides when a recall lands: NOW, on the next BEAT or BAR,
-or GLIDE, where the morph sweeps to the scene over `glide beats` and then the scene lands,
-a crossfade instead of a jump. Turning the morph or the selector mid-glide stops it where
-it stands.
+In PLAY on track 1, hold K1 for erode and wear. Each pass of the loop then rewrites the
+take a little darker and quieter, and GEN counts the passes. K2 becomes HEAL: it parks the
+decay. Recording is never affected.
 
-A MOTION loop's first pass, played within a few percent of a musical length of the clock,
-loops exactly on that length, so it stays in time with the clock, the synced delay and
-the tape.
+![PLAY with erosion](doc/ui/voice-erode.png)
 
-Erosion lives on VOICE and works in PLAY mode, the one mode the engine erodes in. With
-erode up (hold K1 for erode and wear), every pass of the loop rewrites the window slightly
-darker and quieter, the GEN counter counts the passes, and K2 becomes HEAL: hold it to
-park the decay and let go to resume, or tap to latch it stopped. Recording is never
-affected.
+### TRACKS
 
-SCENE slot zero, drawn as a left arrow, is the way back: every recall and chaos throw parks
-the previous sound there automatically. Select it and tap K2 to undo. The `next scene`
-parameter steps through filled slots and can be mapped to a footswitch, as can `chaos throw`.
-A recalled scene never opens the playback window past the recorded material: a scene
-captured with the window wide, recalled over a short take, lands on the take instead of
-sixty seconds of mostly silence. The `capture scope` parameter switches CAP to FX-only
-scenes: a slot that stores just filter, drive, delay, reverb and shimmer, and lands or
-morphs over whatever material is playing.
+| | |
+|---|---|
+| ![TRACKS](doc/ui/tracks.png) | ![TRACKS, the sends](doc/ui/tracks-sends.png) |
+| E2 picks the track and E3 sets its level. | Hold K1: E2 picks where the track sends, E3 how much. |
+
+The sends grid has a column for each track, D for the delay and R for the reverb. Every
+send starts at zero. The echoes and the tail are added to the dry sound, which never ducks.
+
+### FILTER and EFFECT
+
+| | |
+|---|---|
+| ![FILTER](doc/ui/filter.png) | ![FILTER with crush](doc/ui/filter-crush.png) |
+| E2 is the cutoff and E3 the resonance. | Hold K1 for drive and crush. |
+| ![CHORUS](doc/ui/effect-chorus.png) | ![FLANGE](doc/ui/effect-flange.png) |
+| CHORUS | FLANGE |
+| ![WOBBLE](doc/ui/effect-wobble.png) | ![RESON](doc/ui/effect-reson.png) |
+| WOBBLE: tape wow. | RESON: a tuned resonator. RATE is its note. |
+| ![RING](doc/ui/effect-ring.png) | |
+| RING: a ring modulator. | |
+
+The sixth type is ECHO, a delay of the track's own. On every type, E2 is the amount and E3
+the rate. Hold K1 to turn the same two knobs of the second slot. The type of the second
+slot is in PARAMS.
+
+### DELAY, REVERB and MIX
+
+| | |
+|---|---|
+| ![DELAY](doc/ui/delay.png) | ![DELAY held](doc/ui/delay-inf.png) |
+| Each bar is one echo. | K2 holds the echoes forever. |
+| ![REVERB](doc/ui/reverb.png) | ![REVERB with shimmer](doc/ui/reverb-shimmer.png) |
+| The room: four squares, each denser than the one inside it. | K3 adds the shimmer. |
+
+On REVERB, the four tracks stand at the four corners. A line from a corner is that
+track's send. With the plugin, the reverb is `FourRoom`, a room of our own, and the delay
+is `FourBBD`, a model of a bucket brigade chip: a long time is dark.
+
+| | |
+|---|---|
+| ![MIX](doc/ui/mix.png) | ![TAPE](doc/ui/tape.png) |
+| MIX: E2 fades between the engine and the tape. | TAPE: a loop deck with its own speed and direction. |
+
+### PADS
+
+| | |
+|---|---|
+| ![PADS](doc/ui/pads.png) | ![PADS with the sequencer](doc/ui/pads-seq.png) |
+| E2 picks one of eight slices and K2 plays it. | The sequencer draws its pattern under the pads. |
+
+Each slice has its own voice and pitch. Tap K3, and a MIDI or typing keyboard plays the
+slices with many voices.
+
+The sequencer (`PARAMS > pads - sequencer`) plays the pads on the clock. By default it
+steps through four pads, a bar each. `steps that play` spreads that many hits over `steps`.
+`pad order` walks the pads up, down, back and forth or at random. `step chance` skips hits
+and `step gate` shortens them. Map `sequencer run` to a footswitch.
+
+### MOTION
+
+| | |
+|---|---|
+| ![MOTION](doc/ui/motion.png) | ![MOTION, a modulator](doc/ui/motion-lfo.png) |
+| K2 records your knob moves and K3 loops them. | Turn E2 past the last lane for the modulators. |
+
+A motion loop of about a musical length snaps to that length, so it stays on the clock.
+
+A modulator moves what the engine hears, never the knob. The knob stays where you, a scene
+or a motion lane put it, and the sound swings around it. Each of the four modulators has a
+target, a shape, a period and a depth. The shapes are sine, triangle, square, ramp, random
+and ENV, the envelope of the input. A negative depth inverts the wave, so ENV with a
+negative depth ducks the sound while your gear plays. With a modulator selected on MOTION,
+E3 is its depth, K1+E2 its period and K1+E3 its target.
+
+### SCENE
+
+| | |
+|---|---|
+| ![SCENE](doc/ui/scene.png) | ![SCENE, the orbit](doc/ui/scene-orbit.png) |
+| E2 picks a slot and E3 morphs toward it. | The orbit wanders between the stored scenes. |
+
+- K3 captures the sound into the slot. K2 recalls it. Hold K2 to borrow the scene, and
+  release to come back.
+- Slot zero, the left arrow, is the way back. Every recall parks the sound before it there.
+- The orbit picks a scene, morphs part of the way, rests, and picks the next one. Hold K1
+  for its drift time and its reach. Start it with the `orbit run` parameter.
+- `recall quantize` sets the moment of a recall: NOW, the next BEAT or BAR, or GLIDE, a
+  morph over `glide beats`.
+- `capture scope` makes a scene of the effects only. It then lands on any material.
+
+## The header
+
+The header shows what runs, from every page. A blinking R, T or M means that the take, the
+tape or the motion loop records. FZ and TF are the freezes, RP is a held beat repeat, SQ is
+the pad sequencer and LF is a modulator.
 
 ## Recording
 
-Turn on PARAMS > take - record > start on sound, and an armed take starts where the sound
-does. K2 arms as usual and TAKE shows WAIT until what is being recorded crosses the sound
-threshold. The take then starts there, with a short pre-roll that keeps the attack. The
-recording itself runs from the arm, so nothing is lost while the level is read. A pass with
-no sound over the threshold keeps the whole pass, and an overdub never waits. While it is
-on, TAKE shows ON SND top right, so you know before you arm.
+| | |
+|---|---|
+| ![TAKE waits for sound](doc/ui/take-wait.png) | ![TAKE, the undo arc](doc/ui/take-undo.png) |
+| With `start on sound`, an armed take waits. | Hold K3 for a second to undo the last change. |
 
-PARAMS > take - window > win length locks the window's length to the clock: one beat to
-eight bars at the current tempo. The window's start carries the length with it, so moving
-the start slides the whole window, a record pass comes out that long, and a tempo change
-re-times it. Moving the end yourself (E3, SNAP, a scene, the morph) is left as you put it
-until the next of those. TAKE shows the length top right.
-
-Hold K3 on TAKE for about a second (the arc, as for the eraser) to go back to the take before
-the last finished change: a record pass, a load, a print, a PSET, regen or erosion going
-quiet, or a clear. Hold it again to come forward. A tap is still SNAP, and TAKE says on its
-top row what either one did. A "<" at the top left means there is a take to go back to.
-PARAMS > take - record > undo take does the same from a footswitch. The window comes back with it. Each finished change writes the take
-to the card once, at most two takes' worth; turn `keep an undo` off to save the card.
-
-## Notes and pads
-
-A MIDI keyboard or a USB typing keyboard (letters as keys, Z and X for octave) retunes the
-sample chromatically. With pad routing on they play the eight slices polyphonically instead.
-Settings live in PARAMS under keys. The space bar stops and starts everything.
-
-The pad sequencer (PARAMS > pads - sequencer) plays the pads on the clock, so their own
-voices and pitches become a progression. By default it steps through four pads a bar each,
-legato: a slow drone sequence. `steps that play` spreads that many hits evenly over
-`steps`, `pad order` walks the pads up, down, back and forth or at random, `step chance`
-skips hits, and `step gate` shortens each hit. PADS draws the pattern under the pads, dim
-while it is stopped and bright with the current step while it runs. Map `sequencer run` to
-a footswitch to start and stop it. On the grid's PADS rows, row 6 pad 3 runs it and pads 5
-and 6 take a hit away or add one.
-
-## Modulators
-
-PARAMS > modulators holds two LFOs. Each one moves the sound of one engine knob: pick its
-target, a shape (sine, triangle, square, ramp, random, or ENV, the input's envelope), a
-period (free in Hz, or one beat to eight bars on the clock) and a depth. The modulator never
-moves the knob itself, only what the engine hears, so the knob stays where you, a scene or a
-motion lane put it, and the sound swings around it. Scenes, UNDO, the motion loop and a PSET
-all store the knob, never the wave. Two modulators on one knob add up. A negative depth
-inverts the wave, so ENV with a negative depth ducks the sound while the gear plays. The
-pages draw the knob, not the swing; the header shows LF while a modulator runs and SQ while
-the sequencer does.
-
-The two modulators also live on MOTION, as two rows under the lanes. Turn E2 past the last
-lane to select one: its row draws its wave and what it moves ("1>CUT"), E3 sets its depth,
-K1+E2 its period and K1+E3 its target. Holding K1+K3 on a modulator row lets it go. The
-shape and the free rate stay in PARAMS.
-
-PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat` (map it to a pad or a
-footswitch) and on the next division the engine captures that much of what you hear and
-loops it until you let go. `repeat length` sets the division, a half note to a 32nd, and
-turning it while you hold re-captures a shorter slice: a roll. STOP releases it. The header
-shows RP and the division while it holds (RP8 for an eighth). On the grid, row 6 of the main
-workspace holds a repeat at a half note to a 32nd (pads 1 to 5): slide a finger across them
-for a roll. Resampling and PRINT record the sound without the stutter.
-
-PARAMS > modulation out sends one of those movements to other gear: the scene morph (so
-the orbit and a GLIDE move your synth too), the input envelope, or an LFO's wave, which
-runs even when it moves no knob. It goes out as a MIDI CC on the port, channel and number
-you pick, and to crow output 1 as 0 to 5 volts when a crow is connected.
+- `PARAMS > take - record > start on sound`: the take starts where the sound starts, with a
+  short pre-roll that keeps the attack.
+- `PARAMS > take - window > win length`: the loop's length locks to the clock, from one beat
+  to eight bars.
+- Hold K3 on TAKE to go back to the take before the last change. Hold it again to come
+  forward. A "<" at the top left means that there is a take to go back to.
+- Hold K1 plus K3 for a second to erase the take. The arc shows the time left.
 
 ## Samples
 
-Load: PARAMS > take > load sample reads WAV in 8, 16, 24 or 32 bit, integer or float. The
-window snaps to the file. A file at any sample rate loads in tune: off-rate files are resampled on the way in
-through a windowed-sinc kernel. That matters most coming DOWN from 88.2k or 96k: there,
-everything above the server's own limit has to be removed before resampling or it folds
-back into the audible band as tones that were never in the file.
+- Load: PARAMS > take > load sample reads WAV files of 8, 16, 24 or 32 bits. A file at any
+  sample rate loads in tune.
+- Export: PARAMS > take > export take writes the take to `dust/audio` as a stereo WAV of
+  24 bits.
+- Print: PARAMS > take > print mix records the output and loads that recording as the
+  take. The recording also stays on the card.
 
-Export: PARAMS > take > export take writes the current take to `dust/audio` as a stereo
-24-bit WAV. The take rides PSET save and load at the same depth.
+## Notes, beat repeat and other gear
 
-Print: PARAMS > take > print mix records the master output, everything you hear from both
-decks and all effects, then loads that recording back as the take. Length zero means one
-window length. The bounce also stays on disk, so material is never lost. Map it to a
-footswitch and resampling becomes one stomp.
+A MIDI keyboard or a USB typing keyboard plays the take at pitch. The letters are the keys,
+Z and X change the octave, and the space bar stops and starts everything. The settings are
+in PARAMS > keys.
+
+PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat`, and the engine loops
+the last division of what you hear until you let go. `repeat length` runs from a half note
+to a 32nd.
+
+PARAMS > modulation out sends the scene morph, the input envelope or a modulator's wave to
+other gear. It goes out as a MIDI CC, and as 0 to 5 volts on crow output 1.
 
 ## Saving
 
-PARAMS > PSET saves everything: parameters, the MIDI map, the take audio, the tape
-audio, the scene bank, the motion loop and the per slice settings. Loading restores
-the whole session, sound included, and the motion loop comes back playing if it was.
-The tape saves only as far as it holds material, so a short loop makes a small file.
+PARAMS > PSET saves the whole session: the parameters, the MIDI map, the four takes, the
+tape, the scenes, the motion loop and the slices. `data/` holds twelve presets for one
+album. No person listened to them yet.
 
 ## Grid
 
-Optional. Rows one and two are always scenes and transport, rows seven and eight are always
-a piano octave, and the middle rows follow the current page: window and loop spans, slice
-pads, or the morph bar. On a Launchpad Mini MK3 pads are colored by meaning: red records,
-green plays, white is the cursor, purple is destructive. Its left and right arrows step the
-page, up and down step the scene slot, and it can be plugged in after the script has
-loaded. In pad mode the piano rows light the keys whose pad is sounding. Details in
-`lib/mgrid.lua`.
+Rows one and two are scenes and transport. Rows seven and eight are a piano octave. The
+middle rows follow the page: loop spans, slice pads or the morph bar. On a Launchpad Mini
+MK3 the colours have meanings: red records, green plays, white is the cursor and purple
+erases. `lib/mgrid.lua` has the details.
+
+## Visuals
+
+`lib/mosc.lua` sends the state of the instrument as OSC. `visuals/` holds a bridge that
+feeds it to Hydra in a browser: see [visuals/README.md](visuals/README.md). This link has
+not run on the device yet.
+
+## Signal flow
+
+![Signal flow](doc/signal-flow.svg)
+
+softcut runs the tape on its own core. One SuperCollider engine, `lib/Engine_Four.sc`,
+does the recording, the voices and the effects. Only what you hear costs CPU: a track that
+is off, an effect at zero and a reverb at zero do not run.
 
 ## Troubleshooting
 
-1. Every script hangs on LOADING: almost always a duplicate engine class under `dust/code`.
-   Redeploy with `rsync --delete`. Errors appear in maiden's SC tab, not matron.
-2. Engine edits do nothing: you skipped SYSTEM > RESTART, or the printed command count is
-   not `count: 66`.
-3. Dry playback has reverb on it: check the system reverb under PARAMS, a raised reverb or
-   delay mix, or clouds feedback. K1 plus K3 zeros all of them.
-4. Reverb knobs beyond decay, damp and mix do nothing: JPverb is not installed and the
-   FreeVerb fallback only honors those three.
-5. A mystery loop that is not the take: the tape deck. The MIX page shows which deck is
-   audible. Clear the tape on TAPE with the erase gesture.
-6. Faint on headphones but fine on the line out: raise headphone gain under PARAMS > LEVELS.
-7. Frozen or black screen after loading: a Lua error inside redraw. Scroll maiden below the
-   ok line for the traceback. Once running, a Lua error inside one frame no longer freezes
-   anything: maiden prints `frame error` and the instrument carries on.
+1. Every script hangs on LOADING. A second engine class is under `dust/code`. Deploy again
+   with `rsync --delete`. The errors are in maiden's SC tab, not in matron.
+2. An engine edit changes nothing. You did not do SYSTEM > RESTART, or the count is not
+   `count: 198`.
+3. A dry take has reverb on it. Look at the system reverb in PARAMS and at the delay and
+   reverb levels. A tap of K1 plus K3 turns all effects off.
+4. The delay or the reverb is silent. No track sends to it, and the page says `NO SEND`.
+   On TRACKS, hold K1 and open the send D or R.
+5. Some reverb parameters do nothing. The room reads only decay, damp and size.
+6. A loop plays that is not the take. It is the tape. MIX shows which deck you hear. Erase
+   the tape on TAPE with K1 plus K3.
+7. The screen is black or frozen after the load. A Lua error is inside the redraw. Scroll
+   maiden below the ok line for the traceback.
 
-## Architecture
+## What comes next
 
-One SuperCollider engine (`lib/Engine_Four.sc`, exactly one copy on the device) does
-recording, playback voices and effects. softcut runs the tape deck on its own core. The Lua
-side is `four.lua` plus modules in `lib/` sharing one context table, with the params
-system as the single source of truth for every value. `dist/four_single.lua` is a
-generated single file build; edit the modules, not that file. `test/uisim/` renders every
-page offscreen for testing without hardware.
+The plan is [doc/space-plan.md](doc/space-plan.md). The room reverb, the bucket brigade
+delay and the sends are built. The delay and the sends are not on the device yet, and no
+person listened to any of them. Still to do:
+
+- SPACE: one page for the sends, the delay and the reverb.
+- Knobs for the delay's AGE (noise) and TONE, and for the room's COLOR.
+- The room's first reflections, and SIZE that moves while the room plays.
+- CHORUS and ECHO on the bucket brigade, RESON as a string, WOBBLE as a tape model.
+- A screen with fixed rules: geometry only, four levels of grey, and motion only where
+  there is sound.
+
+## For developers
+
+- [CLAUDE.md](CLAUDE.md): the status, the hard rules and the lessons.
+- [doc/changelog.md](doc/changelog.md): every change, oldest first.
+- [doc/spec.md](doc/spec.md) and [doc/engine-map.md](doc/engine-map.md): the engine.
+- [doc/norns-platform.md](doc/norns-platform.md): costs, budgets and platform traps.
+- `lua test/check.lua` runs every check. `python3 test/uisim/gallery.py` rebuilds the
+  pictures of this page from the real redraw code, with no hardware.
+- `dist/four_single.lua` is a generated single file. Edit the modules in `lib/`.

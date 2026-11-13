@@ -128,7 +128,6 @@ block current, and add a change-log entry for every change.
   about 5%). doc/space-plan.md is the plan for SPACE (BBD delay, the room, sends, the
   page), reviewed by a second agent; its section 13 says what is built. With preset 1's
   reverb and delay on, four PLAY tracks take 17% of the thread. Nobody has listened.
-  README.md and doc/ui are edited from another terminal: do not commit them from here.
 - **THE BUCKET BRIGADE (four, seventeenth change), NOT on the device:** `FourBBD` is
   the delay when the plugin is there (ugen/four_core.h `BBD`, `BBDDelay`; proof in
   test_core, 68 checks in all). The norns was off the network when it was written:
