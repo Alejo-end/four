@@ -83,6 +83,9 @@ def states():
         set_mode(mode)
         sample(mode)
     set_mode("PLAY")
+    # the sends start at 0 (four, nineteenth change): open track 1's, so the
+    # delay and the reverb process the take and not silence
+    n.set("fx_rev", 1)
     n.set("rev_mix", 0.4)
     time.sleep(1)
     sample("PLAY + reverb")
@@ -91,10 +94,13 @@ def states():
     sample("PLAY + reverb + shimmer")
     n.set("shimmer", 0)
     n.set("rev_mix", 0)
+    n.set("fx_rev", 0)
+    n.set("fx_dly", 1)
     n.set("delay_mix", 0.4)
     time.sleep(1)
     sample("PLAY + delay")
     n.set("delay_mix", 0)
+    n.set("fx_dly", 0)
     n.set("drive", 0.5)
     sample("PLAY + drive")
     n.set("drive", 0)
@@ -184,6 +190,8 @@ def everything():
     record_tape(3, "tone", 0.1)
     set_mode("GRAIN")
     n.set("density", 80)
+    n.set("fx_dly", 1)   # track 1's sends: the delay and reverb hear it
+    n.set("fx_rev", 1)
     n.set("rev_mix", 0.3)
     n.set("delay_mix", 0.3)
     n.set("shimmer", 0.3)

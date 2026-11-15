@@ -1,5 +1,13 @@
 # UX feedback — 2026-07-06 (voice notes, typed up)
 
+> Status: a record, and the place for new feedback.
+>
+> The points below are the user's words on mangler from July 2026, and most of them are
+> done or decided. Some page names in them are old (WINDOW, LEVEL, STRETCH, a SPACE page).
+> The pad sequencer of today replaced the step sequencer of point 28. The code and the
+> change log cite the point numbers, so keep them as they are. Write new feedback in a new
+> dated section at the end (doc/plan.md, Phase 4).
+
 The main points from the walkthrough feedback, kept as the working list for the
 UI polish loop. Overall verdict: **keep the design** — these are refinements,
 not a redesign. Target: a UX-friendly, state-of-the-art music-technology view,

@@ -1,5 +1,12 @@
 # mangler: the decks as tracks, and the screen
 
+> **Historical.** This was mangler's plan to turn its softcut decks into tracks.
+> four went another way: four engine tracks (mangler2, fifth to ninth changes), and
+> the layer decks were removed (four, thirteenth change). Of this plan, only the
+> screen phases UI-a and UI-b were built (the 96th to the 101st changes). Phases 1 to
+> 6 are not planned. Kept for its research on the S-4 and softcut. The current plan
+> is doc/plan.md.
+
 This plan says how mangler can come closer to a four-track sculpting
 sampler such as the Torso S-4, inside what a Pi 4 can do, and how to make
 its screen better. It is built on research into the S-4, softcut and the

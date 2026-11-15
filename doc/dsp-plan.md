@@ -1,5 +1,14 @@
 # DSP plan: the voices and the effects, done by the math
 
+> **Status, 2026-11-15.** Much of this plan is built. These parts are in the
+> engine: the frame-count head (sixth change), the depth in cents, the RESON gain
+> law and the FourStretch UGens. These parts are not built: the correlated loop
+> seam, the formant hold and GRAIN through the sinc read. The oversampled drive,
+> the RING lowpass, the delay's time options and SHIFT are not built either. The
+> sentence "Nothing here is built" below is from 2026-11-13. The text below the
+> line is the plan as written. The last section, **The acceptance checklist**, is
+> current: each target, its test and the last measured value.
+
 Written 2026-11-13 from a read of `lib/Engine_Four.sc`. Nothing here is built.
 This version replaces the first draft of the same day. The first draft chose
 what was easy with stock UGens. This one starts from what is correct, and
@@ -370,3 +379,40 @@ load with four tracks (stop above 55%), a listen, the change-log entry.
 A stretch trades time detail against frequency detail, and no frame size is
 right for all material. The targets prove that the engine adds no errors of
 its own. Which voice suits which sound is still a matter for ears.
+
+## The acceptance checklist (2026-11-15)
+
+Each row is a target of the table at the top, its test, and the last value. "Mac"
+is an offline render of the real engine or a run of the core. Nothing here is from
+the norns. The DFM1 rows come from its source, because the Mac has no sc3-plugins.
+The method and every number: doc/measurements/2026-11-15/README.md.
+
+| Target | Test | Last value | Verdict |
+|---|---|---|---|
+| PLAY is the take at pitch 1 | 5 kHz tone 54 s in, an_engine.py | -154 dB | pass |
+| PV and WARP are the take at speed 1 | noise, test_core | -140 dB | pass |
+| PLAY, PV, WARP fold nothing at pitch 2 | 15 kHz tone, core_probe2 | -70.6 dBFS | pass |
+| The same at pitch 3 and 4 | 10 and 7.5 kHz tones | -37.2 and -27.9 dBFS | FAIL: the kernel keeps 32 taps above pitch 2 |
+| No image at pitch 0.5 and 0.25 | 10 kHz tone | -106 and -104 dBFS | pass |
+| GRAIN is flat at pitch 1 | noise, third-octave bands | -2.4 dB at 19 kHz | FAIL: the cubic read between frames |
+| GRAIN folds nothing at pitch 2 | 15 kHz tone | -13.4 dBFS | FAIL |
+| The open filter is the identity | null against dry, under -90 dB | stock -10 dB at 10 kHz, DFM1 H3 -37 dB at -6 dBFS | FAIL on both paths |
+| LP, BP and HP sound alike on both paths | sweeps at 3 cutoffs and 3 resonances | HP 6 against 12 dB an octave | FAIL |
+| No step from a moved knob | a modulator at 15 frames a second | the value stands still half of each frame | FAIL |
+| A mode change has no hole | 1 kHz take, 5 ms RMS | WARP -28.6 dB, PV -27.8 dB | FAIL |
+| The same into GRAIN | as above | no hole | pass (twenty-second change) |
+| The drive folds nothing in hearing | 5 kHz at -6 dBFS, full drive, below 16 kHz | -27.3 dB | FAIL |
+| The take is the input | LeakDC on the record arm | -2.8 dB at 40 Hz | FAIL |
+| Limiting keeps the stereo image | one-sided burst | 3.85 dB shift (output), 2.78 dB (take) | FAIL |
+| Erosion adds no noise | 5 kHz take, 12 s | -141 dB at every place | pass (twenty-second change) |
+| RESON is in tune | C2, C4, C6 | within 0.02 cents | pass |
+| The bucket brigade meets its formulas | test_core | within 0.47 dB and 0.1 clock period | pass |
+| Every reverb knob acts | null test on a running room | 9 knobs change nothing | FAIL |
+| The shimmer loop is bounded | 0.95 at every pitch, 60 s | FourRoom decays, FreeVerb runs away at 0 st | pass with the plugin |
+| The reverb passes no DC | DC 0.5 for 10 s, decay 30 | +16 dB of DC out | FAIL |
+| Cost on the norns | four tracks, `top -H` | doc/measurements/2026-11-13 | measured before this review |
+
+Three tests for the filter are still to write. The first sweeps each path at
+cutoffs of 20 Hz, 1 kHz and 20 kHz with resonance 0, 0.5 and 0.9. The second is
+the null against dry at the open setting. The third changes LP to BP to HP under
+a tone and finds no click above -60 dB.

@@ -1,5 +1,13 @@
 # MANGLER — UI/UX Redesign Specification
 
+> **Historical, and a design reference.** This is mangler's screen redesign of July
+> 2026 (NU-1 to NU-4). Its page lists and key maps are old. The pad sequencer came back
+> on PADS (the 85th and 98th changes). The LAYERS page came and went (four, thirteenth
+> change). four added TRACKS and EFFECT, and has twelve pages.
+> README.md's Pages table and doc/controls.md are the current control map. The code
+> still cites two of its sections as the reason for a design: §4 (the purity mark) and
+> §6 (one dominant object for each page).
+
 **Status:** IMPLEMENTED through NU-4 (2026-07-16, stages in Appendix C) —
 renders verified in test/uisim, dist byte-checked; the on-device gate is
 still pending (grid code and key-feel are untestable in the sim). Written
@@ -10,9 +18,8 @@ still pending (grid code and key-feel are untestable in the sim). Written
 > pages, and the **sequencer was removed** — PADS is a
 > pure 8-slice play/sound-lock surface. The `seq_slice` id is KEPT as the slice
 > selector (ids are never renamed), so the "merge into one `slice` param" note
-> below is behavioral only. Later changes added LAYERS and folded EROSION into
-> VOICE and ORBIT into SCENE: **eleven stations** today. README.md's Pages
-> table is the current control map.
+> below is behavioral only. Later changes folded EROSION into VOICE and ORBIT
+> into SCENE. (The note at the top of this page says what changed after that.)
 **North star:** "make it feel like the S-4" — sleek, immediate, confident,
 fluid, unified, restrained — while staying strictly norns-native
 (128x64 OLED · 3 keys · 3 encoders · optional grid · no color).

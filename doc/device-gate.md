@@ -1,15 +1,23 @@
-# Device gate — one walkthrough
+# Device gate: one walkthrough
 
-The last hardware-confirmed state was **2026-07-16 at `count: 63`**. Everything
-from the 48th change onward is unverified: about fifteen logged batches,
-several of them engine, and the fingerprint has moved to **66** (the 94th
-change added the `beat_repeat` command).
+**Where it stands (2026-11-15).** The gate has not passed since **2026-07-16 at
+`count: 63`**, under mangler. On 2026-11-06 `test/device/gate.py` ran it at `count: 66`
+with no ears, which is not a pass (doc/measurements/2026-11-06/README.md). It has not run
+on four. The STATUS block of CLAUDE.md says what is on the device now.
 
-**The two layer decks are gone (four, thirteenth change).** These rows test them and no
-longer apply: stage 9 (9.1 to 9.8), 11.1, 11.2, 11.2b, 11.2c, 11.3 to 11.8, 12.3, 12.12,
-13.5, 15.7, 15.11 and 18.1. Row 1.2 lists the old pages, and 10.5 and 18.2 name a layer:
-read them without it. The rows keep their numbers. `test/device/gate.py` no longer runs
-the removed ones.
+This gate was written for mangler, the one-track instrument. For four:
+
+- Stage 0 expects `count: 198` and `Engine_Four.sc`, and stage 1 the twelve pages.
+- The layer decks are gone (four, thirteenth change). Their rows say REMOVED and keep
+  their numbers, so the other rows keep theirs: stage 9, 11.1 to 11.8, 12.3, 12.12, 13.5,
+  15.7, 15.11 and 18.1. `test/device/gate.py` runs none of them and does not report
+  them (four, twenty-fourth change).
+- Every send to the delay and the reverb starts at 0 (four, nineteenth change). For a
+  delay or reverb row, first open track 1's sends: TRACKS, hold K1, D and R.
+- The rows test track 1. four's own work has no rows yet: tracks 2 to 4, the effect slots
+  and the lanes, the FourStretch voices, the room, the bucket brigade and the sends. Their
+  device measurements are in doc/measurements/2026-11-12/ and 2026-11-13/, and the list
+  to listen to is in doc/plan.md, Phase 2.
 
 This folds those scattered per-change gates into one ordered pass. The order is
 deliberate — **the checks that would invalidate everything else come first**, and
@@ -41,13 +49,13 @@ against the new Lua, which is the most confusing possible state.
 
 | # | Check | Pass |
 |---|---|---|
-| 0.1 | Only one `Engine_Mangler.sc` on the device | `find ~/dust/code -name 'Engine_Mangler.sc'` returns exactly one path |
+| 0.1 | Only one `Engine_Four.sc` on the device | `find ~/dust/code -name 'Engine_Four.sc'` returns exactly one path |
 | 0.2 | Script loads | No hang on LOADING |
-| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 66` |
+| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 198` |
 
-**0.3 is the whole stage.** If it says 63, the old engine is still live and every
-sound check below is meaningless — restart again. If it says anything else,
-something changed that shouldn't have; do not continue.
+**0.3 is the whole stage.** A lower count means that the old engine is still live, and
+every sound check below is then meaningless: restart again. Any other count means that
+something changed by mistake. Do not continue.
 
 If it hangs on LOADING with a clean matron log, **look at maiden's SC tab** — SC
 errors land there, not in matron. A duplicate engine class is the classic cause.
@@ -58,9 +66,9 @@ errors land there, not in matron. A duplicate engine class is the classic cause.
 
 | # | Check | Pass | Suspect on failure |
 |---|---|---|---|
-| 1.1 | E1 through all **11** pages | Every page draws; no black screen | A black screen is a Lua error in `redraw` — scroll maiden below `<ok>` for the traceback |
-| 1.2 | Page order | TAKE VOICE · TAPE LAYERS · FILTER DELAY REVERB · MIX · PADS MOTION SCENE | — |
-| 1.3 | SC tab clean | No errors after load | The guarded plugins (JPverb, MiClouds, DFM1) fall back silently; a *posted* error means a wrong arg order |
+| 1.1 | E1 through all **12** pages | Every page draws. No black screen | A black screen is a Lua error in `redraw`. Scroll maiden below `<ok>` for the traceback |
+| 1.2 | Page order | TAKE VOICE TRACKS · TAPE · FILTER EFFECT DELAY REVERB · MIX · PADS MOTION SCENE | |
+| 1.3 | SC tab clean | No errors after load. With the plugin, the log says `four: FourStretch on` | The guarded plugins (FourStretch, JPverb, MiClouds, DFM1) fall back without a word. A *posted* error means a wrong argument order |
 | 1.4 | Input reaches the meter | TAKE's IN meter moves with your source | Levels / `monitor_level`, not the engine |
 
 ---
@@ -75,7 +83,7 @@ window snaps to it and it loops back dry.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 2.1 | **Erosion respects STOP** | VOICE in PLAY, hold K1, E2 = `erode` ~0.5, window short (~0.5s). K1+K2 STOP. Leave 5 min. START. | The take is *unchanged* | The `level` gate in `\mangler_play` — `level` must be reaching the play synth via `playParams` |
+| 2.1 | **Erosion respects STOP** | VOICE in PLAY, hold K1, E2 = `erode` ~0.5, window short (~0.5s). K1+K2 STOP. Leave 5 min. START. | The take is *unchanged* | The `level` gate in `\four_play`: `level` must reach the play synth through `playParams` |
 | 2.2 | **Punch-in doesn't truncate the save** | Narrow the window to ~2s. Punch a ~200ms overdub (K2, tap, K2). PSET SAVE. Reload script, PSET LOAD. | The **whole** take is back, not 2s of it | `take_len` must be grow-only on the rec-off edge |
 | 2.3 | **PRINT aborts on STOP** | `print_len` 8s, fire PRINT (PARAMS), hit K1+K2 STOP after ~3s | Maiden says "PRINT aborted by STOP"; **the take is untouched**; no part-silent wav left behind | The abort watch inside `record_pass` |
 
@@ -92,7 +100,7 @@ the instrument with a take you care about.
 | # | Check | Pass | Suspect |
 |---|---|---|---|
 | 3.1 | K1+K2 STOP / START, any page | Silence; title chip inverts; START returns the *exact* mix | `Mtape.update_mix` |
-| 3.2 | K1+K3 tapped = DRY | Delay/reverb/shimmer/drive/clouds-fb to zero, filter opens | `ctx.fx_dry` |
+| 3.2 | K1+K3 tapped = DRY | Delay/reverb/shimmer/drive/crush/clouds-fb to zero, the effect slot OFF, filter opens | `ctx.fx_dry` |
 | 3.3 | K1+K3 **held** ~1s = ERASE | The arc draws, then that page's material is wiped at the threshold | `tick_keys` |
 | 3.4 | Release K1 mid-arc = **abort** | Nothing erased, **and no DRY fires either** | The `k13_fired` flag |
 | 3.5 | Release in frames 5–14 | Nothing happens — the abort zone | — |
@@ -111,9 +119,11 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 | 4.1 | Sweep `cutoff` in LP | Diode-ladder character, no zipper noise | The `resonance` lag |
 | 4.2 | `resonance` to max | Resonant but **stable** — no runaway | The 0.9 clip below self-oscillation |
 | 4.3 | HP and BP modes | BP is a resonant LP peak high-passed below it | The guarded DFM1 build |
-| 4.4 | **Is it noisy?** | Clean until `drive` asks for grit | The 0.5 input-gain / 2× makeup pair. If noisy: turn `grain_level` down — if it cleans up, that confirms it |
+| 4.4 | **Is it noisy?** | Clean until `drive` asks for grit | DFM1's input gain and `dfmTrim`, which replaced the 2× makeup (four, tenth change). If noisy, turn `grain_level` down. If that cleans it up, the cause is confirmed |
 
 ### 4b · Reverb (send-style now, spawn/free)
+
+Open track 1's reverb send first: TRACKS, hold K1, R.
 
 | # | Check | Pass | Suspect |
 |---|---|---|---|
@@ -137,9 +147,9 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 
 | # | Check | Pass | Suspect |
 |---|---|---|---|
-| 4.15 | `erode` 0, leave running | Take **bit-identical** after minutes | A stray `\mangler_erode` (stage 14) |
+| 4.15 | `erode` 0, leave running | Take **bit-identical** after minutes | A stray `\four_erode` (stage 14) |
 | 4.16 | `erode` ~0.3 | Darkens over passes, no runaway | — |
-| 4.17 | `erode` at speed 2 and speed −1 | Ages at the **same rate** | The constant-rate head in `\mangler_erode` |
+| 4.17 | `erode` at speed 2 and speed −1 | Ages at the **same rate** | The constant-rate head in `\four_erode` |
 | 4.18 | Raise `regen` while `erode` > 0 | `erode` drops to 0 (and vice versa) | The param-layer interlock |
 | 4.19 | VOICE K2 = HEAL (PLAY mode) | Round-trip; **`regen` comes back too** | The HEAL throw snapshots `regen` |
 
@@ -151,7 +161,7 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 |---|---|---|---|---|
 | 5.1 | **44.1k loads in tune** | PARAMS > load sample, pick a 44.1k wav | Maiden says "resampling to 48000"; it plays at the **right pitch** | `Mpages.convert_sr` |
 | 5.2 | 48k loads untouched | Load a 48k file | No resample message; instant | The rate probe |
-| 5.3 | **A SLICE pad plays only its slice** | PADS, set a pad to SLC, hold it | It stops at the slice end — not the rest of the buffer | `note_len` reaching `\mangler_voice_slice` |
+| 5.3 | **A SLICE pad plays only its slice** | PADS, set a pad to SLC, hold it | It stops at the slice end, not at the end of the buffer | `note_len` reaching `\four_voice_slice` |
 | 5.4 | **CHOP** | Record a drum loop. PARAMS > `chop to transients` | Page says "CHOP - n SLICES ON THE HITS"; dividers are **uneven**; pads land on the hits | `Mpages.transient_cuts` |
 | 5.5 | Chop wrap | With fewer than 8 slices | Cells label the slice they play (`1 2 3 4 5 1 2 3`) | `pad_cut`'s modulo |
 | 5.6 | Chop is dropped with its audio | CHOP, then CLR or load a sample | Back to even eighths | `ctx.pads_uncut` |
@@ -176,7 +186,7 @@ A month of engine work nobody has heard. Use one take and walk the chain.
 | 6.9 | MOTION: record a sweep from a real **encoder** | It captures (polling, not call-interception) | `capture_poll` |
 | 6.10 | **MOTION overdub** | Arm again, move a *second* knob — **the first lane survives** | `last_val` readback |
 | 6.11 | MOTION with `motion_len` shortened | The **end** of the gesture still plays | `src_of` endpoints |
-| 6.12 | ◇ purity mark | Lights only at full wet on an unmangled take; dark at the 0.5 default, dark while the tape or a layer is audible, dark with pan off center | `purity()` — it is *supposed* to be rare now; test/test_purity.lua walks every reason offscreen |
+| 6.12 | ◇ purity mark | Lights only at full wet on an unmangled take. Dark at the 0.5 default, dark while the tape is audible, dark with pan off center | `purity()`. It is *meant* to be rare now. test/test_purity.lua walks every reason offscreen |
 | 6.13 | Grid: hold a note pad, toggle note input off, release | **No stuck voice** | The press-only gate |
 | 6.14 | Grid: two-finger scene pads | One release doesn't kill the other's audition/peek | Per-pad ownership |
 | 6.15 | Launchpad colours | Semantic hues, no flicker | The reused SysEx buffer |
@@ -207,53 +217,35 @@ The one measurement that matters on a Pi 4.
 
 ---
 
-## Stage 9 — Layers (S25)
+## Stage 9: Layers (S25). REMOVED
 
-No engine change, so the count is still 65.
-
-| # | Check | Do | Pass | Suspect |
-|---|---|---|---|---|
-| 9.1 | Two decks sound | Record the engine take. Record LAYER 1 against it. | Both play, independently | |
-| 9.2 | They drift | LAYER 1 at rate 0.5, LAYER 2 at 1 | They drift and re-sync; no clicks | The rate slew |
-| 9.3 | Overdub vs replace | REC with `pre` 1, then with `pre` 0 | 1 stacks, 0 replaces | |
-| 9.4 | **Erase is region-scoped** | K1+K3 on LAYERS | **Only** the selected layer is wiped — the tape and the other layer are untouched | `sc.buffer_clear_region`. This is the one collision that makes layers not purely additive |
-| 9.5 | STOP reaches them | K1+K2 | All four decks silence; START restores the exact mix | `ctx.layers_relevel` |
-| 9.6 | PSET round-trip | Save, reload, load | Both layers' audio returns; an empty layer does not resurrect | |
-| 9.7 | Grid workspace | On LAYERS, rows 3-4 | A two-pad span sets THAT deck's loop; row 5 arms, row 6 mutes (x1-2) and snaps (x4-5); the other deck is untouched | |
-| 9.8 | **%CPU with everything running** | Four decks plus a granular drone | No xruns | The number that decides whether a third layer is ever worth adding |
+Checks 9.1 to 9.8 tested the two layer decks. The decks are gone (four, thirteenth
+change), so this stage has nothing to check. Its number stays.
 
 ## Stage 10 — The spawn/free delay + true STOP + clear (the engine batch after the fold)
 
-Engine changes with NO new command — the count must STILL read **65** (stage 0
-already checked it; a different number here means a stray command).
+Engine changes with NO new command. The count is the one that stage 0 read. Open
+track 1's delay send first: TRACKS, hold K1, D.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 10.1 | The delay still delays | Take playing, raise `delay_mix`, ride `delay_time`/`delay_fb` | Echoes as before, times glide, repeats darken | The `\mangler_delay` split: send/return buses, `updateDelay` |
+| 10.1 | The delay still delays | Take playing, raise `delay_mix`, ride `delay_time`/`delay_fb` | Echoes as before, times glide, repeats darken | The `\four_delay` split: send/return buses, `updateDelay` |
 | 10.2 | **%CPU drops at rest** | `delay_mix` 0, `rev_mix` 0, watch %CPU | Lower than the pre-split build in the same state | The whole point of the split |
 | 10.3 | The dub hold survives KILL | INF (DELAY K2), feed it a phrase, then KILL (K3), wait, un-KILL | The spinning loop is still there | The `delay_fb > 0.9` keep-alive in `updateDelay` |
 | 10.4 | Mix up from rest is clean | From silence at mix 0, raise `delay_mix` | No click on spawn; echoes build from NOW (the line starts empty — accepted trade) | |
-| 10.5 | **STOP truly halts** | Play the take + tape + a layer, K1+K2 | Every on-screen head FREEZES; no click. START: everything resumes from the exact spot, decks still in their drifted relationship | `winRead`'s `(run > 0.001)`; the stop action's transport re-sends |
+| 10.5 | **STOP truly halts** | Play the take and the tape, K1+K2 | Every head on the screen FREEZES, with no click. START: everything resumes from the exact spot, the take and the tape still in their drifted relationship | `winRead`'s `(run > 0.001)`, and the stop action's transport re-sends |
 | 10.6 | STOP pauses an armed take | Arm REC mid-phrase, K1+K2, wait, K1+K2 again | The write head freezes and resumes; the take has no gap of silence printed | The `engine.rec` gate in the stop/rec actions |
 | 10.7 | Full tape throw pauses the drone head | MIX K3 (TAPE throw), watch VOICE/TAKE playheads | The engine head freezes while thrown, resumes on release — stated behavior, same law as erosion/regen | If this feels wrong in play, say so: the alternative is a dedicated run flag (a new command) |
 | 10.8 | **Clear is silence** | Echoes + a long reverb tail ringing, then K1+K3 hold on TAKE (erase) | The tails CUT with the take; with `regen` up beforehand, nothing re-records into the cleared buffer | The `\clear` flush; `clear_recording`'s regen zero |
 
 ## Stage 11: the snap and quality batch
 
-Engine changes with NO new command, so the count must STILL read **65**. The
-layer work is Lua only.
+Engine changes with NO new command, so the count is the one that stage 0 read.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 11.1 | **A fresh layer loops what you played** | Empty LAYER 1. K2 (REC), play four bars, K2 again | It loops those four bars, NOT the whole 60 second region | `Mdeck.arm_loop` / `close_loop`; the head must land back at the loop start |
-| 11.2 | A layer with audio overdubs | K2 again on the same deck, play over it | The loop length does not change; the new pass stacks | The `d.any` test in `arm_loop` |
-| 11.3 | The automatic snap is quiet when it should be | Play a length nowhere near the take's | The loop stays exactly what you played, no message | The 6% tolerance |
-| 11.4 | ...and lands when it should | Play roughly the take's length, or half it | The loop rounds onto it and the page says `L1 4.31>4.00S 1/2 x TAKE` | `ctx.layer_quantize` |
-| 11.5 | **Two decks stay locked** | Snap LAYER 2 against LAYER 1, leave them running five minutes | They are still in phase | If they walk, the snapped lengths were not an exact ratio |
-| 11.6 | Forced SNAP | MIDI-map `lay1_snap` to a footswitch, or grid row 6 x4/x5 | Stomping it snaps the selected deck; the page names the ratio and the reference | |
-| 11.6b | SNAP refuses out loud | Park a loop hard against the region end (loop start to max), then SNAP | It says `NO ROOM TO SNAP` rather than silently doing nothing or inventing a 100ms loop | `ctx.layer_snap`'s room check |
-| 11.7 | The seam is audible | `lay1_fade` to 0.001 vs 0.2 on a drum loop | Short is a hard downbeat, long is a blend | `sc.fade_time` |
-| 11.8 | Width | `lay2_width` to 0 | The deck collapses to the centre; LAYER 1 stays wide | `sc.pan` |
+| 11.1 to 11.8 | REMOVED | The rows tested the layer decks: the loop pedal, SNAP, the seam and the width | | |
+| 11.2d | **The tape's first pass loops** | On TAPE, `cut_source` dry and the voice OFF. K2, play a tone for three seconds, K2 again, then stop playing | The tape plays back the pass you played | The tape's loop-pedal law in lib/mtape.lua |
 | 11.9 | **A 24-bit take round-trips** | Record, PSET save, CLR, PSET load | The take returns; `take-N_L.wav` is 24 bit and roughly 1.5x the old size | `write_take`'s `int24` |
 | 11.10 | Export is 24-bit and browsable | `export_take` | One stereo 24-bit wav in the audio dir; it reloads through LOAD SAMPLE | `interleave_wav` follows the header now |
 | 11.11 | **A 96k or 88.2k sample imports clean** | Load one through LOAD SAMPLE | In tune, and no whistling or gritty top end | The windowed sinc's stopband. Cubic folded everything above 24 kHz into the audible band |
@@ -271,7 +263,7 @@ and fixed; the device check is that the fix FEELS right.
 |---|---|---|---|---|
 | 12.1 | **A late conversion cannot eat a take** | Load a 44.1k sample (it converts in the background), and record a phrase straight away | When the conversion finishes, the maiden log says it was dropped; your phrase is still the take | `take_gen` in `load_at_rate` |
 | 12.2 | The first take of a session is the take | Fresh boot, record 4s, SNAP on TAKE | SNAP finds the take; a PSET save writes a small file | The `rec_open` edge in the rec action |
-| 12.3 | LAYERS keys stay on their deck | Hold K2 (REC) on L1, turn E2 to L2, let go | L1 stops recording | `LAYER_KEYS` |
+| 12.3 | REMOVED | It tested the LAYERS keys | | |
 | 12.4 | A saved tape loop survives its first disarm | Save a PSET while the tape records; load it; tap TAPE K2 | The loop stays as saved | `tape_arm_phase` reset in `action_read` |
 | 12.5 | A mis-tapped tape REC keeps the loop | Set a tight tape loop, tap REC twice quickly | The loop is unchanged | `tape_arm_was` |
 | 12.6 | A long tape seam on a short loop | Tape loop 0.3s, `tape_fade` 0.4 | The loop stays audible | `Mtape.set_fade` through `D.update_fade` |
@@ -280,7 +272,7 @@ and fixed; the device check is that the fix FEELS right.
 | 12.9 | A float WAV from ffmpeg | Load a 32-bit float 96k render | It plays in tune at the right level and draws a real waveform | The extensible SubFormat parse |
 | 12.10 | A right-only stereo loop draws | Load a hard-panned stereo loop of about 5s | The strip shows the hits | The odd preview stride |
 | 12.11 | Scenes and the orbit | Orbit on; hold K1+K3 on SCENE | The slot you pressed on is cleared, not the one the orbit moved to | `ctx.k13_slot` |
-| 12.12 | A recall after a scene captured on an empty layer | Capture, record 4s into L1, recall | L1 loops the 4s, not 60s | `clamp_stored` deck extents |
+| 12.12 | REMOVED | It tested a scene recall on a layer deck | | |
 | 12.13 | MOTION with long lanes | Record 60s of four knobs, stay on MOTION | The screen and the encoders stay responsive | `body_MOTION`'s per-column drawing |
 | 12.14 | Import keeps the screen live | Load a 96k file | The screen updates smoothly while it converts | `convert_sr` yields every block |
 
@@ -295,7 +287,7 @@ feels and that the norns calls behave as the stubs assume.
 | 13.2 | GLIDE recall | PARAMS > scenes > recall quantize GLIDE, glide beats 4, recall a slot | The sound sweeps over a bar and lands; the ◄ cell holds where it began | `M.glide`, `glide_tick` |
 | 13.3 | The orbit yields | Orbit on, then ride K1+E1 | The wander stands still under your hand and resumes two seconds after you let go | `orbit_tick`'s `hand_at` |
 | 13.4 | A synced delay stays synced | `delay_sync` 1/4, then recall a scene with a different delay time | The echoes stay on the beat | `sync_delay_time` |
-| 13.5 | A short deck saves small | A 4s layer loop, PSET save | `lay1-N.wav` is about 4s, not 60; loading it back plays the loop with nothing after it | `Mdeck.save_secs`, the clear before the read |
+| 13.5 | REMOVED | It tested the saved file of a layer deck | | |
 | 13.6 | The take strip follows erosion | Erode a take for a minute, then erode to 0 | The TAKE strip redraws darker within a few seconds | `ctx.refresh_take_strip` |
 | 13.7 | **Launchpad hot-plug** | Start with no Launchpad, then plug the Mini MK3 in; later unplug it | It lights and plays the moment it is plugged in; unplugged, nothing hangs | `Mgrid.hotplug`, norns' `midi.add` / `midi.remove` |
 | 13.8 | Launchpad arrows | Left/right, then up/down | Left/right step the page (the name pops), up/down step the scene slot | The CC numbers 91 to 94 in Programmer mode |
@@ -304,15 +296,15 @@ feels and that the norns calls behave as the stubs assume.
 
 ## Stage 14: erosion in its own synth (engine)
 
-One engine change with no new command, so maiden must still read `count: 65`.
-The erosion head moved out of the PLAY voice into `\mangler_erode`, which runs
+One engine change with no new command, so the count is the one that stage 0 read.
+The erosion head moved out of the PLAY voice into `\four_erode`, which runs
 only while `erode` is above 0 in PLAY mode. To list the running synths, type
 `Server.default.queryAllNodes` in maiden's SC tab.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 14.1 | **At rest nothing writes** | PLAY, `erode` 0, list the nodes | No `mangler_erode` in the list | `updateErode` |
-| 14.2 | Erosion still erodes | A take in PLAY, VOICE K1+E2 to about 0.5, listen over a few passes | It darkens pass by pass as before, GEN counts, and the node list shows `mangler_erode` | `\mangler_erode`, `winBounds` |
+| 14.1 | **At rest nothing writes** | PLAY, `erode` 0, list the nodes | No `four_erode` in the list | `updateErode` |
+| 14.2 | Erosion still erodes | A take in PLAY, VOICE K1+E2 to about 0.5, listen over a few passes | It darkens pass by pass as before, GEN counts, and the node list shows `four_erode` | `\four_erode`, `winBounds` |
 | 14.3 | **No click in or out** | A loud sustained take, `erode` 1, then VOICE K2 (HEAL) and release, a few times | No click is printed into the take: the next passes play smoothly where the switches happened | The 50ms `gate` fade |
 | 14.4 | Mode switch | `erode` up, VOICE K3 once (GRAIN), then three more times (WARP, PV, PLAY) | The node is gone in GRAIN, WARP and PV and back in PLAY. The other modes do not darken the take | `setMode`'s `updateErode` |
 | 14.5 | STOP holds the head | `erode` up, K1+K2, wait ten seconds, K1+K2 again | GEN and the pass bar hold during the STOP. Later passes age evenly, with no lighter stretch | The head's `run` gate |
@@ -331,11 +323,11 @@ norns calls behave as the stubs assume, and how it feels.
 | 15.4 | GLIDE tap | Recall quantize GLIDE, glide beats 4, tap K2 on a filled slot | The sound crossfades over a bar. Nothing jumps at the tap | `tick_keys`' tap wait |
 | 15.5 | GLIDE through chaos | Hold the chaos throw, recall a slot under GLIDE, release the throw mid-glide | The glide goes on and lands the scene | The GLIDE branch of `M.recall` |
 | 15.6 | A long peek under the orbit | Orbit on, hold K2 on a filled slot for three seconds, release | The sound sweeps back to where it was before the peek | `orbit_tick` |
-| 15.7 | An off-rate deck file in a PSET | Delete `lay1-N.wav` beside a PSET whose L1 came from a 44.1k file, then load the PSET | L1 is silent for a moment, then plays the file in tune | `ctx.layer_load`'s clear |
+| 15.7 | REMOVED | It tested a layer deck's file in a PSET | | |
 | 15.8 | Two off-rate loads in a row | Load a long 44.1k sample, then another a few seconds later | The second one loads soon after it is picked. maiden says the first was dropped | `load_at_rate`'s generation check |
 | 15.9 | BEAT tap | Recall quantize BEAT, a clock running, tap K2 on a filled slot between two beats | Nothing moves at the tap. The scene lands on the beat | `tick_keys`' tap wait |
 | 15.10 | A regen flick | MIDI-map `regen`, flick the CC up and straight back to 0 on a long take | About a second later maiden shows no error and the take strip redraws | `strip_wrote` in the regen action |
-| 15.11 | An off-rate layer file by hand | L1 playing, then PARAMS > layers > L1 load file, a 44.1k wav | L1 goes silent at once, then plays the new file in tune | `ctx.layer_load`'s clear |
+| 15.11 | REMOVED | It tested a layer deck's file load | | |
 
 ## Stage 16: the additions (Lua only)
 
@@ -364,13 +356,13 @@ and that the engine polls behave as the stubs assume.
 
 ## Stage 17: the beat repeat (ENGINE, a new command)
 
-The one engine change since stage 14: a new synth, `\mangler_repeat`, and a
+The one engine change since stage 14: a new synth, `\four_repeat`, and a
 new command, `beat_repeat`. Do stage 0 again first: maiden must read
-`count: 66`. MIDI-map `beat repeat` to a pad or a footswitch (it is a hold).
+`count: 198`. MIDI-map `beat repeat` to a pad or a footswitch (it is a hold).
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 17.1 | **It loads** | RESTART, load the script | `count: 66`, no error in the SC tab | `\mangler_repeat`, `updateRepeat`, the three `repBufs` |
+| 17.1 | **It loads** | RESTART, load the script | `count: 198`, no error in the SC tab | `\four_repeat`, `updateRepeat`, the three `repBufs` |
 | 17.2 | **A repeat on the beat** | A take playing, clock at 120, `repeat length` 1/8. Hold `beat repeat` for two bars | It starts on the next eighth and stutters that eighth until you let go, then the live sound returns. The header shows RP | `clock.sync` in `repeat_start`, the `first` pass |
 | 17.3 | No clicks | Hold it over a sustained pad, then over drums | The loop points are smooth (the 3 ms fade); entering and leaving does not click | `fade`, the `gate` envelope |
 | 17.4 | A roll | While holding, turn `repeat length` from 1/8 to 1/16 to 1/32, then spin it fast | Each step re-captures a shorter slice: a roll, no click or smear between steps | The three capture buffers, `updateRepeat` |
@@ -386,13 +378,13 @@ frame rate holds with the GRAIN cloud at its densest.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 18.1 | L flag | Record on a layer deck (LAYERS, K2), then go to TAKE | L blinks in the header with the other write flags | `any_layer_rec` |
-| 18.2 | A full header | On LAYERS, record the take, the tape, a motion lane and a layer at once, with FREEZE on, a beat repeat held, the sequencer running and a modulator set | R T M L blink as letters, then five short bars; nothing touches the page dots | `draw_hflags` |
+| 18.1 | REMOVED | It tested the header's L flag of a layer deck | | |
+| 18.2 | A full header | Record the take, the tape and a motion lane at once, with FREEZE on, a beat repeat held, the sequencer running and a modulator set. Then go to REVERB, a six letter title | The recording track's cell blinks as a box. T and M blink their dots. The other flags show as letters or short bars, and nothing touches the page dots | `draw_tracks`, `draw_hflags` |
 | 18.3 | The erase arc | On TAKE, hold K1+K3 and let go before it lands | The ring sits between ERASE and MOV and touches neither | `FOOT`, `keys_right` |
 | 18.4 | The GRAIN cloud | VOICE in GRAIN. Turn SIZE and DENSITY, then spread, pan and jitter in PARAMS | Longer ticks with SIZE, more with DENSITY, wider with jitter; pan moves the cloud up (left) or down (right) and spread scatters it. At density 200 the screen does not stutter | `grain_cloud` |
 | 18.5 | WET | Open DELAY and REVERB | The E2 word reads WET on both | `FULL` |
 | 18.6 | HELD | PV freeze on, then step VOICE through its modes | HELD is bright in PV and GRAIN, dim in PLAY and WARP, and does not touch the PV chip | `body_VOICE` |
-| 18.7 | One blink | Record on TAKE, TAPE, a layer and MOTION in turn, and run the orbit on SCENE | Only the header's write flags blink. TAPE's REC chip, the LAYERS dot, MOTION's REC chip and frame, the ORBIT chip and TAKE's WAIT are steady | the page chips |
+| 18.7 | One blink | Record on TAKE, TAPE and MOTION in turn, and run the orbit on SCENE | Only the header blinks: the recording track's cell and the dots of T and M. TAPE's REC chip, MOTION's REC chip and frame, the ORBIT chip and TAKE's WAIT are steady | the page chips |
 | 18.8 | Readable text | Look at PADS (PLAY>DRONE, the voice count), SCENE (NOW), TAPE (the seconds) and MOTION (LOOP) from playing distance | All of it reads; an empty page's invitation is as bright as TAKE's, and VOICE with no take says EMPTY - REC ON TAKE | the level floor of 5 |
 | 18.9 | Page dots on one line | Step E1 through all the pages | The dots stay on one straight row at an even spacing. No dot moves. Only the bright bar moves from slot to slot | `layout_dots` |
 | 18.10 | The pattern on PADS | Open PADS with the sequencer stopped, then run it from the grid (PADS, row 6 pad 3); add and take hits with pads 6 and 5 | The pattern shows dim while stopped, bright with the moving step while it runs; the hits follow pads 5 and 6 | `body_PADS`, `pads_ws_key` |
@@ -405,10 +397,8 @@ frame rate holds with the GRAIN cloud at its densest.
 
 ## When it passes
 
-Move the **CURRENT STAGE** marker at the top of `CLAUDE.md` to record the new
-confirmed state — the date and `count: 66`. That marker is what tells the next
-session which changes are trustworthy, and it is the only reason this document
-could be written at all.
+Write the date and `count: 198` into the STATUS block of `CLAUDE.md`, as the new
+confirmed state. That block tells the next session which changes it can trust.
 
 If something fails, the "suspect" column is a starting point, not a verdict.
 Note what you actually heard; a symptom described precisely is worth more than a

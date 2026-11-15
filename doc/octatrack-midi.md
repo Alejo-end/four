@@ -6,8 +6,8 @@ One MIDI track on the Octatrack sends the controls. All of them use MIDI channel
 
 1. Octatrack MIDI OUT to the shield's TRS MIDI IN. Check Type A or B.
 2. Octatrack: pick a MIDI track (for example MIDI track 8), set its channel to 16, and assign the CCs below to its CC knobs (CC pages of the MIDI track).
-3. norns: in the mangler PARAMS menu set `midi channel` to a channel the Octatrack does not use for notes (for example 1), so notes on 16 never play the instrument.
-4. Load the mapping: copy `data/octatrack.pmap` to `~/dust/data/four/four.pmap` on the norns, then reload mangler. Its channel 16 entries use `dev=2`: the Octatrack must be on MIDI port 2 (SYSTEM, DEVICES, MIDI). If it is on another vport, change `dev` in the file, or map by hand in the PARAMS menu with MIDI learn.
+3. norns: in the four PARAMS menu set `midi channel` to a channel the Octatrack does not use for notes (for example 1), so notes on 16 never play the instrument.
+4. Load the mapping: copy `data/octatrack.pmap` to `~/dust/data/four/four.pmap` on the norns, then reload four. Its channel 16 entries use `dev=2`: the Octatrack must be on MIDI port 2 (SYSTEM, DEVICES, MIDI). If it is on another vport, change `dev` in the file, or map by hand in the PARAMS menu with MIDI learn.
 5. The old mapping of `rec` on CC 100 (channel 1, port 1) is kept in the file, unchanged.
 
 ## Knobs (continuous, 0 to 127)
@@ -56,4 +56,4 @@ To go back to the mapping that was on the norns before (only `rec` on CC 100):
 
     ssh we@norns.local 'cp ~/dust/data/four/four.pmap.before-octatrack ~/dust/data/four/four.pmap'
 
-then reload mangler. The Octatrack copy of the file stays in `data/octatrack.pmap`.
+then reload four. The Octatrack copy of the file stays in `data/octatrack.pmap`.

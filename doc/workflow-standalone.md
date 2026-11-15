@@ -1,9 +1,9 @@
 # Workflow: standalone (3 keys + 3 encoders)
 
-> **HISTORICAL** — this walkthrough predates the nine/ten-station redesign
-> (pages like LEVEL and WINDOW no longer exist; TAKE/VOICE/MIX absorbed them).
-> The current guide is the README ("First session, five minutes" + per-page
-> sections). Kept for the ideas, not the key maps.
+> **HISTORICAL.** This walkthrough is older than the nine and ten station redesign.
+> Pages like LEVEL and WINDOW no longer exist: TAKE, VOICE and MIX took their place.
+> The current guide is the README ("First session" and the sections for each page).
+> Kept for the ideas, not the key maps.
 
 mangler is built to carry a full performance with **nothing plugged in but your
 instrument**: a synth (or drum machine, or anything line-level) into the norns

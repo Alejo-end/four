@@ -11,9 +11,13 @@ A result is one of:
   you       needs a person, or hardware that is not connected
   error     the test itself broke
 
-Results go to doc/measurements/<date>/gate.jsonl. Recordings go outside the
-repo, in ../mangler-device-recordings/<date>, because a deploy copies this repo
-to the device.
+Results go to doc/measurements/<date>/gate.jsonl, where <date> is the day of
+the run (GATE_DATE=YYYY-MM-DD overrides it, so a session past midnight keeps
+one folder). Recordings go outside the repo, in ../four-device-recordings/<date>,
+because a deploy copies this repo to the device.
+
+The only PSET slot a test writes is PSET (90). Slots 1 to 12 hold the shipped
+presets, and a write there replaces their take, tape and scene files too.
 """
 import json
 import os
@@ -26,14 +30,18 @@ sys.path.insert(0, os.path.dirname(__file__))
 import audio  # noqa: E402
 from norns import Norns, num  # noqa: E402
 
-DATE = "2026-11-06"
+# the day of the run: a fixed date merged a new run into an old record
+DATE = os.environ.get("GATE_DATE") or time.strftime("%Y-%m-%d")
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "doc", "measurements", DATE)
-WAVS = os.path.join(os.path.dirname(ROOT), "mangler-device-recordings", DATE)
+WAVS = os.path.join(os.path.dirname(ROOT), "four-device-recordings", DATE)
 SCREENS = os.path.join(OUT, "screens")
 ENGINE_OUT = ("SuperCollider:out_1", "SuperCollider:out_2")
 DECKS_OUT = ("softcut:output_1", "softcut:output_2")
-PSET = 97  # a slot that no shipped preset uses; cleaned up by cleanup()
+PSET = 90  # the test slot (CLAUDE.md, doc/plan.md); cleaned up by cleanup()
+assert PSET > 12, "slots 1 to 12 hold the shipped presets: a test never writes them"
+# the engine's fingerprint after a RESTART (CLAUDE.md STATUS)
+COUNT = "count: 198"
 # the pages, in the order E1 walks them (PAGES in four.lua)
 PAGES = "TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE"
 
@@ -185,6 +193,30 @@ def set_mode(name):
     time.sleep(0.5)
 
 
+def sends(dly=None, rev=None):
+    """Set track 1's sends into the delay (fx_dly) and the reverb (fx_rev).
+
+    Since four's nineteenth change both start at 0, and delay_mix and rev_mix
+    are only the levels of the returns, added to a dry sum that never ducks.
+    A check that hears the delay or the reverb opens the send first and closes
+    it after, as doc/device-gate.md says for its delay and reverb rows.
+    """
+    if dly is not None:
+        n.set("fx_dly", dly)
+    if rev is not None:
+        n.set("fx_rev", rev)
+
+
+def tail_db(name, secs=1.5):
+    """The level of what rings on once track 1's voice is off: the tails only."""
+    mode = int(n.get("mode"))
+    n.set("mode", 1)
+    db = level(name, secs)
+    n.set("mode", mode)
+    time.sleep(0.5)
+    return db
+
+
 # ---- stage 0 ----------------------------------------------------------------
 def stage0():
     def c1():
@@ -196,7 +228,7 @@ def stage0():
     n.load_script()
     text = transcript_since("lua", start)
     check("0.2", lambda: verdict("init() done" in text, "script reached init() done"))
-    check("0.3", lambda: verdict("count: 66" in text, [ln for ln in text.splitlines() if "count:" in ln]))
+    check("0.3", lambda: verdict(COUNT in text, [ln for ln in text.splitlines() if "count:" in ln]))
 
 
 # ---- stage 1 ----------------------------------------------------------------
@@ -226,7 +258,9 @@ def stage1():
         # only since sclang last started: an older error belongs to an older run
         since = n.ssh("systemctl show norns-sclang -p ActiveEnterTimestamp --value").strip()
         out = n.ssh(f'journalctl -u norns-sclang --since "{since}" --no-pager | grep -E "ERROR|FAILURE|Exception|exception" | tail -8')
-        return verdict(not out.strip(), out.strip() or "no SuperCollider errors this boot")
+        # which voices this boot built: the plugin, or the stock fallbacks
+        plug = n.ssh(f'journalctl -u norns-sclang --since "{since}" --no-pager | grep -o "four: FourStretch.*" | tail -1').strip()
+        return verdict(not out.strip(), f"{out.strip() or 'no SuperCollider errors this boot'}. {plug or 'no FourStretch line in the log'}")
 
     def c14():
         n.signal("tone")
@@ -346,15 +380,18 @@ def stage3():
         return verdict(ok, f"dB before, stopped, after: {out}", "measured")
 
     def c32():
+        # DRY is read back from the params, so it needs no send. four's DRY
+        # also zeroes the colour (crush) and turns the effect slots OFF.
         n.goto("FILTER")
-        for pid, v in (("delay_mix", 0.4), ("rev_mix", 0.4), ("shimmer", 0.3), ("drive", 0.3), ("clouds_fb", 0.3),
-                       ("resonance", 0.4), ("cutoff", 800)):
+        for pid, v in (("delay_mix", 0.4), ("rev_mix", 0.4), ("shimmer", 0.3), ("drive", 0.3), ("crush", 0.3),
+                       ("effect", 2), ("clouds_fb", 0.3), ("resonance", 0.4), ("cutoff", 800)):
             n.set(pid, v)
         time.sleep(0.3)
         alt_tap(3)
         time.sleep(0.5)
-        s = param_state("delay_mix", "rev_mix", "shimmer", "drive", "clouds_fb", "resonance", "cutoff")
-        ok = all(s[k] == 0 for k in ("delay_mix", "rev_mix", "shimmer", "drive", "clouds_fb", "resonance")) and s["cutoff"] > 15000
+        s = param_state("delay_mix", "rev_mix", "shimmer", "drive", "crush", "effect", "clouds_fb", "resonance", "cutoff")
+        ok = (all(s[k] == 0 for k in ("delay_mix", "rev_mix", "shimmer", "drive", "crush", "clouds_fb", "resonance"))
+              and s["effect"] == 1 and s["cutoff"] > 15000)
         return verdict(ok, s)
 
     def c33():
@@ -506,23 +543,37 @@ def stage4():
                        f"tone at 220 Hz {sig} dB; other bands {floor}. Listen for grit", "measured")
 
     def c45():
+        # with the send closed the reverb hears nothing, and "the dry stays"
+        # would pass on silence. So open it, and prove a tail comes back.
+        sends(rev=1)
         base = tone_bands("4.5_rev0", 2)[0][220]
         n.set("rev_mix", 0.5)
         time.sleep(2.5)
         wet = tone_bands("4.5_rev50", 2)[0][220]
-        return verdict(wet > base - 1.5, f"220 Hz dry {base} dB, with rev_mix 0.5 {wet} dB: the dry stays")
+        tail = tail_db("4.5_tail")
+        sends(rev=0)
+        time.sleep(4)
+        shut = tail_db("4.5_tail_send_closed")
+        return verdict(wet > base - 1.5 and tail > shut + 20,
+                       f"220 Hz dry {base} dB, with rev_mix 0.5 {wet} dB: the dry stays. "
+                       f"With the voice off: tail {tail} dB with track 1's send open, {shut} dB with it closed")
 
     def c46():
+        sends(rev=1)
+        n.set("rev_mix", 0.5)
+        time.sleep(1)
         on = n.nodes()
         cpu_on = n.cpu(3)
         n.set("rev_mix", 0)
         time.sleep(1)
         off = n.nodes()
         cpu_off = n.cpu(3)
+        sends(rev=0)
         ok = "four_reverb" in on and "four_reverb" not in off and cpu_off[0] < cpu_on[0]
         return verdict(ok, f"reverb node on={'four_reverb' in on}, off={'four_reverb' in off}; CPU {cpu_on[0]}% to {cpu_off[0]}%")
 
     def c47():
+        sends(rev=1)
         n.set("rev_mix", 0.5)
         n.set("shimmer", 0)
         time.sleep(3)
@@ -532,6 +583,7 @@ def stage4():
         b = tone_bands("4.7_shim80", 3)[0][884]
         n.set("shimmer", 0)
         n.set("rev_mix", 0)
+        sends(rev=0)
         return verdict(b > a + 3, f"884 Hz {a} dB to {b} dB with shimmer. Robotic or not: listen to 4.7_shim80.wav", "measured")
 
     def c48():
@@ -732,7 +784,7 @@ def stage4():
 
 
 # ---- test files --------------------------------------------------------------
-TEST_DIR = "/home/we/dust/audio/mangler_test"
+TEST_DIR = "/home/we/dust/audio/four_test"
 
 
 def wav_bytes(rate, secs, fn, bits=16, float32=False, extensible=False, channels=2):
@@ -795,6 +847,16 @@ def make_test_files():
     upload("gap.wav", wav_bytes(48000, 4, gap_then_sound))
     upload("long44k.wav", wav_bytes(44100, 30, tone))
     upload("long96k.wav", wav_bytes(96000, 10, tone))
+
+
+def ensure_test_files():
+    """Upload the test files when the device does not have them yet.
+
+    Stage 5 always uploads them. The later stages that load them call this, so
+    that each of them can run alone.
+    """
+    if not n.ssh(f"ls {TEST_DIR}/long96k.wav 2>/dev/null").strip():
+        make_test_files()
 
 
 def load_file(name, wait=8):
@@ -1162,6 +1224,8 @@ def erase_page(page):
 
 
 def stage7():
+    ensure_test_files()
+
     def c71():
         n.load_script()
         record_take(6, "drums")
@@ -1256,7 +1320,7 @@ def stage7():
         wait_save()
         n.helpers()
         length = num(n.ctx("c.take_len"))
-        return ("measured", f"no pset older than S22 is on the device. August pset 2 loads without error: {named!r}, take_len {length}, take file for pset 1 exists={bool(had)}")
+        return ("measured", f"no pset older than S22 is on the device. Shipped pset 2 (only read) loads without error: {named!r}, take_len {length}, take file for pset 1 exists={bool(had)}")
 
     for cid, fn in (("7.1", c71), ("7.2", c72), ("7.3", c73), ("7.4", c74)):
         check(cid, fn)
@@ -1295,6 +1359,9 @@ def stage8():
 
     def c83():
         set_mode("PLAY")
+        # open track 1's delay send, so the morph of delay_mix is heard (both
+        # scenes capture the open send)
+        sends(dly=1)
         n.set("cutoff", 2000)
         n.set("delay_mix", 0.3)
         n.set("scene_slot", 1)
@@ -1317,6 +1384,8 @@ def stage8():
         path_rate, chans = during(morph, "8.3_morph", 6)
         x1 = n.xruns()
         n.set("scene_morph_amt", 0)
+        n.set("delay_mix", 0)
+        sends(dly=0)
         return verdict(x1 == x0, f"xruns {x1 - x0}. Zipper: listen to 8.3_morph.wav (drums make a click count useless here)", "measured")
 
     def c84():
@@ -1344,6 +1413,7 @@ def stage9():
 
 # ---- stage 10: delay, true STOP, clear ---------------------------------------
 def stage10():
+    ensure_test_files()
     n.load_script()
     n.set("dry_wet", 1)
     load_file("hits.wav", 2)
@@ -1354,6 +1424,8 @@ def stage10():
         n.set("delay_time", 0.3)
         n.set("delay_fb", 0.4)
         a = level("10.1_dry", 4)
+        # the echoes add to a dry sum that never ducks, so they raise the level
+        sends(dly=1)
         n.set("delay_mix", 0.5)
         time.sleep(1)
         b = level("10.1_echo", 4)
@@ -1366,18 +1438,25 @@ def stage10():
 
         rate, chans = during(ride, "10.1_ride", 3)
         n.set("delay_time", 0.3)
+        n.set("delay_mix", 0)
+        sends(dly=0)
         return verdict("four_delay" in nodes and b > a, f"{a} dB dry, {b} dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav", "measured")
 
     def c102():
+        sends(dly=1)
+        n.set("delay_mix", 0.5)
+        time.sleep(1)
         on = n.cpu(4)
         n.set("delay_mix", 0)
         time.sleep(1)
         off = n.cpu(4)
         nodes = n.nodes()
+        sends(dly=0)
         return verdict("four_delay" not in nodes, f"delay on {on}, off {off}: the node is gone, the difference is under the noise. No older build to compare", "measured")
 
     def c103():
         n.goto("DELAY")
+        sends(dly=1)
         n.set("delay_mix", 0.5)
         n.tap(2, 0.08)
         time.sleep(3)
@@ -1390,6 +1469,7 @@ def stage10():
         v = level("10.3_hold", 3)
         n.tap(2, 0.08)
         n.set("delay_mix", 0)
+        sends(dly=0)
         set_mode("PLAY")
         return verdict(v > -50, f"after INF, voice off, KILL, wait, un-KILL: the loop plays at {v} dB")
 
@@ -1397,6 +1477,8 @@ def stage10():
         record_take(4, "tone")
         set_mode("PLAY")
         n.set("delay_mix", 0)
+        # the send is open before the mix rises: the echoes build from now
+        sends(dly=1)
         time.sleep(1)
 
         def rise():
@@ -1416,6 +1498,7 @@ def stage10():
         rate, chans = during(knob, "10.4_spawn_knob", 3)
         hits = audio.clicks(chans[0], rate)
         n.set("delay_mix", 0)
+        sends(dly=0)
         return verdict(len(hits) <= 1, f"raised with E2: breaks {hits[:6]}. Jumped from 0 to 0.4 by a param set, as MIDI or a scene can: breaks {jump[:6]}. Listen to 10.4_spawn_knob.wav", "measured")
 
     def c105():
@@ -1484,6 +1567,8 @@ def stage10():
 
     def c108():
         set_mode("PLAY")
+        # with the sends closed there are no tails, and the cut would pass on silence
+        sends(dly=1, rev=1)
         n.set("delay_mix", 0.5)
         n.set("delay_fb", 0.8)
         n.set("rev_mix", 0.6)
@@ -1501,6 +1586,7 @@ def stage10():
         n.set("delay_mix", 0)
         n.set("rev_mix", 0)
         n.set("delay_fb", 0.3)
+        sends(dly=0, rev=0)
         _ = h
         return verdict(b < a - 45 and zero == "True" and regen == 0, f"{a} dB, then {b} dB after the erase; buffer all zero={zero}; regen {regen}. Listen to 10.8_after.wav", "measured")
 
@@ -1528,6 +1614,7 @@ def wait_loaded(start, limit=240):
 
 
 def stage11():
+    ensure_test_files()
     n.load_script()
     n.set("dry_wet", 1)
     record_take(6, "drums")
@@ -1607,11 +1694,14 @@ def stage11():
     for cid, fn in (("11.2d", c112d), ("11.9", c119), ("11.10", c1110),
                     ("11.11", c1111), ("11.12", c1112)):
         check(cid, fn)
-    you("11.13", "11.14", why="only an ear can judge these. Use resample 0.5 and a slammed INF delay")
+    you("11.13", "11.14", why="only an ear can judge these. Use resample 0.5; for 11.14 open track 1's sends first "
+                              "(TRACKS, hold K1, D and R), then slam an INF delay")
 
 
 # ---- stage 12 ----------------------------------------------------------------
 def stage12():
+    ensure_test_files()
+
     def c121():
         n.load_script()
         start = mark()
@@ -1712,7 +1802,8 @@ def stage12():
     for cid, fn in (("12.1", c121), ("12.2", c122), ("12.5", c125), ("12.6", c126), ("12.7", c127),
                     ("12.9", c129), ("12.10", c1210), ("12.14", c1214)):
         check(cid, fn)
-    you("12.4", "12.11", "12.12", "12.13", why="test/test_control covers the logic offscreen. Try these by hand")
+    # 12.3 and 12.12 tested the layer decks: REMOVED in doc/device-gate.md
+    you("12.4", "12.11", "12.13", why="test/test_control covers the logic offscreen. Try these by hand")
     you("12.8", why="needs a physical grid")
 
 
@@ -1862,6 +1953,8 @@ def stage14():
 
 # ---- stage 15 ----------------------------------------------------------------
 def stage15():
+    ensure_test_files()
+
     def c151():
         n.load_script()
         record_take(5, "drums")
@@ -1874,7 +1967,7 @@ def stage15():
         n.ctx("c.pad_chop()")
         time.sleep(10)
         text = transcript_since("lua", start)
-        return verdict("CHOP" in text, f"{[x for x in text.splitlines() if 'mangler' in x]}. The queued line depends on the timing of the repaint", "measured")
+        return verdict("CHOP" in text, f"{[x for x in text.splitlines() if 'four:' in x]}. The queued line depends on the timing of the repaint", "measured")
 
     def c152():
         n.set("erode", 0.5)
@@ -1887,7 +1980,7 @@ def stage15():
         n.ctx("c.pad_chop()")
         time.sleep(8)
         text = transcript_since("lua", start)
-        return verdict("CHOP" in text and "queued" not in text, f"{[x for x in text.splitlines() if 'mangler' in x]}")
+        return verdict("CHOP" in text and "queued" not in text, f"{[x for x in text.splitlines() if 'four:' in x]}")
 
     def c158():
         n.load_script()
@@ -1902,12 +1995,13 @@ def stage15():
                 break
         length = (n.get("pos_end") - n.get("pos_start")) * 60
         text = transcript_since("lua", start)
-        return verdict("dropped" in text or "t44k.wav (3.0s)" in text and abs(length - 3) < 0.1, f"the second load wins: window {length:.2f}s; {[x[:70] for x in text.splitlines() if 'mangler' in x or 'dropped' in x or 'Hz file' in x]}")
+        return verdict("dropped" in text or "t44k.wav (3.0s)" in text and abs(length - 3) < 0.1, f"the second load wins: window {length:.2f}s; {[x[:70] for x in text.splitlines() if 'four:' in x or 'dropped' in x or 'Hz file' in x]}")
 
     for cid, fn in (("15.1", c151), ("15.2", c152), ("15.8", c158)):
         check(cid, fn)
     you("15.3", why="needs a Launchpad")
-    you("15.4", "15.5", "15.6", "15.7", "15.9", "15.10", "15.11", why="test/test_control covers the logic offscreen. Try these by hand")
+    # 15.7 and 15.11 tested the layer decks: REMOVED in doc/device-gate.md
+    you("15.4", "15.5", "15.6", "15.9", "15.10", why="test/test_control covers the logic offscreen. Try these by hand")
 
 
 # ---- stage 16 ----------------------------------------------------------------
@@ -2034,8 +2128,6 @@ def stage16():
         n.set("dry_wet", 1)
         record_take(4, "tone")
         set_mode("PLAY")
-        # doc/device-gate.md names `eng level`, which is not a modulator target
-        # (lib/mlfo.lua TARGETS). The cutoff shows the same ducking.
         n.set("cutoff", 1000)
         opt("lfo2_target", n.lua('print(params:lookup_param("cutoff").name)'))
         opt("lfo2_shape", "ENV")
@@ -2047,12 +2139,14 @@ def stage16():
         ducked = level("16.8_input", 2)
         n.signal(None)
         n.set("lfo2_depth", 0)
-        return verdict(ducked < quiet - 1, f"ENV on the cutoff: engine {quiet} dB without input, {ducked} dB with input. `eng level` is not a target, so the gate's text is out of date")
+        return verdict(ducked < quiet - 1, f"ENV on the cutoff: engine {quiet} dB without input, {ducked} dB with input")
 
     def c169():
         n.load_script()
         record_take(4, "tone")
         set_mode("PLAY")
+        # the node follows rev_mix alone, but the pulse is heard only through a send
+        sends(rev=1)
         name = n.lua('print(params:lookup_param("rev_mix").name)')
         opt("lfo2_target", name)
         opt("lfo2_shape", "SQUARE")
@@ -2064,6 +2158,7 @@ def stage16():
         n.set("lfo2_depth", 0)
         time.sleep(1.5)
         off = n.nodes()
+        sends(rev=0)
         return verdict("four_reverb" in on and "four_reverb" not in off, f"reverb node with the LFO={'four_reverb' in on}, at depth 0={'four_reverb' in off}; CPU {cpu}")
 
     def c1610():
@@ -2144,7 +2239,8 @@ def stage17():
     def c171():
         since = n.ssh("systemctl show norns-sclang -p ActiveEnterTimestamp --value").strip()
         errs = n.ssh(f'journalctl -u norns-sclang --since "{since}" --no-pager | grep -E "ERROR|FAILURE" | grep -cvE "RoutineYield|outside of a Routine"').strip()
-        return verdict("count: 66" in n.transcript("lua") and errs == "0", f"count 66; SuperCollider errors since start {errs}")
+        return verdict(COUNT in n.transcript("lua") and errs == "0",
+                       f"{COUNT} seen={COUNT in n.transcript('lua')}; SuperCollider errors since start {errs}")
 
     def c172():
         opt("repeat_div", "1/8")
@@ -2290,7 +2386,8 @@ def stage18():
         n.goto(page)
         time.sleep(0.25)
         shot("18_" + page)
-    you("18.1", "18.2", "18.3", "18.5", "18.6", "18.7", "18.8", "18.9", "18.10", "18.13", "18.14", "18.15", "18.16",
+    # 18.1 tested a layer deck's header flag: REMOVED in doc/device-gate.md
+    you("18.2", "18.3", "18.5", "18.6", "18.7", "18.8", "18.9", "18.10", "18.13", "18.14", "18.15", "18.16",
         why="test/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
 
 

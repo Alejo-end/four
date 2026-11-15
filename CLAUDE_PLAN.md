@@ -1,5 +1,11 @@
 # mangler — fresh-start spec, docs & loadable Stage-0 skeleton
 
+> **Historical.** This is the first plan of the project: mangler's Stage 0, from before
+> any code. Nothing in it is current. Its folder `SPEC/` never existed (the spec became
+> doc/spec.md, also historical). The current state is the STATUS block of CLAUDE.md, and
+> the current plan is doc/plan.md. Whether to delete this file is a decision for the user
+> (doc/plan.md, "Decisions for the user").
+
 ## Context
 
 The repo is being restarted clean for a new norns script, **mangler**: a performance-first

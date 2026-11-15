@@ -1,5 +1,17 @@
 # four: the plan for SPACE, the effects and the screen
 
+
+> **Status, 2026-11-15.** Four parts are built. The sends of section 3 came in
+> the nineteenth change. The room's core is section 13. FourRoom in the engine is
+> section 14, on the norns. The bucket brigade is section 15, not on the norns.
+> These parts are not built: the early field (5.3) and a SIZE change while the
+> room plays (5.4). The room reads its size only at its start. AGE and TONE have
+> no knobs (they are fixed at 0.25 and 0.35). The clock has no LFO, and CHORUS
+> does not use the BBD core. ECHO uses FourDelay, not the BBD core. The shimmer
+> is still `PitchShift`. The sentence "Nothing here is built" below is from the
+> second draft. The measured state of SPACE is in
+> doc/measurements/2026-11-15/README.md.
+
 Status: the second draft, 2026-11-13. A second agent reviewed the first draft
 and found errors. Section 11 lists them, and the sections above it are
 corrected. Nothing here is built.
@@ -569,3 +581,12 @@ the corner stops at 8.4 kHz so a fast clock folds nothing into hearing.
 Open: the cost on the norns, silence on the norns (the denormal repair), the
 clock in steps of one block (a ramp inside the block is finer), an LFO on the
 clock, knobs for AGE and TONE, the review's test at clocks above 24 kHz.
+
+## 16. The review of 2026-11-15
+
+When its clock changes, the bucket brigade computes the step of a whole tick
+once. Its output is the same, bit for bit (test_core and an engine render). At 43 ms it
+takes 44% less time on the Mac. At 0.3 s the cost does not change. The least delay
+is 42.8 ms: `delay_time` from 10 to 43 ms gives the same echo. The room passes DC
+with a gain of +16 dB at a decay of 30 s. The numbers are in
+doc/measurements/2026-11-15/README.md.

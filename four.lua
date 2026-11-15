@@ -85,7 +85,7 @@
 -- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
 -- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
 -- the wav file reader). they share one `ctx` table and params are the single
--- source of truth. full design: doc/spec.md.
+-- source of truth. the plan: doc/plan.md. the history: doc/changelog.md.
 
 engine.name = "Four"
 
@@ -892,7 +892,7 @@ local KEYS = {
     -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
     -- (slot 0) a tap is the way back (safe restore). CAP captures into the
     -- selected slot — into ◄ it marks the way-back state by hand.
-    k2 = { label = "RCL",
+    k2 = { label = "RCL", hold_label = "PEEK",   -- (doc/controls.md's word)
       lit = function() return ctx.peek_on == true end,
       pon = function()
         -- the slot is resolved at the PRESS: a running orbit re-aims the
@@ -2818,17 +2818,19 @@ local function init_params()
   -- 0..1 knob curved to the actual 0..0.98 feedback coefficient (fb_curve):
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback", unit(0.3), fb_curve)
-  -- FX SEND response curve: the engine crossfades the wet with an equal-power
-  -- .sqrt (Engine_Four.sc), so a raw 3% knob already reads ~17% wet ("way too
-  -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
-  -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
+  -- the level of the echoes. The engine adds them to the dry sum at
+  -- delay_mix.sqrt (Engine_Four.sc), and the dry never ducks. A raw 3% knob
+  -- would already read about 17% ("way too blunt"), so `square` makes the echo
+  -- gain LINEAR in the knob. rev_mix works the same way for the tail.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
   -- how much of the echoes goes on into the reverb (0: the two are apart)
   add_eng_control("dly_rev", "delay > reverb", unit(0.0))
 
-  -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
-  -- fallback in the engine). every knob maps to a real JPverb arg — nothing
-  -- hardcoded. REVERB face reaches mix/size/decay/damp (E2/E3 + K1 alt);
+  -- the reverb params are JPverb's full attribute set. With the plugin the
+  -- engine runs FourRoom, which reads only mix, decay, damp and size (size when
+  -- the synth starts). The other knobs act on JPverb only, and FreeVerb is the
+  -- last fallback (doc/measurements/2026-11-15/README.md, findings m and n).
+  -- REVERB face reaches mix/size/decay/damp (E2/E3 + K1 alt);
   -- the other 11 (early/mod/EQ/cuts/shimmer) live in PARAMS + the WASH/BLOOM
   -- throws. shimmer surges on the BLOOM key.
   params:add_group("grp_reverb", "reverb", 15)

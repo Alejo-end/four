@@ -1,4 +1,4 @@
-# four: the plan (written 2026-11-12, for the next session)
+# four: the plan (written 2026-11-12, corrected 2026-11-15)
 
 This plan says what to do next, in order, and why. Read CLAUDE.md first: it has
 the hard rules, the deploy ritual and the lessons. The per-change history is in
@@ -11,52 +11,37 @@ judged by that: can a tired player on a dark stage read it at once?
 
 ## Where the project stands
 
-- **Name.** mangler2 replaced the one-track mangler and is now called **four**:
-  `four.lua`, `Engine_Four` in `lib/Engine_Four.sc`, `engine.name = 'Four'`,
-  SynthDefs `\four_*`. The old mangler is the git tag `mangler-1`. The OSC
-  addresses are `/four/...` and the log lines start with `four:` (2026-11-13).
-- **Fingerprint.** After a RESTART, maiden must read `count: 198`.
-- **What four is.** Four tracks, each with its own 60 s of material. Each track
-  has a voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window, a filter, COLOR
-  (drive, crush) and SPACE (its delay and reverb sends). Tracks can send into
-  each other. There are four modulators, and each one sits on a track. GRAIN is
-  a granulator that reads the take. CLOUD is MiClouds.
-- **On the device (norns shield, Pi 4, `norns.local`, user `we`).**
-  - `dust/code/four` and `dust/data/four` are installed.
-  - `dust/code/mangler` and `dust/code/mangler2` are deleted.
-  - `dust/data/mangler` and `dust/data/mangler2` stay as backups.
-  - The last code synced to the device is the screen change below. The script
-    was not reloaded, because the user was playing it.
-- **Measured on 2026-11-12.**
-  - The worst case with four GRAIN tracks takes 45% of the scsynth thread.
-  - A 30 minute soak ran at about 40% at 58 to 60 °C, with no throttling
-    (`vcgencmd get_throttled` = `0x0`).
-  - There were 0 xruns while playing. A preset loaded by hand gave a burst of
-    3 to 7 xruns (doc/measurements/2026-11-12/).
-- **Nobody listened yet** to the four-track work: per-track COLOR, SPACE and
-  modulators, the new GRAIN, CLOUD, or the pad scatter.
+The STATUS block of CLAUDE.md is the one record of the device: what is on it, the
+fingerprint (`count: 198`), and what nobody has heard. Read it first. This plan says only
+what to do.
 
-### Git state (read `git status` first)
+- **What four is.** Four tracks, each with its own 60 s of material. Each track has a
+  voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window and a filter. It also has COLOR
+  (drive, crush), two effect slots and its sends to the delay and the reverb. Tracks can
+  send into each other. Four modulators can sit on any track. Twelve pages.
+- **Git.** Read `git status` first. On 2026-11-15 `main` was clean and pushed, at the
+  twentieth change. The `../mangler2` folder is a git worktree on branch `mangler2`. It is
+  fully merged, and `git worktree remove ../mangler2` removes it once the user agrees. The
+  local folder is still named `mangler`: the user moves it, with no session open in it.
+- **The change log.** The visuals doodles are committed, but their entry is titled
+  "Hundred-and-fourteenth change", a number that the sound fixes already use. Give it a
+  number of its own.
 
-- **Branch `main`.** It is the four version, pushed on 2026-11-13.
-- **Uncommitted, from this session: the screen change** ("four, second change"
-  in doc/changelog.md):
-  - The header track cells.
-  - REC TRACK n on TAKE.
-  - Steady writer letters.
-  - Page dots on a 3 px pitch.
-  - `test/device/soak.py`.
-  - This plan.
-- **Uncommitted, from another session: the visuals doodles.**
-  - `visuals/hydra.js` and `visuals/README.md`.
-  - A changelog entry titled "Hundred-and-fourteenth change". That number is
-    already used, so it needs a new one.
-  - When the user says so, commit these (see Phase 1, item 5).
-- **The `../mangler2` folder.** It is a git worktree on branch `mangler2`. It is
-  fully merged and can be removed with `git worktree remove ../mangler2` once
-  the user agrees.
-- **GitHub.** The repo is `Alejo-end/four` since 2026-11-13. The local folder is
-  still named `mangler`: the user moves it, with no session open in it.
+## Phase 0: bring the device up to the code
+
+The STATUS block of CLAUDE.md says which changes the device lacks. To bring it to
+`count: 198`, in this order:
+
+1. Build the plugin on the norns (ugen/README.md, with `-DFOUR_FFTW`). It now holds
+   `FourBBD`. Run the proof (`ugen/test_core.cpp`) there, and make sure that it ends: in
+   silence its first run on the norns did not end in 400 s, before the denormal repair.
+2. Install the binary BEFORE the engine, then deploy and RESTART by the ritual. Maiden
+   must read `count: 198`.
+3. Measure the delay's cost, and make sure that silence costs nothing
+   (doc/space-plan.md, section 15).
+4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED.
+5. The rebuilt presets are not on the device. `test/deploy_set.sh` overwrites slots 1
+   to 12 and deletes their takes, so ask the user first.
 
 ## Phase 1: the show checks (needs the user at the hardware)
 
@@ -77,8 +62,8 @@ whether the show works.
    make sure that the six shapes look right. If they still feel plain, ask which
    part.
 4. **Launchpad colours.** Nobody has seen them on real pads yet.
-5. **Commit.** When the user says so, commit the doodle changes, the visuals
-   README and their changelog entry. Renumber the entry first.
+5. **Commit.** Done: the doodle changes are committed. Their changelog entry still
+   needs its own number (see "Where the project stands").
 6. **The pre-show test.** When the cable is sorted, make sure that:
    - `node visuals/test_bridge.js` passes.
    - `lua test/check.lua` with `LUA53` set passes.
@@ -99,18 +84,28 @@ doc/device-gate.md, and fix or revert it.
    FRZ held.
 3. Per-track drive and crush (FILTER, K1 held). Is the crush range musical, or
    is it lo-fi too early?
-4. The SPACE sends on the TRACKS grid (K1 held, columns D and R). Turn one
-   track's reverb send down while the others keep theirs.
+4. The sends (four, nineteenth change). Every send starts at 0. On TRACKS (K1
+   held, columns D and R) open one track's sends, then a second track's. When the
+   echoes and the tail come up, the dry sound must not duck. Then raise
+   `dly_rev`, which sends the echoes into the reverb.
 5. A modulator on track 3's cutoff. Is the small wave on TRACKS clear enough?
 6. The header track cells and REC TRACK n on TAKE. Ask: "Can you tell what is
    recording, and what plays?" This is the user's own question.
 7. A held GRAIN pad. Does it still buzz?
-8. The effect slot (four, third change): CHORUS, FLANGE, WOBBLE, RESON and RING
-   on one track, on the EFFECT page. Is each one worth keeping? Is the picture
-   of each one clear? RESON's level was raised (four, fifth change): is it even
-   with the others now, at every note?
-9. The presets. They are tuned on CLOUD and have never been heard. Fix the table
-   in test/make_set.lua after the listen, then rebuild.
+8. The effect slots (four, third change): CHORUS, FLANGE, WOBBLE, RESON, RING
+   and ECHO on one track, on the EFFECT page. Is each one worth keeping? Is the
+   picture of each one clear? RESON's level was raised (four, fifth change): is
+   it even with the others now, at every note? FLANGE is new and ECHO is new
+   (four, fourteenth change). Then the second slot (K1+E2 and K1+E3).
+9. The presets. They are tuned on CLOUD and have never been heard. Tracks 2
+   and 3 now play what the layer decks played (four, thirteenth change). Fix
+   the table in test/make_set.lua after the listen, then rebuild.
+10. The stretch voices of FourStretch: PV, WARP and PLAY at pitch 1 and away
+    from it. The user liked them on 2026-11-13, before the ninth change.
+11. The level (four, tenth change): everything is 7 dB quieter. Is that right?
+    Do drive and RESON still bite?
+12. The room (four, sixteenth change) and the bucket brigade (four, seventeenth
+    change). Turn DECAY, DAMP and SIZE. Set a long delay time: it must grow dark.
 
 To deploy the rebuilt presets, run `test/deploy_set.sh` (it writes to
 `data/four`). It deletes the takes saved in slots 1 to 12, so ask the user
@@ -118,9 +113,10 @@ first.
 
 ## Phase 3: no glitch when a preset loads
 
-- **Measured.** Loading preset 6 by hand gave 3 xruns at once, and 7 on a second
-  load. That preset loads the same 50 s file five times: the take, tracks 2 to 4,
-  and both layer decks.
+- **Measured (2026-11-12).** Loading preset 6 by hand gave 3 xruns at once, and 7
+  on a second load. That preset then loaded the same 50 s file five times: the
+  take, tracks 2 to 4, and both layer decks. The decks are gone (four, thirteenth
+  change), so measure it again on the rebuilt presets.
 - **Also seen.** crone printed "error seeking to frame 2400256; aborting read".
   softcut tries to read past the end of a 50 s file.
 - **Goal.** Loading a preset during a show makes no audible glitch.
@@ -154,10 +150,12 @@ two things they named. Next:
    SPRD, CRSH, 1>DLY, the route grid's D and R. Prefer full words at rest and
    short ones only while a knob turns. The footer already does this for some
    ids.
-3. **Fewer pages.** There are thirteen: the user agreed to an EFFECT page
-   after FILTER on 2026-11-12. The user asked for fewer pages and one
-   focus before. Candidates are to fold TAPE and LAYERS into one deck page, and
-   PADS and MOTION into one. Plan this with the user before you build it.
+3. **Fewer pages.** There are twelve: the user agreed to an EFFECT page after
+   FILTER on 2026-11-12, and LAYERS went in the thirteenth change. The user
+   asked for fewer pages and one focus before. A candidate is PADS and MOTION as
+   one page. doc/space-plan.md proposes one SPACE page for the sends, DELAY and
+   REVERB, but in July the user asked for DELAY and REVERB apart
+   (doc/ux-feedback.md, point 21). Plan this with the user before you build it.
 4. **A MIDI controller map.** The user asked if a controller can help the
    granular sound. Ask which controller they own (the question is unanswered).
    Then give each track a column of knobs (level, filter, send, grain size)
@@ -168,6 +166,48 @@ two things they named. Next:
 Prove each screen change with the uisim renders (`test/uisim/render_pages.lua`,
 the variants `base` and `track2`) and test_screen. Look at the PNGs. A
 redraw error on the device is a silent black screen.
+
+### The observed walkthrough (step 1 of this phase)
+
+An outside review of the screen (2026-11-15, four's twenty-third change) asks
+for this before any redesign. It tests what a player understands without help.
+Do it on the device, with sound, after Phase 0.
+
+**Set up.** A fresh script, no preset loaded, a sound source at the input.
+Save only to PSET slot 90. One person observes and writes, and does not
+explain anything until a task ends. When the player stops or asks a question,
+take a photo of the screen.
+
+**The tasks**, in this order, each one started from TAKE:
+
+1. Record a take of about ten seconds on track 1, then stop.
+2. Record a second take on track 2.
+3. On track 1, change the voice to GRAIN and make the grains longer.
+4. Send track 2 into the reverb, and make the reverb louder.
+5. Undo track 2's take.
+6. Save the sound into scene 3. Change two knobs. Recall scene 3. Then go
+   back to the sound before the recall.
+7. Freeze track 1's voice (it is GRAIN now). Start a take on track 2. Go to
+   DELAY, and say from the screen what is frozen, what records and what
+   plays.
+
+**Ask before you explain.** After each task, point at the screen and ask:
+
+- "What does this word mean?" for each footer word on the page, and for the
+  header's cells and letters (T, M, FZ, LF).
+- "Which track records now? Which tracks play?"
+- "Held here, what does K3 do? What does K1 change here?"
+- At one page of each family: "One turn of E1 from here: which page comes next?"
+
+**Write down** for each task: done alone, done with help, or not done. The
+time it took. Each wrong press (the key, the page, what the player expected).
+Each word the player asked about or guessed wrong, and the guess. Where the
+player looked first.
+
+**After it.** Put the results in a new dated section of doc/ux-feedback.md,
+the wrong guesses as a list. Then ask the user to decide on the review's
+proposals (the twenty-third change's entry names them) with the list in hand.
+Build only what the user accepts.
 
 ## Phase 5: engine items left from mangler's plan
 
@@ -190,6 +230,8 @@ One at a time, each with a RESTART and a listen.
    apply it to both sides.
 7. **Reversed grains.** Add a per-grain direction probability (`grain_rev`), as
    one new command.
+8. **The rest of doc/space-plan.md.** Its section 8 is the order of work, and
+   its sections 13 to 15 say what is built.
 
 ## Phase 6: the device (the S-4 alternative)
 
@@ -217,6 +259,8 @@ Each one needs a yes or a no. Ask the user. Do not decide.
 5. Delete `CLAUDE_PLAN.md` (the original S0 plan) and `data/layers/` (old
    preset copies)?
 6. Which MIDI controller do they own?
+7. One SPACE page (doc/space-plan.md, section 7.2), or DELAY and REVERB as two
+   pages, as the user asked in July?
 
 ## How to work on this project
 

@@ -9,19 +9,17 @@
 // COLOR AND SPACE (the S-4's devices after the filter): every track has its
 // own drive and crush (sample rate and bit reduction), and its own send
 // amount into the shared delay (fx_dly) and reverb (fx_rev). Both sends
-// default to 1, which is the sound from before they existed. Track 1's
-// are io's `drive`, `crush`, `fx_dly`, `fx_rev`; the others' are four more
-// strip keys, so 30 a track.
+// start at 0 (SPACE is two sends since four's nineteenth change). Track 1's
+// are io's `drive`, `crush`, `fx_dly`, `fx_rev`; the others' are strip keys.
 // ROUTING (the S-4's sends): `send_<from>_<to>` sends one track's filtered
 // output into another track's filter, 12 sends in all. A send arrives one
 // block late (InFeedback) and goes through a tanh, so a ring of sends can
 // feed back but never runs away. OWN MATERIAL: each track plays its own
 // 60s buffer pair; rec_track picks the pair io records into, buf_track the
-// pair the buffer commands use. THE EFFECT: every track has one effect slot
-// after its COLOR (`effect` picks OFF, CHORUS, FLANGE, WOBBLE, RESON or RING;
-// `effect_amt` and `effect_rate` are its two knobs), so 33 a track.
-// Count: 66 + 6 (crush, fx_dly, fx_rev, effect, effect_amt, effect_rate)
-// + 3 x 33 + 12 + 2 = 185.
+// pair the buffer commands use. THE EFFECT: every track has two effect slots
+// in series after its COLOR (`effect` and `effect2` pick OFF, CHORUS, FLANGE,
+// WOBBLE, RESON, RING or ECHO; `_amt` and `_rate` are each slot's knobs).
+// Count: 198 (CLAUDE.md has the sum; test/test_control.lua checks it).
 //
 // HARD RULE: exactly one `Engine_Four` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
@@ -35,8 +33,10 @@
 // while erode > 0 in PLAY) + the spawn/release beat repeat (updateRepeat,
 // only while the `beat_repeat` command holds a length > 0, placed after io on the
 // output bus). Drone and voices Out.ar additively onto play_bus;
-// io reads it. Plugin UGens (JPverb, MiClouds, DFM1) are guarded via .asClass
-// -> stock fallback so a missing plugin never bricks the load.
+// io reads it. Plugin UGens (DFM1, MiClouds, JPverb and our own FourStretch
+// set) are guarded via .asClass -> stock fallback so a missing plugin never
+// bricks the load. The fallbacks do NOT sound the same (the stock filter, the
+// FreeVerb reverb): doc/measurements/2026-11-15/README.md.
 //
 // DEVICE NOTES: context.in_b is an ARRAY of two mono busses, out_b one stereo
 // bus. SC errors land in maiden's SC tab, not matron. Editing this file needs
@@ -630,8 +630,11 @@ Engine_Four : CroneEngine {
         //     least a quarter of its own length: grains that all start on
         //     the same sample comb-filter into a buzz at the density.
         //   a grain is CENTRED on its place (it reads half before, half
-        //     after), and the whole grain stays inside the window: it never
-        //     reads the empty buffer past the take.
+        //     after), and its START stays inside the window. A grain no
+        //     longer than the window stays inside it. A longer one (size 0.5s
+        //     in a 12ms window) reads on past the window's end: measured, the
+        //     sound from outside came out 8.6 dB louder than the window's own
+        //     (doc/measurements/2026-11-15).
         //   pv_freeze holds the head where it is while grains keep coming.
         // FourStretch (ugen/): our own UGens for the two stretch voices. WARP
         // is WSOLA and PV is a phase vocoder with locked phases; both return
@@ -708,8 +711,13 @@ Engine_Four : CroneEngine {
             // Dust makes up the rest, so the mean rate stays the density.
             // The same knob varies the length. Every per-grain random is ar
             // on the same trigger.
+            // `Impulse.ar(0)` is the first grain, at the first sample. CoinGate
+            // takes its input's first value as the trigger it last saw, so it
+            // never passed Impulse's first impulse: the first grain came one
+            // period late. Measured: silence for 31ms after a mode change into
+            // GRAIN at density 20, and 250ms at density 4.
             trig = CoinGate.ar(1 - grain_jitter.clip(0, 1), Impulse.ar(density))
-                + Dust.ar(density * grain_jitter.clip(0, 1));
+                + Dust.ar(density * grain_jitter.clip(0, 1)) + Impulse.ar(0);
             dur = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trig))).max(0.005);
             // midiratio is already 2^(st/12): no /12 before it
             pch = pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trig).midiratio;
@@ -873,11 +881,19 @@ Engine_Four : CroneEngine {
         SynthDef(\four_erode, {
             arg buf_l, buf_r, gate = 1, pos_start = 0, pos_end = 1,
                 erode = 0, wear = 0.5, level = 1, rec = 0, freeze = 0;
-            var lo, span, run, head, idx, env, eff, wearF, rawL, rawR;
+            var lo, span, run, head, idx, env, eff, wearF, rawL, rawR, frames;
             #lo, span = winBounds.(pos_start, pos_end);
             run = (1 - rec) * (1 - freeze) * (level > 0.001);
-            head = Phasor.ar(0, run * SampleDur.ir / (BufDur.kr(buf_l) * span), 0, 1);
-            idx = (lo + (head * span)) * BufFrames.kr(buf_l);
+            // THE HEAD COUNTS IN WHOLE FRAMES, one a sample (winRead's law).
+            // It was a float from 0 to 1 times the frames: past the middle of
+            // the 60s buffer a float lands up to 0.17 frame off, so the head
+            // read and wrote some frames twice and skipped others, and the
+            // low-pass saw a jittered signal. Measured on a 5kHz take, erode 1
+            // for 12s: noise 18dB under the tone at 30s in, 22dB under it at
+            // 54s in. Counted in frames: -141dB at every place.
+            frames = BufFrames.kr(buf_l);
+            head = Phasor.ar(0, run, 0, (span * frames).round.max(64));
+            idx = (lo * frames).round + head;
             env = EnvGen.kr(Env.asr(0.05, 1, 0.05), gate, doneAction: 2);
             eff = erode.clip(0, 1).lag(0.05) * env * run;
             wearF = wear.clip(0, 1).linexp(0, 1, 9000, 1200);
@@ -965,9 +981,12 @@ Engine_Four : CroneEngine {
             var comp, bufDur, reach;
             // the drone's laws, one stream of stereo grain pairs: sample
             // accurate onsets (regular to Poisson on grain_jitter), per-grain
-            // randoms on the same trigger
+            // randoms on the same trigger. Impulse.ar(0) is the first grain, at
+            // the press: CoinGate never passes its input's first impulse (see
+            // \four_grain), and a pad sounded 51ms after the press at density
+            // 20 and 251ms after it at density 4.
             trig = CoinGate.ar(1 - grain_jitter.clip(0, 1), Impulse.ar(density))
-                + Dust.ar(density * grain_jitter.clip(0, 1));
+                + Dust.ar(density * grain_jitter.clip(0, 1)) + Impulse.ar(0);
             bufDur = BufDur.kr(buf_l);
             dur = (size * (1 + TRand.ar(grain_jitter.neg, grain_jitter, trig))).max(0.005);
             pch = note_pitch * TRand.ar(grain_pitch_spread.neg, grain_pitch_spread, trig).midiratio;
@@ -1195,6 +1214,12 @@ Engine_Four : CroneEngine {
         // inputgain 0.5: DFM1 is a NONLINEAR diode model, and at unity input
         // gain it saturated constantly. dfmTrim brings its output to unity.
         // The resonance stays under DFM1's self-oscillation (about 0.95).
+        // OPEN IS NOT A BYPASS. The synth runs at 20kHz too. DFM1's source
+        // (sc3-plugins, Dfm1.cpp) puts every sample through z - z^3/3: a
+        // third harmonic 37dB under a -6dBFS tone, 24dB under a 0dBFS one.
+        // The stock path is worse: RLPF at 20kHz and resonance 0 is 10dB down
+        // at 10kHz and 21dB down at 19kHz (measured offline). DFM1's HP is 6dB
+        // an octave, RHPF's 12. doc/measurements/2026-11-15/README.md.
         [\four_filt_lo, \four_filt_hi].do({ arg name, hi;
             SynthDef(name, {
                 arg sbus, pbus, cutoff = 20000, resonance = 0, filt_type = 0, gate = 1;
@@ -1277,13 +1302,12 @@ Engine_Four : CroneEngine {
 
             // the delay runs in \four_delay (spawn/free: alive while
             // delay_mix > 0 or the feedback is a near-infinite hold). SPACE:
-            // what goes in is each track's own send (fx_dly, 1 by default,
-            // which is everything, as before). The echo comes back through
-            // InFeedback, one block late; the delay synth's line is one block
-            // short to pay for it. The mix law stays the equal-power
-            // CROSSFADE (a dub throw wants the direct to duck), lagged so a
-            // CC step does not zipper. At rest the synth is gone and the
-            // return reads 0.
+            // what goes in is each track's own send (fx_dly, 0 at the start).
+            // The echo comes back through InFeedback, one block late; the
+            // delay synth's line is one block short to pay for it. delay_mix
+            // is the level of the echoes (squared in Lua, so .sqrt makes it
+            // linear in the knob), lagged so a CC step does not zipper. At
+            // rest the synth is gone and the return reads 0.
             dm = delay_mix.lag(0.03);
             Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(t_dly, 2));
             dlyRet = InFeedback.ar(dly_ret, 2) * dm.sqrt;
@@ -1405,8 +1429,8 @@ Engine_Four : CroneEngine {
             ReplaceOut.ar(out, (src * (1 - env)) + (rep * env));
         }).add;
 
-        // delay synth (spawned by updateDelay). reads io's post-drive wet,
-        // returns the 100%-wet echo; io does the crossfade. the regeneration
+        // delay synth (spawned by updateDelay). reads the tracks' delay sends,
+        // returns the 100%-wet echo; io adds it to the dry sum. the regeneration
         // loop lives HERE (this def's own LocalIn/LocalOut pair), so freeing
         // the synth is what flushes the line — \clear leans on exactly that.
         // all core UGens. delay_mix is accepted and unused: the generic
@@ -1458,8 +1482,14 @@ Engine_Four : CroneEngine {
         }).add;
 
         // reverb + shimmer synth (spawned by updateReverb while rev_mix > 0).
-        // reads io's post-delay wet, returns the JPverb tail; shimmer recirculates
-        // through this synth's own LocalIn/LocalOut. JPverb guarded -> FreeVerb.
+        // reads the tracks' reverb sends (and dly_rev's echoes), returns the
+        // tail; shimmer recirculates through this synth's own LocalIn/LocalOut.
+        // THREE reverbs, by what is installed: FourRoom (the plugin), else
+        // JPverb (sc3-plugins), else FreeVerb. They differ. Measured offline
+        // at decays of 0.8, 2 and 7s: the room's T60 is 0.67, 1.79 and 5.79s,
+        // FreeVerb's 0.59, 0.61 and 0.75s, and FreeVerb is 3.3dB louder.
+        // FreeVerb with shimmer at 0 semitones and a long decay runs away to
+        // a full-scale drone (peak 4.8); the room does not.
         SynthDef(\four_reverb, {
             arg in_bus, out_bus,
                 rev_size = 1.0, rev_decay = 2.0, rev_damp = 0.3, rev_early = 0.7,
@@ -1480,8 +1510,11 @@ Engine_Four : CroneEngine {
             // unitary diffusion steps and eight late lines. It takes 4% of
             // the audio thread where JPverb took 13.5%. rev_decay is its T60.
             // rev_damp makes it dark: the top keeps 1 down to 0.15 of the
-            // decay. rev_size is the base time of the diffusion, read when the
-            // synth starts. The other reverb values do nothing to it yet.
+            // decay. rev_size is the base time of the diffusion, read ONLY when
+            // the synth starts, and only from 0.4 to 2.1 (the knob goes to 5).
+            // A turn of SIZE while the room plays does nothing, and neither do
+            // rev_early, rev_moddepth, rev_modfreq, rev_low, rev_mid,
+            // rev_high, rev_lowcut and rev_highcut (a null test: bit for bit).
             // Its level is set against JPverb's, measured on the device with
             // the same pink noise at decays of 0.8, 2 and 7 s. The room alone
             // rose 4.9 dB over that range and JPverb 2.0 dB, so the return

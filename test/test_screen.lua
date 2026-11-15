@@ -8,6 +8,9 @@
 --   the footer: the erase arc clears the encoder words (it sat on "MOVE")
 --   VOICE:      the GRAIN cloud follows its knobs (it drew the same dots
 --               whatever size, density, spread, pan or jitter said)
+--   a held key: the footer keeps the tap's word while a release still taps
+--   the cells:  the recording track reads REC in either blink phase
+--   the edges:  TAKE's count and MOTION's >OUT stay on the screen
 --
 --   lua test/test_screen.lua        # from the repo root
 
@@ -377,6 +380,133 @@ do
   lit, maxl, rows = body()
   ok(maxl <= 4 and lit > 0, "a silent track's effect is drawn dim (level " .. maxl .. ")")
   params:set("mode", 5); params:set("effect", 1)
+end
+
+-- ============================================================================
+-- 8 · a held key's word changes when its release changes meaning
+-- ============================================================================
+-- Before TAP_FRAMES a release is still the tap (SNAP, DRY), so the footer
+-- keeps the tap's word, with no arc and no hatch. The hold's word drew from
+-- the second frame, and a release in frames 2 to 4 did what it did not say.
+do
+  local TAP = CTX.TAP_FRAMES
+  T.goto_page("TAKE")
+  _h.run_ticks(30)
+  local real_undo = CTX.take_undo
+  CTX.take_undo = function() end
+  params:set("pos_start", 0.1); params:set("pos_end", 0.4)
+  key(3, 1); _h.run_ticks(TAP - 1); redraw()
+  ok(Mp.FOOT.k3 == "SNAP" and Mp.FOOT.arc == nil,
+    "K3 held " .. (TAP - 1) .. " frames on TAKE still reads SNAP, no arc (" .. tostring(Mp.FOOT.k3) .. ")")
+  CTX.take_msg = nil
+  key(3, 0)
+  ok(CTX.take_msg and CTX.take_msg:find("SNAP"), "...and its release snaps, as it said")
+  key(3, 1); key(3, 0)                -- the second tap puts the window back
+  key(3, 1); _h.run_ticks(TAP); redraw()
+  ok(Mp.FOOT.k3 == "UNDO" and Mp.FOOT.arc ~= nil,
+    "held " .. TAP .. " frames it reads UNDO with its arc (" .. tostring(Mp.FOOT.k3) .. ")")
+  CTX.take_msg = nil
+  key(3, 0); _h.run_ticks(1)
+  ok(CTX.take_msg == nil, "...and a release there does nothing")
+  CTX.take_undo = real_undo
+  -- K1+K3: DRY until a release can no longer be a tap, then ERASE and the hatch
+  local function hatched()
+    for y = 20, 40 do for x = 0, 127 do if px(x, y) == 11 then return true end end end
+    return false
+  end
+  key(1, 1); key(3, 1); _h.run_ticks(TAP - 1); redraw()
+  ok(Mp.FOOT.k3 == "DRY" and Mp.FOOT.arc == nil and not hatched(),
+    "K1+K3 held " .. (TAP - 1) .. " frames reads DRY: no ERASE, no arc, no hatch ("
+      .. tostring(Mp.FOOT.k3) .. ")")
+  _h.run_ticks(1); redraw()
+  ok(Mp.FOOT.k3 == "ERASE" and Mp.FOOT.arc ~= nil and hatched(),
+    "...and at " .. TAP .. " frames ERASE, the arc and the hatch")
+  key(3, 0); key(1, 0); _h.run_ticks(1)
+  ok(CTX.wave_any, "...released in the abort zone, the take stays")
+end
+
+-- ============================================================================
+-- 9 · the recording track's cell reads REC in either blink phase
+-- ============================================================================
+-- The lit phase was the focus's white box, so on a track page half the blink
+-- looked like no recording. Each phase must differ from every other drawing
+-- of that cell: the box (a page that edits it) and the underline (a shared page).
+do
+  local function cell(n) return region((n - 1) * 6, 0, n * 6 - 1, 7) end
+  local keep = CTX.frame
+  local function at(phase) CTX.frame = 400 + phase; redraw() end
+  params:set("track_sel", 2)
+  T.goto_page("EFFECT"); _h.run_ticks(30)
+  at(0); local box = cell(2)
+  at(2); ok(cell(2) == box, "the focus box is steady while nothing records")
+  T.goto_page("DELAY"); _h.run_ticks(30)
+  at(0); local line = cell(2)
+  params:set("rec", 1)
+  for _, page in ipairs({ "EFFECT", "DELAY" }) do
+    T.goto_page(page); _h.run_ticks(30)
+    for _, ph in ipairs({ 0, 2 }) do
+      at(ph)
+      local c = cell(2)
+      ok(Mp.CELL[2] == "rec" and c:find("[1-9]") ~= nil and c ~= box and c ~= line,
+        page .. ", blink phase " .. ph .. ": the recording cell is neither the box nor the underline")
+    end
+  end
+  params:set("rec", 0)
+  CTX.frame = keep
+  params:set("track_sel", 1)
+  _h.run_ticks(1)
+end
+
+-- ============================================================================
+-- 10 · numbers and tags stay on the screen
+-- ============================================================================
+do
+  -- TAKE's elapsed seconds at the widest (58.2S): it lost its S's last two
+  -- columns from 20 s on
+  T.goto_page("TAKE"); _h.run_ticks(30)
+  params:set("rec", 1)
+  _h.run_ticks(1)
+  CTX.rec_waiting = false
+  CTX.rec_arm_phase, CTX.rec_phase = 0, 0.97
+  redraw()
+  local right = -1
+  for y = 46, 55 do for x = 70, 127 do if px(x, y) > 0 then right = math.max(right, x) end end end
+  ok(right >= 110 and right <= 125, "TAKE's count at 58 s ends inside the screen (x " .. right .. ")")
+  params:set("rec", 0)
+  _h.run_ticks(1)
+  -- MOTION: a modulator that goes out to MIDI and crow says >OUT after its wave
+  local function tgt(id)
+    for k, t in ipairs(CTX.lfo.TARGETS) do if t == id then return k + 1 end end
+  end
+  T.goto_page("MOTION"); _h.run_ticks(30)
+  params:set("motion_rec", 0)
+  params:set("lfo1_target", tgt("cutoff")); params:set("lfo1_depth", 0.6)
+  params:set("out_src", 4); params:set("out_midi", 1); params:set("out_crow", 1)
+  params:set("mod_focus", 2)
+  _h.run_ticks(2); redraw()
+  -- the tag is the row's one level-6 ink (a scrollbar on x 127 is 2 or 9)
+  local edge, tag = false, false
+  for y = 9, 54 do
+    if px(126, y) == 6 or px(127, y) == 6 then edge = true end
+    for x = 105, 125 do if px(x, y) == 6 then tag = true end end
+  end
+  ok(tag and not edge, ">OUT draws whole, clear of the screen's last two columns")
+  params:set("out_src", 1); params:set("out_midi", 0); params:set("out_crow", 0)
+  params:set("lfo1_depth", 0); params:set("lfo1_target", 1); params:set("mod_focus", 1)
+  _h.run_ticks(1)
+end
+
+-- ============================================================================
+-- 11 · FZ: any track's freeze is a hold the header shows
+-- ============================================================================
+do
+  local FZ
+  for _, f in ipairs(Mp.HFLAGS) do if f.id == "FZ" then FZ = f end end
+  T.goto_page("DELAY"); _h.run_ticks(2)
+  params:set("t3_pv_freeze", 1); redraw()
+  ok(FZ.on and FZ.x ~= nil, "track 3's freeze lights FZ")
+  params:set("t3_pv_freeze", 0); redraw()
+  ok(not FZ.on, "...and FZ goes with it")
 end
 
 T.report("screen harness OK")

@@ -1,5 +1,11 @@
 # S25 — LAYERS: multitrack, on the core that has room for it
 
+> **Historical. The LAYERS page and its two decks do not exist any more.** four
+> removed them in its thirteenth change (doc/changelog.md): the four engine tracks
+> replaced them, and the tape is the one softcut deck left. This page is mangler's
+> design from S25, kept for its reasoning. The presets in `data/layers/` belong to
+> it and are not supported. The current plan is doc/plan.md.
+
 ## The decision
 
 mangler gets **two more independent loop decks**, on softcut, alongside the one

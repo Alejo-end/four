@@ -11,7 +11,7 @@ effects. A track can send to the other tracks, to the delay and to the reverb. T
 and three encoders reach everything. A grid is welcome and never needed. Every parameter
 maps to MIDI.
 
-four was called mangler. It is in active development: each change is measured on the
+four was called mangler. It is in active development. Most changes are measured on the
 device, and the newest sounds still wait for a listening session.
 
 ## Requirements
@@ -224,9 +224,16 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
 
 ## The header
 
-The header shows what runs, from every page. A blinking R, T or M means that the take, the
-tape or the motion loop records. FZ and TF are the freezes, RP is a held beat repeat, SQ is
-the pad sequencer and LF is a modulator.
+The header shows what runs, from every page. It starts with the four track cells:
+
+- A white box is the track that the page edits. On a shared page such as DELAY, a line
+  under the number marks the focused track.
+- A bright number is a track that sounds. A dim one is silent.
+- The track that records blinks as a box.
+
+After the title, a T or an M with a blinking dot means that the tape or the motion loop
+records. FZ and TF are the freezes, RP is a held beat repeat, SQ is the pad sequencer and LF
+is a modulator.
 
 ## Recording
 
@@ -281,8 +288,8 @@ erases. `lib/mgrid.lua` has the details.
 ## Visuals
 
 `lib/mosc.lua` sends the state of the instrument as OSC. `visuals/` holds a bridge that
-feeds it to Hydra in a browser: see [visuals/README.md](visuals/README.md). This link has
-not run on the device yet.
+feeds it to Hydra in a browser: see [visuals/README.md](visuals/README.md). The link ran
+with mangler on the device. No run with four's `/four/` addresses is on record.
 
 ## Signal flow
 
@@ -310,22 +317,29 @@ is off, an effect at zero and a reverb at zero do not run.
 
 ## What comes next
 
-The plan is [doc/space-plan.md](doc/space-plan.md). The room reverb, the bucket brigade
-delay and the sends are built. The delay and the sends are not on the device yet, and no
-person listened to any of them. Still to do:
+The plan for the effects is [doc/space-plan.md](doc/space-plan.md). The room reverb, the
+bucket brigade delay and the sends are built. The delay and the sends are not on the device
+yet, and no person listened to any of them. Still to do:
 
-- SPACE: one page for the sends, the delay and the reverb.
 - Knobs for the delay's AGE (noise) and TONE, and for the room's COLOR.
 - The room's first reflections, and SIZE that moves while the room plays.
 - CHORUS and ECHO on the bucket brigade, RESON as a string, WOBBLE as a tape model.
 - A screen with fixed rules: geometry only, four levels of grey, and motion only where
   there is sound.
 
+Not decided: doc/space-plan.md proposes one SPACE page for the sends, the delay and the
+reverb. Today they are TRACKS with K1 held, DELAY and REVERB. In July the user asked for
+DELAY and REVERB as two pages (doc/ux-feedback.md, point 21), so the user decides.
+
 ## For developers
 
-- [CLAUDE.md](CLAUDE.md): the status, the hard rules and the lessons.
+- [CLAUDE.md](CLAUDE.md): the status on the device, the hard rules, the lessons, and which
+  documents are current.
+- [doc/plan.md](doc/plan.md): the next work.
 - [doc/changelog.md](doc/changelog.md): every change, oldest first.
-- [doc/spec.md](doc/spec.md) and [doc/engine-map.md](doc/engine-map.md): the engine.
+- [doc/device-gate.md](doc/device-gate.md): the walkthrough on the device.
+- [doc/engine-map.md](doc/engine-map.md): why the engine is shaped as it is. It was written
+  for mangler's engine of one track.
 - [doc/norns-platform.md](doc/norns-platform.md): costs, budgets and platform traps.
 - `lua test/check.lua` runs every check. `python3 test/uisim/gallery.py` rebuilds the
   pictures of this page from the real redraw code, with no hardware.

@@ -8,138 +8,140 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS
+## STATUS (2026-11-15)
 
-- **Names:** script `four.lua`, class `Engine_Four`, file `lib/Engine_Four.sc`,
-  `engine.name = 'Four'`, SynthDefs `\four_*`. It deploys to `~/dust/code/four/`, and its
-  data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The one-track
-  mangler is retired: git tag `mangler-1`. The OSC addresses are `/four/...` (lib/mosc.lua
-  and visuals/bridge.js must agree), and the log lines start with `four:`. The GitHub
-  repository is `Alejo-end/four` since 2026-11-13; the old address redirects.
-- **The fingerprint:** after a RESTART maiden must read **`count: 198`**. That is
-  mangler's 66, plus crush, the two FX sends and the six effect commands of track 1
-  (two slots), `dly_rev`, 36 for each of tracks 2 to 4, 12 sends, rec_track and buf_track.
-- **The instrument:** four tracks, each with its OWN material (four 60 s buffers). K1+E1
-  picks the track. Each track has its own voice (OFF GRAIN WARP PV PLAY CLOUD), window,
-  filter, COLOR (drive, crush), two EFFECT slots in series (OFF CHORUS FLANGE WOBBLE RESON
-  RING, each with an amount and a rate) and SPACE (delay and reverb sends, on the TRACKS grid).
-  The four modulators can sit on any track. GRAIN is a granulator that reads the take
-  (stereo grain pairs, spray, regular to Poisson timing); CLOUD is MiClouds.
-- **TRACKS** (after VOICE) is the hub: E2 picks the focused track, which TAKE, VOICE,
-  FILTER and EFFECT then edit; K1 held shows its sends.
-- **On the device 2026-11-12:** `count: 185`. The worst case takes 45% of the scsynth
-  thread, with 0 xruns over 60 s (doc/measurements/2026-11-12/). Nobody has listened yet.
-- **The effect slot (four, third and fourth changes):** engine, params and the EFFECT
-  page (after FILTER, twelve pages now: E2 amount, E3 rate, K2 ON, K3 TYPE). Measured
-  on the device: each type
-  changes the output and the slot adds no CPU that the measurement can see
-  (doc/measurements/2026-11-12/effect-slot.md). RESON's level was raised in the fifth
-  change and now sits within about 4 dB of the dry signal.
-- The history below says 173 or 185 in places; read 198.
-- The history below the line is mangler's, from before the merge; where it says 66 or
-  `Engine_Mangler`, read 173 and `Engine_Four`.
+This block is the one record of the device, the fingerprint and what nobody has heard.
+doc/plan.md and the README point here. Keep it current. When you change it, date it.
 
-- **Last device-confirmed:** 2026-07-16 at `count: 63` (S21, S22 Phase A, the NU-1..4
-  redesign, the 45th to 47th changes).
-- **Unverified on hardware:** everything since the 48th change, engine and Lua. The engine
-  has changed several times; after a RESTART maiden must read **`count: 66`**.
-- **Device session 2026-11-06:** `main` plus the 104th to 106th changes are on the device
-  at `count: 66`. `test/device/gate.py` ran the walkthrough with no ears:
-  doc/measurements/2026-11-06/README.md. It is NOT a pass: the `measured` and `you` rows
-  still need a person. Costs, budgets and platform traps: doc/norns-platform.md.
-- **The one walkthrough:** doc/device-gate.md, stages 0 to 18, top to bottom. When it
-  passes, update this block with the date and the count.
-- **Latest change:** the 106th, the bugs that the device session found. The 105th is the
-  page dots on one straight line. The 104th is the device session's tools and results. The 102nd is the screen work's review fixes. The
-  96th to the 101st are the screen work of doc/tracks-plan.md (UI-a and UI-b): the
-  GRAIN cloud, the header flags, one blink, the page dots, the
-  sequencer on PADS, UNDO on a held TAKE K3, the beat repeat on the grid,
-  the modulators on MOTION.
-  Lua only, the count stays 66. `full-review` was merged into `main` on
-  2026-10-23, before the device session: `main` holds code not yet heard.
-- **The album set (107th and 108th changes):** data/ holds twelve presets for one album (ten
-  half-songs walked in whole parts, and two album walks, ALBUM 1 and 2), built by `test/make_set.lua` (the source of truth), with
-  loops from `test/set_audio.py` and `test/deploy_set.sh`. On the device 2026-11-10: loads,
-  scenes, levels, CPU and temperature measured; nobody has judged it by ear yet. After a
-  listen, fix the table in make_set.lua and rebuild.
-- **The visuals link (109th change):** lib/mosc.lua sends the state as OSC to visuals/bridge.js,
-  which feeds Hydra (visuals/hydra.js). Lua only, never run on the device.
-- **The sound fixes (114th change):** engine and Lua. Clicks at mode changes, punches, regen,
-  loop seams, STOP and filter type changes; delay and limiter timing; the deck loop on a
-  preset reload. On the device 2026-11-11: compiles, `count: 66`, all defs built, modes
-  cycle with no leftover synths, CPU about 19%. Nobody has listened yet.
-- **SuperCollider on the Mac (2026-11-13):** 3.14.1 is installed, without sc3-plugins or
-  mi-UGens (DFM1, JPverb and MiClouds take their fallbacks there). `test/dsp/run_engine.sh`
-  compiles the real engine with a stand-in for CroneEngine, prints the command count and
-  renders the SynthDefs offline; `an_engine.py` measures them. Invariant 3 below is out of
-  date for stock UGens. The DSP plan and the measurements: doc/dsp-plan.md.
-- **The exact read head (four, sixth change), on the device since 2026-11-13:** PLAY, PV
-  and CLOUD read through `exactRd` (a head in whole frames plus a fraction), bit exact at
-  pitch 1. CHORUS and WOBBLE set their depth in cents. `count: 185`; four PLAY tracks
-  take 41.8% of the thread with the stock voices. Nobody has listened yet.
-- **FourStretch (four, seventh to ninth changes), ON the device since 2026-11-13:**
-  `ugen/` holds our own UGens (FourPV, FourWarp, FourRead) and their proof
-  (`ugen/test_core.cpp`, plain C++). `lib/FourStretch.sc` is their ONLY class file: the
-  binary goes alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`, never
-  with a second class file. The engine uses them when it finds the binary and logs
-  `four: FourStretch on`; absent, it builds the stock voices. Build steps:
-  ugen/README.md (on the norns, with `-DFOUR_FFTW`). The plugin also holds `FourTanh`,
-  which every `tanh` of the engine uses (ninth change): install the binary BEFORE an
-  engine that names a new UGen. Measured: `count: 185`, four PV tracks at pitch 1 take
-  49% of the thread, four WARP 39%, four PLAY 36%; four PV at pitch 2 take 64%, OVER
-  the budget (doc/measurements/2026-11-13/fourstretch.md). The user listened on
-  2026-11-13 (before the ninth change) and liked the sound. Next CPU step: pause what
-  is not heard in a track (the second DFM1 pair, the unused effects, the crusher).
-- **Unity gain (four, tenth change), on the device 2026-11-13:** DFM1's makeup was x2
-  on a filter that is already 1 dB hot, so every track ran 7 dB loud and the master
-  limiter squashed any mix of three or four tracks. `dfmTrim` (0.891) makes one PLAY
-  track leave the engine at the level of its take. The output is 7 dB quieter than
-  before; four tracks now peak at -2.7 dBFS (doc/measurements/2026-11-13/mud.md).
-  Nobody has listened yet. Drive and RESON bite later on the knob now.
-- **Deck pages (four, eleventh change), on the device 2026-11-13:** a deck strip (TAPE,
-  the tape lane of MIX) shows the LOOP, not the 60 s deck (`deck_view` in
-  lib/mpages.lua), from a 1024-bin picture. TAPE says `SILENT / SEE MIX` when the MIX
-  crossfade hides it. Screenshots taken on the device; the user did not see it yet.
-- **Lanes and the second slot (four, twelfth change), on the device 2026-11-13:** each
-  track's filter, colour and effects are small synths in a group (`buildLane`,
-  `laneSet` in the engine), and only what is HEARD exists: one filter family, the
-  colour while drive or crush is up, an effect synth for each slot that is on. `count:
-  197`. Four PLAY tracks take 25% of the thread (were 36%), four PV at pitch 2 take
-  53%. A cloud holds 32 grain pairs at most: denser settings ran the engine to 100%.
-  The second slot has params and K1+E2/E3 on EFFECT, but no key for its type yet (it
-  is in PARAMS). doc/measurements/2026-11-13/lanes.md. Nobody has listened yet.
-- **The layer decks are gone (four, thirteenth change), NOT on the device yet:** the
-  LAYERS page, the decks `lay1` and `lay2` and their 26 params are removed (Lua only,
-  the count stays 197). Twelve pages. The tape is the one softcut deck, on the deck law
-  in lib/mdeck.lua. In the shipped presets tracks 2 and 3 play what the decks played
-  (PLAY, the deck's level, the deck's rate as pitch, no sends, no drive), and the scenes
-  fade the take with `grain_level`. `MOTION_IDS` keeps the fourteen layer ids in place
-  as tombstones (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md are old and
-  still there. Nobody has heard the migrated presets.
-- **Cloud, flanger, ECHO (four, fourteenth change), on the device 2026-11-13:** the
-  plugin also holds `FourGrain` (GRAIN's cloud, 48 pairs at most), `FourDelay` (the new
-  FLANGE and the ECHO effect type, appended as type 7). The proof of the cloud against
-  `GrainBuf` is test/dsp/grain_eq.scd. Nobody has listened to the new flanger or ECHO.
-  The album presets in `data/` are regenerated (the deck parts play on
-  tracks 2 and 3), but they are NOT on the device: `test/deploy_set.sh` overwrites
-  slots 1 to 12 there, and the user has not said yes.
-- **THE ROOM (four, sixteenth change), on the device 2026-11-13:** the reverb is our own
-  `FourRoom` when the plugin is there (JPverb took 13.5% of the thread, the room takes
-  about 5%). doc/space-plan.md is the plan for SPACE (BBD delay, the room, sends, the
-  page), reviewed by a second agent; its section 13 says what is built. With preset 1's
-  reverb and delay on, four PLAY tracks take 17% of the thread. Nobody has listened.
-- **THE BUCKET BRIGADE (four, seventeenth change), NOT on the device:** `FourBBD` is
-  the delay when the plugin is there (ugen/four_core.h `BBD`, `BBDDelay`; proof in
-  test_core, 68 checks in all). The norns was off the network when it was written:
-  build the plugin there, install it BEFORE the engine, restart, read `count: 197`,
-  measure its cost and make sure that silence costs nothing (a denormal repair is
-  unconfirmed there). doc/space-plan.md section 15.
-- **Sends (four, nineteenth change), NOT on the device:** SPACE is two sends. Each
-  track's `fx_dly` and `fx_rev` start at 0, the returns are added and the dry sum never
-  ducks, and `dly_rev` sends the echoes into the reverb. `count: 198`. The presets in
-  `data/` say `fx_dly = 1` and so on for the tracks that sent before. DELAY and REVERB
-  say `NO SEND - TRACKS K1` when the effect is up and nothing feeds it.
-- **Next work:** doc/plan.md (2026-11-12: the show checks, the listening session, no glitch on a preset load, the screen and controls polish).
+**Names.** Script `four.lua`, class `Engine_Four` in `lib/Engine_Four.sc`,
+`engine.name = 'Four'`, SynthDefs `\four_*`. The code goes to `~/dust/code/four/` and
+the data lives in `~/dust/data/four/` (`four-NN.pset`, `four.pmap`). The OSC addresses
+are `/four/...` (lib/mosc.lua and visuals/bridge.js must agree), and the log lines start
+with `four:`. The one-track mangler is retired as the git tag `mangler-1`. The GitHub
+repository is `Alejo-end/four` since 2026-11-13, and the old address redirects.
+
+**The fingerprint.** After a RESTART, maiden must read **`count: 198`**. That is
+mangler's 66 and nine for track 1: crush, the two FX sends, and six effect commands for
+the two slots. Then `dly_rev`, 36 for each of tracks 2 to 4, 12 sends, `rec_track` and
+`buf_track`.
+Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in its day.
+
+**The instrument.**
+- Four tracks, each with its own material (four 60 s buffers). K1+E1 picks the track.
+- Each track has a voice (OFF GRAIN WARP PV PLAY CLOUD), a window, a filter, COLOR
+  (drive, crush), two EFFECT slots in series and its sends to the delay and the reverb.
+  The effect types are OFF CHORUS FLANGE WOBBLE RESON RING ECHO, each with an amount and
+  a rate. The second slot's type has no key yet: it is in PARAMS.
+- GRAIN is a granulator that reads the take: stereo grain pairs, spray, and timing from
+  regular to Poisson. A cloud holds 48 pairs with the plugin and 32 without. CLOUD is
+  MiClouds.
+- Four modulators, each on any track.
+- Twelve pages: TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE.
+  TRACKS is the hub: E2 picks the focused track, which TAKE, VOICE, FILTER and EFFECT
+  then edit. K1 held on TRACKS shows the sends.
+- Each track's path is a lane of small synths (`buildLane`, `laneSet` in the engine).
+  Only what is heard exists: one filter family, the colour while drive or crush is up,
+  one synth for each effect slot that is on.
+- SPACE is two sends. Each track's `fx_dly` and `fx_rev` start at 0. The returns are
+  added to the dry sum, which never ducks. `dly_rev` sends the echoes into the reverb.
+  When the effect is up and nothing feeds it, DELAY and REVERB say `NO SEND - TRACKS K1`.
+  The presets in `data/` say `fx_dly = 1` and so on for the tracks that sent before.
+- A track leaves its filter at the level of its take (`dfmTrim`). The output is 7 dB
+  quieter than before the tenth change, so drive and RESON bite later on the knob.
+- The tape is the one softcut deck, on the deck law in lib/mdeck.lua. The layer decks
+  are gone. `MOTION_IDS` keeps their fourteen ids in place as tombstones
+  (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md stay, labelled as old.
+
+**FourStretch, our own plugin.** `ugen/` holds our UGens (FourPV, FourWarp, FourRead,
+FourGrain, FourDelay, FourRoom, FourBBD, FourTanh) and their proof `ugen/test_core.cpp`,
+in plain C++. `lib/FourStretch.sc` is their ONLY class file: the binary goes alone into
+`~/.local/share/SuperCollider/Extensions/FourStretch/`, never with a second class file.
+Build it on the norns with `-DFOUR_FFTW` (ugen/README.md). Install the binary BEFORE an
+engine that names a new UGen. With the binary the log says `four: FourStretch on`. Without
+it the engine builds the stock voices and effects.
+
+**SuperCollider on the Mac (2026-11-13).** 3.14.1, without sc3-plugins or mi-UGens, so
+DFM1, JPverb and MiClouds take their fallbacks there. `test/dsp/run_engine.sh` compiles the
+real engine with a stand-in for CroneEngine, prints the command count and renders the
+SynthDefs offline. `an_engine.py` measures them. Invariant 3 below is out of date for
+stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
+
+**On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
+- It runs the code of the sixteenth change at `count: 197`, with the plugin of that day.
+  The seventeenth to the nineteenth, the twenty-second and the twenty-third changes are
+  NOT on it.
+- `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
+  `dust/data/mangler2` stay as backups.
+- `dust/data/four` holds older presets. The set rebuilt in `data/` (the thirteenth and
+  nineteenth changes) is not there: `test/deploy_set.sh` overwrites slots 1 to 12, and
+  the user has not said yes. A test that writes a PSET on the device uses slot 90.
+
+| Change of four | On the device | Heard |
+|---|---|---|
+| 1st, 2nd: the names, the header's track cells | yes | no |
+| 3rd to 5th: the effect slot, the EFFECT page, RESON's level | yes, `count: 185` | no |
+| 6th to 9th: the exact read head, FourStretch | yes, `four: FourStretch on` | the user liked it on 2026-11-13, before the ninth |
+| 10th: unity gain | yes | no |
+| 11th: the deck pages | yes, screenshots | the user has not seen it |
+| 12th: lanes, the second slot | yes, `count: 197` | no |
+| 13th: the layer decks removed (Lua) | yes, see below | no |
+| 14th: FourGrain, the new FLANGE, ECHO | yes | no |
+| 15th: the name everywhere, the opening | yes | |
+| 16th: THE ROOM | yes | no |
+| 17th: THE BUCKET BRIGADE | NO | no |
+| 18th: REVERB's four squares (Lua) | NO | no |
+| 19th: the sends, `count: 198` | NO | no |
+| 20th: the README and its pictures | documents only | |
+| 21st: the documents agree with the code | documents only | |
+| 22nd: the first grain, the erosion head, a lighter FourBBD (engine and plugin) | NO | no |
+| 23rd: the screen review (Lua) | NO | |
+| 24th: gate.py follows four (test tools) | not run there yet | |
+
+The thirteenth change's entry says that nothing ran on the device. The fifteenth
+change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
+walked the twelve pages there yet.
+
+Measured on the device (doc/measurements/2026-11-12/ and 2026-11-13/). The scsynth thread
+xruns past about 60%.
+- Four PLAY tracks take 25.2% (twelfth change). With preset 1's reverb and delay on:
+  four PLAY 17.2%, four PV 28.6%, four GRAIN 19.1% (sixteenth change). Four PV at pitch
+  2 take 53.0%. The user's heaviest set takes 57.3%, with no xruns.
+- A soak of 30 minutes (2026-11-12) ran near 40% at 58 to 60 °C, with no throttling. A
+  preset loaded by hand gave 3 to 7 xruns (doc/plan.md, Phase 3).
+
+**What is pending on the device** (doc/plan.md, Phase 0):
+1. Build the plugin with `FourBBD` (its core changed again in the twenty-second change),
+   and install it BEFORE the engine.
+2. Deploy, RESTART, and read `count: 198`.
+3. Measure the delay's cost. Make sure that silence costs nothing: the denormal repair is
+   not confirmed there.
+
+**Not heard.** No listening session for four took place yet. The one judgement on record
+is the user's on FourStretch, above. The shipped presets have never been heard. The list
+to listen to is doc/plan.md, Phase 2.
+
+**The walkthrough.** doc/device-gate.md, stages 0 to 18, top to bottom. It has not
+passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
+`test/device/gate.py` ran it at `count: 66` with no ears, which is NOT a pass
+(doc/measurements/2026-11-06/README.md). It has not run on four. When it passes, write
+the date and the count here. Costs, budgets and platform traps: doc/norns-platform.md.
+
+**The album set.** `data/` holds twelve presets for one album: ten half-songs
+walked in whole parts, and two album walks, ALBUM 1 and 2. `test/make_set.lua` builds
+them and is the source of truth, with loops from `test/set_audio.py` and
+`test/deploy_set.sh` to install them. Their mangler form was on the device on
+2026-11-10 (loads, scenes, levels, CPU and temperature measured). Nobody judged them by
+ear yet. After a listen, fix the table in make_set.lua and rebuild.
+
+**The visuals link.** lib/mosc.lua sends the state as OSC to visuals/bridge.js, which
+feeds Hydra (visuals/hydra.js). It ran with mangler on the device (the 110th and 111th
+changes). No run with the `/four/` addresses is on record.
+
+**Before four.** mangler went to its 114th change at `count: 66`. `full-review` was
+merged into `main` on 2026-10-23. mangler2 then forked from mangler and became four.
+doc/changelog.md holds that history.
+
+**Next work:** doc/plan.md.
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
@@ -153,23 +155,51 @@ Lua-only changes skip all this: save and reload the script.
 
 ---
 
+## Documents: current, reference, historical
+
+Current. Keep these true to the code:
+- CLAUDE.md (this file) and README.md, the guide for players.
+- doc/plan.md: the next work. doc/changelog.md: every change, oldest first.
+- doc/device-gate.md: the walkthrough. It was written for mangler, and its top says what
+  that means for four.
+- doc/controls.md and doc/set-album.md: GENERATED, never edit by hand.
+- doc/octatrack-midi.md, data/README.md, ugen/README.md, visuals/README.md.
+
+Design references. Partly built, and each one says what is built:
+- doc/space-plan.md (SPACE: the delay, the room, the sends, the screen).
+- doc/dsp-plan.md (the voices and the effects, by the math).
+- doc/engine-map.md (why the engine is shaped as it is, written for mangler's engine).
+- doc/norns-platform.md (what the platform costs, measured with mangler).
+- doc/measurements/: dated records from the device.
+
+Historical. Kept for their reasoning, and each one has a note at its top:
+- CLAUDE_PLAN.md (the first plan), doc/spec.md (mangler's spec, S0 to S23).
+- doc/redesign.md (mangler's screen redesign), doc/tracks-plan.md (decks as tracks).
+- doc/layers.md and `data/layers/` (the layer decks, removed).
+- doc/workflow-standalone.md, doc/workflow-grid.md (mangler's walkthroughs).
+- doc/ux-feedback.md is the user's feedback of July 2026. New feedback goes at its end.
+
+---
+
 ## What four is
 
 A performance-first **stereo sample-mangling instrument** for external line-level gear
 (synth, drum machine, anything line-level). Built for norns **shield XL on Raspberry Pi 4**,
-played with **3 keys + 3 encoders** — everything reachable without a grid; an **optional
-grid** (monome, a Launchpad Mini MK3 through its own colour driver, or other launchpad-style
-MIDI grids via midigrid) adds a pad surface. No arc.
-It records live stereo input
+played with **3 keys + 3 encoders**. Everything is reachable without a grid. An
+**optional grid** (monome, a Launchpad Mini MK3 through its own colour driver, or other
+launchpad-style MIDI grids via midigrid) adds a pad surface. No arc.
+It records live stereo input on four tracks
 and mangles it with: multiple **time-stretch** algorithms (pitch-independent), **granular**
 clouds, **tape-like** varispeed/looping, a **playback window** (slice start/stop), a
-**filter** (LP/HP/BP), and an **FX** section (delay + reverb, each with its own dry/wet).
+**filter** (LP/HP/BP) and two **effect** slots on each track, and a shared **delay** and
+**reverb** that the tracks send into.
 **Every parameter is MIDI-mappable.**
 
 Architecture: softcut (a separate audio core, nearly free) does everything it can (the
-tape); scsynth does only what softcut cannot (granular, time-stretch,
-the filter, delay and reverb). GRAIN/WARP/PV/PLAY are a **mode switch** on a single SC
-voice, never run together: a Pi 4 has one scsynth core, and it xruns past about 60%.
+tape). scsynth does only what softcut cannot (granular, time-stretch,
+the filters, the effects, delay and reverb). Each track's voice is a **mode switch**
+(GRAIN, WARP, PV, PLAY, CLOUD): one track never runs two modes at once. A Pi 4 has one
+scsynth core, and it xruns past about 60%, so four tracks share that budget.
 
 ---
 
@@ -365,7 +395,7 @@ Each line was learned the hard way; the change log has the story.
 ## Workflow
 
 ```sh
-# EVERYTHING below in one command, with one verdict: syntax, the six harnesses,
+# EVERYTHING below in one command, with one verdict: syntax, the seven harnesses,
 # and source == single-file build across all render variants. With LUA53 set to a
 # Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
 # it runs on 5.3, which is the only check of what the device actually accepts.
@@ -393,6 +423,7 @@ lua test/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
 lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
 lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
+lua test/test_set.lua       # the album presets: every pset and scene loads
 
 # single-file build: inlines lib/*.lua into dist/four_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
@@ -411,8 +442,8 @@ python3 test/device/measure.py states voices
 rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/four/
 ```
 
-To prove a refactor changes nothing: render all four variants (base, empty, grain,
-filter) before and after and byte-compare the PGMs, then render `dist/four_single.lua`
+To prove a refactor changes nothing: render all five variants (base, empty, grain,
+filter, track2) before and after and byte-compare the PGMs, then render `dist/four_single.lua`
 the same way. Compare renders made by the SAME interpreter: `math.random` differs between
 Lua 5.3 and 5.5, so the orbit's shot differs across them by design.
 
@@ -420,11 +451,12 @@ Lua 5.3 and 5.5, so the orbit's shot differs across them by design.
 - Brightness encodes audibility: a thing that is not sounding lies flat and dim (mode
   OFF, STOP, a deck thrown away by the MIX crossfade, a dormant FX page at mix 0).
 - An empty buffer is an invitation, always in the same voice: "EMPTY - K2 REC".
-- The header: the page title, the ◇ purity mark, the write flags (R/T/M, the ONLY fast
-  blink), the hold flags, and uniform page dots top-right.
+- The header: the four track cells, the page title, the ◇ purity mark, the write flags
+  (T and M), the hold flags, and uniform page dots top-right. The cell of the track that
+  records and the dots of T and M are the ONLY fast blink.
 - The footer: four quiet words, K2 K3 | E2 E3. A turning knob brightens its word and
   swells its value in a framed 2x box above the footer; selector pages (SLICE, LANE,
-  SLOT, LAYER) read their value at rest. E1 pops the page name big for a moment.
+  SLOT) read their value at rest. E1 pops the page name big for a moment.
 - VOICE draws the active mode's own texture (one unbroken wave, grains, warp windows,
   spectral columns).
 - The redraw path allocates nothing per frame.

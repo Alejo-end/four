@@ -1,5 +1,12 @@
 # mangler — design spec (living document)
 
+> **Historical.** This spec is no longer kept up to date. It is mangler's design, stage by
+> stage, from S0 to S23 (July 2026). mangler then had one engine track. Every change after
+> S23 is only in doc/changelog.md. Its counts (`count: 31` to `63`), its page lists and
+> `Engine_Mangler` are all old: four reads `count: 198` and has twelve pages. Kept for the
+> reasoning of each stage. The current state is the STATUS block of CLAUDE.md, the
+> current plan is doc/plan.md, and the current controls are README.md and doc/controls.md.
+
 The durable contract for **mangler**. This is the source of truth for the signal flow, the
 staged build order, every stage's parameters / SynthDef arguments / engine commands, the
 page→control map, and the on-device acceptance test that gates each stage. Update it as the

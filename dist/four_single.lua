@@ -95,7 +95,7 @@
 -- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
 -- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
 -- the wav file reader). they share one `ctx` table and params are the single
--- source of truth. full design: doc/spec.md.
+-- source of truth. the plan: doc/plan.md. the history: doc/changelog.md.
 
 engine.name = "Four"
 
@@ -5744,6 +5744,11 @@ local FY = 58  -- the footer text row (four quiet words)
 -- the frame the arc beside the K3 word started on, or nil: the K1+K3
 -- eraser, or a key held on a def with a `hold` (TAKE K3 = UNDO). Its word is
 -- the arc's, from the frame the tap window can no longer be a tap.
+-- past_tap: a press from frame f0 is no longer a tap. Until then a release
+-- still fires the tap (SNAP, MODE, TYPE, DRY), so the screen keeps the tap's
+-- word: it showed the hold's word, arc and hatch from the second frame, and
+-- a release in frames 2 to 4 then did what the screen did not say.
+local function past_tap(f0) return C.frame - f0 >= C.TAP_FRAMES end
 local function arc_start()
   if C.alt and C.k13_frame and C.page_erase() then
     return C.k13_frame, "ERASE"
@@ -5757,9 +5762,9 @@ local function fkey_draw(n, x)
   local lab = def and def.label or "--"
   if n == 3 then
     local f0, word = arc_start()
-    if f0 and C.frame - f0 >= 2 then
+    if f0 and past_tap(f0) then
       ptext(word, x, FY, 1, 15)      -- the tap became the hold
-      return text_w(word, 1)
+      return text_w(word, 1), word
     end
   end
   local on = false
@@ -5776,7 +5781,7 @@ local function fkey_draw(n, x)
   else
     ptext(lab, x, FY, 1, 6)
   end
-  return w
+  return w, lab
 end
 
 -- one encoder word, right-anchored: WORD· — the FULL word, except on the
@@ -5796,6 +5801,11 @@ local function label_for(id, full)
   id = T2_BASE[id] or id
   if full then return FULL[id] or SHORT[id] or string.upper(id) end
   return SHORT[id] or "--"
+end
+-- the word the footer shows at rest for an encoder target (test/controls.lua
+-- writes it into doc/controls.md): a selector's short word, else the full one
+function M.footer_word(id)
+  return label_for(id, not (id and SELECTOR_IDS[id]))
 end
 local function label_total(l, val) return text_w(l, 1) + 3 + (val and text_w(val, 1) or 0) end
 local function flabel_r(id, rx, minx)
@@ -5837,8 +5847,9 @@ end
 
 -- footer: K2 K3 | E2· E3· — four quiet words that never lie about the keys.
 -- M.FOOT keeps the last layout for the tests: `arc` the erase arc's right
--- edge (nil when it is not drawn) and `e2` the E2 word's left edge.
-local FOOT = { arc = nil, e2 = 0 }
+-- edge (nil when it is not drawn), `e2` the E2 word's left edge and `k3`
+-- the K3 word as drawn.
+local FOOT = { arc = nil, e2 = 0, k3 = nil }
 M.FOOT = FOOT
 local function draw_footer()
   local x = 2
@@ -5850,7 +5861,7 @@ local function draw_footer()
   end
   local w = fkey_draw(2, x)
   x = x + w + 9
-  w = fkey_draw(3, x)
+  w, FOOT.k3 = fkey_draw(3, x)
   local keys_right = x + w + 4     -- the key words' right edge (labels clear it)
   FOOT.arc = nil
   -- the hold-arc beside the K3 word (the eraser, or TAKE's UNDO). It
@@ -5859,7 +5870,7 @@ local function draw_footer()
   local f0 = arc_start()
   if f0 then
     local dt = C.frame - f0
-    if dt >= 2 then
+    if past_tap(f0) then
       local ax, ay = x + w + 8, FY + 2
       keys_right = ax + 7
       FOOT.arc = ax + 4
@@ -5978,7 +5989,8 @@ local TK = {}
 for n = 2, 4 do
   local pre = "t" .. n .. "_"
   TK[n] = { mode = pre .. "mode", level = pre .. "level",
-    pos_start = pre .. "pos_start", pos_end = pre .. "pos_end" }
+    pos_start = pre .. "pos_start", pos_end = pre .. "pos_end",
+    pv_freeze = pre .. "pv_freeze" }
 end
 local function cur_track() return C.tsel and C.tsel() or 1 end
 local function on_t2() return cur_track() > 1 end
@@ -6022,7 +6034,7 @@ local function body_TAKE(frame)
   local wx = clamp(C.rec_phase, 0, 1) * 127
   -- marked for erase: K1+K3 held past the tap window on this page
   local marked = C.k13_frame ~= nil
-    and (C.frame - C.k13_frame) >= 2 and not C.k13_fired
+    and past_tap(C.k13_frame) and not C.k13_fired
   -- the material: bright inside the window, dim outside, hot behind the
   -- write head; the unwritten buffer is a dotted centerline
   local run = 0
@@ -6085,12 +6097,14 @@ local function body_TAKE(frame)
     screen.line(wx, TK_MID + TK_HALF + 2)
     screen.stroke()
     -- elapsed seconds: the one number a performer needs
-    -- ...or, armed to start on sound and none yet, WAIT
+    -- ...or, armed to start on sound and none yet, WAIT. From x 84 the
+    -- widest count (60.0S, 42px at 2x) ends at 125. From 88 every count
+    -- from 20 s on lost the last two columns of its S off the screen.
     if C.rec_waiting then
-      ptext("WAIT", 88, 46, 2, 12)   -- steady: the header's track box is the blink
+      ptext("WAIT", 84, 46, 2, 12)   -- steady: the header's track box is the blink
     else
       local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
-      ptext(string.format("%.1fS", el), 88, 46, 2, 15)
+      ptext(string.format("%.1fS", el), 84, 46, 2, 15)
     end
     -- input meter with the record-ready bracket (peak inside = clean take)
     ptext("IN", 2, 47, 1, 5)
@@ -7171,7 +7185,17 @@ local function lfo_row(k, yb, selected, gx0)
   else
     ptext(LFO_OFF[k], 2, yb - 6, 1, lvl)
   end
-  local w = LFO_GX1 - gx0
+  -- does it also go out? The tag sits after the wave, and a wide one (>OUT)
+  -- ends at 125 and pulls the wave's end back: from LFO_GX1 + 3 it ran two
+  -- columns off the screen.
+  local tag
+  if floor(pget("out_src", 1) + 0.5) == k + 3 then
+    local cc = pget("out_midi", 0) > 0
+    local cv = pget("out_crow", 0) == 1
+    if cc or cv then tag = cc and cv and ">OUT" or (cc and ">CC" or ">CV") end
+  end
+  local tx = tag and min(LFO_GX1 + 3, 126 - text_w(tag, 1)) or nil
+  local w = (tx and min(LFO_GX1, tx - 3) or LFO_GX1) - gx0
   local mid = yb - 4
   local shape = floor(pget(P.shape, 1) + 0.5)
   local m = L.mods[k]
@@ -7201,14 +7225,7 @@ local function lfo_row(k, yb, selected, gx0)
     screen.rect(floor(dx) - 1, floor(mid - v * a * sg + 0.5) - 1, 3, 3)
     screen.fill()
   end
-  -- does it also go out?
-  if floor(pget("out_src", 1) + 0.5) == k + 3 then
-    local cc = pget("out_midi", 0) > 0
-    local cv = pget("out_crow", 0) == 1
-    if cc or cv then
-      ptext(cc and cv and ">OUT" or (cc and ">CC" or ">CV"), LFO_GX1 + 3, yb - 6, 1, 6)
-    end
-  end
+  if tag then ptext(tag, tx, yb - 6, 1, 6) end
   if selected then
     screen.level(15)
     screen.move(0, yb - 8) screen.line(0, yb + 2)
@@ -7699,7 +7716,8 @@ end
 --     TRACKS belong to the focused track; on the shared pages, DELAY,
 --     REVERB ..., the focus is only underlined: those pages edit no track)
 --   a BRIGHT number sounds, a DIM one is silent (OFF, level 0, or STOP)
---   a BLINKING box is the track being RECORDED
+--   a BLINKING box is the track being RECORDED: a solid block, then a frame
+--     with its number. Neither phase looks like any other cell.
 -- It replaces the badge and the old T2 / T23 / T234 flag.
 local TRACK_PAGE = { TAKE = true, VOICE = true, FILTER = true, EFFECT = true, TRACKS = true }
 local BADGE = { "1", "2", "3", "4" }
@@ -7726,12 +7744,15 @@ local function draw_tracks(blink, own)
     local x = (n - 1) * CELL_W
     local sounds = audible and track_sounds(n)
     if recording and n == focus then
-      -- REC: the box blinks; between blinks its frame stays
+      -- REC: the box blinks, and between blinks its frame stays. The lit phase
+      -- is a solid block with no number: with the number it was the white
+      -- box of the focus, so on TAKE, VOICE, FILTER, EFFECT and TRACKS half
+      -- the blink looked like no recording at all. Each phase now reads REC
+      -- in a still frame, and the number shows in the other one.
       screen.level(15)
       if blink then
         screen.rect(x, 0, CELL_W, 8)
         screen.fill()
-        ptext(BADGE[n], x + 1, 1, 1, 0)
       else
         cell_frame(x)
         screen.fill()
@@ -7787,7 +7808,11 @@ local function draw_header()
   local dx0 = M.DOT_X0
   HF.T.on = pget("tape_rec", 0) == 1
   HF.M.on = pget("motion_rec", 0) == 1
+  -- FZ: the take's freeze, or ANY track's voice freeze. It read track 1's
+  -- alone, so a frozen track 3 held its sound with no flag on any page.
   HF.FZ.on = pget("pv_freeze", 0) == 1 or pget("freeze", 0) == 1
+    or pget(TK[2].pv_freeze, 0) == 1 or pget(TK[3].pv_freeze, 0) == 1
+    or pget(TK[4].pv_freeze, 0) == 1
   HF.TF.on = pget("tape_freeze", 0) == 1
   -- RP bright while the engine loops, dim while a press waits for its beat
   HF.RP.on = pget("beat_repeat", 0) == 1
@@ -8538,7 +8563,7 @@ local KEYS = {
     -- morph engine; release sweeps you home), tap = COMMIT. on the ◄ cell
     -- (slot 0) a tap is the way back (safe restore). CAP captures into the
     -- selected slot — into ◄ it marks the way-back state by hand.
-    k2 = { label = "RCL",
+    k2 = { label = "RCL", hold_label = "PEEK",   -- (doc/controls.md's word)
       lit = function() return ctx.peek_on == true end,
       pon = function()
         -- the slot is resolved at the PRESS: a running orbit re-aims the
@@ -10464,17 +10489,19 @@ local function init_params()
   -- 0..1 knob curved to the actual 0..0.98 feedback coefficient (fb_curve):
   -- a smooth "few -> many (10+) -> near-infinite" sweep, not a top-end cliff.
   add_eng_control("delay_fb", "feedback", unit(0.3), fb_curve)
-  -- FX SEND response curve: the engine crossfades the wet with an equal-power
-  -- .sqrt (Engine_Four.sc), so a raw 3% knob already reads ~17% wet ("way too
-  -- blunt"). `square` makes the effective wet gain LINEAR in the knob — a
-  -- progressive fade (dry stays ~full at the bottom, full wet at 1). same reverb.
+  -- the level of the echoes. The engine adds them to the dry sum at
+  -- delay_mix.sqrt (Engine_Four.sc), and the dry never ducks. A raw 3% knob
+  -- would already read about 17% ("way too blunt"), so `square` makes the echo
+  -- gain LINEAR in the knob. rev_mix works the same way for the tail.
   add_eng_control("delay_mix", "delay mix", unit(0.0), square)
   -- how much of the echoes goes on into the reverb (0: the two are apart)
   add_eng_control("dly_rev", "delay > reverb", unit(0.0))
 
-  -- the reverb is JPverb's FULL attribute set (guarded → FreeVerb
-  -- fallback in the engine). every knob maps to a real JPverb arg — nothing
-  -- hardcoded. REVERB face reaches mix/size/decay/damp (E2/E3 + K1 alt);
+  -- the reverb params are JPverb's full attribute set. With the plugin the
+  -- engine runs FourRoom, which reads only mix, decay, damp and size (size when
+  -- the synth starts). The other knobs act on JPverb only, and FreeVerb is the
+  -- last fallback (doc/measurements/2026-11-15/README.md, findings m and n).
+  -- REVERB face reaches mix/size/decay/damp (E2/E3 + K1 alt);
   -- the other 11 (early/mod/EQ/cuts/shimmer) live in PARAMS + the WASH/BLOOM
   -- throws. shimmer surges on the BLOOM key.
   params:add_group("grp_reverb", "reverb", 15)

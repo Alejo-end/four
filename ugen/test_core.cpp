@@ -13,6 +13,36 @@ static void expect(bool ok, const char* what, double v) {
 static double db(double x) { return 20 * std::log10(x > 1e-15 ? x : 1e-15); }
 static const double PI = 3.14159265358979323846;
 
+// BBD::tick as it was before 2026-11-15: every tick computes its own step.
+// The present tick() computes only the first tick of a sample; this is the
+// reference it must equal.
+struct RefBBD : BBD {
+    float tickRef(float in) {
+        const double u = (double)in + 1e-15;
+        const int nt = (int)(ph + inc);
+        if (nt == 0) {
+            adv(ia, ibr, ibi, E1, E2r, E2i, u); adv(oa, obr, obi, E1, E2r, E2i, hold); ph += inc;
+        } else {
+            double t = 0, P1 = 1, Pr = 1, Pi = 0;
+            const double x = om / fs;
+            for (int k = 1; k <= nt; k++) {
+                const double d = ((double)k - ph) / inc, D = d - t;
+                const double m = std::exp(-0.5 * x * D), e1 = m * m;
+                const double e2r = m * std::cos(0.8660254037844386 * x * D), e2i = m * std::sin(0.8660254037844386 * x * D);
+                adv(ia, ibr, ibi, e1, e2r, e2i, u); adv(oa, obr, obi, e1, e2r, e2i, hold);
+                hold = (double)ring[w] + 1e-15; ring[w] = (float)read(om, ia, ibr, ibi); w = (w + 1) & (half - 1);
+                P1 *= e1; const double q = Pr * e2r - Pi * e2i; Pi = Pr * e2i + Pi * e2r; Pr = q;
+                t = d;
+            }
+            const double e1 = E1 / P1, n2 = Pr * Pr + Pi * Pi;
+            const double e2r = (E2r * Pr + E2i * Pi) / n2, e2i = (E2i * Pr - E2r * Pi) / n2;
+            adv(ia, ibr, ibi, e1, e2r, e2i, u); adv(oa, obr, obi, e1, e2r, e2i, hold);
+            ph = ph + inc - nt;
+        }
+        return (float)read(om, oa, obr, obi);
+    }
+};
+
 // runs the PV: head from p0 at `speed` frames per sample, block 64
 static void run(const std::vector<float>& L, const std::vector<float>& R, double p0, double speed,
                 float pitch, int n, std::vector<float>& oL, std::vector<float>& oR) {
@@ -336,6 +366,26 @@ int main() {
             double diff = lag - std::fmod(want, 0.01);
             while (diff > 0.005) diff -= 0.01; while (diff < -0.005) diff += 0.01;
             expect(std::fabs(diff) < 0.1 / fc, "the delay against chain + hold + filters, in clock periods", diff * fc);
+        }
+        {
+            // the whole-tick step computed once in setClock: the same output as
+            // the reference that computes every tick, at a slow clock, a fast one
+            // (4 ticks a sample, the 43 ms floor) and across clock changes
+            std::vector<float> ma(8192), mb(8192);
+            static BBD fa; static RefBBD fb;
+            fa.init(ma.data(), 4096, fs); fb.init(mb.data(), 4096, fs);
+            double worst = 0, peak = 0;
+            const double clocks[] = {4100.0, 27300.0, 82000.0, 191800.0, 61234.5};
+            for (int s = 0; s < 5; s++) {
+                fa.setClock(clocks[s], 0.35); fb.setClock(clocks[s], 0.35);
+                for (int i = 0; i < 48000; i++) {
+                    const float in = 0.5f * (float)std::sin(2 * PI * 440.0 * i / fs) + nd(rng);
+                    const float a = fa.tick(in), b = fb.tickRef(in);
+                    worst = std::fmax(worst, std::fabs((double)a - b)); peak = std::fmax(peak, std::fabs((double)b));
+                }
+            }
+            expect(worst < 1e-6 && peak > 0.1, "one step for each whole tick: largest difference from the reference, dB",
+                   20 * std::log10(worst + 1e-30));
         }
         {
             // the delay as a whole: an echo lands on its time, and a loop at 0.98 falls

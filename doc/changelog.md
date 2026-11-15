@@ -4167,3 +4167,116 @@ signal flow drawing (documents and a test tool only)**.
 - The gallery sets `FOUR_SENDS`, and `render_pages.lua` then opens track 1's two sends.
   Without it DELAY and REVERB say `NO SEND`. The render suite does not set it.
 - `doc/signal-flow.svg` is redrawn by hand for four tracks, the sends and the tape.
+
+four, twenty-first change: **the documents agree with the code, and the device state is
+in one place (documents only)**. An outside review found documents that described
+removed features and old device states.
+- CLAUDE.md: STATUS is one dated section. It holds the names, the fingerprint, the
+  instrument and the plugin. A table shows, for each change of four, if it is on the
+  device and if anyone heard it. It also lists the steps still to do on the device, the
+  walkthrough, the presets and the visuals. The "read 198" notes and mangler's old status
+  lines are gone, and the change log holds them. A new section says which documents are
+  current, which are design references and which are historical. The header rule names
+  the track cells and T and M. "What four is" and the workflow (seven harnesses, five
+  render variants) match the code.
+- doc/plan.md: its device and git state point to STATUS. A Phase 0 brings the device to
+  `count: 198`, with the plugin's FourBBD installed before the engine. The listening list
+  has the sends, ECHO, the new FLANGE, the second slot, FourStretch, the level, the room
+  and the bucket brigade. There are twelve pages, and LAYERS is gone from the plan. A new
+  decision for the user: one SPACE page, or DELAY and REVERB apart.
+- doc/device-gate.md: stage 0 reads `count: 198` and `Engine_Four.sc`, and stage 1 the
+  twelve pages. The layer rows say REMOVED and keep their numbers. Row 11.2d, which
+  gate.py runs, is in the table now. The synth names are `\four_*`. Delay and reverb rows
+  open track 1's sends first. The header rows test the track cells, not R and L.
+- README.md: the header section describes the track cells. The visuals link ran with
+  mangler on the device. The SPACE page is a decision for the user, not a step. The
+  developer list names the plan, the gate and the map of documents. The PADS sequencer
+  stays: lib/mseq.lua runs it.
+- Notes at the top of CLAUDE_PLAN.md, doc/spec.md, doc/redesign.md, doc/tracks-plan.md
+  and doc/layers.md say that they are historical. doc/ux-feedback.md and
+  doc/norns-platform.md say what they are now. `data/layers/README.md` says that those
+  presets are not supported. doc/octatrack-midi.md says four.
+Not changed: the code, the tests, dist/ and the DSP documents. `test/check.lua` passes on
+Lua 5.3.
+
+four, twenty-second change: **the first grain on time, the erosion head in frames, a
+lighter bucket brigade, and a DSP review (engine and plugin, not on the device)**. A
+review of the DSP code rendered the real engine offline on the Mac.
+doc/measurements/2026-11-15/README.md holds the method and every number.
+- GRAIN and the grain pads lost their first grain. `CoinGate` never passed `Impulse`'s
+  first impulse, so a pad sounded 51 ms after the press at density 20 and 251 ms after
+  it at density 4. A mode change into GRAIN was silent from 20 to 52 ms. `Impulse.ar(0)`
+  now starts the stream: the first sound comes 1 to 1.6 ms after the press.
+- The erosion head counts whole frames, like winRead. Its float place jittered past the
+  middle of the buffer and printed noise 18 to 22 dB under a tone into the take. It now
+  prints none (-141 dB at every place).
+- FourBBD computes the step of a whole tick once, when its clock changes. Its output is
+  the same, bit for bit (a new test_core check and an engine render). At 43 ms it takes
+  44% less time on the Mac. test_core: 77 checks.
+- Engine comments match the code: count 198, sends from 0, two slots, three reverbs, the
+  room's dead knobs, the open filter.
+- doc/dsp-plan.md, doc/space-plan.md and doc/engine-map.md have dated status notes.
+  doc/dsp-plan.md ends with a current acceptance checklist. test/dsp/review/ holds the
+  probes.
+- Found and not changed (proposals in the measurement notes): the 15 Hz staircase of the
+  modulators, holes at mode changes into WARP and PV, nine reverb knobs that do nothing
+  with the plugin, a 38 Hz high-pass on every take, uncapped pad clouds, an open filter
+  that is not a bypass, folds at pitch 3 and 4 and in GRAIN, the room's DC gain, the
+  delay's 42.8 ms floor, unlinked limiters and drive aliasing.
+Count: 198, unchanged. The engine changed, so the device needs the deploy ritual:
+replace the file, SYSTEM > RESTART, read `count: 198`. `ugen/four_core.h` changed
+(FourBBD only), so rebuild the plugin on the norns and install it before the engine,
+together with the seventeenth change's pending install. Nobody has listened.
+
+four, twenty-third change: **the screen review: a held key says what its release does,
+the recording cell, two edges, FZ and the control map (Lua only, the count stays
+198)**. An outside review of the screen named five concerns. Each was checked against
+the code and fresh renders. The small defects that a render proves are fixed:
+- A held K3 (TAKE's UNDO, the track step on VOICE, FILTER and EFFECT) and K1+K3 showed
+  the hold's word, its arc and TAKE's hatch from the second frame. A release is a tap
+  until `TAP_FRAMES` (the fifth frame), so for 200 ms the screen said UNDO or ERASE while
+  a release did SNAP, MODE, TYPE or DRY. All three now start at `TAP_FRAMES`
+  (`past_tap`).
+- The recording cell's lit phase was the white box of the focus. On TAKE, VOICE, FILTER,
+  EFFECT and TRACKS half the blink looked like no recording. The lit phase is now a
+  solid block with no number, so each phase reads REC in a still frame.
+- TAKE's elapsed count started at x 88, and from 20 s on its S lost two columns off the
+  screen. The count and WAIT now start at x 84.
+- MOTION's >OUT tag ran two columns off the screen. It now ends at x 125, and the wave
+  stops before it.
+- FZ lit only for track 1's freeze. It lights for any track's freeze now.
+- doc/controls.md said "mangler controls", had no CLOUD row and two modulators, and
+  called drive shared. test/controls.lua now writes each knob's footer word beside its
+  id, CLOUD and OFF, the four modulators, the punch-law mark and the rows that differ on
+  tracks 2 to 4. `Mpages.footer_word` gives it the words, and RCL's def names its hold
+  (PEEK) for the map.
+Tests: test_screen sections 8 to 11. Each fails with its fix reverted. Renders: only
+TAKE_REC and TAKE_WAIT change, and doc/ui take-rec.png and take-wait.png are rebuilt.
+Not built, for the user to decide after the observed walkthrough (doc/plan.md, Phase 4):
+one meaning for K3 on VOICE, FILTER and EFFECT, the value box over the knob that turns,
+plain words at rest, a page pop that names its neighbours and the K1 pair, a hold mark,
+and a rule between MOTION's lanes and modulators. `test/check.lua` passes on Lua 5.3.
+Nothing ran on the device.
+
+four, twenty-fourth change: **gate.py follows four, and stale comments (test tools,
+comments and documents, the count stays 198)**. test/device/gate.py was mangler's
+walkthrough.
+- 0.3 and 17.1 read `count: 198`.
+- The results folder is the day of the run (`GATE_DATE` overrides it), and recordings go
+  to `../four-device-recordings/`.
+- The test PSET is slot 90, and the script stops if the slot is 12 or below.
+- 1.3 reports the FourStretch line.
+- 3.2 also checks that DRY zeroes `crush` and turns `effect` OFF. doc/device-gate.md row
+  3.2 says so too.
+- The delay and reverb checks (4.5 to 4.7, 8.3, 10.1 to 10.4, 10.8, 16.9) open track 1's
+  sends and close them after. 4.5 also proves that a tail returns: before, it passed on
+  silence.
+- The REMOVED rows 12.12, 15.7, 15.11 and 18.1 are no longer reported.
+- The log filters read `four:`, and the test files live in `~/dust/audio/four_test`,
+  uploaded on demand. `~/dust/audio/mangler_test` on the norns is unused now.
+- measure.py opens the sends for its reverb, delay and full-load states.
+- four.lua: the header points to doc/plan.md and doc/changelog.md, not doc/spec.md. The
+  `delay_mix` comment describes the echoes added to a dry sum that never ducks. The
+  reverb comment says that FourRoom reads only mix, decay, damp and size.
+- test/check.lua's header says seven harnesses and five render variants.
+Nothing ran on the device. `test/check.lua` passes on Lua 5.3.

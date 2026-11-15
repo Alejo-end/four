@@ -4,9 +4,9 @@
 --
 -- What it runs, in order:
 --   1. a syntax check of the script, the modules and the single-file build
---   2. the six harnesses (each prints its assertion count; test_control
+--   2. the seven harnesses (each prints its assertion count; test_control
 --      also fails on a stale single-file build)
---   3. the render suite over the source AND the single-file build, all four
+--   3. the render suite over the source AND the single-file build, all five
 --      variants, compared byte for byte (the build must draw what the source
 --      draws)
 --
@@ -53,7 +53,7 @@ for _, t in ipairs({ "test_control", "test_deck", "test_wav",
   step("harness: " .. t, sh(LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
 end
 
--- 3. the renders: source and build, four variants each, byte-compared
+-- 3. the renders: source and build, five variants each, byte-compared
 local tmp = os.tmpname()
 os.remove(tmp)
 local src_dir, dist_dir = tmp .. "-src", tmp .. "-dist"

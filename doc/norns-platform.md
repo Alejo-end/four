@@ -1,5 +1,10 @@
 # norns as a platform: what the device measurements show
 
+> A reference. The measurements here are from mangler, the one-track instrument before
+> four. The platform facts and the traps hold for four. Its costs per track are in
+> doc/measurements/2026-11-12/ and 2026-11-13/, and the STATUS block of CLAUDE.md has the
+> latest numbers.
+
 This page records how a norns runs mangler, what each part costs, and which
 traps the device showed. The numbers are from one device on 2026-11-06. The full
 tables are in [measurements/2026-11-06/README.md](measurements/2026-11-06/README.md).

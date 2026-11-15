@@ -1,5 +1,16 @@
 # The engine, mapped
 
+> **Status, 2026-11-15.** This map was written for mangler's one-track engine
+> (`lib/Engine_Mangler.sc`, one drone voice, the filter inside `io`). four's
+> `lib/Engine_Four.sc` differs in five ways. It has four tracks. Each track has a
+> lane between its voice and `io`: one filter family, the colour, and two effect
+> slots. SPACE is two sends added to the dry sum, so the delay no longer ducks
+> the direct sound. With the plugin the reverb is FourRoom and the delay is
+> FourBBD. The command count is 198. These sections still hold: why it cannot
+> brick, recording, the window law, the beat repeat and the shapes of the
+> spawn and free synths. The current measurements are in
+> doc/measurements/2026-11-15/README.md.
+
 Why `lib/Engine_Mangler.sc` is shaped the way it is. Each section is a decision that
 survived contact with the hardware. Where there is a trade, it is stated. Change the engine
 and this file tells you what you are about to fight.
