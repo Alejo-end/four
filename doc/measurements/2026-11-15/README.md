@@ -17,6 +17,10 @@ plays the DFM1 path.
 - The work folder needs `test/dsp/mkbuf.py` and `test/dsp/review/mkbuf_review.py`,
   run inside it. Python needs numpy, scipy and soundfile, for example
   `uv run --with numpy --with scipy --with soundfile python`.
+- `test/dsp/check_dsp.sh <work>` runs probes 1 to 4, engine.scd and
+  `core_probe2.cpp`, and checks the fixes and the checklist of doc/dsp-plan.md with
+  one PASS or FAIL verdict. Set `FOUR_PLUGIN_DIR` for the plugin build too. Both
+  builds take about 30 s. probe4's job r renders the drive row (5 kHz, full drive).
 - `core_probe.cpp`, `core_probe2.cpp` and `bbd_time.cpp` measure
   `ugen/four_core.h` directly (`clang++ -O2 -std=c++17 -I<repo>/ugen`).
 - Mac to Pi: `ugen/bench_core.cpp` gives the room 0.23% of a Mac core, and the

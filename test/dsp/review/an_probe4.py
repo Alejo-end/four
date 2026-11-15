@@ -33,6 +33,10 @@ for k, (lv, dr, cr) in enumerate([(.25, .25, 0), (.25, .5, 0), (.25, 1, 0), (.5,
     s = x[a: a + 65536, 2 * k]; h1 = amp(s, 1000)
     hs = " ".join(f"H{n} {db(amp(s, 1000 * n) / h1):6.1f}" for n in (2, 3, 5))
     print(f"  in {db(lv):5.1f} dBFS drive {dr:4.2f} crush {cr:3.1f}: level {db(np.std(s)/(lv/np.sqrt(2))):+5.1f} dB, {hs}, DC {np.mean(s):+.5f}")
+y = rd('drive5k')[sr // 2: sr // 2 + 65536, 0]
+X = np.abs(np.fft.rfft(y * get_window('blackmanharris', len(y)))) ** 2; f = np.fft.rfftfreq(len(y), 1 / sr)
+band = f < 16000; odd = (np.abs(f - 5000) < 60) | (np.abs(f - 15000) < 60)
+print(f"r. DRIVE 1, a 5 kHz sine at -6 dBFS: energy below 16 kHz that is not an odd harmonic {10 * np.log10(X[band & ~odd].sum() / X[band].sum()):.1f} dB")
 x = rd('gedge'); a = sr
 print("j. GRAIN in a 12 ms window (a 1 kHz island in a 7 kHz buffer): energy from outside the window")
 for k, n in enumerate(['size 0.5 s', 'size 0.01 s', 'size 0.5 s, scan -1', 'size 0.1, 72 ms window']):

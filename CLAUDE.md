@@ -63,7 +63,8 @@ it the engine builds the stock voices and effects.
 **SuperCollider on the Mac (2026-11-13).** 3.14.1, without sc3-plugins or mi-UGens, so
 DFM1, JPverb and MiClouds take their fallbacks there. `test/dsp/run_engine.sh` compiles the
 real engine with a stand-in for CroneEngine, prints the command count and renders the
-SynthDefs offline. `an_engine.py` measures them. Invariant 3 below is out of date for
+SynthDefs offline. `an_engine.py` measures them. `test/dsp/check_dsp.sh` runs the whole
+offline DSP check with one verdict (see the workflow). Invariant 3 below is out of date for
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
@@ -96,6 +97,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 22nd: the first grain, the erosion head, a lighter FourBBD (engine and plugin) | NO | no |
 | 23rd: the screen review (Lua) | NO | |
 | 24th: gate.py follows four (test tools) | not run there yet | |
+| 25th: stage 19 of the gate (documents, test tools) | not run there yet | |
+| 26th: the offline DSP check (Mac only) | not for the device | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -432,6 +435,12 @@ lua test/amalgamate.lua
 # the control map: doc/controls.md is GENERATED from ENC_MAP/VOICE_FACE/KEYS; rerun
 # after changing a page's knobs or keys (test_control fails on a stale one)
 lua test/controls.lua
+
+# the DSP, offline on the Mac, after ANY engine or ugen change: compiles the real
+# engine (count 198), renders the review probes, one verdict. About 30 s. KNOWN rows
+# are open faults that fail only when they get worse. FOUR_PLUGIN_DIR (a folder with
+# FourStretch.scx from ugen/build_mac.sh) adds the plugin build.
+FOUR_PLUGIN_DIR=<plugin folder> test/dsp/check_dsp.sh <work folder>
 
 # on a connected device: run the walkthrough and the measurements (doc/norns-platform.md
 # says how, and why one SSH session must stay open)

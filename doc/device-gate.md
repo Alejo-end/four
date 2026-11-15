@@ -14,10 +14,10 @@ This gate was written for mangler, the one-track instrument. For four:
   them (four, twenty-fourth change).
 - Every send to the delay and the reverb starts at 0 (four, nineteenth change). For a
   delay or reverb row, first open track 1's sends: TRACKS, hold K1, D and R.
-- The rows test track 1. four's own work has no rows yet: tracks 2 to 4, the effect slots
-  and the lanes, the FourStretch voices, the room, the bucket brigade and the sends. Their
-  device measurements are in doc/measurements/2026-11-12/ and 2026-11-13/, and the list
-  to listen to is in doc/plan.md, Phase 2.
+- Stages 1 to 18 test track 1. Stage 19 is four's own work: tracks 2 to 4, the lanes
+  and the effect slots, the FourStretch voices, the sends, the room, the bucket brigade
+  and the CPU budget. The earlier device measurements are in doc/measurements/2026-11-12/
+  and 2026-11-13/, and the list to listen to is in doc/plan.md, Phase 2.
 
 This folds those scattered per-change gates into one ordered pass. The order is
 deliberate — **the checks that would invalidate everything else come first**, and
@@ -394,6 +394,50 @@ frame rate holds with the GRAIN cloud at its densest.
 | 18.14 | The repeat on the grid | A take playing on the clock. On TAKE, hold grid row 6 pad 3, then slide to pad 4 and back, then let go | A 1/8 repeat on the beat, a roll to 1/16 and back, the live sound when the last pad comes up. The header reads RP8, then RP16. The held pad is bright cyan | `repeat_key`, `RP_CH` |
 | 18.15 | The modulators on MOTION | On MOTION, turn E2 past the last lane to LFO 1. Turn K1+E3 to CUTOFF, E3 up, K1+E2 to 1 BAR | The row reads 1>CUT and draws its wave with a moving dot; the filter swings on the bar; the footer reads LANE·LFO1, DEPTH, PERIOD, TARGET | `@mo_sel`, `MOTION_LFO`, `lfo_row` |
 | 18.16 | Let a modulator go | With LFO 1 selected and moving, hold K1+K3 | The arc lands, the row goes OFF and flat, the swing stops, and no lane is cleared | MOTION's `erase` |
+
+## Stage 19: four's own work (ENGINE and PLUGIN)
+
+Four tracks, the lanes, the effect slots, the FourStretch voices, the sends, the room
+and the bucket brigade. Most of it ran on the device without ears, and the bucket
+brigade and the sends never ran there. Do stage 0 first: build the plugin on the norns
+(ugen/README.md), install the binary alone in
+`~/.local/share/SuperCollider/Extensions/FourStretch/` BEFORE the engine, RESTART, and
+read `count: 198`. `python3 test/device/gate.py 19` runs it. It records a take on each
+track: put a source on the input that you can tell apart.
+
+The CPU figures are the busiest scsynth thread in `top -H`, the way
+doc/measurements/2026-11-12/ and 2026-11-13/ read them. `Crone.server.avgCPU` is the load
+of the whole JACK cycle, not the engine's. The budget is 60% of that thread.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 19.1 | **The plugin is in** | RESTART with the binary installed, load the script | `count: 198`. The SC log says `four: FourStretch on`, and `Crone.engine.hasStretch` is true. The plugin folder holds no `.sc` file | The install order. Without the line, every row below runs the stock voices, JPverb and the stock delay |
+| 19.2 | K1+E1 picks the track | On any page, hold K1 and turn E1 right four steps, then left three | The focus goes 2, 3, 4, stays at 4, then 3, 2, 1. The track badge in the header and the page name pop show it | `enc` in four.lua, `track_sel` |
+| 19.3 | TRACKS picks the focus | On TRACKS, turn E2 | `track_sel` follows E2 | `ENC_MAP.TRACKS` |
+| 19.4 | **Each track has its own take** | Focus track 1 and record drums on TAKE (K2). Focus track 2 and record a tone, then tracks 3 and 4 | Each pass writes only the focused track's buffers. The other tracks' buffers stay the same, bit for bit. The four takes differ. The engine's `recIdx` and `opIdx` follow the focus | `rec_track`, `buf_track`, `ctx.focus_take` |
+| 19.5 | Each track plays its own voice | Track 1 PLAY, track 2 GRAIN, track 3 WARP, track 4 PV. Then track 1 alone, and track 2 alone in PLAY | The node tree holds `four_play`, `four_grain`, `four_warp` and `four_pv`. Track 1 alone plays the drums and track 2 alone the tone | `setModeN`, `droneDef` |
+| 19.6 | The pages edit the focused track | Focus track 3. On FILTER turn E2, on EFFECT tap K2, on TAKE turn E2 | `t3_cutoff`, `t3_effect` and `t3_pos_start` move. Track 1's `cutoff`, `effect` and `pos_start` do not | `tid`, `TRACK_PAGES` |
+| 19.7 | **Only what is heard exists** | Track 2 in PLAY, the others OFF. Drive, crush and both effects at rest | One filter synth for each track (four in all), no `four_colour`, no `four_fx_*` | `buildLane` (twelfth change) |
+| 19.8 | A filter family swap | Track 2's tone, cutoff 400. Step its `filter type` LP, HP, BP, LP | HP runs `four_filt_hi` in place of `four_filt_lo`. BP runs `four_filt_lo`. There are still four filter synths. No click at any step: the swap is a 20 ms crossfade | `laneFilter` |
+| 19.9 | The colour synth | Track 2's drive up, crush up, drive to 0, crush to 0 | One `four_colour` while drive or crush is up. It goes about 300 ms after both are at 0 | `laneColour` |
+| 19.10 | The effect synths | Track 2's `effect` CHORUS, `effect 2` RING, then both OFF | One `four_fx_mod` and one `four_fx_ring`, then no `four_fx_*` | `laneFx` |
+| 19.11 | **Each effect type changes the sound** | Track 2's tone. Step `effect` through CHORUS, FLANGE, WOBBLE, RESON, RING and ECHO | Each type sounds different from OFF and from the others. RESON is within about 4 dB of the dry sound. FLANGE is the plugin's flanger (`four_fx_flange`), ECHO repeats the track | `fxSlot`, `four_fx_flange`, `four_fx_echo` (fourteenth change) |
+| 19.12 | A type change does not click | On EFFECT, tap K2 ON, then tap K3 TYPE through every type while the tone plays | No click at any step: the change is a 50 ms crossfade | `laneFx`'s bundle |
+| 19.13 | The second slot | Set track 2's `effect 2` in PARAMS. On EFFECT, turn K1+E2 and K1+E3 | K1+E2 turns `effect2_amt` and K1+E3 `effect2_rate`, and the first slot's knobs do not move. The second slot's name shows top right. The second slot changes the sound of the first | `ENC_MAP.EFFECT`, `body_EFFECT` |
+| 19.14 | **PV, WARP and PLAY at pitch 1** | Track 2's tone at pitch 1, in PLAY, WARP and PV | The three play the same take at the same level, within 1 dB. Listen for warble or a smear | FourPV, FourWarp, FourRead, `exactRd` |
+| 19.15 | **GRAIN's first grain** | Density 4. Start track 2's GRAIN and track 3's PLAY together. Then tap a grain pad with track 3's PLAY | The grain sounds with the PLAY, not a quarter of a second after it. Offline the first grain comes 1 to 1.6 ms after the press | `Impulse.ar(0)` in `\four_grain` and `\four_voice_grain` (twenty-second change) |
+| 19.16 | CLOUD | Track 2 in CLOUD | It sounds. With mi-UGens the node is `four_clouds`, without them `four_grain` | `droneDef`, MiClouds |
+| 19.17 | The voices' cost | Four tracks in PLAY, then WARP, PV and GRAIN, at pitch 1 | Record the thread for each. Compare with doc/measurements/2026-11-13/lanes.md and the sixteenth change | |
+| 19.18 | **The sends start at 0** | A fresh script | `fx_dly`, `fx_rev`, every `t<n>_fx_dly` and `t<n>_fx_rev`, and `dly_rev` read 0 | `ROUTES` (nineteenth change) |
+| 19.19 | A send at 0 gives no echo | Drums on track 1, `delay_mix` and `rev_mix` up, every send at 0. Stop the voice. Then open track 1's sends (TRACKS, hold K1, D and R) and stop it again | With the sends at 0 nothing rings on. With them open, echoes and a tail ring on | the sends in io and the lanes |
+| 19.20 | **The dry never ducks** | Track 2's tone, every send at 0. Raise `delay_mix` and `rev_mix` from 0 to full | The level stays within 0.5 dB | The sum in `\four_io` (nineteenth change) |
+| 19.21 | `dly_rev` | Track 2's delay send open, its reverb send at 0, `delay_fb` 0, `rev_decay` 4 s. Stop the voice with `dly_rev` at 0, then at 1 | At 0 the echo ends dry. At 1 the echoes ring on in the reverb | `dly_rev` in `\four_io` |
+| 19.22 | NO SEND | `delay_mix` and `rev_mix` up, every send at 0. Open DELAY and REVERB. Then open track 2's delay send | Both pages say `NO SEND - TRACKS K1`. On DELAY the words go once a track sends | `SPC_HINT`, `no_send` in lib/mpages.lua |
+| 19.23 | The room and the brigade run | Track 2's sends open, `delay_mix` and `rev_mix` up | `four_reverb` and `four_delay` run, and `hasStretch` is true, so they are FourRoom and FourBBD. The tail decays smoothly. The echoes land on `delay_time` | `\four_reverb`, `\four_delay` (sixteenth and seventeenth changes) |
+| 19.24 | **Silence costs nothing** | Track 2's sends open, `delay_mix` and `rev_mix` up, `delay_fb` 0.5. Turn every track OFF. Read the thread 5 s and 60 s later | The thread does not rise while the tails die out. A rise is the denormal fault. Only the offline proof covers its repair (doc/space-plan.md, section 15) | The 1e-15 term in `BBD`, `Room` and `DelayFb` |
+| 19.25 | Their cost | Track 2 in PLAY with both sends open. Read the thread with both mixes at 0, the delay alone, the reverb alone, then both | Record the figures. The room took about 5% on 2026-11-13, where JPverb took 13.5%. The brigade has no device figure yet | |
+| 19.26 | KNOWN, not new failures | Turn SIZE while the room plays. Set `delay_time` to 0.01 s. Feed the reverb a DC offset | Record what the device does and go on. The offline review found it all (doc/measurements/2026-11-15/README.md): The room reads SIZE at its start only. A later turn of SIZE does nothing. Eight other reverb knobs do nothing to the room. The brigade's least time is 42.8 ms. The room has a DC gain of +16 dB. FLANGE at amount 0 delays the track by 1.40 ms | Not a fault of this build. A device figure that differs from these is new |
+| 19.27 | **The CPU budget** | Four PV tracks at pitch 2 for 60 s. Each has FLANGE and ECHO on, drive up and both sends open. `delay_mix`, `rev_mix` and `shimmer` are up. Then the user's dense set: PV at pitch 1.96 and 2.5, GRAIN at density 200 and size 0.29 s and 0.5 s, for 60 s | The scsynth thread stays under 60%, and there is no xrun in either 60 s. On 2026-11-13 four PV at pitch 2 took 53.0% and the dense set 57.3% | The grain cap (48 pairs), the lanes, the room |
 
 ## When it passes
 

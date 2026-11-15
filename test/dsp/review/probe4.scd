@@ -49,6 +49,13 @@ Engine_Four.new(ctx, { arg eng;
                 [[0.002, [\s_new, \copy, 1000 + i, 1, 0, \from, c[0], \to, 80 + (i * 2)]],
                  [0.003, [\s_new, \four_colour, 1100 + i, 1, 0, \pbus, 80 + (i * 2), \drive, c[1], \crush, c[2]]],
                  [0.004, [\s_new, \copy, 1200 + i, 1, 0, \from, 80 + (i * 2), \to, i * 2]]] }).flatten(1)],
+        // r. the drive's aliasing: a 5 kHz sine at -6 dBFS, full drive (a checklist row)
+        [\drive5k, 2.0, 2, [],
+            [[0.0, [\d_recv, def.(\four_colour)]],
+             [0.001, [\s_new, \sine, 900, 0, 0, \out, 40, \freq, 5000, \amp, 0.5]],
+             [0.002, [\s_new, \copy, 1000, 1, 0, \from, 40, \to, 80]],
+             [0.003, [\s_new, \four_colour, 1100, 1, 0, \pbus, 80, \drive, 1, \crush, 0]],
+             [0.004, [\s_new, \copy, 1200, 1, 0, \from, 80, \to, 0]]]],
         // j. GRAIN in a 12 ms window of a 1 kHz island in a 7 kHz buffer: [size, scan]
         [\gedge, 4.0, 8, [[0, "marker.wav"], [1, "marker.wav"]],
             [[0.0, [\d_recv, def.(\four_grain)]]]

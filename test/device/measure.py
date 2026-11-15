@@ -125,7 +125,8 @@ def grain():
     n.set("density", 20)
     n.set("size", 0.1)
     set_mode("WARP")
-    for overlaps in (2, 8, 16):
+    # the param stops at 8 (four.lua), so a 16 measured 8 under the name 16
+    for overlaps in (2, 4, 8):
         n.set("warp_overlaps", overlaps)
         time.sleep(1)
         sample(f"WARP overlaps {overlaps}", window=8)

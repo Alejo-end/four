@@ -4280,3 +4280,43 @@ walkthrough.
   reverb comment says that FourRoom reads only mix, decay, damp and size.
 - test/check.lua's header says seven harnesses and five render variants.
 Nothing ran on the device. `test/check.lua` passes on Lua 5.3.
+
+four, twenty-fifth change: **the device gate has a stage for four (documents and test
+tools only, the count stays 198)**. doc/device-gate.md said that four's own work had no
+rows.
+- Stage 19 has 27 rows. They cover the four tracks (K1+E1, TRACKS E2, a take for each
+  track, a voice for each track, the pages on the focus), the lanes (filter family,
+  colour, effect synths) and the effect slots (every type, the type change, the second
+  slot). They also cover the FourStretch voices (pitch 1, the first grain, CLOUD, their
+  cost), the sends (from 0, no echo at 0, no duck, `dly_rev`, NO SEND), the room and the
+  brigade (they run, silence, their cost), and the CPU budget.
+- Row 19.26 lists the offline review's findings as KNOWN. The device session records
+  them and does not count them as new failures.
+- test/device/gate.py runs stage 19. 16 rows are pass or fail, 9 give numbers for a
+  person to judge, and 2 need a person. `sends()` takes a track. Each track's buffers
+  are hashed. A track's first grain is timed against a PLAY track panned hard left. The
+  thread is read from `top -H`.
+- measure.py swept WARP at 16 overlaps, but the param stops at 8, so that reading was 8
+  under the name 16. It sweeps 2, 4 and 8.
+Nothing ran on the device. `test/check.lua` passes on Lua 5.3.
+
+four, twenty-sixth change: **one offline check for the DSP (test tools, the count stays
+198)**. `test/dsp/check_dsp.sh <work folder>` compiles the real engine on the Mac with
+the stand-in CroneEngine. It renders the review probes and engine.scd, runs
+`core_probe2.cpp`, and prints one line for each assertion and one verdict. It runs the
+stock voices, and the FourStretch build too when `FOUR_PLUGIN_DIR` is set. Both builds
+take about 30 s.
+- It checks COMMANDS 198 with no ERROR in every run, and the FourStretch line.
+- It checks the two fixes of the twenty-second change. The first grain of a pad and of
+  the drone comes within 5 ms (measured 0.8 to 1.7 ms). A mode change into GRAIN leaves
+  no hole below -60 dBFS. Erosion stays at -140.8 dB in windows at 3, 18, 30 and 54 s.
+- It checks the checklist rows of doc/dsp-plan.md that a Mac can render. The rows that
+  fail today are KNOWN, each with its value and a margin. The check fails if one gets
+  worse by more than its margin.
+- probe4 has a new job r: a 5 kHz sine at -6 dBFS at full drive. It reproduces the drive
+  row, -27.3 dB.
+- Proof: with `+ Impulse.ar(0)` removed from `\four_voice_grain`, the check fails on the
+  pad rows (51 and 251 ms) in both builds.
+- The probes use unseeded noise, so GRAIN's flatness moves between -1.6 and -2.3 dB, and
+  the FreeVerb runaway rows move by several dB. Their margins allow it.
+CLAUDE.md's workflow names the check. Nothing ran on the device.

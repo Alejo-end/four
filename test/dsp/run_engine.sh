@@ -5,6 +5,8 @@
 # usage: test/dsp/run_engine.sh <work folder> <tag>
 #   then: python test/dsp/an_engine.py <work folder> <tag>
 # The work folder must hold long5k.wav (python test/dsp/mkbuf.py, run inside it).
+# For one PASS or FAIL verdict over this render and the review probes:
+# test/dsp/check_dsp.sh <work folder>
 set -e
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(cd "$1" && pwd)"; TAG="${2:-run}"

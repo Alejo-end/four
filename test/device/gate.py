@@ -21,6 +21,7 @@ presets, and a write there replaces their take, tape and scene files too.
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -193,18 +194,20 @@ def set_mode(name):
     time.sleep(0.5)
 
 
-def sends(dly=None, rev=None):
-    """Set track 1's sends into the delay (fx_dly) and the reverb (fx_rev).
+def sends(dly=None, rev=None, track=1):
+    """Set a track's sends into the delay and the reverb: fx_dly and fx_rev
+    for track 1, t<n>_fx_dly and t<n>_fx_rev for track n.
 
     Since four's nineteenth change both start at 0, and delay_mix and rev_mix
     are only the levels of the returns, added to a dry sum that never ducks.
     A check that hears the delay or the reverb opens the send first and closes
     it after, as doc/device-gate.md says for its delay and reverb rows.
     """
+    pre = "" if track == 1 else f"t{track}_"
     if dly is not None:
-        n.set("fx_dly", dly)
+        n.set(pre + "fx_dly", dly)
     if rev is not None:
-        n.set("fx_rev", rev)
+        n.set(pre + "fx_rev", rev)
 
 
 def tail_db(name, secs=1.5):
@@ -2391,6 +2394,525 @@ def stage18():
         why="test/test_screen reads these off the pixels offscreen. Look at the OLED; screens/18_*.png are from the device")
 
 
+
+# ---- stage 19: four's own work ------------------------------------------------
+# MODE_NAMES and EFFECT_NAMES in four.lua, as option indexes
+MODE = {"OFF": 1, "GRAIN": 2, "WARP": 3, "PV": 4, "PLAY": 5, "CLOUD": 6}
+EFFECTS = ("OFF", "CHORUS", "FLANGE", "WOBBLE", "RESON", "RING", "ECHO")
+HAS_STRETCH = '("MGHS " ++ Crone.engine.hasStretch).postln;'
+
+
+def tp(track, pid):
+    """Track n's id for a track 1 id: `t<n>_<id>`, as tid_n in four.lua."""
+    return pid if track == 1 else f"t{track}_{pid}"
+
+
+def modes(*names):
+    """Set the modes of tracks 1 to 4, in order."""
+    for t, name in enumerate(names, 1):
+        n.set(tp(t, "mode"), MODE[name])
+    time.sleep(0.6)
+
+
+def sc_thread(seconds=5):
+    """The busiest scsynth thread in top -H, in % of a core. The budget is 60.
+
+    avgCPU is the whole JACK cycle (CLAUDE.md), so the cost of the engine is
+    read from its thread, as doc/measurements/2026-11-12 and 2026-11-13 did.
+    """
+    idle, rows = n.threads(seconds, 20)
+    return max((cpu for name, cpu, _ in rows if name.startswith("scsynth")), default=None)
+
+
+def track_hash(t):
+    """A digest of track t's two buffers (bufLs and bufRs in the engine).
+
+    norns.py's take_hash reads track 1 only. The server writes in the
+    background, so a file is complete when it holds the full 60 s and has
+    stopped growing.
+    """
+    stem = "/tmp/mg_t"
+    n.ssh(f"rm -f {stem}_L.wav {stem}_R.wav")
+    n.sc(f'Crone.engine.bufLs[{t - 1}].write("{stem}_L.wav", "wav", "float"); '
+         f'Crone.engine.bufRs[{t - 1}].write("{stem}_R.wav", "wav", "float");', timeout=10)
+    last = None
+    for _ in range(120):
+        time.sleep(0.5)
+        sizes = n.ssh(f"stat -c %s {stem}_L.wav {stem}_R.wav 2>/dev/null | tr '\\n' ' '").strip()
+        parts = sizes.split()
+        if len(parts) == 2 and sizes == last and min(int(p) for p in parts) >= 11520000:
+            break
+        last = sizes
+    else:
+        raise RuntimeError(f"track {t}'s dump did not finish: {last}")
+    code = (
+        "import hashlib\n"
+        f"for p in ('{stem}_L.wav','{stem}_R.wav'):\n"
+        "  d=open(p,'rb').read(); i=d.find(b'data')+8; print(hashlib.sha1(d[i:]).hexdigest()[:12], end=' ')\n"
+    )
+    return n.ssh(f"python3 -c \"{code}\"", timeout=30).strip()
+
+
+def lane_nodes():
+    """What the lanes run (four, twelfth change): filters, colour, effects."""
+    names = n.nodes()
+    return {"filters": sum(1 for x in names if x.startswith("four_filt_")),
+            "hi": names.count("four_filt_hi"),
+            "colour": names.count("four_colour"),
+            "fx": sorted(x for x in names if x.startswith("four_fx_"))}
+
+
+def onset(xs, rate, floor=0.01):
+    """The first time (s) a channel passes `floor` (-40 dBFS), or None."""
+    for i, s in enumerate(xs):
+        if abs(s) > floor:
+            return i / rate
+    return None
+
+
+def stage19():
+    start = mark()
+    n.load_script()
+    loaded = transcript_since("lua", start)
+    n.set("dry_wet", 1)
+
+    def c191():
+        since = n.ssh("systemctl show norns-sclang -p ActiveEnterTimestamp --value").strip()
+        plug = n.ssh(f'journalctl -u norns-sclang --since "{since}" --no-pager | grep -o "four: FourStretch.*" | tail -1').strip()
+        has = "MGHS true" in n.sc(HAS_STRETCH)
+        files = n.ssh("ls ~/.local/share/SuperCollider/Extensions/FourStretch/ 2>/dev/null").split()
+        classes = [f for f in files if f.endswith(".sc")]
+        ok = COUNT in loaded and plug.endswith("FourStretch on") and has and not classes
+        return verdict(ok, f"{COUNT} seen={COUNT in loaded}; log: {plug or 'no FourStretch line'}; "
+                           f"hasStretch={has}; plugin folder {files}")
+
+    def c1918():
+        # first, before any check opens a send
+        ids = ["dly_rev"] + [tp(t, k) for t in range(1, 5) for k in ("fx_dly", "fx_rev")]
+        vals = param_state(*ids)
+        return verdict(all(v == 0 for v in vals.values()), vals)
+
+    check("19.1", c191)
+    check("19.18", c1918)
+
+    def c192():
+        n.set("track_sel", 1)
+        seen = []
+        for d in (1, 1, 1, 1, -1, -1, -1):
+            n.key(1, 1)
+            n.enc(1, d)
+            n.key(1, 0)
+            time.sleep(0.15)
+            seen.append(int(n.get("track_sel")))
+            if len(seen) == 2:
+                shot("19.2_focus_3")
+        return verdict(seen == [2, 3, 4, 4, 3, 2, 1], f"K1+E1 steps the focus {seen}. The badge: screens/19.2_focus_3.png")
+
+    def c193():
+        n.set("track_sel", 1)
+        n.goto("TRACKS")
+        got = []
+        for d in (1, 1, -5):
+            n.enc(2, d)
+            time.sleep(0.1)
+            got.append(int(n.get("track_sel")))
+        return verdict(got[0] > 1 and got[1] > got[0] and got[2] == 1, f"E2 on TRACKS: focus {got}")
+
+    check("19.2", c192)
+    check("19.3", c193)
+
+    # The takes for the rest of the stage: drums on 1, a tone on 2, a quieter
+    # tone on 3, quieter drums on 4. 19.4 reads each track's buffers after its
+    # own pass and again at the end; other checks need only the takes.
+    hashes, idx = {}, {}
+    digest = not ONLY or "19.4" in ONLY
+    for t, kind, amp in ((1, "drums", None), (2, "tone", None), (3, "tone", 0.12), (4, "drums", 0.25)):
+        n.set("track_sel", t)
+        time.sleep(0.4)
+        found = re.search(r"MGIDX (\d+) (\d+)",
+                          n.sc('("MGIDX " ++ Crone.engine.recIdx ++ " " ++ Crone.engine.opIdx).postln;'))
+        idx[t] = (int(found.group(1)), int(found.group(2))) if found else None
+        record_take(4, kind, amp)
+        if digest:
+            hashes[t] = track_hash(t)
+    n.set("track_sel", 2)
+
+    def c194():
+        after = {t: track_hash(t) for t in range(1, 5)}
+        ok = (after == hashes and len(set(after.values())) == 4
+              and all(idx[t] == (t - 1, t - 1) for t in idx))
+        return verdict(ok, f"digests after each track's pass {hashes}; at the end {after}; "
+                           f"recIdx and opIdx by focus {idx}")
+
+    def c195():
+        modes("PLAY", "GRAIN", "WARP", "PV")
+        time.sleep(1)
+        names = n.nodes()
+        want = ("four_play", "four_grain", "four_warp", "four_pv")
+        modes("PLAY", "OFF", "OFF", "OFF")
+        one = tone_bands("19.5_track1", 2)[0]
+        modes("OFF", "PLAY", "OFF", "OFF")
+        two = tone_bands("19.5_track2", 2)[0]
+        ok = all(w in names for w in want) and two[220] > one[220] + 10
+        return verdict(ok, f"voices in the tree {sorted(set(x for x in names if x in want))}; 220 Hz with track 1 "
+                           f"alone {one[220]} dB (drums), track 2 alone {two[220]} dB (tone). "
+                           "Listen to 19.5_*.wav", "measured")
+
+    def c196():
+        modes("OFF", "PLAY", "PLAY", "OFF")
+        n.set("track_sel", 3)
+        time.sleep(0.3)
+        ids = ("cutoff", "t3_cutoff", "effect", "t3_effect", "pos_start", "t3_pos_start")
+        a = param_state(*ids)
+        n.goto("FILTER")
+        n.enc(2, -10)
+        n.goto("EFFECT")
+        n.tap(2)
+        time.sleep(0.2)
+        n.goto("TAKE")
+        n.enc(2, 5)
+        time.sleep(0.2)
+        b = param_state(*ids)
+        moved = sorted(i for i in ids if a[i] != b[i])
+        n.set("t3_effect", 1)
+        n.set("t3_cutoff", 20000)
+        n.set("t3_pos_start", a["t3_pos_start"])
+        n.set("track_sel", 2)
+        return verdict(moved == ["t3_cutoff", "t3_effect", "t3_pos_start"], f"moved {moved}; before {a}; after {b}")
+
+    for cid, fn in (("19.4", c194), ("19.5", c195), ("19.6", c196)):
+        check(cid, fn)
+
+    # the lanes, on track 2's tone
+    modes("OFF", "PLAY", "OFF", "OFF")
+    n.set("track_sel", 2)
+
+    def c197():
+        time.sleep(0.5)
+        lane = lane_nodes()
+        return verdict(lane["filters"] == 4 and lane["colour"] == 0 and not lane["fx"], f"at rest {lane}")
+
+    def c198():
+        n.set("t2_cutoff", 400)
+        time.sleep(0.3)
+        seen = {}
+
+        def step():
+            for name, v in (("HP", 2), ("BP", 3), ("LP", 1)):
+                n.set("t2_filt_type", v)
+                time.sleep(0.4)
+                seen[name] = lane_nodes()
+                time.sleep(0.3)
+
+        rate, chans = during(step, "19.8_filter_swap", 7)
+        hits = audio.clicks(chans[0], rate)
+        n.set("t2_cutoff", 20000)
+        ok = (seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
+              and all(x["filters"] == 4 for x in seen.values()) and not hits)
+        return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
+
+    def c199():
+        got = []
+        for pid, v, wait in (("t2_drive", 0.5, 0.3), ("t2_crush", 0.5, 0.3), ("t2_drive", 0, 0.6), ("t2_crush", 0, 0.8)):
+            n.set(pid, v)
+            time.sleep(wait)
+            got.append(lane_nodes()["colour"])
+        return verdict(got == [1, 1, 1, 0], f"four_colour after drive up, crush up, drive 0, crush 0: {got}")
+
+    def c1910():
+        n.set("t2_effect", 2)
+        time.sleep(0.3)
+        a = lane_nodes()["fx"]
+        n.set("t2_effect2", 6)
+        time.sleep(0.3)
+        b = lane_nodes()["fx"]
+        n.set("t2_effect", 1)
+        n.set("t2_effect2", 1)
+        time.sleep(0.4)
+        c = lane_nodes()["fx"]
+        ok = a == ["four_fx_mod"] and b == ["four_fx_mod", "four_fx_ring"] and not c
+        return verdict(ok, f"CHORUS {a}; CHORUS and RING {b}; both OFF {c}")
+
+    def c1911():
+        out = {}
+        for e, name in enumerate(EFFECTS, 1):
+            n.set("t2_effect", e)
+            time.sleep(1.2)
+            bands, st, rate, c = tone_bands(f"19.11_{name}", 2)
+            out[name] = (bands, st["rms_db"], audio.brightness(c, rate))
+        n.set("t2_effect", 1)
+        dry = out["OFF"]
+
+        def change(x):
+            return max([abs(x[0][hz] - dry[0][hz]) for hz in dry[0]] + [abs(x[1] - dry[1]), abs(x[2] - dry[2])])
+
+        d = {name: round(change(x), 1) for name, x in out.items() if name != "OFF"}
+        return verdict(all(v > 1 for v in d.values()),
+                       f"largest change against OFF in dB {d}; RESON level {out['RESON'][1] - dry[1]:+.1f} dB. "
+                       "Each type apart: listen to 19.11_*.wav", "measured")
+
+    def c1912():
+        n.goto("EFFECT")
+        n.tap(2)
+        time.sleep(0.3)
+
+        def steps():
+            for _ in range(6):
+                n.tap(3)
+                time.sleep(0.6)
+
+        rate, chans = during(steps, "19.12_type_steps", 6)
+        hits = audio.clicks(chans[0], rate)
+        n.set("t2_effect", 1)
+        return verdict(not hits, f"six TYPE taps over a tone: breaks {hits[:8]}. Listen to 19.12_type_steps.wav", "measured")
+
+    def c1913():
+        n.set("t2_effect", 2)
+        n.set("t2_effect2", 1)
+        time.sleep(1)
+        one = tone_bands("19.13_slot1", 2)[0]
+        n.set("t2_effect2", 6)
+        time.sleep(1)
+        both = tone_bands("19.13_slots", 2)[0]
+        n.goto("EFFECT")
+        ids = ("t2_effect_amt", "t2_effect2_amt", "t2_effect_rate", "t2_effect2_rate")
+        a = param_state(*ids)
+        n.key(1, 1)
+        n.enc(2, 5)
+        n.enc(3, 5)
+        time.sleep(0.2)
+        n.key(1, 0)
+        time.sleep(0.3)
+        shot("19.13_slot2")
+        b = param_state(*ids)
+        moved = sorted(i for i in ids if a[i] != b[i])
+        change = max(abs(both[hz] - one[hz]) for hz in one)
+        for pid, v in (("t2_effect", 1), ("t2_effect2", 1), ("t2_effect2_amt", 0.5), ("t2_effect2_rate", 0.5)):
+            n.set(pid, v)
+        return verdict(moved == ["t2_effect2_amt", "t2_effect2_rate"] and change > 1,
+                       f"K1+E2 and K1+E3 moved {moved}; RING in slot 2 changes the tone by {change:.1f} dB. "
+                       "The name top right: screens/19.13_slot2.png", "measured")
+
+    for cid, fn in (("19.7", c197), ("19.8", c198), ("19.9", c199), ("19.10", c1910), ("19.11", c1911),
+                    ("19.12", c1912), ("19.13", c1913)):
+        check(cid, fn)
+
+    # the voices
+    def c1914():
+        n.set("t2_pitch", 1)
+        out = {}
+        for name in ("PLAY", "WARP", "PV"):
+            modes("OFF", name, "OFF", "OFF")
+            time.sleep(1)
+            out[name] = tone_bands(f"19.14_{name}", 2)[0]
+        modes("OFF", "PLAY", "OFF", "OFF")
+        worst = max(abs(out[m][hz] - out["PLAY"][hz]) for m in ("WARP", "PV") for hz in out["PLAY"])
+        return verdict(worst <= 1, f"bands by voice {out}; largest difference from PLAY {worst:.1f} dB. "
+                                   "Warble or smear: listen to 19.14_*.wav", "measured")
+
+    def c1915():
+        # Track 3's PLAY is the clock: hard left, so the right channel holds
+        # the grain alone. A late first grain starts on the right a quarter
+        # second after the left.
+        n.set("t3_pan", -1)
+        for pid in ("density", "t2_density"):
+            n.set(pid, 4)
+        modes("OFF", "OFF", "OFF", "OFF")
+        time.sleep(1)
+        rate, chans = during(lambda: n.lua('params:set("t3_mode", 5) params:set("t2_mode", 2)'), "19.15_grain_start", 3)
+        drone = (onset(chans[0], rate), onset(chans[1], rate))
+        modes("OFF", "OFF", "OFF", "OFF")
+        n.lua("__ctx.pad_type[0] = 0")
+        time.sleep(1)
+        rate, chans = during(lambda: n.lua('params:set("t3_mode", 5) __ctx.pad_trigger(9300, 0, 1)'), "19.15_grain_pad", 3)
+        pad = (onset(chans[0], rate), onset(chans[1], rate))
+        n.ctx("c.pad_trigger(9300, 0, 0)")
+        n.ctx("c.pads_all_off()")
+        modes("OFF", "PLAY", "OFF", "OFF")
+        n.set("t3_pan", 0)
+        for pid in ("density", "t2_density"):
+            n.set(pid, 20)
+        lags = [None if a is None or b is None else round((b - a) * 1000, 1) for a, b in (drone, pad)]
+        return verdict(all(x is not None and x < 30 for x in lags),
+                       f"the grain's first sound after track 3's PLAY: mode change {lags[0]} ms, pad {lags[1]} ms "
+                       "(before the twenty-second change about 250 ms at density 4)")
+
+    def c1916():
+        modes("OFF", "CLOUD", "OFF", "OFF")
+        time.sleep(1.5)
+        names = n.nodes()
+        db = level("19.16_cloud", 3)
+        modes("OFF", "PLAY", "OFF", "OFF")
+        kind = next((k for k in ("four_clouds", "four_grain") if k in names), None)
+        return verdict(kind is not None and db > -50, f"CLOUD runs {kind}, {db} dB. Listen to 19.16_cloud.wav", "measured")
+
+    def c1917():
+        for t in range(1, 5):
+            n.set(tp(t, "pitch"), 1)
+        out = {}
+        for name in ("PLAY", "WARP", "PV", "GRAIN"):
+            modes(name, name, name, name)
+            time.sleep(2)
+            out[name] = sc_thread(6)
+        modes("OFF", "PLAY", "OFF", "OFF")
+        return ("measured", f"scsynth thread, four tracks at pitch 1, no delay or reverb: {out}. Compare with "
+                            "doc/measurements/2026-11-13/lanes.md and the sixteenth change")
+
+    for cid, fn in (("19.14", c1914), ("19.15", c1915), ("19.16", c1916), ("19.17", c1917)):
+        check(cid, fn)
+
+    # the sends
+    def c1919():
+        modes("PLAY", "OFF", "OFF", "OFF")
+        n.set("delay_mix", 0.5)
+        n.set("rev_mix", 0.5)
+        time.sleep(2)
+        shut = tail_db("19.19_sends_closed")
+        sends(dly=1, rev=1)
+        time.sleep(3)
+        opened = tail_db("19.19_sends_open")
+        sends(dly=0, rev=0)
+        n.set("delay_mix", 0)
+        n.set("rev_mix", 0)
+        return verdict(opened > shut + 20, f"once track 1's voice stops: {shut} dB with its sends at 0, {opened} dB with them open")
+
+    def c1920():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        time.sleep(1.5)
+        a = level("19.20_mix0", 3)
+        n.set("delay_mix", 1)
+        n.set("rev_mix", 1)
+        time.sleep(1.5)
+        b = level("19.20_mix1", 3)
+        n.set("delay_mix", 0)
+        n.set("rev_mix", 0)
+        return verdict(abs(b - a) <= 0.5, f"track 2's tone, every send at 0: {a} dB with both mixes at 0, {b} dB with both at 1")
+
+    def c1921():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        sends(dly=1, rev=0, track=2)
+        for pid, v in (("delay_mix", 0.6), ("rev_mix", 0.6), ("delay_time", 0.1), ("delay_fb", 0), ("rev_decay", 4)):
+            n.set(pid, v)
+        out = {}
+        for v in (0, 1):
+            n.set("dly_rev", v)
+            time.sleep(3)
+            n.set("t2_mode", MODE["OFF"])
+            time.sleep(0.4)
+            out[v] = level(f"19.21_dly_rev{v}", 1)
+            n.set("t2_mode", MODE["PLAY"])
+        sends(dly=0, track=2)
+        for pid, v in (("dly_rev", 0), ("delay_mix", 0), ("rev_mix", 0), ("delay_time", 0.3), ("delay_fb", 0.3), ("rev_decay", 2)):
+            n.set(pid, v)
+        return verdict(out[1] > out[0] + 6, f"what rings on once track 2 stops: {out[0]} dB with dly_rev 0, {out[1]} dB with dly_rev 1")
+
+    def c1922():
+        n.set("delay_mix", 0.5)
+        n.set("rev_mix", 0.5)
+        time.sleep(0.5)
+        for page in ("DELAY", "REVERB"):
+            n.goto(page)
+            time.sleep(0.4)
+            shot(f"19.22_{page}_no_send")
+        sends(dly=1, track=2)
+        n.goto("DELAY")
+        time.sleep(0.4)
+        shot("19.22_DELAY_send")
+        sends(dly=0, track=2)
+        n.set("delay_mix", 0)
+        n.set("rev_mix", 0)
+
+    for cid, fn in (("19.19", c1919), ("19.20", c1920), ("19.21", c1921), ("19.22", c1922)):
+        check(cid, fn)
+    you("19.22", why="the words are drawn, no param holds them: look at screens/19.22_*.png. "
+                     "NO SEND - TRACKS K1 on both, gone from DELAY once track 2 sends")
+
+    # the room and the bucket brigade
+    def c1923():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        sends(dly=1, rev=1, track=2)
+        n.set("delay_mix", 0.5)
+        n.set("rev_mix", 0.5)
+        time.sleep(1.5)
+        names = n.nodes()
+        has = "MGHS true" in n.sc(HAS_STRETCH)
+        during(lambda: n.set("t2_mode", MODE["OFF"]), "19.23_tails", 6)
+        n.set("t2_mode", MODE["PLAY"])
+        ok = has and "four_reverb" in names and "four_delay" in names
+        return verdict(ok, f"hasStretch={has}, so FourRoom and FourBBD; reverb node={'four_reverb' in names}, "
+                           f"delay node={'four_delay' in names}. The tails: listen to 19.23_tails.wav", "measured")
+
+    def c1924():
+        sends(dly=1, rev=1, track=2)
+        n.set("delay_mix", 0.5)
+        n.set("rev_mix", 0.5)
+        n.set("delay_fb", 0.5)
+        time.sleep(2)
+        modes("OFF", "OFF", "OFF", "OFF")
+        time.sleep(5)
+        early = sc_thread(5)
+        time.sleep(50)
+        late = sc_thread(5)
+        n.set("delay_fb", 0.3)
+        ok = early is not None and late is not None and late <= early + 2
+        return verdict(ok, f"scsynth thread while the tails die out: {early}% after about 5 s, {late}% after about 60 s")
+
+    def c1925():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        sends(dly=1, rev=1, track=2)
+        out = {}
+        for name, d, r in (("none", 0, 0), ("delay", 0.5, 0), ("reverb", 0, 0.5), ("both", 0.5, 0.5)):
+            n.set("delay_mix", d)
+            n.set("rev_mix", r)
+            time.sleep(2)
+            out[name] = sc_thread(5)
+        sends(dly=0, rev=0, track=2)
+        n.set("delay_mix", 0)
+        n.set("rev_mix", 0)
+        return ("measured", f"scsynth thread, track 2 in PLAY with both sends open: {out}. "
+                            "The room took about 5% on 2026-11-13. The brigade has no device figure yet")
+
+    for cid, fn in (("19.23", c1923), ("19.24", c1924), ("19.25", c1925)):
+        check(cid, fn)
+    you("19.26", why="KNOWN from the offline review (doc/measurements/2026-11-15/README.md): SIZE and eight "
+                     "other reverb knobs do nothing to a room that runs, the brigade's least time is 42.8 ms, "
+                     "the room's DC gain is +16 dB, FLANGE at amount 0 is 1.40 ms late. Record what the device does")
+
+    # the budget
+    def c1927():
+        for t in range(1, 5):
+            for pid, v in (("effect", 3), ("effect2", 7), ("drive", 0.5), ("fx_dly", 0.5), ("fx_rev", 0.5)):
+                n.set(tp(t, pid), v)
+        for pid, v in (("delay_mix", 0.5), ("rev_mix", 0.5), ("shimmer", 0.5)):
+            n.set(pid, v)
+        sets = {
+            "four PV at pitch 2": [("PV", {"pitch": 2})] * 4,
+            "the dense set": [("PV", {"pitch": 1.96}), ("PV", {"pitch": 2.5}),
+                              ("GRAIN", {"density": 200, "size": 0.29}), ("GRAIN", {"density": 200, "size": 0.5})],
+        }
+        out = {}
+        for label, tracks in sets.items():
+            modes(*[m for m, _ in tracks])
+            for t, (_, vals) in enumerate(tracks, 1):
+                for pid, v in vals.items():
+                    n.set(tp(t, pid), v)
+            time.sleep(3)
+            x0 = n.now()
+            seen = [x for x in (sc_thread(5) for _ in range(11)) if x is not None]   # about 60 s
+            out[label] = (max(seen) if seen else None, n.xruns_since(x0))
+        modes("OFF", "PLAY", "OFF", "OFF")
+        for t in range(1, 5):
+            for pid, v in (("effect", 1), ("effect2", 1), ("drive", 0), ("fx_dly", 0), ("fx_rev", 0),
+                           ("pitch", 1), ("density", 20), ("size", 0.1)):
+                n.set(tp(t, pid), v)
+        for pid in ("delay_mix", "rev_mix", "shimmer"):
+            n.set(pid, 0)
+        ok = all(cpu is not None and cpu < 60 and xr == 0 for cpu, xr in out.values())
+        return verdict(ok, f"busiest scsynth thread and xruns over 60 s: {out}. 2026-11-13: 53.0% and 57.3%")
+
+    check("19.27", c1927)
+
+
 def cleanup():
     n.signal_quit()
     n.ssh(f"rm -f ~/dust/data/four/four-{PSET}.pset ~/dust/data/four/*-{PSET}.lua "
@@ -2399,7 +2921,7 @@ def cleanup():
 
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,
           8: stage8, 9: stage9, 10: stage10, 11: stage11, 12: stage12, 13: stage13, 14: stage14,
-          15: stage15, 16: stage16, 17: stage17, 18: stage18}
+          15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19}
 
 
 def main():

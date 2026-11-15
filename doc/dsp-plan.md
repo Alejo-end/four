@@ -412,6 +412,10 @@ The method and every number: doc/measurements/2026-11-15/README.md.
 | The reverb passes no DC | DC 0.5 for 10 s, decay 30 | +16 dB of DC out | FAIL |
 | Cost on the norns | four tracks, `top -H` | doc/measurements/2026-11-13 | measured before this review |
 
+To check the rows a Mac can render: `test/dsp/check_dsp.sh <work folder>` (add
+`FOUR_PLUGIN_DIR` for the FourStretch build, about 30 s). It fails on a missed pass
+row, and on a FAIL row that gets worse than the margin it prints.
+
 Three tests for the filter are still to write. The first sweeps each path at
 cutoffs of 20 Hz, 1 kHz and 20 kHz with resonance 0, 0.5 and 0.9. The second is
 the null against dry at the open setting. The third changes LP to BP to HP under
