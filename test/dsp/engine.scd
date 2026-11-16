@@ -82,6 +82,18 @@ Engine_Four.new(ctx, { arg eng;
             ++ [0.3, 1.0, 2.0].collect({ |t, i|
                 [0.01, [\s_new, \four_delay, 1000 + i, 1, 0, \in_bus, 40, \out_bus, i * 2,
                     \delay_time, t, \delay_fb, 0.6, \delay_mix, 0.5]] })]
+        ,
+        // THE CLOUD (only with FOUR_PLUGIN_DIR, and only when the engine built
+        // its Clouds def): the CLOUD voice on a 1 kHz take in each of the four
+        // modes of Clouds, then GRANULAR frozen at 2 s, each on its own pair of outs
+        [("FOUR_PLUGIN_DIR".getenv.notNil and: { SynthDescLib.global[\four_clouds].notNil }).if({ \cloud }, { \skip }),
+            6, 10, [[0, "long1k.wav"], [1, "long1k.wav"]],
+            [[0.0, [\d_recv, def.(\four_clouds)]]]
+            ++ [0, 1, 2, 3, 0].collect({ |m, i|
+                [0.001, [\s_new, \four_clouds, 1000 + i, 0, 0, \buf_l, 0, \buf_r, 1,
+                    \play_bus, i * 2, \phase_out, 100 + i,
+                    \pos_start, 0.5, \pos_end, 0.58, \level, 1, \clouds_mode, m]] })
+            ++ [[2.0, [\n_set, 1004, \pv_freeze, 1]]]]
     ];
     run = { |i|
         if (i >= jobs.size) { "BENCH_DONE".postln; 0.exit } {

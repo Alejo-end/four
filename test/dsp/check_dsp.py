@@ -103,6 +103,11 @@ def check(build):
     plug_on = 'FourStretch on' in runs['p1'][3]
     say('PASS' if plug_on == (build == 'plugin') else 'FAIL', build,
         f"the engine says FourStretch {'on' if plug_on else 'absent'} (needs {'on' if build == 'plugin' else 'absent'})")
+    # CLOUD is FourCloud exactly when the plugin is there (no mi-UGens on the Mac)
+    m = re.search(r'four: CLOUD is (.+)', runs['eng'][3])
+    cloud = m.group(1).strip() if m else '?'
+    say('PASS' if (cloud == 'FourCloud') == (build == 'plugin') else 'FAIL', build,
+        f"the engine says CLOUD is {cloud} (needs {'FourCloud' if build == 'plugin' else 'not FourCloud'})")
     a1 = analyse(os.path.join(REV, 'an_probe1.py'), runs['p1'][0], 'p1')
     a2 = analyse(os.path.join(REV, 'an_probe2.py'), runs['p2'][0], 'p2')
     a4 = analyse(os.path.join(REV, 'an_probe4.py'), runs['p4'][0], 'p4')
@@ -127,6 +132,11 @@ def check(build):
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')
     if build == 'plugin':
+        # THE CLOUD: FourCloud in each mode of Clouds sounds, and stays finite
+        for n in ['GRANULAR', 'STRETCH', 'LOOPING DELAY', 'SPECTRAL', 'GRANULAR, frozen at 2 s']:
+            line = rf'^\s+{re.escape(n)}\s+RMS\s+([-\d.]+) dBFS\s+peak\s+([\d.]+)\s+not finite (\d+)'
+            target(build, f"CLOUD sounds, {n}: a 1 kHz take at -9 dBFS, RMS from 1 to 6 s", num(line, ae, 1), -40, 'dBFS', low=False)
+            target(build, f"CLOUD stays finite, {n}: values not finite", num(line, ae, 3), 0, '')
         # the shimmer loop is bounded: 0.95, decay 30, every pitch (probe4 p, probe1 3)
         for n in ['burst, -12 st', 'burst, -7 st', 'burst, \\+7 st', 'burst, \\+24 st']:
             v = num(rf'{n}\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+\s+([-\d.]+)\s+peak', a4)

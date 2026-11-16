@@ -34,8 +34,8 @@
 // only while the `beat_repeat` command holds a length > 0, placed after io on the
 // output bus). Drone and voices Out.ar additively onto play_bus;
 // io reads it. Plugin UGens (DFM1, MiClouds, JPverb and our own FourStretch
-// set) are guarded via .asClass -> stock fallback so a missing plugin never
-// bricks the load. The fallbacks do NOT sound the same (the stock filter, the
+// set, FourCloud among it) are guarded via .asClass -> stock fallback so a
+// missing plugin never bricks the load. The fallbacks do NOT sound the same (the stock filter, the
 // FreeVerb reverb): doc/measurements/2026-11-15/README.md.
 //
 // DEVICE NOTES: context.in_b is an ARRAY of two mono busses, out_b one stereo
@@ -75,8 +75,9 @@ Engine_Four : CroneEngine {
     var <repSynth, <repBufs, <repIdx;
     // polyphonic voice layer
     var <activeVoices, <voiceOrder, <voiceParams, <maxVoices;
-    // true when the MiClouds def compiled (mi-UGens present): CLOUD mode
-    // then uses the Clouds voice, else the GRAIN granulator
+    // true when a Clouds def compiled (FourCloud from the plugin, or MiClouds
+    // from mi-UGens): CLOUD mode then uses the Clouds voice, else the GRAIN
+    // granulator
     var <hasClouds;
     // tracks 2 to 4: one Event each (keys n, synth, params, strip,
     // stripParams, bus, phase), the shared return they all add into, and the
@@ -95,6 +96,48 @@ Engine_Four : CroneEngine {
     // true when the FourStretch plugin is there: FLANGE and ECHO then have
     // their own synths (laneFx)
     var <hasStretch;
+    // THE PLUGIN AS THE SERVER LOADED IT: [path, mtime] of the FourStretch
+    // binary when sclang started, nil when there was none. scsynth loads its
+    // plugins once, when sclang boots it right after its own start, so this is
+    // the binary the server runs. four installs or replaces its own plugin
+    // (lib/mplugin.lua) under a running server; until SYSTEM > RESTART the
+    // engine must not name a UGen the server lacks. A def that names one does
+    // not load, and every def names FourTanh: the instrument would be silent.
+    classvar <bootPlug;
+
+    *initClass {
+        StartUp.add({ try { bootPlug = this.plugStamp } });
+    }
+
+    // the FourStretch binary: in FOUR_PLUGIN_DIR on the Mac bench (test/dsp),
+    // else in the user Extensions folder. nil when there is none.
+    *plugBinary {
+        ["FOUR_PLUGIN_DIR".getenv, Platform.userExtensionDir +/+ "FourStretch"].do({ arg d;
+            d.notNil.if({
+                ["FourStretch.so", "FourStretch.scx"].do({ arg f;
+                    File.exists(d +/+ f).if({ ^d +/+ f });
+                });
+            });
+        });
+        ^nil
+    }
+
+    *plugStamp {
+        var p = this.plugBinary;
+        ^p.notNil.if({ [p, File.mtime(p)] })
+    }
+
+    // whether the binary holds the UGen `name`: a UGen's name is a string in
+    // the binary that defines it. A binary built before the UGen was added
+    // does not hold it. false when the file cannot be read.
+    *plugHas { arg name;
+        var p = this.plugBinary, s;
+        p.isNil.if({ ^false });
+        ^{
+            File.use(p, "rb", { arg f; s = String.newClear(f.length); f.read(s) });
+            s.find(name).notNil
+        }.try({ false })
+    }
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -102,8 +145,8 @@ Engine_Four : CroneEngine {
 
     // the drone def for mode i (1=GRAIN 2=WARP 3=PV 4=PLAY 5=CLOUD). GRAIN is
     // the granulator that reads the window itself (\four_grain). CLOUD
-    // is MiClouds on the playing window (it was GRAIN until four's tenth
-    // change), and falls back to the granulator when mi-UGens are absent.
+    // is Clouds on the playing window (it was GRAIN until four's tenth
+    // change): FourCloud, else MiClouds, else the granulator.
     // PLAY is the clean straight loop.
     droneDef { arg i;
         (i == 4).if({ ^\four_play });
@@ -420,7 +463,7 @@ Engine_Four : CroneEngine {
         var allKeys;
         var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
         var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, roomClass, bbdClass, th, dfmTrim;
-        var grainCap;
+        var grainCap, plugNow, plugLoaded, cloudDef, cloudName;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
         // (it cannot read it off the server) and derives every window edge,
         // pad slice and waveform position from it — change it here and there
@@ -651,16 +694,19 @@ Engine_Four : CroneEngine {
         grainClass = "FourGrain".asSymbol.asClass;
         roomClass = "FourRoom".asSymbol.asClass;
         bbdClass = "FourBBD".asSymbol.asClass;
+        // The binary must also be the one the server loaded at its boot
+        // (bootPlug): one installed or replaced since then waits for a
+        // RESTART. FOUR_STRETCH (the Mac bench, test/dsp) says the server has it.
+        plugNow = this.class.plugStamp;
+        plugLoaded = "FOUR_STRETCH".getenv.notNil
+            or: { plugNow.notNil and: { plugNow == bootPlug } };
         stretchOn = pvClass.notNil and: { warpClass.notNil } and: { readClass.notNil }
             and: { tanhClass.notNil } and: { delayClass.notNil }
             and: { grainClass.notNil } and: { roomClass.notNil } and: { bbdClass.notNil }
-            and: {
-            "FOUR_STRETCH".getenv.notNil or: {
-                ["FourStretch.so", "FourStretch.scx"].any({ arg f;
-                    File.exists(Platform.userExtensionDir +/+ "FourStretch" +/+ f)
-                })
-            }
-        };
+            and: { plugLoaded };
+        (plugNow.notNil and: { plugLoaded.not }).if({
+            "four: FourStretch is new since the restart, SYSTEM > RESTART to use it".postln;
+        });
         ("four: FourStretch " ++ stretchOn.if({ "on" },
             { "absent, WARP and PV are the stock voices" })).postln;
         // tanh, for every def below. The C library's tanh costs 0.4% of the
@@ -905,61 +951,71 @@ Engine_Four : CroneEngine {
                 buf_r, idx);
         }).add;
 
-        // MiClouds granular drone (mi-UGens), guarded two ways: .asClass (no
-        // literal reference) + a try around the def -> falls back to GrainBuf if
-        // absent/broken. a BufRd scrubs the window into Clouds; pv_freeze doubles
-        // as the clouds freeze.
-        hasClouds = false;
-        "MiClouds".asSymbol.asClass.notNil.if({
-            try {
-                var cc = "MiClouds".asSymbol.asClass;
-                SynthDef(\four_clouds, {
-                    arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
-                        pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
-                        size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
-                        grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
-                        grain_env1 = -1, grain_env2 = -1,
-                        clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
-                        clouds_mode = 0, clouds_lofi = 0,
-                        warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
-                        pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
-                    var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
-                    #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
-                    // Clouds' density is silent at 0.5: below it grains are
-                    // random, above it periodic. Mapping 1..200 across 0.5 made
-                    // density 13 to 16 silent and the default 20 about 20 dB
-                    // down. Stay on the random side (the drone's Dust law), and
-                    // lift the sparse end by the level the device measured.
-                    dens = density.explin(1, 200, 0.36, 0.05);
-                    edge = seam.(phase, span, buf_l);
-                    srcL = exactRd.(buf_l, idx, frac) * edge;
-                    srcR = exactRd.(buf_r, idx, frac) * edge;
-                    // POSITIONAL args (keyword args don't survive perform on a
-                    // var-held class): in, pit, pos, size, dens, tex, drywet,
-                    // in_gain, spread, rvb, fb, freeze, mode, lofi. our size/
-                    // density/pitch remap to Clouds' 0..1 / semitone ranges.
-                    sig = cc.ar([srcL, srcR],
-                        // Clouds reads its pitch when a grain starts, so a noise
-                        // here is a pitch spread per grain, as in the GrainBuf drone
-                        (pitch.max(0.01).log2 * 12) + LFNoise0.kr(density.clip(4, 30), grain_pitch_spread),
-                        clouds_pos,
-                        size.linlin(0.01, 0.5, 0.1, 0.9),
-                        dens,
-                        clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
-                        pv_freeze, clouds_mode, clouds_lofi);
-                    // x0.5: measured on the device, Clouds at the default
-                    // density came out 6 dB above PLAY on the same take, so
-                    // a mode change jumped in level
-                    sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp * 0.5;
-                    Out.ar(play_bus, sig * drEnv.(gate));
-                }).add;
-                hasClouds = true;
-            } { arg err;
-                hasClouds = false;
-                ("four: MiClouds def failed — using GrainBuf. "
-                    ++ err.errorString).postln;
-            };
+        // THE CLOUD: Mutable Instruments Clouds on the playing window, from
+        // the first of these that is there: FourCloud (four's own plugin,
+        // ugen/vendor/), MiClouds (mi-UGens), else CLOUD plays the GRAIN
+        // granulator. FourCloud takes the inputs of MiClouds in the same
+        // order, so one def serves both. Each is guarded two ways: .asClass
+        // (no literal reference) and a try around the def. FourCloud also
+        // needs a binary that holds it: one built before it does not, and a
+        // def that names it would load nowhere. a BufRd scrubs the window
+        // into Clouds; pv_freeze doubles as the clouds freeze.
+        cloudDef = { arg cc;
+            SynthDef(\four_clouds, {
+                arg buf_l, buf_r, play_bus, phase_out, rec = 0, freeze = 0,
+                    pos_start = 0, pos_end = 1, scan = 1, pos_jitter = 0,
+                    size = 0.1, density = 20, pitch = 1, spread = 0.5, pan = 0,
+                    grain_jitter = 0, grain_pitch_spread = 0, grain_shape = 0,
+                    grain_env1 = -1, grain_env2 = -1,
+                    clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
+                    clouds_mode = 0, clouds_lofi = 0,
+                    warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
+                    pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
+                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+                // Clouds' density is silent at 0.5: below it grains are
+                // random, above it periodic. Mapping 1..200 across 0.5 made
+                // density 13 to 16 silent and the default 20 about 20 dB
+                // down. Stay on the random side (the drone's Dust law), and
+                // lift the sparse end by the level the device measured.
+                dens = density.explin(1, 200, 0.36, 0.05);
+                edge = seam.(phase, span, buf_l);
+                srcL = exactRd.(buf_l, idx, frac) * edge;
+                srcR = exactRd.(buf_r, idx, frac) * edge;
+                // POSITIONAL args (keyword args don't survive perform on a
+                // var-held class): in, pit, pos, size, dens, tex, drywet,
+                // in_gain, spread, rvb, fb, freeze, mode, lofi. our size/
+                // density/pitch remap to Clouds' 0..1 / semitone ranges.
+                sig = cc.ar([srcL, srcR],
+                    // Clouds reads its pitch when a grain starts, so a noise
+                    // here is a pitch spread per grain, as in the GrainBuf drone
+                    (pitch.max(0.01).log2 * 12) + LFNoise0.kr(density.clip(4, 30), grain_pitch_spread),
+                    clouds_pos,
+                    size.linlin(0.01, 0.5, 0.1, 0.9),
+                    dens,
+                    clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
+                    pv_freeze, clouds_mode, clouds_lofi);
+                // x0.5: measured on the device, Clouds at the default
+                // density came out 6 dB above PLAY on the same take, so
+                // a mode change jumped in level
+                sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp * 0.5;
+                Out.ar(play_bus, sig * drEnv.(gate));
+            }).add;
+        };
+        [["FourCloud", stretchOn and: { this.class.plugHas("FourCloud") }],
+         ["MiClouds", true]].do({ arg c;
+            var cc = c[0].asSymbol.asClass;
+            (cloudName.isNil and: { c[1] } and: { cc.notNil }).if({
+                try {
+                    cloudDef.(cc);
+                    cloudName = c[0];
+                } { arg err;
+                    ("four: the " ++ c[0] ++ " def failed. " ++ err.errorString).postln;
+                };
+            });
         });
+        hasClouds = cloudName.notNil;
+        ("four: CLOUD is " ++ (cloudName ? "the GRAIN granulator, no Clouds")).postln;
 
         // ---- polyphonic voices: ONE note each, spawned per press. both
         // defs share the arg set; each frees itself. THE PER-PAD SWITCH is

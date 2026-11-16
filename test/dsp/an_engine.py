@@ -49,3 +49,10 @@ if os.path.exists(f'{d}/{tag}_stretch.wav'):
         env = np.sqrt(np.convolve(x ** 2, np.ones(480) / 480, 'valid'))[::240]
         sw = db(env.max() / max(env.min(), 1e-9))
         print(f"  {n:24s} {f0:7.0f} Hz  {lv:6.1f} dBFS  off {a:7.1f} dB  swing {sw:5.2f} dB")
+if os.path.exists(f'{d}/{tag}_cloud.wav'):
+    c, _ = sf.read(f'{d}/{tag}_cloud.wav')
+    print("CLOUD, the Clouds voice on a 1 kHz take at -9 dBFS: RMS and peak from 1 to 6 s, values not finite")
+    for i, n in enumerate(['GRANULAR', 'STRETCH', 'LOOPING DELAY', 'SPECTRAL', 'GRANULAR, frozen at 2 s']):
+        x = c[:, 2 * i: 2 * i + 2]; bad = int((~np.isfinite(x)).sum())
+        y = np.nan_to_num(x[sr: 6 * sr], nan=0.0, posinf=0.0, neginf=0.0)
+        print(f"  {n:24s} RMS {db(np.sqrt(np.mean(y ** 2))):6.1f} dBFS  peak {np.abs(y).max():5.2f}  not finite {bad}")
