@@ -1,6 +1,6 @@
 // BBD::tick against the reference of test_core (the per-tick law of before
 // 2026-11-15): the time a sample at four clocks, best of five.
-// clang++ -O2 -std=c++17 -I../../../ugen bbd_time.cpp -o /tmp/bbd_time (from this folder)
+// clang++ -O2 -std=c++17 -I../../../ugen -I../../../ugen/vendor/eurorack bbd_time.cpp -o /tmp/bbd_time (from this folder)
 #include <cstdio>
 #include <chrono>
 #include <vector>

@@ -1,7 +1,12 @@
-// The proof of four_core.h, with no SuperCollider. Build and run:
-//   clang++ -O2 -std=c++17 -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
+// The proof of four_core.h, with no SuperCollider, and a smoke test of the
+// Clouds core of FourCloud (four_cloud.h). Build and run:
+//   clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
 #include "four_core.h"
+#include "four_cloud.h"
+#include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <new>
 #include <vector>
 #include <random>
 using namespace four;
@@ -69,6 +74,80 @@ static void tone(const std::vector<float>& x, int a, int b, double f, double sr,
     double amp = 2 * std::sqrt(sr_ * sr_ + si * si) / wsum;
     double toneE = amp * amp / 2 * w2;
     lv = db(amp); off = 10 * std::log10(std::fmax(e - toneE, 1e-30) / e);
+}
+
+// THE CLOUD: the Clouds core run the way FourCloud runs it (FourStretch.cpp):
+// constructed then zeroed, the same two buffers, the core at 48 kHz, and
+// Process then Prepare on each block of 32 frames. The settings are the
+// engine's CLOUD at rest: size 0.1 s, density 20, texture 0.5, all wet.
+struct CloudRun {
+    std::vector<uint8_t> large = std::vector<uint8_t>(118784), small = std::vector<uint8_t>(65536 - 128);
+    alignas(16) unsigned char mem[sizeof(clouds::GranularProcessor)];
+    clouds::GranularProcessor* gp = nullptr;
+    clouds::FloatFrame in[32], out[32];
+    void init() {
+        gp = new (mem) clouds::GranularProcessor;
+        std::memset(static_cast<void*>(gp), 0, sizeof(clouds::GranularProcessor));
+        gp->Init(large.data(), large.size(), small.data(), small.size());
+        gp->set_sample_rate(48000.f);
+        gp->set_num_channels(2);
+        gp->set_low_fidelity(false);
+        gp->set_playback_mode(clouds::PLAYBACK_MODE_GRANULAR);
+        clouds::Parameters* p = gp->mutable_parameters();
+        p->pitch = 0.f; p->position = 0.5f; p->size = 0.247f; p->density = 0.185f;
+        p->texture = 0.5f; p->dry_wet = 1.f; p->stereo_spread = 0.5f;
+        p->reverb = 0.f; p->feedback = 0.f; p->freeze = false; p->trigger = false;
+    }
+    void block(const float* l, const float* r, float* oL, float* oR) {
+        for (int i = 0; i < 32; i++) { in[i].l = l[i]; in[i].r = r[i]; }
+        gp->Process(in, out, 32);
+        gp->Prepare();
+        for (int i = 0; i < 32; i++) { oL[i] = out[i].l; oR[i] = out[i].r; }
+    }
+};
+
+// runs a cloud for `secs`: a 1 kHz sine at 0.25 (-12 dBFS) in until `until`
+// seconds, silence after it. `at` changes the settings at a time. Reports
+// whether every value was finite, how many were subnormal, the RMS of
+// [a0, a1) and [b0, b1) in dBFS, the peak, and the mean cost of a block in
+// [a0, a1) and in [b0, b1).
+struct CloudReport { bool finite; long subnormal; double levA, levB, peak, costA, costB; };
+template <typename F>
+static CloudReport cloudRun(CloudRun& c, double secs, double until, double a0, double a1,
+                            double b0, double b1, F at) {
+    typedef std::chrono::steady_clock clk;
+    const double sr = 48000;
+    CloudReport r{true, 0, 0, 0, 0, 0, 0};
+    double eA = 0, eB = 0, tA = 0, tB = 0; long nA = 0, nB = 0, kA = 0, kB = 0;
+    float l[32], rr[32], oL[32], oR[32];
+    const long n = (long)(secs * sr);
+    for (long i = 0; i + 32 <= n; i += 32) {
+        const double t = i / sr;
+        at(c, t);
+        for (int j = 0; j < 32; j++) {
+            const double ph = 2 * PI * 1000.0 * (double)(i + j) / sr;
+            l[j] = t < until ? 0.25f * (float)std::sin(ph) : 0.f;
+            rr[j] = t < until ? 0.25f * (float)std::sin(ph + 1.0) : 0.f;
+        }
+        const auto t0 = clk::now();
+        c.block(l, rr, oL, oR);
+        const double cost = std::chrono::duration<double>(clk::now() - t0).count();
+        for (int j = 0; j < 32; j++) {
+            for (float y : {oL[j], oR[j]}) {
+                if (!std::isfinite(y)) r.finite = false;
+                if (std::fpclassify(y) == FP_SUBNORMAL) r.subnormal++;
+                if (std::fabs(y) > r.peak) r.peak = std::fabs(y);
+                if (t >= a0 && t < a1) { eA += (double)y * y; nA++; }
+                if (t >= b0 && t < b1) { eB += (double)y * y; nB++; }
+            }
+        }
+        if (t >= a0 && t < a1) { tA += cost; kA++; }
+        if (t >= b0 && t < b1) { tB += cost; kB++; }
+    }
+    r.levA = 10 * std::log10(eA / (nA ? nA : 1) + 1e-30);
+    r.levB = 10 * std::log10(eB / (nB ? nB : 1) + 1e-30);
+    r.costA = tA / (kA ? kA : 1); r.costB = tB / (kB ? kB : 1);
+    return r;
 }
 
 int main() {
@@ -439,6 +518,46 @@ int main() {
             expect(fin && restDb < -110, "AGE 1, silence in: the noise at the output, dBFS", restDb);
             expect(behindDb > restDb + 20 && behindDb < -55, "AGE 1, behind a loud note: the noise above 2 kHz, dBFS", behindDb);
         }
+    }
+    std::printf("CLOUD core (Clouds, vendor/, as FourCloud runs it)\n");
+    {
+        static CloudRun c;
+        auto none = [](CloudRun&, double) {};
+        // GRANULAR: 3 s of the sine, then 27 s of silence. The silent tail
+        // must cost what the sound cost: a state that decays into the
+        // subnormal range costs many times more on a CPU without flush to zero.
+        c.init();
+        CloudReport g = cloudRun(c, 30, 3, 1, 3, 25, 30, none);
+        expect(g.finite, "GRANULAR, 30 s: every value finite", g.finite ? 1 : 0);
+        expect(g.levA > -40, "GRANULAR, a sine at -12 dBFS in: level out, dBFS", g.levA);
+        expect(g.levB < -120, "GRANULAR, 22 s after the sine ends: level out, dBFS", g.levB);
+        expect(g.subnormal == 0, "GRANULAR, 30 s: subnormal values out", (double)g.subnormal);
+        expect(g.costB < 3 * g.costA, "GRANULAR, silence against sound: cost of a block, ratio", g.costB / g.costA);
+        // FREEZE: the held buffer goes on sounding after the input stops
+        c.init();
+        CloudReport f = cloudRun(c, 8, 2, 0.5, 2, 5, 8, [](CloudRun& cr, double t) {
+            cr.gp->mutable_parameters()->freeze = t >= 1.5;
+        });
+        expect(f.finite && f.levB > -40, "FREEZE at 1.5 s, silent from 2 s: level at 5 to 8 s, dBFS", f.levB);
+        // the other modes and the low fidelity: they sound and stay finite
+        const char* names[] = {"STRETCH", "LOOPING DELAY", "SPECTRAL", "GRANULAR, low fidelity"};
+        for (int m = 0; m < 4; m++) {
+            c.init();
+            CloudReport r = cloudRun(c, 4, 4, 1.5, 4, 3.9, 4, [m](CloudRun& cr, double) {
+                cr.gp->set_playback_mode((clouds::PlaybackMode)(m < 3 ? m + 1 : 0));
+                cr.gp->set_low_fidelity(m == 3);
+            });
+            char what[96]; std::snprintf(what, 96, "%s, the sine in: level out, dBFS", names[m]);
+            expect(r.finite && r.levA > -40, what, r.levA);
+        }
+        // the loop at its hottest: feedback 1 and reverb 1 on the sine for
+        // 20 s. It must stay finite and bounded.
+        c.init();
+        CloudReport h = cloudRun(c, 20, 20, 1, 20, 19, 20, [](CloudRun& cr, double) {
+            cr.gp->mutable_parameters()->feedback = 1.f;
+            cr.gp->mutable_parameters()->reverb = 1.f;
+        });
+        expect(h.finite && h.peak < 2, "feedback 1, reverb 1, 20 s of the sine: peak out", h.peak);
     }
     std::printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails ? 1 : 0;

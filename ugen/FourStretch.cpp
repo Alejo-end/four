@@ -4,11 +4,15 @@
 //   FourWarp.ar(bufL, bufR, pos, pitch, windowFrames, overlaps, rand)
 //   FourRead.ar(bufL, bufR, pos, frac, ratio)   PLAY's read, a windowed sinc
 //   FourTanh.ar(in)                             tanh, about ten times as fast
+//   FourCloud.ar([inL, inR], pit, pos, ...)     Mutable Instruments Clouds
 // The class file is lib/FourStretch.sc. The binary goes in the SuperCollider
-// user Extensions folder, in FourStretch/ (see ugen/README.md).
+// user Extensions folder, in FourStretch/ (see ugen/README.md). Build it with
+// -I<ugen>/vendor/eurorack (four_cloud.h says why).
 #include "SC_PlugIn.h"
 #include "four_core.h"
+#include "four_cloud.h"
 #include <new>
+#include <cstring>
 
 static InterfaceTable* ft;
 
@@ -258,6 +262,155 @@ static void FourBBD_Dtor(FourBBD* unit) {
     if (unit->mem) RTFree(unit->mWorld, unit->mem);
 }
 
+// FourCloud.ar(inputArray, pit, pos, size, dens, tex, drywet, in_gain, spread,
+// rvb, fb, freeze, mode, lofi, trig): Mutable Instruments Clouds (Emilie
+// Gillet, MIT), run the way the MiClouds UGen of mi-UGens runs it (Volker
+// Böhm, 2020, GPL-3.0; this wrapper follows his MiClouds.cpp line for line).
+// The same inputs in the same order, the same smoothing, the same 32-sample
+// blocks, the same 48 kHz core. Its own name: a second MiClouds class next to
+// an installed mi-UGens would hang every norns script.
+// What differs from MiClouds, none of it heard: the core and its buffers come
+// from the real-time pool (MiClouds took the core from the heap); a failed
+// start or a block size that is not a multiple of 32 gives silence and a
+// message (MiClouds left the unit without a calc function); one audio input
+// is read on both sides (MiClouds wrote past it).
+namespace cloud {
+const int kBlock = 32;            // the core's block (clouds::kMaxBlockSize)
+const int kArgs = 14;             // the inputs before the audio
+const int kLarge = 118784;        // the core's two buffers, as MiClouds sizes them
+const int kSmall = 65536 - 128;
+enum { PITCH, POSITION, SIZE, DENSITY, TEXTURE, DRYWET, COUNT };
+}
+
+struct FourCloud : public Unit {
+    clouds::GranularProcessor* gp;
+    uint8_t* large;
+    uint8_t* small;
+    float smoothed[cloud::COUNT];
+    bool previousTrig;
+    clouds::FloatFrame in[cloud::kBlock];
+    clouds::FloatFrame out[cloud::kBlock];
+};
+
+static void FourCloud_next(FourCloud* unit, int inNumSamples) {
+    using namespace cloud;
+    float pitch = IN0(0);
+    float inGain = IN0(6), spread = IN0(7), reverb = IN0(8), fb = IN0(9);
+    const bool freeze = IN0(10) > 0.f;
+    int mode = (int)IN0(11);
+    const bool lofi = IN0(12) > 0.f;
+    const float* trigIn = IN(13);
+    float* outL = OUT(0);
+    float* outR = OUT(1);
+    const float* inL = IN(kArgs);
+    const float* inR = unit->mNumInputs > kArgs + 1 ? IN(kArgs + 1) : inL;
+    float* sm = unit->smoothed;
+    const float coef = 0.1f;
+    clouds::GranularProcessor* gp = unit->gp;
+    clouds::Parameters* p = gp->mutable_parameters();
+
+    pitch = sc_clip(pitch, -48.f, 48.f);
+    sm[PITCH] += coef * (pitch - sm[PITCH]);
+    p->pitch = sm[PITCH];
+    for (int i = 1; i < COUNT; ++i) {
+        const float v = sc_clip(IN0(i), 0.f, 1.f);
+        sm[i] += coef * (v - sm[i]);
+    }
+    p->position = sm[POSITION];
+    p->size = sm[SIZE];
+    p->density = sm[DENSITY];
+    p->texture = sm[TEXTURE];
+    p->dry_wet = sm[DRYWET];
+
+    inGain = sc_clip(inGain, 0.125f, 8.f);
+    p->stereo_spread = sc_clip(spread, 0.f, 1.f);
+    p->reverb = sc_clip(reverb, 0.f, 1.f);
+    p->feedback = sc_clip(fb, 0.f, 1.f);
+    mode = sc_clip(mode, 0, 3);
+    gp->set_low_fidelity(lofi);
+    gp->set_freeze(freeze);
+    gp->set_playback_mode(static_cast<clouds::PlaybackMode>(mode));
+
+    const int trigRate = INRATE(13);
+    for (int count = 0; count < inNumSamples; count += kBlock) {
+        for (int i = 0; i < kBlock; ++i) {
+            unit->in[i].l = inL[i + count] * inGain;
+            unit->in[i].r = inR[i + count] * inGain;
+        }
+        bool trigger = false;
+        if (trigRate == calc_BufRate) {
+            trigger = trigIn[0] > 0.f;
+        } else if (trigRate == calc_FullRate) {
+            float sum = 0.f;
+            for (int i = 0; i < kBlock; ++i) sum += trigIn[i + count];
+            trigger = sum > 0.f;
+        }
+        p->trigger = trigger && !unit->previousTrig;
+        unit->previousTrig = trigger;
+        gp->Process(unit->in, unit->out, kBlock);
+        gp->Prepare();
+        p->trigger = false;
+        for (int i = 0; i < kBlock; ++i) {
+            outL[i + count] = unit->out[i].l;
+            outR[i + count] = unit->out[i].r;
+        }
+    }
+}
+
+static void FourCloud_Dtor(FourCloud* unit) {
+    if (unit->gp) {
+        unit->gp->~GranularProcessor();
+        RTFree(unit->mWorld, unit->gp);
+    }
+    if (unit->large) RTFree(unit->mWorld, unit->large);
+    if (unit->small) RTFree(unit->mWorld, unit->small);
+}
+
+static void FourCloud_Ctor(FourCloud* unit) {
+    using namespace cloud;
+    unit->gp = nullptr; unit->large = nullptr; unit->small = nullptr;
+    const char* why = nullptr;
+    if (BUFLENGTH < kBlock || BUFLENGTH % kBlock) why = "the block size must be a multiple of 32";
+    else if (unit->mNumInputs <= kArgs) why = "no audio input";
+    if (!why) {
+        unit->large = (uint8_t*)RTAlloc(unit->mWorld, kLarge);
+        unit->small = (uint8_t*)RTAlloc(unit->mWorld, kSmall);
+        void* mem = RTAlloc(unit->mWorld, sizeof(clouds::GranularProcessor));
+        if (mem) {
+            // as MiClouds: construct, then zero. Init() sets only some of the
+            // members and relies on the rest starting at zero.
+            unit->gp = new (mem) clouds::GranularProcessor;
+            std::memset(static_cast<void*>(unit->gp), 0, sizeof(clouds::GranularProcessor));
+        }
+        if (!unit->large || !unit->small || !unit->gp) why = "no real-time memory";
+    }
+    if (why) {
+        FourCloud_Dtor(unit);
+        unit->gp = nullptr; unit->large = nullptr; unit->small = nullptr;
+        Print("FourCloud: %s\n", why);
+        SETCALC(ft->fClearUnitOutputs);
+        ClearUnitOutputs(unit, 1);
+        return;
+    }
+    clouds::GranularProcessor* gp = unit->gp;
+    gp->Init(unit->large, kLarge, unit->small, kSmall);
+    gp->set_sample_rate(SAMPLERATE);
+    gp->set_num_channels(2);
+    gp->set_low_fidelity(false);
+    gp->set_playback_mode(clouds::PLAYBACK_MODE_GRANULAR);
+    float* sm = unit->smoothed;
+    sm[PITCH] = 0.f; sm[POSITION] = 0.f; sm[SIZE] = 0.5f;
+    sm[DENSITY] = 0.1f; sm[TEXTURE] = 0.5f; sm[DRYWET] = 1.f;
+    clouds::Parameters* p = gp->mutable_parameters();
+    p->stereo_spread = 0.5f;
+    p->reverb = 0.f;
+    p->feedback = 0.f;
+    p->freeze = false;
+    unit->previousTrig = false;
+    SETCALC(FourCloud_next);
+    ClearUnitOutputs(unit, 1);
+}
+
 PluginLoad(FourStretch) {
     ft = inTable;
     four::tables();     // built here, off the audio thread
@@ -274,4 +427,5 @@ PluginLoad(FourStretch) {
     DefineDtorCantAliasUnit(FourGrain);
     DefineDtorCantAliasUnit(FourRoom);
     DefineDtorCantAliasUnit(FourBBD);
+    DefineDtorCantAliasUnit(FourCloud);
 }

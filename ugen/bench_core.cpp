@@ -1,8 +1,11 @@
 // How much of one core each voice takes, and the worst single block.
-//   clang++ -O2 -std=c++17 -o /tmp/bench_core ugen/bench_core.cpp && /tmp/bench_core
+//   clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/bench_core ugen/bench_core.cpp && /tmp/bench_core
 #include "four_core.h"
+#include "four_cloud.h"
 #include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <new>
 #include <vector>
 #include <random>
 using namespace four;
@@ -69,6 +72,41 @@ int main() {
         double sec = std::chrono::duration<double>(clk::now() - t0).count();
         char name[64]; std::snprintf(name, sizeof name, "BBD delay, mono, %.1f s", time);
         std::printf("%-28s %11.2f%% %16.0f   (clock %.0f Hz, %g)\n", name, sec / 10 * 100, worst, dl.chain.inc * 48000, acc);
+    }
+    {
+        // THE CLOUD (FourCloud): the Clouds core, stereo noise in, 10 s, in
+        // each mode, set as the engine sets it at rest (size 0.1 s, density 20)
+        std::vector<uint8_t> large(118784), small(65536 - 128);
+        alignas(16) static unsigned char mem[sizeof(clouds::GranularProcessor)];
+        clouds::FloatFrame in[32], out[32];
+        const char* names[] = {"CLOUD, granular", "CLOUD, stretch", "CLOUD, looping delay",
+                               "CLOUD, spectral", "CLOUD, granular, low fi"};
+        for (int m = 0; m < 5; m++) {
+            clouds::GranularProcessor* gp = new (mem) clouds::GranularProcessor;
+            std::memset(static_cast<void*>(gp), 0, sizeof(clouds::GranularProcessor));
+            gp->Init(large.data(), large.size(), small.data(), small.size());
+            gp->set_sample_rate(48000.f); gp->set_num_channels(2); gp->set_low_fidelity(m == 4);
+            gp->set_playback_mode((clouds::PlaybackMode)(m < 4 ? m : 0));
+            clouds::Parameters* p = gp->mutable_parameters();
+            p->pitch = 0; p->position = 0.5f; p->size = 0.247f; p->density = 0.185f; p->texture = 0.5f;
+            p->dry_wet = 1; p->stereo_spread = 0.5f; p->reverb = 0; p->feedback = 0; p->freeze = false;
+            double worst = 0; float acc = 0;
+            auto t0 = clk::now();
+            for (int b = 0; b < 48000 * 10 / 64; b++) {
+                auto a = clk::now();
+                for (int h = 0; h < 2; h++) {           // a block of 64 is two of the core's 32
+                    for (int j = 0; j < 32; j++) {
+                        in[j].l = L[(b * 64 + h * 32 + j) % len]; in[j].r = R[(b * 64 + h * 32 + j) % len];
+                    }
+                    gp->Process(in, out, 32); gp->Prepare();
+                    acc += out[0].l;
+                }
+                double us = std::chrono::duration<double, std::micro>(clk::now() - a).count();
+                if (us > worst) worst = us;
+            }
+            double sec = std::chrono::duration<double>(clk::now() - t0).count();
+            std::printf("%-28s %11.2f%% %16.0f   (%g)\n", names[m], sec / 10 * 100, worst, acc);
+        }
     }
     std::printf("one block is 1333 us\n");
 }
