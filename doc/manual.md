@@ -39,7 +39,7 @@ In maiden, type this line and then SYSTEM > RESTART:
 To work from a clone instead, copy the script to the norns:
 
 ```sh
-rsync -av --delete --exclude='.git' ./ we@norns.local:~/dust/code/four/
+rsync -av --delete --exclude='.git' --exclude='.claude' ./ we@norns.local:~/dust/code/four/
 ```
 
 Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:

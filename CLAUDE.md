@@ -455,8 +455,10 @@ FOUR_PLUGIN_DIR=<plugin folder> test/dsp/check_dsp.sh <work folder outside the r
 python3 test/device/gate.py 2 4:4.10,4.14
 python3 test/device/measure.py states voices
 
-# deploy (the repo IS the script; --delete kills stale engine copies)
-rsync -av --delete --exclude='.git' ./ <norns>:~/dust/code/four/
+# deploy (the repo IS the script; --delete kills stale engine copies). Keep
+# --exclude='.claude': agent worktrees live in .claude/worktrees, each with its own
+# lib/Engine_Four.sc, and a second copy on the norns hangs every script (invariant 1).
+rsync -av --delete --exclude='.git' --exclude='.claude' ./ <norns>:~/dust/code/four/
 ```
 
 To prove a refactor changes nothing: render all five variants (base, empty, grain,

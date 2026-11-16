@@ -1,24 +1,32 @@
 # four
 
-A creative live sampler for [norns](https://monome.org/docs/norns/), free for everyone.
-Record any sound, then loop it, stretch it and scatter it into grains on four tracks.
+four is a live sampler for [norns](https://monome.org/docs/norns/) with four stereo tracks.
+Catch what your synth or drum machine plays, and the recording turns into a new instrument
+in your hands.
 
-![four on a handheld case](doc/four-on-device.png)
+![A pocket-sized version of the norns shield with four on its screen](doc/four-on-device.png)
 
-*four on a handheld case that is still in design.*
+*A render of a pocket-sized version of the norns shield, with four on its screen. It is
+built around a Raspberry Pi Compute Module 4 and is still in design.*
 
 ## What it does
 
-- Four tracks. Each track holds its own take of up to 60 seconds.
-- Five voices play a take: PLAY (like tape), GRAIN (a cloud of grains), WARP and PV (two
-  ways to stretch time without changing pitch) and CLOUD (a texture granulator).
-- Each track has a filter, drive and crush, and two effects in a row: chorus, flanger,
-  wobble, resonator, ring or echo.
-- Each track sends to a shared delay and a shared reverb.
-- Scenes keep a whole sound, and you can morph between them. MOTION records your knob
-  moves and loops them, and four modulators can move the main knobs.
-- Three keys and three encoders reach everything. A grid helps, but you never need one.
-- Every parameter maps to MIDI.
+Anything at line level goes in: a synth, a drum machine, a tape deck, another norns. Each
+of the four tracks records its own take of up to 60 seconds, loops it and plays it through
+its own chain:
+
+- A voice. PLAY runs the take like tape, with varispeed. GRAIN turns it into a granular
+  cloud. WARP and PV stretch time without changing the pitch. CLOUD is a second
+  granulator, made for texture.
+- A filter (low-pass, high-pass or band-pass) with drive and crush.
+- Two effects in series: chorus, flanger, wobble, resonator, ring modulator or echo.
+- Sends into a shared delay and a shared reverb.
+
+Around the tracks sit a tape loop deck for the input or the whole mix, and eight pads that
+slice a take. A step sequencer plays the pads. Scenes hold a whole sound, and one knob
+morphs from one scene to the next. MOTION loops your knob moves, and four modulators sway
+the sound around your settings. Three keys and three encoders reach everything. A grid is
+optional, and every parameter maps to MIDI.
 
 ## Install
 

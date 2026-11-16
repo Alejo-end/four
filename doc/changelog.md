@@ -4391,3 +4391,14 @@ name engraved on the case below the screen is cleared from the picture, so it sh
 device name. `test/uisim/onscreen.py` makes it: it finds the screen's corners from its
 flat grey, clears the engraving, and maps a page from doc/ui onto the screen with a
 perspective transform. Run it again when the case or a page changes.
+
+four, thirty-first change: **a README that says what four is, and a safer deploy line
+(documents only)**.
+- The README's opening and "What it does" say what four is and how you play it: live
+  sound in, four stereo tracks of up to 60 seconds, a voice, a filter, two effects and
+  the sends for each track, and the tape, pads, scenes, MOTION and modulators around them.
+  The caption names the picture as a pocket-sized version of the norns shield, built
+  around a Raspberry Pi Compute Module 4 and still in design.
+- Every documented deploy rsync now has `--exclude='.claude'`. Agent worktrees live in
+  `.claude/worktrees`, each with its own `lib/Engine_Four.sc`, and a second copy on the
+  norns hangs every script (invariant 1). The worktree of `proposal-dsp-fixes` was there.
