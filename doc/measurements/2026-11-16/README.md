@@ -58,3 +58,69 @@ RESTART. The sclang log said `compile done`, then
 `four: FourStretch on`, `four: CLOUD is FourCloud`, and no installer message. A second
 RESTART logged nothing from four. The voices on a tone take: OFF 10.5%, PLAY 10.5%,
 GRAIN 10.7%, WARP 10.7%, PV 12.5%, CLOUD 13.0%, all at -18.8 to -20.9 dB out, no xruns.
+
+## The walkthrough's stage 19, and a bug it found (the fortieth change)
+
+The norns had booted on a stale clock (sclang started at 19:17, the clock then
+said 20:26), so the services were restarted before any measurement. Then
+`python3 test/device/gate.py 19`. The results are in `gate.jsonl`.
+
+19.21 failed: with `dly_rev` at 1, nothing rang on once track 2 stopped. A probe
+on the buses showed that track 2's sends reached `tDlyBus` and `tRevBus`, but
+nothing reached the delay or the reverb, and io's `t_dly` read 0. SuperCollider
+makes an argument named `t_...` a trigger control, which falls to 0 after one
+block, so io read bus 0. Tracks 2 to 4 never reached the delay or the reverb.
+The arguments are now `lanes_dly` and `lanes_rev`, and test_control rejects any
+engine argument named `t_`, `a_` or `i_`.
+
+Track 2 on a tone take, delay 0.25 s, feedback 0.5, mix 0.8, then track 2 stops:
+
+| Track 2 sends | Before the fix: playing, tail | After: playing, tail |
+|---|---|---|
+| none | -18.9, -92.5 dB | -18.9, -92.5 dB |
+| delay | -18.9, -92.5 dB | -15.5, -30.3 dB |
+| delay, and `dly_rev` 1 with reverb mix 0.6 | -18.9, -92.5 dB | -15.8, -31.9 dB |
+| reverb | -18.9, -92.5 dB | -19.9, -56.8 dB |
+
+After the fix, 19.21 passes: -92.5 dB with `dly_rev` 0, -47.3 dB with 1.
+
+Two checks misread the device and were fixed in gate.py:
+
+- 19.7 and 19.8 counted four filters. A strip of tracks 2 to 4 pauses while its
+  track is OFF, and the node tree does not list the synths of a paused group (the
+  same node ids come back when the track plays). Two filters is right there.
+- 19.14 compared bands that PLAY does not hold: 884 Hz at -135 and -145 dB. A band
+  under -80 dB now counts only when a voice puts sound into it. Then WARP and PV
+  differ from PLAY by 0.0 dB.
+
+Still open from the stage:
+
+- 19.12: six TYPE taps over a tone gave breaks at 1.1, 3.4 and 3.9 s. Listen to
+  `19.12_type_steps.wav` in `four-device-recordings/2026-11-16`.
+- 19.27: the busiest scsynth thread, 60 s each: four PV at pitch 2 56.6%, the
+  dense set 64.1% (over the 60% budget), no xruns in either. On 2026-11-13 they
+  were 53.0% and 57.3%.
+- The JACK log counted 161 xruns this boot, over many restarts and engine loads.
+  The heavy states above had none.
+- 19.17, the scsynth thread with four tracks at pitch 1: PLAY 10.6%, WARP 12.9%,
+  PV 21.3%, GRAIN 13.0%. 19.25, track 2 with both sends open: none 5.6%, delay
+  8.4%, reverb 10.8%, both 13.5%.
+- 19.15: a grain's first sound comes 3.6 ms after a mode change and 13.0 ms after
+  a pad (about 250 ms before the twenty-second change).
+
+The screens: `screens/19.22_REVERB_no_send_settled.png` shows the dim squares
+under `NO SEND - TRACKS K1`, and `screens/19.22_REVERB_send_settled.png` the bright
+squares with the line from track 2's corner. The text covers the top edge of the
+outer square. The first 19.22 shots caught the page name over the picture.
+
+## The frame clock (phase 0, step 7)
+
+Tracks 1 to 3 in PLAY, GRAIN and PLAY, on VOICE, for 60 s, with `redraw` timed
+from the REPL:
+
+| Frames | Period mean | p50 | p95 | max | Later than 1.5 periods | redraw p50 | p95 | max |
+|---|---|---|---|---|---|---|---|---|
+| 901 in 60.00 s | 66.67 ms | 66.85 ms | 67.59 ms | 79.64 ms | 0 | 2.00 ms | 11.45 ms | 14.65 ms |
+
+The frames come at 15 a second, and redraw leaves matron most of each frame. The
+sum of `ctx.frame_dt` over the run is 60.07 s, so a FREE modulator keeps its rate.

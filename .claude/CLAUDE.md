@@ -89,7 +89,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-16 it runs the thirty-sixth change at `count: 198`, with the plugin
+- Since 2026-11-16 it runs the fortieth change at `count: 198`, with the plugin
   built there that day (`ignore/plugins/armv7l/`), which four's startup install put in
   Extensions. The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -133,6 +133,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
 | 38th: the album preset set leaves the repo | nothing on the device changes | |
 | 39th: CLAUDE_PLAN.md deleted, this file moves to .claude/ | documents only | |
+| 40th: tracks 2 to 4 reach the delay and the reverb (io's `t_dly` was a trigger control) (engine) | yes, `count: 198`, measured | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -150,10 +151,12 @@ xruns past about 60%.
   20 s after the sound stops it costs less than with sound. A silent CLOUD track costs
   3.9% against 2.5% for one that sounds: Clouds in silence is not free. No xruns.
 
-**What is pending on the device** (doc/plan.md, Phase 0): the plugin is built, shipped
-and installed, and the costs above are measured. Still open: REVERB's squares on the
-OLED, the gate's stage 19, the frame period, and why a silent CLOUD track costs more than
-one that sounds.
+**What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
+19 and the frame clock are done (doc/measurements/2026-11-16/). Stage 19 still fails
+19.12 (breaks when TYPE steps) and 19.27 (the dense set takes 64.1% of the scsynth
+thread, over 60%, with no xruns). Open too: the user's look at REVERB's squares (the
+screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
+more than one that sounds.
 
 **Heard.** On 2026-11-16 the user listened to four on the device, the thirty-sixth change
 with the plugin (FourCloud included), and said "it sounds nice". That is a general
@@ -382,6 +385,10 @@ Each line was learned the hard way; the change log has the story.
 - `MOTION_IDS` is append-only: an id whose param is deleted stays in its place and joins
   `MOTION_TOMBSTONES`. test_control lets only a tombstone name a missing param.
 - Every new audio source must join `purity()` (the ◇ mark has lied three times).
+- A SynthDef argument's name sets its rate: `t_` makes a trigger control that falls to 0
+  after one block, `a_` an audio-rate control, `i_` a fixed one. io's bus arguments
+  `t_dly` and `t_rev` read bus 0 after the first block, so tracks 2 to 4 never reached
+  the delay or the reverb until the fortieth change. test_control rejects the prefixes.
 - A guard added to one of two sibling paths makes the other one a bug with a witness.
   When a fix names a limitation in ANOTHER module, that is an unfixed bug, not a note.
 - A release belongs to whatever took the press: `key_state` routes a key release to the

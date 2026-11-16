@@ -578,6 +578,29 @@ do
     .. table.concat(dead_chaos, ",") .. ")")
 end
 
+-- ============================================================================
+-- SuperCollider reads a rate from an argument's name: t_ makes a trigger
+-- control, which falls to 0 after one block, a_ an audio-rate control and i_
+-- a fixed one. io's bus arguments were called t_dly and t_rev, so io read bus
+-- 0 after the first block and tracks 2 to 4 never reached the delay or the
+-- reverb (found on the device on 2026-11-16). No argument may carry a prefix.
+-- ============================================================================
+do
+  local sc = io.open("lib/Engine_Four.sc"):read("a"):gsub("//[^\n]*", "")
+  local bad, seen = {}, 0
+  for list in sc:gmatch("arg%s+([^;]+);") do
+    for item in list:gmatch("[^,]+") do
+      local name = item:match("^%s*([%a_][%w_]*)")
+      if name then
+        seen = seen + 1
+        if name:match("^[tai]_") then bad[#bad + 1] = name end
+      end
+    end
+  end
+  ok(seen > 100, "the engine's argument lists are readable (" .. seen .. " names)")
+  ok(#bad == 0, "no engine argument is named t_, a_ or i_ (" .. table.concat(bad, ",") .. ")")
+end
+
 -- the files that ship directly in a folder (not in its subfolders) whose path
 -- matches one of the patterns, sorted. A global: the checks below and section
 -- 10b use it.

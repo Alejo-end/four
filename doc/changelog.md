@@ -4546,3 +4546,22 @@ doc/plan.md no longer point at it.
   folder holds only what a player needs. The deploy rsync leaves `.claude` out, so it
   does not go to the norns. doc/README.md and the manual link the new place.
 
+four, fortieth change: **tracks 2 to 4 reach the delay and the reverb (engine and test
+tools; the count stays 198; on the device 2026-11-16, measured, not heard)**. Stage 19
+of the walkthrough ran on the device for the first time on four, and 19.21 failed:
+nothing rang on through the delay or the reverb from track 2.
+- The cause: io's arguments for the other tracks' send buses were named `t_dly` and
+  `t_rev`. SuperCollider makes an argument named `t_...` a trigger control, which falls
+  to 0 after one block, so io read bus 0. Since the nineteenth change, tracks 2 to 4
+  never reached the delay or the reverb. Track 1 did, through its own `fx_dly`.
+- The arguments are now `lanes_dly` and `lanes_rev`. test_control rejects any engine
+  argument named `t_`, `a_` or `i_` (the old engine fails it on `t_dly` and `t_rev`).
+- On the device, track 2 with a delay send: the tail went from -92.5 to -30.3 dB, and
+  19.21 passes (-47.3 dB with `dly_rev` 1).
+- gate.py: 19.7 and 19.8 expect two filters (a paused strip's synths are not listed in
+  the node tree), and 19.14 ignores bands that no voice holds.
+- Stage 19 otherwise: 19.12 (breaks when TYPE steps) and 19.27 (the dense set at 64.1%
+  of the scsynth thread, no xruns) are open. The frame clock was logged: 15 frames a
+  second, none late, and the FREE modulators keep their rate.
+  doc/measurements/2026-11-16/ has all of it.
+

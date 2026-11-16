@@ -1350,8 +1350,12 @@ Engine_Four : CroneEngine {
                 grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
                 // track 1's COLOR (crush) and SPACE (its sends into the delay
-                // and the reverb); t_dly and t_rev carry the other tracks'
-                crush = 0.0, fx_dly = 0.0, fx_rev = 0.0, t_dly = 0, t_rev = 0, dly_rev = 0.0,
+                // and the reverb); lanes_dly and lanes_rev carry the other tracks'.
+                // NEVER name an argument t_...: SuperCollider makes it a trigger
+                // control, which falls to 0 after one block. These two were t_dly
+                // and t_rev, so io read bus 0 and tracks 2 to 4 never reached the
+                // delay or the reverb (found on the device, 2026-11-16).
+                crush = 0.0, fx_dly = 0.0, fx_rev = 0.0, lanes_dly = 0, lanes_rev = 0, dly_rev = 0.0,
                 // track 1's EFFECT: its type and its two knobs
                 effect = 0, effect_amt = 0.5, effect_rate = 0.5,
                 // delay + reverb run in their own spawn/free synths; io keeps
@@ -1384,7 +1388,7 @@ Engine_Four : CroneEngine {
             // linear in the knob), lagged so a CC step does not zipper. At
             // rest the synth is gone and the return reads 0.
             dm = delay_mix.lag(0.03);
-            Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(t_dly, 2));
+            Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(lanes_dly, 2));
             dlyRet = InFeedback.ar(dly_ret, 2) * dm.sqrt;
 
             // SPACE is two SENDS (doc/space-plan.md, section 3). A track goes
@@ -1394,7 +1398,7 @@ Engine_Four : CroneEngine {
             // as rev_mix is the level of the tail. (Before, the delay was a
             // crossfade that lowered the dry sound, and each track sent
             // everything.) dly_rev sends the echoes into the reverb.
-            revIn = (wet * fx_rev.lag(0.03)) + In.ar(t_rev, 2)
+            revIn = (wet * fx_rev.lag(0.03)) + In.ar(lanes_rev, 2)
                 + (dlyRet * dly_rev.lag(0.03));
             Out.ar(rev_send, revIn);
             wet = wet + others + dlyRet;
@@ -1669,7 +1673,7 @@ Engine_Four : CroneEngine {
             \dly_send, dlySendBus,
             \dly_ret, dlyRetBus,
             \t2_ret, tRetBus,
-            \t_dly, tDlyBus, \t_rev, tRevBus,
+            \lanes_dly, tDlyBus, \lanes_rev, tRevBus,
             \own_out, outBuses[0],
             \lane_bus, lanes[0][\pBus],
         ], playGroup, \addAfter);

@@ -2587,10 +2587,14 @@ def stage19():
     modes("OFF", "PLAY", "OFF", "OFF")
     n.set("track_sel", 2)
 
+    # A strip of tracks 2 to 4 pauses while its track is OFF, and the node tree
+    # does not list the synths of a paused group (seen 2026-11-16: the same
+    # node ids come back when the track plays). Track 1's lane always runs, and
+    # track 2's runs while it plays: two filters.
     def c197():
         time.sleep(0.5)
         lane = lane_nodes()
-        return verdict(lane["filters"] == 4 and lane["colour"] == 0 and not lane["fx"], f"at rest {lane}")
+        return verdict(lane["filters"] == 2 and lane["colour"] == 0 and not lane["fx"], f"at rest {lane}")
 
     def c198():
         n.set("t2_cutoff", 400)
@@ -2610,7 +2614,7 @@ def stage19():
         loud = audio.stats(chans[0])["rms_db"]
         n.set("t2_cutoff", 20000)
         ok = (loud > -40 and seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
-              and all(x["filters"] == 4 for x in seen.values()) and not hits)
+              and all(x["filters"] == 2 for x in seen.values()) and not hits)
         return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; level {loud} dB; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
 
     def c199():
@@ -2708,7 +2712,15 @@ def stage19():
             time.sleep(1)
             out[name] = tone_bands(f"19.14_{name}", 2)[0]
         modes("OFF", "PLAY", "OFF", "OFF")
-        worst = max(abs(out[m][hz] - out["PLAY"][hz]) for m in ("WARP", "PV") for hz in out["PLAY"])
+        # A band PLAY holds is compared both ways. A band it does not hold (under
+        # -80 dB, such as 884 Hz) only counts when a voice puts sound there: two
+        # floors at -130 and -145 dB are not a difference.
+        def gap(m, hz):
+            ref = out["PLAY"][hz]
+            if ref > -80:
+                return abs(out[m][hz] - ref)
+            return max(0.0, out[m][hz] - max(ref, -80))
+        worst = max(gap(m, hz) for m in ("WARP", "PV") for hz in out["PLAY"])
         return verdict(worst <= 1, f"bands by voice {out}; largest difference from PLAY {worst:.1f} dB. "
                                    "Warble or smear: listen to 19.14_*.wav", "measured")
 

@@ -1,0 +1,27 @@
+{"id": "19.1", "status": "pass", "note": "count: 198 seen=True; log: four: FourStretch on; hasStretch=True; plugin folder ['FourStretch.so']"}
+{"id": "19.2", "status": "pass", "note": "K1+E1 steps the focus [2, 3, 4, 4, 3, 2, 1]. The badge: screens/19.2_focus_3.png"}
+{"id": "19.3", "status": "pass", "note": "E2 on TRACKS: focus [2, 3, 1]"}
+{"id": "19.4", "status": "pass", "note": "digests after each track's pass {1: 'c2baaaf4d159 cdbb40a035d7', 2: 'dd16dbdebacb 692c9ffa82db', 3: 'f80829b4ad0c 78e916438ba7', 4: '68285995938e 56211d6f3f43'}; at the end {1: 'c2baaaf4d159 cdbb40a035d7', 2: 'dd16dbdebacb 692c9ffa82db', 3: 'f80829b4ad0c 78e916438ba7', 4: '68285995938e 56211d6f3f43'}; recIdx and opIdx by focus {1: (0, 0), 2: (1, 1), 3: (2, 2), 4: (3, 3)}"}
+{"id": "19.5", "status": "measured", "note": "voices in the tree ['four_grain', 'four_play', 'four_pv', 'four_warp']; 220 Hz with track 1 alone -64.7 dB (drums), track 2 alone -17.0 dB (tone). Listen to 19.5_*.wav"}
+{"id": "19.6", "status": "pass", "note": "moved ['t3_cutoff', 't3_effect', 't3_pos_start']; before {'cutoff': 20000.0, 't3_cutoff': 20000.0, 'effect': 1.0, 't3_effect': 1.0, 'pos_start': 0.0, 't3_pos_start': 0.13791111111641}; after {'cutoff': 20000.0, 't3_cutoff': 10023.744672545, 'effect': 1.0, 't3_effect': 2.0, 'pos_start': 0.0, 't3_pos_start': 0.14061422228813}"}
+{"id": "19.7", "status": "pass", "note": "at rest {'filters': 2, 'hi': 0, 'colour': 0, 'fx': []}"}
+{"id": "19.8", "status": "pass", "note": "LP, HP, BP, LP at 400 Hz: {'HP': {'filters': 2, 'hi': 1, 'colour': 0, 'fx': []}, 'BP': {'filters': 2, 'hi': 0, 'colour': 0, 'fx': []}, 'LP': {'filters': 2, 'hi': 0, 'colour': 0, 'fx': []}}; level -23.5 dB; breaks []. Listen to 19.8_filter_swap.wav"}
+{"id": "19.9", "status": "pass", "note": "four_colour after drive up, crush up, drive 0, crush 0: [1, 1, 1, 0]"}
+{"id": "19.10", "status": "pass", "note": "CHORUS ['four_fx_mod']; CHORUS and RING ['four_fx_mod', 'four_fx_ring']; both OFF []"}
+{"id": "19.11", "status": "measured", "note": "largest change against OFF in dB {'CHORUS': 53.9, 'FLANGE': 47.9, 'WOBBLE': 48.5, 'RESON': 40.7, 'RING': 37.3, 'ECHO': 2.9}; RESON level -7.3 dB. Each type apart: listen to 19.11_*.wav"}
+{"id": "19.12", "status": "fail", "note": "six TYPE taps over a tone: breaks [1.114, 3.401, 3.933]. Listen to 19.12_type_steps.wav"}
+{"id": "19.13", "status": "measured", "note": "K1+E2 and K1+E3 moved ['t2_effect2_amt', 't2_effect2_rate']; RING in slot 2 changes the tone by 6.1 dB. The name top right: screens/19.13_slot2.png"}
+{"id": "19.14", "status": "measured", "note": "bands by voice {'PLAY': {220: -17.0, 442: -29.0, 884: -140.5}, 'WARP': {220: -17.0, 442: -29.0, 884: -135.6}, 'PV': {220: -17.0, 442: -29.0, 884: -139.1}}; largest difference from PLAY 0.0 dB. Warble or smear: listen to 19.14_*.wav"}
+{"id": "19.15", "status": "pass", "note": "the grain's first sound after track 3's PLAY: mode change 3.6 ms, pad 13.0 ms (before the twenty-second change about 250 ms at density 4)"}
+{"id": "19.16", "status": "measured", "note": "CLOUD runs four_clouds, -19.2 dB. Listen to 19.16_cloud.wav"}
+{"id": "19.17", "status": "measured", "note": "scsynth thread, four tracks at pitch 1, no delay or reverb: {'PLAY': 10.6, 'WARP': 12.9, 'PV': 21.3, 'GRAIN': 13.0}. Compare with doc/measurements/2026-11-13/lanes.md and the sixteenth change"}
+{"id": "19.18", "status": "pass", "note": "{'dly_rev': 0.0, 'fx_dly': 0.0, 'fx_rev': 0.0, 't2_fx_dly': 0.0, 't2_fx_rev': 0.0, 't3_fx_dly': 0.0, 't3_fx_rev': 0.0, 't4_fx_dly': 0.0, 't4_fx_rev': 0.0}"}
+{"id": "19.19", "status": "pass", "note": "once track 1's voice stops: -92.5 dB with its sends at 0, -34.6 dB with them open"}
+{"id": "19.20", "status": "pass", "note": "track 2's tone, every send at 0: -18.8 dB with both mixes at 0, -18.8 dB with both at 1"}
+{"id": "19.21", "status": "pass", "note": "what rings on once track 2 stops: -92.5 dB with dly_rev 0, -47.3 dB with dly_rev 1"}
+{"id": "19.22", "status": "you", "note": "the words are drawn, no param holds them: look at screens/19.22_*.png. NO SEND - TRACKS K1 on both, gone from DELAY once track 2 sends"}
+{"id": "19.23", "status": "measured", "note": "hasStretch=True, so FourRoom and FourBBD; reverb node=True, delay node=True. The tails: listen to 19.23_tails.wav"}
+{"id": "19.24", "status": "pass", "note": "scsynth thread while the tails die out: 11.0% after about 5 s, 11.0% after about 60 s"}
+{"id": "19.25", "status": "measured", "note": "scsynth thread, track 2 in PLAY with both sends open: {'none': 5.6, 'delay': 8.4, 'reverb': 10.8, 'both': 13.5}. The room took about 5% on 2026-11-13. The brigade has no device figure yet"}
+{"id": "19.26", "status": "you", "note": "KNOWN from the offline review (doc/measurements/2026-11-15/README.md): SIZE and eight other reverb knobs do nothing to a room that runs, the brigade's least time is 42.8 ms, the room's DC gain is +16 dB, FLANGE at amount 0 is 1.40 ms late. Record what the device does"}
+{"id": "19.27", "status": "fail", "note": "busiest scsynth thread and xruns over 60 s: {'four PV at pitch 2': (56.6, 0), 'the dense set': (64.1, 0)}. 2026-11-13: 53.0% and 57.3%"}

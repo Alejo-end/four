@@ -38,15 +38,21 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 3. DONE 2026-11-16: the delay adds 1.4%, and in silence it costs less than with sound
    (doc/measurements/2026-11-16/). A silent CLOUD track costs more than a sounding one:
    3.9% against 2.5%.
-4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED.
+4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED. The screens
+   are captured (doc/measurements/2026-11-16/screens/19.22_REVERB_*_settled.png): the
+   user still has to look. The text covers the top edge of the outer square.
 5. (The album presets left the repo in the thirty-eighth change.)
-6. Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
+6. DONE 2026-11-16, with two checks open (doc/measurements/2026-11-16/): 19.12, breaks
+   when TYPE steps over a tone, and 19.27, the dense set at 64.1% of the scsynth thread.
+   It found that tracks 2 to 4 never reached the delay or the reverb (the fortieth
+   change fixed it). Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
    pad's first sound and the gap at a mode change (the twenty-second change). The
    device runs scsynth 3.13.0-dev. The bug depends on how `Impulse` starts: since
    2022-07-18 its first impulse is the init sample, which `CoinGate` takes as its last
    trigger. A build older than that never had the bug. The fix gives one grain at
    sample 0 either way.
-7. Log the real frame period: the time between `frame_tick` calls for 60 s while
+7. DONE 2026-11-16: 901 frames in 60.00 s, p95 67.6 ms, none late, redraw p95 11.5
+   ms, and the frame_dt sum is 60.07 s. Log the real frame period: the time between `frame_tick` calls for 60 s while
    playing. The twenty-seventh change puts the frames on a deadline. Make sure that they
    now come at 15 a second, and that a FREE modulator keeps its rate. Log each frame's
    own work time too: a frame that takes longer than 1/15 s is followed by the next one
