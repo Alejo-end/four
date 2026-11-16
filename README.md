@@ -3,8 +3,9 @@
 A creative live sampler for [norns](https://monome.org/docs/norns/), free for everyone.
 Record any sound, then loop it, stretch it and scatter it into grains on four tracks.
 
-<!-- doc/hero.png is a placeholder picture. Replace it with the drawing. -->
-![four](doc/hero.png)
+![four on a handheld case](doc/four-on-device.png)
+
+*four on a handheld case that is still in design.*
 
 ## What it does
 

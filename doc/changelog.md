@@ -4383,3 +4383,11 @@ install four from maiden.
   other norns scripts.
 - doc/ux-feedback.md names the transcript as `~/Downloads/transcript.txt`, not by a path
   in the user's home folder.
+
+four, thirtieth change: **the README shows four on the handheld case (documents and a
+picture tool)**. The placeholder picture is gone. `doc/four-on-device.png` is the
+isometric render of the handheld case with the TAKE page mapped onto its screen. The
+name engraved on the case below the screen is cleared from the picture, so it shows no
+device name. `test/uisim/onscreen.py` makes it: it finds the screen's corners from its
+flat grey, clears the engraving, and maps a page from doc/ui onto the screen with a
+perspective transform. Run it again when the case or a page changes.
