@@ -101,8 +101,8 @@ each page.
 
 ## Status and known limits
 
-four is in active development. It is built, measured and played on one norns: a shield
-with a Raspberry Pi 4 and the 32-bit norns system.
+four is in public beta. It is built, measured and played on one norns: a shield with a
+Raspberry Pi 4 and the 32-bit norns system.
 
 - The plugin in this repo is built for that system. It is made to load on other norns too
   (the original norns, a shield on a Raspberry Pi 3, or a norns with a 64-bit kernel), but
@@ -111,6 +111,13 @@ with a Raspberry Pi 4 and the 32-bit norns system.
   60% load. Four CLOUD tracks take about 30%, or 40% in SPECTRAL mode. Four PV tracks
   pitched up come close to the limit. A track set to OFF costs nothing, but a CLOUD track
   keeps working in silence, so set the tracks you do not use to OFF.
+
+Known issues in this beta:
+
+- Changing an effect's type gives a short dip in the sound.
+- A take that runs past the end of its 60-second buffer becomes a full 60-second loop,
+  with silence in it. Move its start and end on TAKE with E2 and E3.
+- The densest set tried so far went past the CPU limit.
 
 If something does not work, please open an
 [issue on GitHub](https://github.com/Alejo-end/four/issues).
