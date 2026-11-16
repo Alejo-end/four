@@ -45,6 +45,24 @@ In maiden, type this line, then SYSTEM > RESTART and pick four from SELECT:
 You need a norns and a line-level sound on its input. four is built and tested on a norns
 shield with a Raspberry Pi 4. Older norns hardware has not been tried.
 
+The first time four starts, it asks for one more restart to install its plugin.
+
+## The plugin
+
+Part of four's sound comes from its own plugin, FourStretch: C++ code for SuperCollider,
+written for four. It gives WARP and PV their clean time-stretch, CLOUD its Clouds, and the
+delay and the reverb their bucket brigade and room.
+
+four installs the plugin itself. The first time you load four, the screen says
+`PLUGIN INSTALLED / SYSTEM > RESTART`. Do SYSTEM > RESTART and load four again. maiden's
+SuperCollider tab then says `four: FourStretch on`.
+
+Until that restart, or on a norns where the plugin does not fit, four plays simpler stock
+versions of the same voices and effects. Everything else works the same.
+
+The plugin in this repo was built on a norns shield with a Raspberry Pi 4. To build it
+yourself, see [ugen/README.md](ugen/README.md).
+
 ## First minutes
 
 1. On TAKE, press K2, play something, then press K2 again. The take loops.
@@ -72,10 +90,7 @@ each one.
 - [The full guide](doc/manual.md): every page with pictures, the grid, MIDI, saving and
   troubleshooting.
 - [Every key and knob](doc/controls.md), generated from the code.
-- Optional extras: the FourStretch plugin, four's own stretch, grain, delay, reverb and
-  Clouds code ([ugen/README.md](ugen/README.md)). When the repo ships it for your norns,
-  four installs it itself and asks for one SYSTEM > RESTART. A monome grid or a
-  Launchpad Mini MK3.
+- Optional extras: a monome grid or a Launchpad Mini MK3.
 
 ## License
 

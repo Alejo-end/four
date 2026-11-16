@@ -32,13 +32,12 @@ what to do.
 The STATUS block of CLAUDE.md says which changes the device lacks. To bring it to
 `count: 198`, in this order:
 
-1. Build the plugin on the norns (ugen/README.md, with `-DFOUR_FFTW`). It now holds
-   `FourBBD`. Run the proof (`ugen/test_core.cpp`) there, and make sure that it ends: in
-   silence its first run on the norns did not end in 400 s, before the denormal repair.
-2. Install the binary BEFORE the engine, then deploy and RESTART by the ritual. Maiden
-   must read `count: 198`.
-3. Measure the delay's cost, and make sure that silence costs nothing
-   (doc/space-plan.md, section 15).
+1. DONE 2026-11-16: the plugin built on the norns (`ugen/build_norns.sh`, the proof
+   printed `all passed`), shipped in `ignore/plugins/`, installed by four itself.
+2. DONE 2026-11-16: deployed and restarted, `count: 198`.
+3. DONE 2026-11-16: the delay adds 1.4%, and in silence it costs less than with sound
+   (doc/measurements/2026-11-16/). A silent CLOUD track costs more than a sounding one:
+   3.9% against 2.5%.
 4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED.
 5. The rebuilt presets are not on the device. `test/deploy_set.sh` overwrites slots 1
    to 12 and deletes their takes, so ask the user first.

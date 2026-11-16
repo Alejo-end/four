@@ -52,12 +52,12 @@ Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
 3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
    A different number means that an old engine still runs.
 
-The `FourStretch` plugin holds the instrument's own stretch, grain, delay and Clouds
-code. It is built on the norns: the steps are in [ugen/README.md](../ugen/README.md).
-When the repo ships a binary for your norns (in `ignore/plugins/`), four installs it at
-load and shows `PLUGIN INSTALLED / SYSTEM > RESTART` once. Do the restart: until then
-four plays its stock voices. With the plugin, the SuperCollider log says
-`four: FourStretch on` and `four: CLOUD is FourCloud`.
+The `FourStretch` plugin holds the instrument's own stretch, grain, delay, reverb and
+Clouds code. The repo ships it, built on a norns shield with a Raspberry Pi 4, in
+`ignore/plugins/`. four installs it at load and shows `PLUGIN INSTALLED / SYSTEM > RESTART`
+once. Do the restart: until then four plays its stock voices. With the plugin, the
+SuperCollider log says `four: FourStretch on` and `four: CLOUD is FourCloud`. To build it
+yourself, see [ugen/README.md](../ugen/README.md).
 
 ## First session
 

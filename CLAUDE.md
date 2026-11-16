@@ -86,9 +86,11 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- It runs the code of the sixteenth change at `count: 197`, with the plugin of that day.
-  The seventeenth to the nineteenth, the twenty-second, the twenty-third and the
-  twenty-seventh changes are NOT on it.
+- Since 2026-11-16 it runs the thirty-fifth change (the `fourcloud` branch) at
+  `count: 198`, with the plugin built there that day (`ignore/plugins/armv7l/`), which
+  four's own installer put in Extensions. The plugin of 2026-11-13 is kept in
+  `~/fourstretch-backup/` on the device. mi-UGens is installed there too
+  (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
   `dust/data/mangler2` stay as backups.
 - `dust/data/four` holds older presets. The set rebuilt in `data/` (the thirteenth and
@@ -107,24 +109,24 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 14th: FourGrain, the new FLANGE, ECHO | yes | no |
 | 15th: the name everywhere, the opening | yes | |
 | 16th: THE ROOM | yes | no |
-| 17th: THE BUCKET BRIGADE | NO | no |
-| 18th: REVERB's four squares (Lua) | NO | no |
-| 19th: the sends, `count: 198` | NO | no |
+| 17th: THE BUCKET BRIGADE | yes, 2026-11-16 | no |
+| 18th: REVERB's four squares (Lua) | yes, 2026-11-16, not looked at | no |
+| 19th: the sends, `count: 198` | yes, `count: 198` | no |
 | 20th: the README and its pictures | documents only | |
 | 21st: the documents agree with the code | documents only | |
-| 22nd: the first grain, the erosion head, a lighter FourBBD (engine and plugin) | NO | no |
-| 23rd: the screen review (Lua) | NO | |
+| 22nd: the first grain, the erosion head, a lighter FourBBD (engine and plugin) | yes, 2026-11-16 | no |
+| 23rd: the screen review (Lua) | yes, 2026-11-16 | |
 | 24th: gate.py follows four (test tools) | not run there yet | |
 | 25th: stage 19 of the gate (documents, test tools) | not run there yet | |
 | 26th: the offline DSP check (Mac only) | not for the device | |
-| 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | NO | |
+| 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | yes, 2026-11-16, the frame period not logged | |
 | 28th: the pre-merge review's fixes (test tools, documents) | not run there yet | |
 | 29th: a short README, the guide in doc/manual.md, the GPL v3 license | documents only | |
 | 30th: the README picture on the handheld case | documents only | |
 | 31st, 32nd: README, safer deploy line, the clip exporter | documents, test tool | |
-| 33rd: SCENE A and B crossfader (Lua) | NO | no |
-| 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | NO | no |
-| 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | NO, no norns binary yet | no |
+| 33rd: SCENE A and B crossfader (Lua) | yes, 2026-11-16 | no |
+| 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | yes, 2026-11-16 | no |
+| 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -137,19 +139,15 @@ xruns past about 60%.
   2 take 53.0%. The user's heaviest set takes 57.3%, with no xruns.
 - A soak of 30 minutes (2026-11-12) ran near 40% at 58 to 60 °C, with no throttling. A
   preset loaded by hand gave 3 to 7 xruns (doc/plan.md, Phase 3).
+- With the plugin of 2026-11-16 (doc/measurements/2026-11-16/): all tracks OFF 9.8%.
+  One CLOUD track 12.2%, four 29.1%, four in SPECTRAL 38.7%. The delay adds 1.4%, and
+  20 s after the sound stops it costs less than with sound. A silent CLOUD track costs
+  3.9% against 2.5% for one that sounds: Clouds in silence is not free. No xruns.
 
-**What is pending on the device** (doc/plan.md, Phase 0):
-1. Deploy, then build the plugin there with `ugen/build_norns.sh` (it has `FourBBD`,
-   changed in the twenty-second change, and `FourCloud`, new in the thirty-third). Its
-   proof must print `all passed`: it includes the Clouds smoke test, whose cost check
-   (silence against sound) is a real denormal check only on the Pi.
-2. Load four: it installs the binary and asks for SYSTEM > RESTART. RESTART, read
-   `count: 198`, `four: FourStretch on` and `four: CLOUD is FourCloud`.
-3. Copy `ignore/plugins/<uname -m>/FourStretch.so` back to the Mac and commit it: the
-   next `rsync --delete` removes it otherwise.
-4. Measure the delay's cost and CLOUD's (four CLOUD tracks, and SPECTRAL, which costs
-   three to four times GRANULAR on the Mac). Make sure that silence costs nothing: the
-   denormal repair is not confirmed there.
+**What is pending on the device** (doc/plan.md, Phase 0): the plugin is built, shipped
+and installed, and the costs above are measured. Still open: REVERB's squares on the
+OLED, the gate's stage 19, the frame period, and why a silent CLOUD track costs more than
+one that sounds.
 
 **Not heard.** No listening session for four took place yet. The one judgement on record
 is the user's on FourStretch, above. The shipped presets have never been heard. The list

@@ -97,7 +97,15 @@ that was there when sclang started, and says
 A trap: a Pi with a 64-bit kernel under the 32-bit norns system prints
 `aarch64` for `uname -m` and still needs the 32-bit binary. `build_norns.sh`
 builds for the system it runs on and files the binary under what `uname -m`
-prints there, so a binary built on a device fits that device.
+prints there, so a binary built on a device fits that device. The repo ships
+the 32-bit binary under both `armv7l` and `aarch64` (one file to git): the
+ELF check keeps it off a server that is really 64-bit. No norns that prints
+`aarch64` has tried it yet.
+
+The binary shipped now was built on 2026-11-16 on a norns shield with a
+Raspberry Pi 4 (armv7l, g++ 10) and heard nowhere yet. On that norns, four
+installed it into an empty Extensions folder, and after the RESTART the log
+said `four: FourStretch on` and `four: CLOUD is FourCloud` at `count: 198`.
 
 ### Build the binary on the norns
 

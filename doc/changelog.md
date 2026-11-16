@@ -4451,7 +4451,7 @@ crossfader on their own encoders, with no shift to pick A.
   portfolio.
 
 four, thirty-fifth change: **FourCloud, and four installs its own plugin (plugin, engine,
-Lua, NOT on the device, no norns binary yet)**.
+Lua, on the device 2026-11-16, not heard)**.
 - CLOUD is Mutable Instruments Clouds from four's own plugin: `FourCloud`, the code of
   mi-UGens' MiClouds copied unchanged into `ugen/vendor/` from v7b1/mi-UGens at `10f6824`.
   It keeps both MIT notices, and `ugen/vendor/README.md` names the source. It has the same
@@ -4469,4 +4469,14 @@ Lua, NOT on the device, no norns binary yet)**.
   what sound does). `test/test_plugin.lua` covers the installer, and test_screen reads the
   notice. check_dsp passes with CLOUD rows. On the Mac, four CLOUD tracks take about 3.3%
   of a core, and 8.8% in SPECTRAL.
+- On the device, 2026-11-16: `ugen/build_norns.sh` built the plugin (the proof printed
+  `all passed`). With the old plugin moved out of Extensions, the first load of four
+  installed the shipped one and printed its RESTART message, at `count: 198`, with the
+  stock voices. After the RESTART the log said `four: FourStretch on` and
+  `four: CLOUD is FourCloud`. Every voice sounds on a tone take, with no xruns. Four
+  CLOUD tracks take 29.1%, 38.7% in SPECTRAL (doc/measurements/2026-11-16/).
+- The binary ships under `ignore/plugins/armv7l/` and, the same file, under `aarch64/`
+  for a norns whose 64-bit kernel runs the 32-bit system. Nobody has tried that one.
+- The README gives the plugin its own section after Install, so a player learns from it
+  that four installs the plugin and needs one more restart. The user asked for that.
 - Nobody has heard FourCloud.
