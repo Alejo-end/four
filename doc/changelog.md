@@ -4383,3 +4383,11 @@ install four from maiden.
   other norns scripts.
 - doc/ux-feedback.md names the transcript as `~/Downloads/transcript.txt`, not by a path
   in the user's home folder.
+
+four, thirtieth change: **the README shows four on pocket norns (documents and a picture
+tool)**. The placeholder picture is gone. `doc/four-on-pocket-norns.png` is the
+isometric render of the pocket norns case (digitalFabrication/pcb/pocket-norns-cm4,
+export/pocket-norns-CM4-iso.png) with the TAKE page mapped onto its screen.
+`test/uisim/onscreen.py` makes it: it finds the screen's corners from its flat grey and
+maps a page from doc/ui onto it with a perspective transform. Run it again when the case
+or a page changes.

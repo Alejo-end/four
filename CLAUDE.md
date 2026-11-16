@@ -102,6 +102,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | NO | |
 | 28th: the pre-merge review's fixes (test tools, documents) | not run there yet | |
 | 29th: a short README, the guide in doc/manual.md, the GPL v3 license | documents only | |
+| 30th: the README picture on pocket norns | documents only | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
