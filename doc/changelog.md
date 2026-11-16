@@ -4534,6 +4534,7 @@ example presets on freely usable ambient samples instead.
 - README, doc/README.md, the manual, the visuals guide, the plan and the STATUS block no
   longer point at the set.
 - No document names the album or its tools any more, and the set's measurement record of
-  2026-11-11 is gone with it. The public history was replaced by one clean commit, so no
-  older commit holds the set either.
+  2026-11-11 is gone with it. The public history was rewritten without the set: every
+  commit keeps its date and its story, and none holds the presets, their tools or the
+  album's name.
 
