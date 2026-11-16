@@ -580,8 +580,8 @@ end
 
 -- SCENE: two slots stored, the morph sweeps toward slot 4 and back
 page_clip{ id = "scene", page = "SCENE", loop = 45,
-  caption = "SCENE: eight slots of stored states. E3 fades from A, here the sound "
-    .. "you have, toward B, the selected slot, and back.",
+  caption = "SCENE: eight slots of stored states. E3 fades from A, slot 1, "
+    .. "toward B, slot 4, and back.",
   setup = function()
     params:set("scene_slot", 1)
     params:set("cutoff", 700); params:set("delay_mix", 0.1)
@@ -590,6 +590,7 @@ page_clip{ id = "scene", page = "SCENE", loop = 45,
     params:set("cutoff", 9000); params:set("delay_mix", 0.7); params:set("rev_mix", 0.6)
     params:set("scene_capture", 1); params:set("scene_capture", 0)
     params:set("cutoff", 1400); params:set("delay_mix", 0.35); params:set("rev_mix", 0.28)
+    params:set("scene_slot_a", 1)      -- A is slot 1, B is slot 4: the rail names both
     run_ticks(25)                      -- the SAVED word has gone
   end,
   drive = function(u)
