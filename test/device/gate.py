@@ -2606,10 +2606,12 @@ def stage19():
 
         rate, chans = during(step, "19.8_filter_swap", 7)
         hits = audio.clicks(chans[0], rate)
+        # "no click" holds on silence too, so the track must sound
+        loud = audio.stats(chans[0])["rms_db"]
         n.set("t2_cutoff", 20000)
-        ok = (seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
+        ok = (loud > -40 and seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
               and all(x["filters"] == 4 for x in seen.values()) and not hits)
-        return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
+        return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; level {loud} dB; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
 
     def c199():
         got = []
@@ -2786,7 +2788,8 @@ def stage19():
         b = level("19.20_mix1", 3)
         n.set("delay_mix", 0)
         n.set("rev_mix", 0)
-        return verdict(abs(b - a) <= 0.5, f"track 2's tone, every send at 0: {a} dB with both mixes at 0, {b} dB with both at 1")
+        # a silent track 2 (a failed take) would pass "no change", so it must sound
+        return verdict(a > -40 and abs(b - a) <= 0.5, f"track 2's tone, every send at 0: {a} dB with both mixes at 0, {b} dB with both at 1")
 
     def c1921():
         modes("OFF", "PLAY", "OFF", "OFF")

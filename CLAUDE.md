@@ -69,8 +69,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
 - It runs the code of the sixteenth change at `count: 197`, with the plugin of that day.
-  The seventeenth to the nineteenth, the twenty-second and the twenty-third changes are
-  NOT on it.
+  The seventeenth to the nineteenth, the twenty-second, the twenty-third and the
+  twenty-seventh changes are NOT on it.
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
   `dust/data/mangler2` stay as backups.
 - `dust/data/four` holds older presets. The set rebuilt in `data/` (the thirteenth and
@@ -100,6 +100,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 25th: stage 19 of the gate (documents, test tools) | not run there yet | |
 | 26th: the offline DSP check (Mac only) | not for the device | |
 | 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | NO | |
+| 28th: the pre-merge review's fixes (test tools, documents) | not run there yet | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -124,7 +125,8 @@ xruns past about 60%.
 is the user's on FourStretch, above. The shipped presets have never been heard. The list
 to listen to is doc/plan.md, Phase 2.
 
-**The walkthrough.** doc/device-gate.md, stages 0 to 18, top to bottom. It has not
+**The walkthrough.** doc/device-gate.md, stages 0 to 19, top to bottom. Stage 19 is
+four's own work. It has not
 passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 `test/device/gate.py` ran it at `count: 66` with no ears, which is NOT a pass
 (doc/measurements/2026-11-06/README.md). It has not run on four. When it passes, write
@@ -441,7 +443,9 @@ lua test/controls.lua
 # engine (count 198), renders the review probes, one verdict. About 30 s. KNOWN rows
 # are open faults that fail only when they get worse. FOUR_PLUGIN_DIR (a folder with
 # FourStretch.scx from ugen/build_mac.sh) adds the plugin build.
-FOUR_PLUGIN_DIR=<plugin folder> test/dsp/check_dsp.sh <work folder>
+# The work folder must be OUTSIDE the repo: it holds a stand-in CroneEngine .sc file,
+# and the deploy rsync would copy it to the norns (invariant 1). The scripts refuse it.
+FOUR_PLUGIN_DIR=<plugin folder> test/dsp/check_dsp.sh <work folder outside the repo>
 
 # on a connected device: run the walkthrough and the measurements (doc/norns-platform.md
 # says how, and why one SSH session must stay open)

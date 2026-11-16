@@ -10,6 +10,9 @@
 set -e
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(cd "$1" && pwd)"; TAG="${2:-run}"
+# The work folder must be outside the repo: it holds a stand-in CroneEngine .sc
+# file, and the deploy rsync would copy it to the norns (CLAUDE.md, invariant 1).
+case "$WORK/" in "$REPO"/*) echo "refused: the work folder $WORK is inside the repo $REPO" >&2; exit 2;; esac
 SCLANG=/Applications/SuperCollider.app/Contents/MacOS/sclang
 # The stand-in class lives in the repo as .txt ON PURPOSE: a second CroneEngine
 # .sc file under dust/code would hang every script on the norns.
@@ -22,6 +25,7 @@ rm -f "$WORK/elog.txt"
 [ -n "$FOUR_PLUGIN_DIR" ] && export FOUR_STRETCH=1
 ( BENCH_DIR="$WORK" BENCH_TAG="$TAG" script -q "$WORK/elog.txt" "$SCLANG" -l "$WORK/conf.yaml" "$REPO/test/dsp/engine.scd" > /dev/null 2>&1 & )
 for i in $(seq 1 90); do sleep 2; grep -q "BENCH_DONE\|ERROR" "$WORK/elog.txt" 2>/dev/null && break; done
-sleep 2; pkill -f "test/dsp/engine.scd" || true
+# only this run's sclang: its command line names this work folder's conf.yaml
+sleep 2; pkill -f "$WORK/conf.yaml" || true
 grep -A8 "ERROR" "$WORK/elog.txt" && exit 1
 grep "COMMANDS\|BENCH_DONE\|FourStretch\|four: \|FAIL\|not installed\|exception" "$WORK/elog.txt"

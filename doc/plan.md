@@ -44,11 +44,15 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
    to 12 and deletes their takes, so ask the user first.
 6. Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
    pad's first sound and the gap at a mode change (the twenty-second change). The
-   device runs scsynth 3.13.0-dev, and the first-grain fix depends on how `CoinGate`
-   starts there.
+   device runs scsynth 3.13.0-dev. The bug depends on how `Impulse` starts: since
+   2022-07-18 its first impulse is the init sample, which `CoinGate` takes as its last
+   trigger. A build older than that never had the bug. The fix gives one grain at
+   sample 0 either way.
 7. Log the real frame period: the time between `frame_tick` calls for 60 s while
    playing. The twenty-seventh change puts the frames on a deadline. Make sure that they
-   now come at 15 a second, and that a FREE modulator keeps its rate.
+   now come at 15 a second, and that a FREE modulator keeps its rate. Log each frame's
+   own work time too: a frame that takes longer than 1/15 s is followed by the next one
+   after about 1 ms, so matron then gets no rest between frames.
 
 After this phase, measure the branch `proposal-dsp-fixes` (proposal A), then merge it.
 Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8 with a

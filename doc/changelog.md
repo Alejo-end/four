@@ -4349,3 +4349,23 @@ The engine did not change. The Lua changed: save and reload the script. Nothing 
 the device. On the device, measure the real frame period (doc/plan.md, Phase 0, step 7).
 doc/plan.md, Phase 0 also gains the gate's stage 19 and what to measure before
 proposal A merges.
+
+four, twenty-eighth change: **the pre-merge review's small fixes (test tools and
+documents, the count stays 198)**. A full review of the twenty-first to twenty-seventh
+changes found nothing blocking and these small faults:
+- The DSP scripts (`check_dsp.sh`, `run_engine.sh`, `review/run_probe.sh`) refuse a work
+  folder inside the repo. The folder receives stand-in CroneEngine .sc files, and the
+  deploy rsync would copy them to the norns, where a second class hangs every script on
+  LOADING. CLAUDE.md's workflow says so.
+- `run_engine.sh` and `run_probe.sh` end only their own sclang (matched on the work
+  folder's conf.yaml). Before, two checks running at once ended each other's render.
+- gate.py 19.20 ("the dry does not move") and 19.8 ("no click") passed on silence after a
+  failed take. Both now need track 2 above -40 dB.
+- measure.py's `patch` state measured the reverb with every send at 0. It opens track
+  1's reverb send.
+- CLAUDE.md: the walkthrough is stages 0 to 19, and the twenty-seventh change is listed
+  as not on the device.
+- doc/plan.md: the first-grain bug depends on how `Impulse` starts (changed in
+  SuperCollider on 2022-07-18), not `CoinGate`. Step 7 also logs each frame's own work
+  time: a frame longer than 1/15 s is followed by the next after about 1 ms.
+`test/check.lua` passes on Lua 5.3. `check_dsp.sh` passes (45 pass, 45 known).

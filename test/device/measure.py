@@ -221,6 +221,7 @@ def patch():
     time.sleep(1)
     x0 = n.now()
     after = audio.stats(audio.load(gate_rec("patch_engine_after", gate.ENGINE_OUT))[1][0])
+    n.set("fx_rev", 1)   # track 1's send: since the 19th change it starts at 0
     n.set("rev_mix", 0.5)
     time.sleep(2)
     wet = audio.stats(audio.load(gate_rec("patch_engine_reverb", gate.ENGINE_OUT))[1][0])
@@ -228,6 +229,7 @@ def patch():
     amp = n.ctx("c.amp_in[1]")
     n.ssh("jack_disconnect softcut:output_1 SuperCollider:in_1; jack_disconnect softcut:output_2 SuperCollider:in_2")
     n.set("rev_mix", 0)
+    n.set("fx_rev", 0)
     save("patch", "softcut into the engine", deck=deck, engine_before=before, engine_after=after, with_reverb=wet,
          xruns=x1, amp_in_poll=amp)
 
