@@ -17,7 +17,7 @@ Start with the [README](../README.md). This page lists everything else.
 
 | Document | What it covers |
 |---|---|
-| [../CLAUDE.md](../CLAUDE.md) | The working notes: the state of the test device, the hard rules and the lessons. |
+| [../.claude/CLAUDE.md](../.claude/CLAUDE.md) | The working notes: the state of the test device, the hard rules and the lessons. |
 | [plan.md](plan.md) | The next work. |
 | [changelog.md](changelog.md) | Every change, oldest first. |
 | [device-gate.md](device-gate.md) | The walkthrough on the device, stage by stage. |
@@ -25,7 +25,7 @@ Start with the [README](../README.md). This page lists everything else.
 | [measurements/](measurements/) | Dated records from the device. |
 
 The checks run with `lua test/check.lua`. The offline DSP check runs with
-`test/dsp/check_dsp.sh`. [CLAUDE.md](../CLAUDE.md) explains both.
+`test/dsp/check_dsp.sh`. [CLAUDE.md](../.claude/CLAUDE.md) explains both.
 
 ## Design references
 

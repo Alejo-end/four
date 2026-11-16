@@ -132,7 +132,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | the user, 2026-11-16: "it sounds nice" |
 | 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
 | 38th: the album preset set leaves the repo | nothing on the device changes | |
-| 39th: CLAUDE_PLAN.md deleted | documents only | |
+| 39th: CLAUDE_PLAN.md deleted, this file moves to .claude/ | documents only | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

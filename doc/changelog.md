@@ -4542,4 +4542,7 @@ four, thirty-ninth change: **CLAUDE_PLAN.md is deleted (documents only)**. It wa
 first plan of mangler, from before any code, and nothing in it was current. The user
 asked whether it needed to be there. Git history keeps it. CLAUDE.md, doc/README.md and
 doc/plan.md no longer point at it.
+- CLAUDE.md moves to `.claude/CLAUDE.md`, where Claude Code also reads it, so the top
+  folder holds only what a player needs. The deploy rsync leaves `.claude` out, so it
+  does not go to the norns. doc/README.md and the manual link the new place.
 

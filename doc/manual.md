@@ -362,7 +362,7 @@ The documents:
 
 - [doc/README.md](README.md): every document, for players and for developers.
 
-- [CLAUDE.md](../CLAUDE.md): the status on the device, the hard rules, the lessons, and which
+- [.claude/CLAUDE.md](../.claude/CLAUDE.md): the status on the device, the hard rules, the lessons, and which
   documents are current.
 - [doc/plan.md](plan.md): the next work.
 - [doc/changelog.md](changelog.md): every change, oldest first.
