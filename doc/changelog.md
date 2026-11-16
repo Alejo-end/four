@@ -4449,3 +4449,24 @@ crossfader on their own encoders, with no shift to pick A.
 - test_control 794, test_screen 106. doc/manual.md, doc/controls.md, row 13.3b of the
   device gate and the website say the new keys. The website's footer links the user's
   portfolio.
+
+four, thirty-fifth change: **FourCloud, and four installs its own plugin (plugin, engine,
+Lua, NOT on the device, no norns binary yet)**.
+- CLOUD is Mutable Instruments Clouds from four's own plugin: `FourCloud`, the code of
+  mi-UGens' MiClouds copied unchanged into `ugen/vendor/` from v7b1/mi-UGens at `10f6824`.
+  It keeps both MIT notices, and `ugen/vendor/README.md` names the source. It has the same
+  inputs and gives the same samples as a MiClouds of that commit in all four modes. It has
+  its own name, because a second MiClouds class hangs every script. The engine takes
+  FourCloud, else MiClouds, else the granulator, and logs which. The count stays 198.
+- The engine uses the plugin only when the binary is the one that was there when sclang
+  started (`bootPlug`). A newer one waits for the RESTART and the stock voices play, so a
+  reload after an install is not silent.
+- `lib/mplugin.lua` installs `ignore/plugins/<uname -m>/FourStretch.so` (built by
+  `ugen/build_norns.sh`) when none is installed or the shipped one is newer with other
+  bytes. It shows `PLUGIN INSTALLED / SYSTEM > RESTART` once. It writes the `.so` alone,
+  checks its ELF against scsynth, and leaves mi-UGens alone. No binary is shipped yet.
+- Proofs: test_core runs the Clouds core (finite, sounding, no subnormals, silence costs
+  what sound does). `test/test_plugin.lua` covers the installer, and test_screen reads the
+  notice. check_dsp passes with CLOUD rows. On the Mac, four CLOUD tracks take about 3.3%
+  of a core, and 8.8% in SPECTRAL.
+- Nobody has heard FourCloud.
