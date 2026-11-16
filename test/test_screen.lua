@@ -562,11 +562,12 @@ do
   local others = 0
   for i = 2, 8 do others = math.max(others, lmax(cell_x(i), 36, cell_x(i) + 11, 40)) end
   ok(others == 0, "...and under no other cell")
-  ok(reads("B", Mp.FOOT.e2, 58) and reads("4", Mp.FOOT.e2 + 7, 58),
-    "the footer names E2 B·4 (" .. tostring(Mp.FOOT.e2) .. ")")
-  key(1, 1); redraw()
   ok(reads("A", Mp.FOOT.e2, 58) and reads("1", Mp.FOOT.e2 + 7, 58),
-    "...and K1 held names it A·1")
+    "the footer names E2 A·1 (" .. tostring(Mp.FOOT.e2) .. ")")
+  ok(reads("B", Mp.FOOT.e3, 58) and reads("4", Mp.FOOT.e3 + 7, 58),
+    "...and E3 B·4 (" .. tostring(Mp.FOOT.e3) .. ")")
+  key(1, 1); redraw()
+  ok(reads("FADE", Mp.FOOT.e3, 58), "...and K1 held names E3 FADE")
   key(1, 0); redraw()
 
   -- A changed mid-fade: the rail keeps the A the fade left from, and the

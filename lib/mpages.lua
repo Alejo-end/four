@@ -380,7 +380,7 @@ local FULL = {
   lfo4_depth = "DEPTH", lfo4_period = "PERIOD", lfo4_target = "TARGET",
   crush = "CRUSH",
   pad_pitch = "PITCH", pad_voice = "VOICE",
-  scene_morph_amt = "MORPH",
+  scene_morph_amt = "FADE",
   orbit_rate = "DRIFT", orbit_reach = "REACH", erode = "ERODE",
 }
 
@@ -677,7 +677,7 @@ end
 -- M.FOOT keeps the last layout for the tests: `arc` the erase arc's right
 -- edge (nil when it is not drawn), `e2` the E2 word's left edge and `k3`
 -- the K3 word as drawn.
-local FOOT = { arc = nil, e2 = 0, k3 = nil }
+local FOOT = { arc = nil, e2 = 0, e3 = 0, k3 = nil }
 M.FOOT = FOOT
 local function draw_footer()
   local x = 2
@@ -719,6 +719,7 @@ local function draw_footer()
     end
   end
   local e3x = flabel_r(C.enc_param(3), 126, keys_right)
+  FOOT.e3 = e3x
   FOOT.e2 = flabel_r(C.enc_param(2), e3x - 9, keys_right)
   draw_big_value()
 end

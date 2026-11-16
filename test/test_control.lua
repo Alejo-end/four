@@ -915,23 +915,35 @@ do
   key(2, 1); key(2, 0)
   params:set("mode", 5)
 
-  -- SCENE alt = the crossfader's A end. The orbit's drift and reach left
-  -- the K1 layer for PARAMS: K1+E2 picks A, K1+E3 is nothing
+  -- SCENE: E2 picks A and E3 picks B with no shift, K1+E3 fades, and K1+E2
+  -- is nothing. The orbit's drift and reach live in PARAMS.
   goto_page(si)
   params:set("scene_slot_a", 0)
-  key(1, 1)
+  params:set("scene_slot", 4)
+  params:set("scene_morph_amt", 0)
   local r0, rc0 = params:get("orbit_rate"), params:get("orbit_reach")
   local b0, m0 = params:get("scene_slot"), params:get("scene_morph_amt")
   enc(2, 3)
-  ok(params:get("scene_slot_a") == 3, "SCENE K1+E2 picks A (LIVE + 3 = slot 3)")
+  ok(params:get("scene_slot_a") == 3, "SCENE E2 picks A (LIVE + 3 = slot 3)")
   ok(params:get("scene_slot") == b0, "...and leaves B where it was")
-  ok(params:get("orbit_rate") == r0, "...and no longer moves orbit drift")
-  enc(3, 3)
-  ok(params:get("orbit_reach") == rc0 and params:get("scene_morph_amt") == m0,
-    "SCENE K1+E3 moves nothing (not orbit reach, not the morph)")
+  ok(params:get("orbit_rate") == r0, "...and moves no orbit drift")
   enc(2, -20)
-  ok(params:get("scene_slot_a") == 0, "...and K1+E2 turned down comes back to LIVE")
+  ok(params:get("scene_slot_a") == 0, "...and E2 turned down comes back to LIVE")
+  enc(3, 2)
+  ok(params:get("scene_slot") == b0 + 2, "SCENE E3 picks B")
+  ok(params:get("scene_morph_amt") == m0, "...and does not fade")
+  enc(3, -2)
+  key(1, 1)
+  local a1 = params:get("scene_slot_a")
+  enc(2, 3)
+  ok(params:get("scene_slot_a") == a1 and params:get("scene_slot") == b0,
+    "SCENE K1+E2 moves nothing")
+  enc(3, 4)
+  ok(params:get("scene_morph_amt") > m0 and params:get("orbit_reach") == rc0,
+    "SCENE K1+E3 fades (not orbit reach)")
+  enc(3, -40)
   key(1, 0)
+  params:set("scene_morph_amt", 0)
   ok(params:lookup_param("orbit_rate").name == "orbit drift"
       and params:lookup_param("orbit_reach").name == "orbit reach",
     "the orbit's drift and reach are still params (PARAMS, MIDI, presets)")

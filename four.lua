@@ -996,11 +996,11 @@ local ENC_MAP = {
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
   MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
-  -- the crossfader: E2 picks B (the slot K2 recalls and K3 captures into),
-  -- K1+E2 picks A (LIVE or a slot), E3 fades between them. K1+E3 is
-  -- nothing. The orbit's drift and reach, and the recall quantize, are
-  -- set-and-forget: they live in PARAMS.
-  SCENE  = { "scene_slot", "scene_slot_a", "scene_morph_amt", nil },
+  -- the crossfader: E2 picks A (LIVE or a slot), E3 picks B (the slot K2
+  -- recalls and K3 captures into), both with no shift, and K1+E3 fades
+  -- between them. K1+E2 is nothing. The orbit's drift and reach, and the
+  -- recall quantize, are set-and-forget: they live in PARAMS.
+  SCENE  = { "scene_slot_a", nil, "scene_slot", "scene_morph_amt" },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always

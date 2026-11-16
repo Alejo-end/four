@@ -64,7 +64,7 @@ modes, and VOICE draws HELD dim.
 | MOTION (LFO 2) | LANE `@mo_sel` | DEPTH `lfo2_depth` | PERIOD `lfo2_period` | TARGET `lfo2_target` | REC* | PLAY* | yes |
 | MOTION (LFO 3) | LANE `@mo_sel` | DEPTH `lfo3_depth` | PERIOD `lfo3_period` | TARGET `lfo3_target` | REC* | PLAY* | yes |
 | MOTION (LFO 4) | LANE `@mo_sel` | DEPTH `lfo4_depth` | PERIOD `lfo4_period` | TARGET `lfo4_target` | REC* | PLAY* | yes |
-| SCENE | B `scene_slot` | MORPH `scene_morph_amt` | A `scene_slot_a` | none | RCL, hold PEEK | CAP | yes |
+| SCENE | A `scene_slot_a` | B `scene_slot` | none | FADE `scene_morph_amt` | RCL, hold PEEK | CAP | yes |
 
 On tracks 2 to 4 (shown for track 2) these rows differ from track 1's.
 Track 1 alone has the erosion, so VOICE in PLAY keeps SPEED and PITCH

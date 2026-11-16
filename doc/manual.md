@@ -213,23 +213,24 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
 | | |
 |---|---|
 | ![SCENE](ui/scene.png) | ![SCENE, A and B](ui/scene-ab.png) |
-| E2 picks B. E3 fades from the sound you have to B. | Hold K1 and turn E2 to pick A. E3 fades from A to B. |
+| E2 picks A and E3 picks B. Hold K1 and turn E3 to fade. | With A on a slot, the fade runs from A to B and back. |
 | ![SCENE, the peek](ui/scene-peek.png) | ![SCENE, the orbit](ui/scene-orbit.png) |
 | Hold K2 to borrow B. | The orbit wanders between the stored scenes. |
 
 - K3 captures the sound into the selected slot. K2 recalls it. Hold K2 to borrow the
   scene, and release to come back.
-- E3 is a crossfader with two ends. B, the right end, is the selected slot. A, the left
-  end, is LIVE or a stored slot: hold K1 and turn E2. The rail names both ends, and a
-  small A sits under the cell of slot A.
-- With A on LIVE, E3 fades from the sound you have when it leaves 0. Back at 0 you hear
-  that sound again.
-- With A on a slot, E3 at 0 is A and E3 at 1 is B, both ways. A new A changes nothing
-  while E3 rests at 0. The first turn of E3 brings A in at once.
-- If you pick another A during a fade, the fade keeps its A until E3 is back at 0, so the
+- SCENE is a crossfader with two ends, and each end has its own encoder. E2 picks A, the
+  left end: LIVE or a stored slot. E3 picks B, the right end, which is also the slot that
+  K2 and K3 act on. Hold K1 and turn E3 to fade. The rail names both ends, and a small A
+  sits under the cell of slot A.
+- With A on LIVE, the fade starts from the sound you have when it leaves 0. Back at 0 you
+  hear that sound again.
+- With A on a slot, the fade at 0 is A and at 1 is B, both ways. A new A changes nothing
+  while the fade rests at 0. The first turn of the fade brings A in at once.
+- If you pick another A during a fade, the fade keeps its A until it is back at 0, so the
   sound never jumps. The new A shows dim under its cell until then.
-- An empty slot as A counts as LIVE. With B empty, E3 does nothing.
-- E3 never lands a scene. At 1 the holds, the note routing, the buffer writers and the
+- An empty slot as A counts as LIVE. With B empty, the fade does nothing.
+- The fade never lands a scene. At 1 the holds, the note routing, the buffer writers and the
   voice count are still as you left them, and K2 lands the rest of B.
 - The orbit, a K2 peek and a GLIDE recall start from the sound you have, whatever A is.
 - Slot zero, the left arrow, is the way back. Every recall parks the sound before it there.

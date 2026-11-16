@@ -286,7 +286,7 @@ feels and that the norns calls behave as the stubs assume.
 | 13.1 | **The motion loop rides the PSET** | Record a gesture, save a PSET, load another, load it back | The loop returns and plays; a saved arm does not start recording | `Mmotion.pset_write` / `pset_read` |
 | 13.2 | GLIDE recall | PARAMS > scenes > recall quantize GLIDE, glide beats 4, recall a slot | The sound sweeps over a bar and lands; the ◄ cell holds where it began | `M.glide`, `glide_tick` |
 | 13.3 | The orbit yields | Orbit on (PARAMS > orbit), then turn E3 on SCENE | The wander stands still under your hand and resumes two seconds after you let go | `orbit_tick`'s `hand_at` |
-| 13.3b | The A and B crossfader | Capture slots 3 and 4. On SCENE, K1+E2 to A 3, E2 to B 4, then sweep E3 both ways | The rail reads `A 3` and `4 B`, a small A marks cell 3; E3 at 0 sounds like scene 3, at the top like scene 4 (its morph-safe part), and back again with no jump | `M.morph`, `scene_slot_a` (four, thirty-third change) |
+| 13.3b | The A and B crossfader | Capture slots 3 and 4. On SCENE, E2 to A 3, E3 to B 4, then hold K1 and sweep E3 both ways | The rail reads `A 3` and `4 B`, a small A marks cell 3; the fade at 0 sounds like scene 3, at the top like scene 4 (its morph-safe part), and back again with no jump | `M.morph`, `scene_slot_a` (four, thirty-third change) |
 | 13.4 | A synced delay stays synced | `delay_sync` 1/4, then recall a scene with a different delay time | The echoes stay on the beat | `sync_delay_time` |
 | 13.5 | REMOVED | It tested the saved file of a layer deck | | |
 | 13.6 | The take strip follows erosion | Erode a take for a minute, then erode to 0 | The TAKE strip redraws darker within a few seconds | `ctx.refresh_take_strip` |

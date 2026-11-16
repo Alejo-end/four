@@ -4438,3 +4438,14 @@ always the sound at the start of the sweep.
 - The README and the website were rewritten by an editor's pass at the same time, with
   the website link and the A and B crossfader.
 Nobody has played it yet.
+
+four, thirty-fourth change: **on SCENE, E2 picks A and E3 picks B, and K1+E3 fades (Lua
+only, the count stays 198, NOT on the device)**. The user wanted both ends of the
+crossfader on their own encoders, with no shift to pick A.
+- `ENC_MAP.SCENE` is { `scene_slot_a`, nothing, `scene_slot`, `scene_morph_amt` }: E2 is
+  A, E3 is B (the slot K2 recalls and K3 captures into), K1+E3 is the fade, K1+E2 is
+  nothing. The fade's footer word is FADE (it was MORPH).
+- The footer keeps E3's place in `Mpages.FOOT.e3` for the screen test.
+- test_control 794, test_screen 106. doc/manual.md, doc/controls.md, row 13.3b of the
+  device gate and the website say the new keys. The website's footer links the user's
+  portfolio.

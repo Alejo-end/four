@@ -105,6 +105,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 30th: the README picture on the handheld case | documents only | |
 | 31st, 32nd: README, safer deploy line, the clip exporter | documents, test tool | |
 | 33rd: SCENE A and B crossfader (Lua) | NO | no |
+| 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | NO | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
