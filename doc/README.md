@@ -41,8 +41,7 @@ These are partly built. Each one says at its top what is built.
 
 These are kept for their reasoning. Each one has a note at its top.
 
-- [../CLAUDE_PLAN.md](../CLAUDE_PLAN.md) and [spec.md](spec.md): the first plan and
-  mangler's spec.
+- [spec.md](spec.md): mangler's spec.
 - [redesign.md](redesign.md): mangler's screen redesign.
 - [tracks-plan.md](tracks-plan.md) and [layers.md](layers.md): the decks that became
   tracks, and the layer decks that were removed.

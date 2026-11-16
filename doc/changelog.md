@@ -4538,3 +4538,8 @@ example presets on freely usable ambient samples instead.
   commit keeps its date and its story, and none holds the presets, their tools or the
   album's name.
 
+four, thirty-ninth change: **CLAUDE_PLAN.md is deleted (documents only)**. It was the
+first plan of mangler, from before any code, and nothing in it was current. The user
+asked whether it needed to be there. Git history keeps it. CLAUDE.md, doc/README.md and
+doc/plan.md no longer point at it.
+

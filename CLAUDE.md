@@ -132,6 +132,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | the user, 2026-11-16: "it sounds nice" |
 | 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
 | 38th: the album preset set leaves the repo | nothing on the device changes | |
+| 39th: CLAUDE_PLAN.md deleted | documents only | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -214,7 +215,8 @@ Design references. Partly built, and each one says what is built:
 - doc/measurements/: dated records from the device.
 
 Historical. Kept for their reasoning, and each one has a note at its top:
-- CLAUDE_PLAN.md (the first plan), doc/spec.md (mangler's spec, S0 to S23).
+- doc/spec.md (mangler's spec, S0 to S23). The first plan, CLAUDE_PLAN.md, was deleted
+  in the thirty-ninth change; git history keeps it.
 - doc/redesign.md (mangler's screen redesign), doc/tracks-plan.md (decks as tracks).
 - doc/layers.md and `data/layers/` (the layer decks, removed).
 - doc/workflow-standalone.md, doc/workflow-grid.md (mangler's walkthroughs).

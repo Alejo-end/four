@@ -271,7 +271,7 @@ Each one needs a yes or a no. Ask the user. Do not decide.
 2. Rename the local folder from mangler to four?
 3. Remove the `../mangler2` worktree?
 4. (Answered 2026-11-16: the album presets and `data/layers/` left the repo.)
-5. Delete `CLAUDE_PLAN.md` (the original S0 plan)?
+5. (Answered 2026-11-16: `CLAUDE_PLAN.md` is deleted. Git history keeps it.)
 6. Which MIDI controller do they own?
 7. One SPACE page (doc/space-plan.md, section 7.2), or DELAY and REVERB as two
    pages, as the user asked in July?
