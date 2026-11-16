@@ -4369,3 +4369,17 @@ changes found nothing blocking and these small faults:
   SuperCollider on 2022-07-18), not `CoinGate`. Step 7 also logs each frame's own work
   time: a frame longer than 1/15 s is followed by the next after about 1 ms.
 `test/check.lua` passes on Lua 5.3. `check_dsp.sh` passes (45 pass, 45 known).
+
+four, twenty-ninth change: **a short README, the full guide in doc/manual.md, and the
+GPL v3 license (documents only)**. The repository is to become public, so that anyone can
+install four from maiden.
+- README.md is short: what four does, the install line, the first minutes, the pages and
+  where to read more. It does not name other instruments.
+- The old README is doc/manual.md, the full guide. Its links point from doc/ now, and its
+  install section no longer says that the repository is private.
+- doc/hero.png is a placeholder picture: a sampler box drawn around a real render of the
+  TAKE page. The user plans to replace it with a drawing.
+- LICENSE is the GNU General Public License v3, the license of arcologies and many
+  other norns scripts.
+- doc/ux-feedback.md names the transcript as `~/Downloads/transcript.txt`, not by a path
+  in the user's home folder.

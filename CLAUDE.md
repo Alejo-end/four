@@ -11,7 +11,7 @@ block current, and add a change-log entry for every change.
 ## STATUS (2026-11-15)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
-doc/plan.md and the README point here. Keep it current. When you change it, date it.
+doc/plan.md points here. Keep it current. When you change it, date it.
 
 **Names.** Script `four.lua`, class `Engine_Four` in `lib/Engine_Four.sc`,
 `engine.name = 'Four'`, SynthDefs `\four_*`. The code goes to `~/dust/code/four/` and
@@ -101,6 +101,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 26th: the offline DSP check (Mac only) | not for the device | |
 | 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | NO | |
 | 28th: the pre-merge review's fixes (test tools, documents) | not run there yet | |
+| 29th: a short README, the guide in doc/manual.md, the GPL v3 license | documents only | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -164,7 +165,8 @@ Lua-only changes skip all this: save and reload the script.
 ## Documents: current, reference, historical
 
 Current. Keep these true to the code:
-- CLAUDE.md (this file) and README.md, the guide for players.
+- CLAUDE.md (this file). README.md, the short page for players, and doc/manual.md, the
+  full guide with every page's pictures.
 - doc/plan.md: the next work. doc/changelog.md: every change, oldest first.
 - doc/device-gate.md: the walkthrough. It was written for mangler, and its top says what
   that means for four.

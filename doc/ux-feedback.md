@@ -185,7 +185,7 @@ fully playable standalone (3 keys + 3 encoders); the grid stays optional.
 
 Second on-device walkthrough, recorded after the NU nine-station redesign and
 the S21/S22 engine changes shipped. Source: a 22-min voice memo transcribed to
-`/Users/alejandrodeleon/Downloads/transcript.txt` (line refs below). Points
+`~/Downloads/transcript.txt` (line refs below). Points
 continue the global numbering.
 
 **Overarching directive:** *no new features* — "no more features now… make this
