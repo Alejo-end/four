@@ -108,7 +108,11 @@ below 13.7 frames per second, and the rate is capped at 15.
 | One server, thread at 71%, JACK 78% | 4 xruns |
 
 The JACK peak reached 84% at the 61% step, so the usable limit for one server's
-thread is about 60%. The whole instrument above uses 43%. That leaves room for
+thread is about 60%. That limit counts xruns, not what you hear: 4 xruns in 20 s
+can pass unnoticed. On 2026-11-16 the user played four at 99% and heard it clean.
+The meter of that reading is not recorded. Next time, read the scsynth thread in
+`top -H`, the JACK load and the xrun count together, and listen, before treating 60%
+as a limit. The whole instrument above uses 43%. That leaves room for
 about 17 more default GRAIN voices or about 50 SLICE voices. CPU is therefore not
 what keeps mangler from eight-voice sampling. The tables above are from before the 106th
 change, and `measurements/2026-11-06/performance-before-fixes.jsonl` keeps them. That
