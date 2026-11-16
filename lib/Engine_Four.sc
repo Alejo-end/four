@@ -99,14 +99,33 @@ Engine_Four : CroneEngine {
     // THE PLUGIN AS THE SERVER LOADED IT: [path, mtime] of the FourStretch
     // binary when sclang started, nil when there was none. scsynth loads its
     // plugins once, when sclang boots it right after its own start, so this is
-    // the binary the server runs. four installs or replaces its own plugin
-    // (lib/mplugin.lua) under a running server; until SYSTEM > RESTART the
-    // engine must not name a UGen the server lacks. A def that names one does
-    // not load, and every def names FourTanh: the instrument would be silent.
+    // the binary the server runs. four can also install or replace its own
+    // plugin (lib/mplugin.lua) under a running server; until SYSTEM > RESTART
+    // the engine must not name a UGen the server lacks. A def that names one
+    // does not load, and every def names FourTanh: the instrument would be silent.
     classvar <bootPlug;
 
+    // The shipped plugin goes into place first, while sclang compiles its
+    // classes and before StartUp boots the server: the RESTART that follows
+    // `;install` then brings the plugin in, with no second restart. It runs at
+    // every sclang start, for every script, so it must stay quick and quiet.
+    // A failure here costs nothing: four's load tries again (lib/mplugin.lua).
     *initClass {
+        try { this.installPlug };
         StartUp.add({ try { bootPlug = this.plugStamp } });
+    }
+
+    // lib/install_plugin.sh holds the rule. With no arch given it asks uname,
+    // and it acts on Linux only, so the Mac bench never writes Extensions.
+    *installPlug {
+        var dir = this.filenameSymbol.asString.dirname.dirname, said;
+        said = ["sh", (dir +/+ "lib/install_plugin.sh").shellQuote,
+            ("HOME".getenv ? "").shellQuote, dir.shellQuote, "''",
+            "/usr/local/bin/scsynth", "/usr/bin/scsynth", "2>/dev/null"].join(" ").unixCmdGetStdOut;
+        said.find("installed").notNil.if({
+            "four: installed the FourStretch plugin at startup".postln });
+        said.find("failed").notNil.if({
+            "four: could not install the FourStretch plugin at startup".postln });
     }
 
     // the FourStretch binary: in FOUR_PLUGIN_DIR on the Mac bench (test/dsp),

@@ -76,12 +76,21 @@ read on both sides (MiClouds wrote past it); `add` is applied.
 four installs its own plugin. The repo ships a binary built on a norns in
 `ignore/plugins/<what uname -m prints>/FourStretch.so`. norns compiles
 nothing under a folder named `ignore`, so the folder is inert there, and the
-deploy copies it like any other. When four loads (`lib/mplugin.lua`):
+deploy copies it like any other.
 
-| On the norns | What four does |
+`lib/install_plugin.sh` holds the rule, and two callers run it. The engine
+class runs it while sclang starts (`Engine_Four.installPlug`, from
+`*initClass`), before sclang boots the server. So the SYSTEM > RESTART that
+follows `;install` puts the plugin in place and the server loads it in the
+same start: one restart in all, and the log says
+`four: installed the FourStretch plugin at startup`. Then `lib/mplugin.lua`
+runs it again when four loads, as a fallback, and that one asks for a
+restart when it installs:
+
+| On the norns | What the script does |
 |---|---|
 | No binary shipped for this machine | Nothing, and says nothing. The stock voices play. |
-| A binary shipped, none installed | Copies the `.so` alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`, and says `PLUGIN INSTALLED / SYSTEM > RESTART` on the screen and in maiden. |
+| A binary shipped, none installed | Copies the `.so` alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`. At four's load it also says `PLUGIN INSTALLED / SYSTEM > RESTART` on the screen and in maiden. |
 | The same binary installed | Nothing. |
 | A newer shipped binary, other bytes | Replaces the installed one (a copy beside it, then a rename, so a running server keeps the file it has open), and asks for the RESTART. |
 | An installed binary newer than the shipped one | Keeps it. |
@@ -106,6 +115,9 @@ The binary shipped now was built on 2026-11-16 on a norns shield with a
 Raspberry Pi 4 (armv7l, g++ 10) and heard nowhere yet. On that norns, four
 installed it into an empty Extensions folder, and after the RESTART the log
 said `four: FourStretch on` and `four: CLOUD is FourCloud` at `count: 198`.
+With the startup install (the thirty-sixth change), one RESTART did it all:
+the log said `four: installed the FourStretch plugin at startup`, and four's
+first load said `four: FourStretch on`. The next RESTART said nothing.
 
 ### Build the binary on the norns
 
@@ -115,8 +127,8 @@ The SuperCollider headers are in `/usr/local/include/SuperCollider`.
    `~/dust/code/four/ugen/build_norns.sh`. It builds the proof and runs it
    (it must print `all passed`), builds the plugin with FFTW, and copies it
    to `~/dust/code/four/ignore/plugins/$(uname -m)/FourStretch.so`.
-2. Load four. It installs the binary and asks for SYSTEM > RESTART.
-3. Restart with the engine ritual. The SuperCollider log must say
+2. Restart with the engine ritual: the startup installs the new binary.
+3. Load four. The SuperCollider log must say
    `four: FourStretch on` and `four: CLOUD is FourCloud`, and the count must
    stay 198.
 4. Copy the binary back into the repo on the Mac and commit it:

@@ -45,20 +45,19 @@ In maiden, type this line, then SYSTEM > RESTART and pick four from SELECT:
 You need a norns and a line-level sound on its input. four is built and tested on a norns
 shield with a Raspberry Pi 4. Older norns hardware has not been tried.
 
-The first time four starts, it asks for one more restart to install its plugin.
-
 ## The plugin
 
 Part of four's sound comes from its own plugin, FourStretch: C++ code for SuperCollider,
 written for four. It gives WARP and PV their clean time-stretch, CLOUD its Clouds, and the
 delay and the reverb their bucket brigade and room.
 
-four installs the plugin itself. The first time you load four, the screen says
-`PLUGIN INSTALLED / SYSTEM > RESTART`. Do SYSTEM > RESTART and load four again. maiden's
-SuperCollider tab then says `four: FourStretch on`.
+You do not need to do anything for it. The SYSTEM > RESTART after the install puts the
+plugin in place, and maiden's SuperCollider tab then says `four: FourStretch on` when four
+loads. If four's screen ever says `PLUGIN INSTALLED / SYSTEM > RESTART` (after an update,
+for example), do one more restart.
 
-Until that restart, or on a norns where the plugin does not fit, four plays simpler stock
-versions of the same voices and effects. Everything else works the same.
+On a norns where the plugin does not fit, four plays simpler stock versions of the same
+voices and effects. Everything else works the same.
 
 The plugin in this repo was built on a norns shield with a Raspberry Pi 4. To build it
 yourself, see [ugen/README.md](ugen/README.md).

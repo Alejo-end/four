@@ -64,13 +64,16 @@ engine builds the stock voices and effects.
   samples (rendered offline against a MiClouds of the same commit). Never name it
   `MiClouds`: a second MiClouds class next to an installed mi-UGens hangs every script.
   Every build needs `-Iugen/vendor/eurorack`.
-- **four installs its own plugin** (lib/mplugin.lua, 33rd change). A binary built on a
-  norns with `ugen/build_norns.sh` lands in `ignore/plugins/<uname -m>/FourStretch.so`
-  (inert on the norns, deployed like the rest). At init, four copies that `.so` alone
-  into Extensions when none is there or the shipped one is newer with other bytes, and
-  says `PLUGIN INSTALLED / SYSTEM > RESTART` once. It checks the ELF class and machine
-  against scsynth's, writes nothing else, and never touches mi-UGens. No binary shipped
-  for the machine: nothing happens. `test/test_plugin.lua` proves the cases.
+- **four installs its own plugin** (35th and 36th changes). A binary built on a norns
+  with `ugen/build_norns.sh` lands in `ignore/plugins/<uname -m>/FourStretch.so` (inert
+  on the norns, deployed like the rest; the repo ships one for armv7l, the same file for
+  aarch64). `lib/install_plugin.sh` holds the rule: it copies that `.so` alone into
+  Extensions when none is there or the shipped one is newer with other bytes. It checks
+  the ELF class and machine against scsynth's, writes nothing else, and never touches
+  mi-UGens. `Engine_Four.installPlug` runs it from `*initClass`, while sclang starts and
+  before it boots the server, so the one RESTART after `;install` brings the plugin in.
+  lib/mplugin.lua runs it again at four's load as a fallback, and when that installs it
+  says `PLUGIN INSTALLED / SYSTEM > RESTART`. `test/test_plugin.lua` proves the cases.
 - The engine uses the plugin only when the binary is the one that was there when
   sclang started (`Engine_Four.bootPlug`). One installed since then waits for the
   RESTART (`four: FourStretch is new since the restart`), so a reload without a RESTART
@@ -86,9 +89,9 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-16 it runs the thirty-fifth change (the `fourcloud` branch) at
-  `count: 198`, with the plugin built there that day (`ignore/plugins/armv7l/`), which
-  four's own installer put in Extensions. The plugin of 2026-11-13 is kept in
+- Since 2026-11-16 it runs the thirty-sixth change at `count: 198`, with the plugin
+  built there that day (`ignore/plugins/armv7l/`), which four's startup install put in
+  Extensions. The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
   (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
@@ -127,6 +130,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 33rd: SCENE A and B crossfader (Lua) | yes, 2026-11-16 | no |
 | 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | yes, 2026-11-16 | no |
 | 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | no |
+| 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

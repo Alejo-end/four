@@ -54,10 +54,13 @@ Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
 
 The `FourStretch` plugin holds the instrument's own stretch, grain, delay, reverb and
 Clouds code. The repo ships it, built on a norns shield with a Raspberry Pi 4, in
-`ignore/plugins/`. four installs it at load and shows `PLUGIN INSTALLED / SYSTEM > RESTART`
-once. Do the restart: until then four plays its stock voices. With the plugin, the
-SuperCollider log says `four: FourStretch on` and `four: CLOUD is FourCloud`. To build it
-yourself, see [ugen/README.md](../ugen/README.md).
+`ignore/plugins/`, and it installs itself while the norns starts: the SYSTEM > RESTART
+after `;install` puts it in place, and the log says
+`four: installed the FourStretch plugin at startup`. When four loads, the SuperCollider
+log says `four: FourStretch on` and `four: CLOUD is FourCloud`. If four's screen says
+`PLUGIN INSTALLED / SYSTEM > RESTART`, four installed it at load instead (after an update
+without a restart): do the restart, and until then four plays its stock voices. To build
+the plugin yourself, see [ugen/README.md](../ugen/README.md).
 
 ## First session
 

@@ -48,3 +48,12 @@ or the cache with several Clouds buffers. Four in SPECTRAL stays well under the 
 the scsynth thread xruns.
 
 Nobody listened. The numbers say that each voice sounds, not how it sounds.
+
+## The startup install (the thirty-sixth change)
+
+The plugin removed from Extensions again, the thirty-sixth change deployed, one
+RESTART. The sclang log said `compile done`, then
+`four: installed the FourStretch plugin at startup`. Loading four: `count: 198`,
+`four: FourStretch on`, `four: CLOUD is FourCloud`, and no installer message. A second
+RESTART logged nothing from four. The voices on a tone take: OFF 10.5%, PLAY 10.5%,
+GRAIN 10.7%, WARP 10.7%, PV 12.5%, CLOUD 13.0%, all at -18.8 to -20.9 dB out, no xruns.

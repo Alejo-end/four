@@ -1,5 +1,5 @@
--- test_plugin.lua: the plugin installer (lib/mplugin.lua), over real files in
--- a scratch folder, with the real shell. No norns: the home folder, the
+-- test_plugin.lua: the plugin installer (lib/mplugin.lua and the script it runs,
+-- lib/install_plugin.sh), over real files in a scratch folder, with the real shell. No norns: the home folder, the
 -- script folder, the machine and scsynth are handed in.
 --
 --   lua test/test_plugin.lua        # from the repo root
@@ -67,7 +67,8 @@ local REF = TMP .. "/ref"
 write(REF, "")
 sh("touch -t 202001010000 " .. q(REF))
 local mi_before = files(EXT .. "/mi-UGens") .. read(MI)
-local O = { home = HOME, dir = DIR, arch = "armv7l", servers = { TMP .. "/none", SERVER } }
+local SCRIPT = "lib/install_plugin.sh"
+local O = { home = HOME, dir = DIR, arch = "armv7l", servers = { TMP .. "/none", SERVER }, script = SCRIPT }
 
 -- nothing shipped for this machine: nothing happens
 ok(P.check(O) == "none", "nothing shipped: says none")
@@ -107,18 +108,38 @@ ok(not util.file_exists(DST), "a 64-bit binary for a 32-bit scsynth: nothing ins
 
 -- another arch: its own folder is empty, nothing happens
 write(SRC, elf(1, 40, "build three"))
-local O2 = { home = HOME, dir = DIR, arch = "aarch64", servers = { SERVER } }
+local O2 = { home = HOME, dir = DIR, arch = "aarch64", servers = { SERVER }, script = SCRIPT }
 ok(P.check(O2) == "none", "another arch, nothing shipped for it: says none")
 ok(not util.file_exists(DST), "another arch: nothing installed")
 
 -- no scsynth found: the folder name alone decides
-local O3 = { home = HOME, dir = DIR, arch = "armv7l", servers = { TMP .. "/none" } }
+local O3 = { home = HOME, dir = DIR, arch = "armv7l", servers = { TMP .. "/none" }, script = SCRIPT }
 ok(P.check(O3) == "installed", "no scsynth to compare with: installs by the folder")
 
 -- not on a norns (no script folder, no uname), or a strange machine name
 ok(P.check({ home = HOME }) == "unknown", "no script folder: says unknown")
 ok(P.check({ home = HOME, dir = DIR, arch = "x86_64; rm -rf /" }) == "unknown",
   "a machine name that is not a word: says unknown")
+
+-- the startup's call (Engine_Four.installPlug): no arch given, so the script asks
+-- uname, and off Linux it does nothing. On the Mac bench it must never write.
+local function run(args)
+  local p = io.popen("sh " .. SCRIPT .. " " .. args .. " 2>&1")
+  local s = p:read("a")
+  p:close()
+  return s
+end
+sh("rm -rf " .. q(EXT .. "/FourStretch"))
+local onlinux = run("x x ''") ~= "unknown\n"
+local startup = run(q(HOME) .. " " .. q(DIR) .. " '' " .. q(SERVER))
+if onlinux then
+  ok(startup ~= "unknown\n", "startup call on Linux: asks uname and acts")
+else
+  ok(startup == "unknown\n", "startup call off Linux: says unknown")
+  ok(not util.file_exists(DST), "startup call off Linux: nothing installed")
+end
+ok(run("") == "unknown\n" and run(q(HOME) .. " " .. q(DIR)) == "unknown\n",
+  "too few arguments: says unknown")
 
 -- mi-UGens never moved
 ok(files(EXT .. "/mi-UGens") .. read(MI) == mi_before, "mi-UGens: untouched")

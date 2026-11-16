@@ -4480,3 +4480,21 @@ Lua, on the device 2026-11-16, not heard)**.
 - The README gives the plugin its own section after Install, so a player learns from it
   that four installs the plugin and needs one more restart. The user asked for that.
 - Nobody has heard FourCloud.
+
+four, thirty-sixth change: **the plugin installs while the norns starts, so `;install` and
+one RESTART give the full sound (engine and Lua, the count stays 198, on the device
+2026-11-16)**. The user found the plugin too many steps and asked for maiden alone.
+- `lib/install_plugin.sh` now holds the install rule that lib/mplugin.lua held: the same
+  cases, the same words (installed, current, none, foreign, failed, unknown), the copy
+  beside the file and then the rename. lib/mplugin.lua runs it.
+- `Engine_Four.installPlug` runs it from `*initClass`, while sclang starts and before
+  StartUp boots the server. With no arch given the script asks uname and acts on Linux
+  only, so the Mac bench writes nothing. `bootPlug` is stamped after it, in StartUp, so
+  the engine takes the binary the server booted with.
+- On the device: with the plugin removed from Extensions, one RESTART logged
+  `four: installed the FourStretch plugin at startup`, and four's first load said
+  `four: FourStretch on` and `four: CLOUD is FourCloud` at `count: 198`, with no notice on
+  screen. The next RESTART said nothing. Every voice sounds on a tone take, no xruns.
+- test_plugin runs the script through lib/mplugin.lua and calls it as the startup does
+  (off Linux it says unknown and writes nothing): 24 assertions. check_dsp passes.
+- The README and the website say that the install needs nothing more than the RESTART.
