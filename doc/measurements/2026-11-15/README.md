@@ -91,6 +91,7 @@ are 20 to 50 ms, measured to -60 dB. With a 50 ms lag each step is 90% done afte
 16 ms, and the value stands still for half of each 67 ms frame. With 20 ms it
 stands still for 80%. During each step it moves 8 times (50 ms) to 18 times (20 ms)
 as fast as the mean. A slow sweep is a staircase at 15 Hz.
+probe4's job s measures it on the engine's own level and cutoff, with frames at random phase: the output stands still 61 to 74% of the time it should move, for up to 60 ms, with a ripple above 5 Hz of -34 to -35 dB (test/dsp/review/an_stair.py).
 
 ## Stereo, headroom and the record path
 

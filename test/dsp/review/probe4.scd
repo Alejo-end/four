@@ -19,6 +19,49 @@ Engine_Four.new(ctx, { arg eng;
         SynthDef(\copy, { |from, to| Out.ar(to, In.ar(from, 2)) })
     ];
     var jobs, run, std = syn.collect({ |d| [0.0, [\d_recv, d.asBytes]] });
+    // s. THE MODULATED KNOB (doc/dsp-plan.md: "No step from a moved knob").
+    // A modulator sends the engine one value a frame. Two frame clocks:
+    //   \deadline: a deadline every 1/15 s, each frame 0 to 8 ms late. The
+    //     frame loop after its fix. The deadlines are 1/150 longer than
+    //     1/15 s (14.9 Hz): on the device the system clock and the audio clock
+    //     drift apart, so over minutes the frames pass through every phase of
+    //     any 1/15 s clock in the engine. The probe speeds that up, so one run
+    //     of 11 s walks the frames once through every phase. (A clock locked
+    //     at one phase tests one phase: Ramp.kr at 1/15 s scored 0% still
+    //     with that, and stands still with this.)
+    //   \drift: the old loop. It slept 1/15 s after 2 to 10 ms of work, and a
+    //     value reached scsynth 0 to 3 ms later (13.8 Hz on average).
+    // The first frame lands at a random place inside a frame, so no step keeps
+    // a phase against an engine block or a synth start. The randomness is
+    // seeded: every run sends the same frames.
+    // The values are a FREE sine of 0.25 Hz, one step a frame, on two real
+    // engine paths at once: track 2's level (0.5, swing 0.3) through
+    // \four_lane_out over DC 0.5 (channel 0), and the cutoff of a lane filter
+    // (3 kHz times 2 to the power of 1.5 sin) under a 3 kHz tone (channel 2).
+    // an_stair.py measures how much of the time the output stands still.
+    var modJob = { |name, clock, seed|
+        var ts = List.new, msgs;
+        thisThread.randSeed = seed;
+        (clock == \deadline).if({
+            var t0 = 0.5 + (1.0.rand / 15), p = (1 / 15) * (1 + (1 / 150)), k = 0;
+            while({ (t0 + (k * p)) < 11.6 }, { ts.add(t0 + (k * p) + 0.008.rand); k = k + 1 });
+        }, {
+            var t = 0.5 + (1.0.rand / 15);
+            while({ t < 11.6 }, { ts.add(t + 0.003.rand); t = t + (1 / 15) + rrand(0.002, 0.010) });
+        });
+        msgs = [[0.0, [\d_recv, def.(\four_lane_out)]], [0.0, [\d_recv, def.(\four_filt_lo)]],
+            [0.001, [\s_new, \dc, 900, 0, 0, \out, 40, \amp, 0.5, \dur, 20]],
+            [0.0011, [\s_new, \sine, 901, 0, 0, \out, 44, \freq, 3000, \amp, 0.25]],
+            [0.002, [\s_new, \four_lane_out, 1000, 1, 0, \pbus, 40, \out_bus, 0, \own_out, 90,
+                \dly_out, 92, \rev_out, 94, \level, 0.5]],
+            [0.003, [\s_new, \four_filt_lo, 1001, 1, 0, \sbus, 44, \pbus, 46, \cutoff, 3000, \resonance, 0]],
+            [0.004, [\s_new, \copy, 1002, 1, 0, \from, 46, \to, 2]]]
+            ++ ts.collect({ |tk, k|
+                var ph = 2pi * 0.25 * (k + 1) / 15;
+                [[tk, [\n_set, 1000, \level, 0.5 + (0.3 * ph.sin)]],
+                 [tk, [\n_set, 1001, \cutoff, 3000 * (2 ** (1.5 * (ph + 1).sin))]]] }).flatten(1);
+        [name, 12.0, 4, [], msgs]
+    };
     ("COMMANDS " ++ eng.cmdNames.size).postln;
     "FOUR_PLUGIN_DIR".getenv.notNil.if({
         opts.ugenPluginsPath = [Platform.resourceDir +/+ "plugins", "FOUR_PLUGIN_DIR".getenv];
@@ -82,7 +125,10 @@ Engine_Four.new(ctx, { arg eng;
             [[0.0, [\d_recv, def.(\four_delay)]],
              [0.001, [\s_new, \sine, 900, 0, 0, \out, 40, \amp, 0.25]],
              [0.01, [\s_new, \four_delay, 1000, 1, 0, \in_bus, 40, \out_bus, 0, \delay_time, 0.3, \delay_fb, 0, \delay_mix, 1]],
-             [1.0, [\n_set, 1000, \delay_time, 0.1]]]]
+             [1.0, [\n_set, 1000, \delay_time, 0.1]]]],
+        // s. the modulated knob, on the two frame clocks (see modJob above)
+        modJob.(\mod15, \deadline, 1511),
+        modJob.(\mod138, \drift, 1138)
     ];
     run = { |i|
         if (i >= jobs.size) { "PROBE_DONE".postln; 0.exit } {

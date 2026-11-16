@@ -42,6 +42,23 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED.
 5. The rebuilt presets are not on the device. `test/deploy_set.sh` overwrites slots 1
    to 12 and deletes their takes, so ask the user first.
+6. Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
+   pad's first sound and the gap at a mode change (the twenty-second change). The
+   device runs scsynth 3.13.0-dev, and the first-grain fix depends on how `CoinGate`
+   starts there.
+7. Log the real frame period: the time between `frame_tick` calls for 60 s while
+   playing. The twenty-seventh change puts the frames on a deadline. Make sure that they
+   now come at 15 a second, and that a FREE modulator keeps its rate.
+
+After this phase, measure the branch `proposal-dsp-fixes` (proposal A), then merge it.
+Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8 with a
+low resonant low-pass for 2 minutes. Measure the reverb's cost. Force a real-time memory
+failure and look for its message in maiden.
+
+Proposal B is dropped and kept on `proposal-b-ramp`. Its successor is a glide that
+adapts to the frame clock, or 60 Hz modulator sends from Lua. Measure either one on the
+device before it ships. Capture the latency of OPEN, KILL and DRY. Listen to an LFO on
+the cutoff with resonance 0.7. Try a morph and a preset load. Read the CPU in `top -H`.
 
 ## Phase 1: the show checks (needs the user at the hardware)
 

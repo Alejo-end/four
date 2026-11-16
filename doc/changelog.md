@@ -4320,3 +4320,32 @@ take about 30 s.
 - The probes use unseeded noise, so GRAIN's flatness moves between -1.6 and -2.3 dB, and
   the FreeVerb runaway rows move by several dB. Their margins allow it.
 CLAUDE.md's workflow names the check. Nothing ran on the device.
+
+four, twenty-seventh change: **the frame clock keeps time, the modulators stop at 6 Hz,
+and an honest staircase probe (Lua and test tools, the count stays 198)**. A DSP
+assessment on 2026-11-16 found both Lua faults and showed that the old staircase probe
+passed by construction.
+- The frame loop slept 1/FPS after each frame's work, so the frames came at about 14 a
+  second, and a FREE modulator, which stepped by `rate / FPS`, ran slow by the same
+  ratio. The loop now sleeps to a deadline every 1/FPS of real time (`util.time`). A late
+  frame or a jump of the system clock restarts the deadline from now, so the loop never
+  bursts and never stalls. `ctx.frame_dt` holds the real time since the last frame, and
+  a FREE modulator steps by `rate * frame_dt`. The simulator has no `util.time`, so its
+  frames stay 1/FPS and the tests are unchanged.
+- The modulators' rate stopped at 10 Hz, but the frames sample the wave 15 times a
+  second, so anything above 7.5 Hz aliased: 10 Hz played as 5 Hz. The rate now stops at
+  6 Hz, at least 2.5 frames a cycle. No shipped preset uses more than 0.5 Hz. A MIDI map
+  of an LFO rate now spans 0.01 to 6 Hz.
+- test_control: three assertions (739 in all). A late frame moves a FREE wave by the time
+  it took, the sim's frame by 1/FPS, and the rate stops below half the frame rate.
+- test/dsp/review/probe4.scd job s and `an_stair.py` drive track 2's level and a lane
+  filter's cutoff from a modulator frame clock, at 14.9 Hz with 0 to 8 ms of jitter, and
+  at the old 13.8 Hz. They measure how much of the sweep the output stands still, the
+  longest stand and the ripple above 5 Hz. Today's lags stand still 61 to 74% of the
+  time, with stands of 47 to 60 ms: twelve KNOWN rows in check_dsp.py. A glide built in
+  a scratch copy of the engine scored 0% and 0 ms, and Ramp.kr (proposal B) showed stands
+  of a whole frame, 65 ms. So the probe can tell a fix from a fake one.
+The engine did not change. The Lua changed: save and reload the script. Nothing ran on
+the device. On the device, measure the real frame period (doc/plan.md, Phase 0, step 7).
+doc/plan.md, Phase 0 also gains the gate's stage 19 and what to measure before
+proposal A merges.

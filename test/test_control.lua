@@ -2309,6 +2309,22 @@ do
     "two modulators on one knob add up and stay bounded")
   near(params:get("cutoff"), 4000, 1e-9, "...and the knob never moves")
   params:set("lfo2_depth", 0); params:set("lfo2_target", 1)
+  -- a FREE wave follows real time: a late frame moves its phase by the time
+  -- the frame took (four.lua's frame clock sets ctx.frame_dt), not by 1/FPS
+  params:set("lfo1_rate", 1)
+  local m1 = lfo.mods[1]
+  _h.run_ticks(1)
+  local p0 = m1.phase
+  CTX.frame_dt = 2 / CTX.FPS
+  _h.run_ticks(1)
+  CTX.frame_dt = nil
+  near((m1.phase - p0) % 1, 2 / CTX.FPS, 1e-9,
+    "a FREE modulator steps by the real time since the last frame")
+  p0 = m1.phase
+  _h.run_ticks(1)
+  near((m1.phase - p0) % 1, 1 / CTX.FPS, 1e-9, "...and by 1/FPS where no clock measures it")
+  ok(params:lookup_param("lfo1_rate").controlspec.maxval <= CTX.FPS * 0.4 + 1e-9,
+    "the LFO rate stops below half the frame rate, so a wave never aliases")
   -- on the clock: the phase is the beat count
   local real_beats = clock.get_beats
   local beats = 0

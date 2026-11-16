@@ -155,6 +155,24 @@ def check(build):
           -num(r'master out 1\.55-1\.75 s:.*image L-R ([-+\d.]+) dB', a1), 3.85, 1, 'dB')
     known(build, "the record limiter moves the image of the take: shift",
           -num(r'the take 1\.05-1\.25 s:.*image ([-+\d.]+) dB', a1), 2.78, 1, 'dB')
+    # No step from a moved knob (probe4 s, an_stair.py): a 0.25 Hz sine sent once
+    # a frame into track 2's level and a lane filter's cutoff, on two frame
+    # clocks, at random phase. Today's lags take each step in 10 to 17 ms and
+    # then stand still. Both paths hold no plugin UGen, so the rows run once,
+    # in the stock build. A smoother that draws lines between the frames should
+    # reach still <= 1%, longest <= 10 ms and ripple <= -45 dB: then these
+    # become target rows. (Measured offline, an adaptive glide in a scratch copy
+    # of the engine: 0%, 0 ms, -53 to -60 dB. Ramp.kr at 1/15 s: 3 to 4%, 65 ms.)
+    if build == 'stock':
+        a_s = analyse(os.path.join(REV, 'an_stair.py'), runs['p4'][0], 'p4')
+        for clock, hz, kv in [('deadline', '14.9 Hz deadline clock', {'level': (72.0, 56.0, -35.0), 'cutoff': (60.8, 46.7, -34.0)}),
+                              ('drift', '13.8 Hz old clock', {'level': (73.9, 60.0, -35.2), 'cutoff': (62.2, 50.7, -33.6)})]:
+            for path, (k_still, k_long, k_rip) in kv.items():
+                line = rf'^s\. {clock} clock, {path}: still ([\d.]+)% of the time, longest ([\d.]+) ms, ripple above 5 Hz ([-\d.]+) dB'
+                known(build, f"a modulated {path} stands still, {hz}: share of the time",
+                      num(line, a_s, 1), k_still, 5, '%')
+                known(build, f"a modulated {path} stands still, {hz}: longest", num(line, a_s, 2), k_long, 15, 'ms')
+                known(build, f"a modulated {path} steps, {hz}: ripple above 5 Hz", num(line, a_s, 3), k_rip, 3, 'dB')
     v = num(r'minus B \(left alone\): ([-\d.]+) dBFS', a1)
     say('KNOWN', build, f"the reverb's 9 knobs on a running synth change nothing: difference {v:.1f} dBFS "
         "(known -300, it cannot get worse; a change shows they act)")
@@ -198,7 +216,6 @@ def skips():
     for row, where in [
         ("PV and WARP are the take at speed 1", "ugen/test_core.cpp"),
         ("LP, BP and HP sound alike on both paths", "DFM1 is not on the Mac (sc3-plugins)"),
-        ("No step from a moved knob", "the 15 fps modulator steps are Lua timing, not a render"),
         ("RESON is in tune", "no shipped probe; it passed in the review"),
         ("The bucket brigade meets its formulas", "ugen/test_core.cpp"),
         ("Cost on the norns", "test/device/measure.py on the device")]:

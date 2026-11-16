@@ -99,6 +99,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 24th: gate.py follows four (test tools) | not run there yet | |
 | 25th: stage 19 of the gate (documents, test tools) | not run there yet | |
 | 26th: the offline DSP check (Mac only) | not for the device | |
+| 27th: the frame clock, the LFO rate cap (Lua), the staircase probe | NO | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

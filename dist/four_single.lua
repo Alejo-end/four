@@ -2889,7 +2889,9 @@ function M.tick(amp)
         if rnd then m.held = math.random() * 2 - 1 end
       end
     else
-      local ph = m.phase + pget(PID[i].rate, 0.5) / FPS
+      -- the real time since the last frame (four.lua's frame clock), so a
+      -- FREE wave keeps its rate when a frame comes late
+      local ph = m.phase + pget(PID[i].rate, 0.5) * (C.frame_dt or 1 / FPS)
       if ph >= 1 and rnd then m.held = math.random() * 2 - 1 end
       m.phase = ph - floor(ph)
     end
@@ -2984,8 +2986,11 @@ function M.add_params(add_group)
     params:add_option(PID[i].target, "LFO " .. i .. " target", names, 1)
     params:add_option(PID[i].shape, "LFO " .. i .. " shape", SHAPES, 1)
     params:add_option(PID[i].period, "LFO " .. i .. " period", PERIOD_NAMES, 1)
+    -- the frames sample the wave 15 times a second (four.lua FPS). Above
+    -- 7.5 Hz a wave aliases (10 Hz played as 5 Hz), so the rate stops at
+    -- 6 Hz: at least 2.5 frames a cycle, with room for a late frame.
     params:add_control(PID[i].rate, "LFO " .. i .. " rate",
-      controlspec.new(0.01, 10, "exp", 0, 0.5, "Hz"))
+      controlspec.new(0.01, 6, "exp", 0, 0.5, "Hz"))
     params:add_control(PID[i].depth, "LFO " .. i .. " depth",
       controlspec.new(-1, 1, "lin", 0, 0, ""))
     params:add_number(PID[i].track, "LFO " .. i .. " track", 1, NTRACKS, 1)
@@ -10893,9 +10898,31 @@ function init()
   -- tap. The frame is caught, reported (at most every 5 seconds, not 15 times
   -- a second) and the next one runs.
   local last_err_frame = -1e9
+  -- A frame is due every 1/FPS of real time. A plain sleep of 1/FPS after
+  -- each frame added the frame's own work to the period, so the frames came
+  -- at about 14 a second. A frame that runs late moves the deadline to now:
+  -- the loop never bursts to catch up. A system clock that jumps (a time sync)
+  -- restarts the deadline too, so a jump back can never stall the screen.
+  -- ctx.frame_dt is the real time since the last frame, for what must follow
+  -- the clock (the FREE modulators). The simulator has no util.time, so there
+  -- every frame is 1/FPS.
+  local now = util.time
   redraw_clock = clock.run(function()
+    local due = now and now() or 0
+    local last = due
     while true do
-      clock.sleep(1 / FPS)
+      if now then
+        due = due + 1 / FPS
+        local t = now()
+        local wait = due - t
+        if wait < 0 or wait > 2 / FPS then due, wait = t, 0 end
+        clock.sleep(wait)
+        t = now()
+        ctx.frame_dt = max(0, min(t - last, 4 / FPS))
+        last = t
+      else
+        clock.sleep(1 / FPS)
+      end
       local ok, err = pcall(frame_tick)
       if not ok and ctx.frame - last_err_frame >= FPS * 5 then
         last_err_frame = ctx.frame
