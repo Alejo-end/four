@@ -42,21 +42,14 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
    are captured (doc/measurements/2026-11-16/screens/19.22_REVERB_*_settled.png): the
    user still has to look. The text covers the top edge of the outer square.
 5. (The album presets left the repo in the thirty-eighth change.)
-6. DONE 2026-11-16, with two checks open (doc/measurements/2026-11-16/): 19.12, breaks
-   when TYPE steps over a tone, and 19.27, the dense set at 64.1% of the scsynth thread.
-   It found that tracks 2 to 4 never reached the delay or the reverb (the fortieth
-   change fixed it). Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
-   pad's first sound and the gap at a mode change (the twenty-second change). The
-   device runs scsynth 3.13.0-dev. The bug depends on how `Impulse` starts: since
-   2022-07-18 its first impulse is the init sample, which `CoinGate` takes as its last
-   trigger. A build older than that never had the bug. The fix gives one grain at
-   sample 0 either way.
-7. DONE 2026-11-16: 901 frames in 60.00 s, p95 67.6 ms, none late, redraw p95 11.5
-   ms, and the frame_dt sum is 60.07 s. Log the real frame period: the time between `frame_tick` calls for 60 s while
-   playing. The twenty-seventh change puts the frames on a deadline. Make sure that they
-   now come at 15 a second, and that a FREE modulator keeps its rate. Log each frame's
-   own work time too: a frame that takes longer than 1/15 s is followed by the next one
-   after about 1 ms, so matron then gets no rest between frames.
+6. DONE 2026-11-16: stage 19 ran on four for the first time (doc/measurements/2026-11-16/).
+   It found that tracks 2 to 4 never reached the delay or the reverb, and the fortieth
+   change fixed that. Open: 19.12, breaks when TYPE steps over a tone, and 19.27, the
+   dense set at 64.1% of the scsynth thread. To run it again:
+   `python3 test/device/gate.py 19`.
+7. DONE 2026-11-16: the frame period, logged for 60 s while four played. 901 frames in
+   60.00 s, p95 67.6 ms, none late, redraw p95 11.5 ms, and the sum of `frame_dt` is
+   60.07 s, so a FREE modulator keeps its rate.
 
 After this phase, measure the branch `proposal-dsp-fixes` (proposal A), then merge it.
 Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8 with a

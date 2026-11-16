@@ -4552,8 +4552,12 @@ of the walkthrough ran on the device for the first time on four, and 19.21 faile
 nothing rang on through the delay or the reverb from track 2.
 - The cause: io's arguments for the other tracks' send buses were named `t_dly` and
   `t_rev`. SuperCollider makes an argument named `t_...` a trigger control, which falls
-  to 0 after one block, so io read bus 0. Since the nineteenth change, tracks 2 to 4
-  never reached the delay or the reverb. Track 1 did, through its own `fx_dly`.
+  to 0 after one block, so io read bus 0. The bus came in with mangler2 and is in four's
+  first commit, so tracks 2 to 4 never reached the delay or the reverb at any point.
+  Track 1 did, through its own `fx_dly`. Before the nineteenth change every `fx_dly`
+  was 1, so every earlier figure "with the reverb and the delay on" ran with tracks 2
+  to 4 dry. The cost of the effects' own synths does not depend on how many tracks feed
+  them, so those CPU figures stand.
 - The arguments are now `lanes_dly` and `lanes_rev`. test_control rejects any engine
   argument named `t_`, `a_` or `i_` (the old engine fails it on `t_dly` and `t_rev`).
 - On the device, track 2 with a delay send: the tail went from -92.5 to -30.3 dB, and
@@ -4564,4 +4568,10 @@ nothing rang on through the delay or the reverb from track 2.
   of the scsynth thread, no xruns) are open. The frame clock was logged: 15 frames a
   second, none late, and the FREE modulators keep their rate.
   doc/measurements/2026-11-16/ has all of it.
+- A review the same day added: 19.28 in gate.py and doc/device-gate.md, every track's
+  delay and reverb send on its own; 19.7 and 19.8 read every lane's filter from the
+  engine (`lanes`), since the node tree leaves out a paused strip; the offline probes
+  (test/dsp/review/probe1.scd, probe4.scd) pass the new argument names; the static
+  check also reads `|a, b|` arguments and NamedControls and drops block comments; and
+  doc/controls.md's SCENE prose says E2 picks A, E3 picks B and K1+E3 fades.
 

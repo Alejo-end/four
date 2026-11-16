@@ -141,7 +141,8 @@ walked the twelve pages there yet.
 
 Measured on the device (doc/measurements/2026-11-12/ and 2026-11-13/). The scsynth thread
 xruns past about 60%.
-- Four PLAY tracks take 25.2% (twelfth change). With preset 1's reverb and delay on:
+- Four PLAY tracks take 25.2% (twelfth change). With preset 1's reverb and delay on
+  (tracks 2 to 4 did not reach them until the fortieth change; the effects cost the same):
   four PLAY 17.2%, four PV 28.6%, four GRAIN 19.1% (sixteenth change). Four PV at pitch
   2 take 53.0%. The user's heaviest set takes 57.3%, with no xruns.
 - A soak of 30 minutes (2026-11-12) ran near 40% at 58 to 60 °C, with no throttling. A

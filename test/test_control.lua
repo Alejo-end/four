@@ -586,9 +586,9 @@ end
 -- reverb (found on the device on 2026-11-16). No argument may carry a prefix.
 -- ============================================================================
 do
-  local sc = io.open("lib/Engine_Four.sc"):read("a"):gsub("//[^\n]*", "")
+  local sc = io.open("lib/Engine_Four.sc"):read("a"):gsub("/%*.-%*/", ""):gsub("//[^\n]*", "")
   local bad, seen = {}, 0
-  for list in sc:gmatch("arg%s+([^;]+);") do
+  local function names(list)
     for item in list:gmatch("[^,]+") do
       local name = item:match("^%s*([%a_][%w_]*)")
       if name then
@@ -596,6 +596,12 @@ do
         if name:match("^[tai]_") then bad[#bad + 1] = name end
       end
     end
+  end
+  for list in sc:gmatch("arg%s+([^;]+);") do names(list) end
+  for list in sc:gmatch("{%s*|([^|]+)|") do names(list) end
+  -- a NamedControl takes its rate from its name too: \t_x.kr
+  for name in sc:gmatch("\\([%a_][%w_]*)%.[aikt]r") do
+    if name:match("^[tai]_") then bad[#bad + 1] = name end
   end
   ok(seen > 100, "the engine's argument lists are readable (" .. seen .. " names)")
   ok(#bad == 0, "no engine argument is named t_, a_ or i_ (" .. table.concat(bad, ",") .. ")")

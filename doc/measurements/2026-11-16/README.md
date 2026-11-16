@@ -63,7 +63,8 @@ GRAIN 10.7%, WARP 10.7%, PV 12.5%, CLOUD 13.0%, all at -18.8 to -20.9 dB out, no
 
 The norns had booted on a stale clock (sclang started at 19:17, the clock then
 said 20:26), so the services were restarted before any measurement. Then
-`python3 test/device/gate.py 19`. The results are in `gate.jsonl`.
+`python3 test/device/gate.py 19`. `gate.jsonl` keeps the last result of each check:
+19.1, 19.7, 19.8, 19.14 and 19.19 to 19.22 come from the run after the fix below.
 
 19.21 failed: with `dly_rev` at 1, nothing rang on once track 2 stopped. A probe
 on the buses showed that track 2's sends reached `tDlyBus` and `tRevBus`, but
@@ -92,6 +93,18 @@ Two checks misread the device and were fixed in gate.py:
 - 19.14 compared bands that PLAY does not hold: 884 Hz at -135 and -145 dB. A band
   under -80 dB now counts only when a voice puts sound into it. Then WARP and PV
   differ from PLAY by 0.0 dB.
+
+After a review the same evening, 19.28 checks every track's sends on its own, and 19.7
+and 19.8 read every lane's filter from the engine. On the device both passed, and 19.28
+read what rings on after each track stops, with only its delay send or only its reverb
+send open (silence is -92.5 dB):
+
+| Track | Delay send | Reverb send |
+|---|---|---|
+| 1 | -41.1 dB | -46.6 dB |
+| 2 | -34.2 dB | -43.1 dB |
+| 3 | -40.2 dB | -49.4 dB |
+| 4 | -47.3 dB | -52.2 dB |
 
 Still open from the stage:
 

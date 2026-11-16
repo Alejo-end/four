@@ -2462,6 +2462,17 @@ def lane_nodes():
             "fx": sorted(x for x in names if x.startswith("four_fx_"))}
 
 
+def lane_kinds():
+    """The filter synth each of the four lanes holds, read from the engine.
+
+    The node tree leaves out the synths of a paused strip, so tracks 3 and 4's
+    lanes are checked here instead (2026-11-16 review).
+    """
+    out = n.sc('("MGLK " ++ Crone.engine.lanes.collect({ arg l; l[\\filtKind] })).postln;')
+    found = re.search(r"MGLK \[ (.*) \]", out)
+    return [x.strip() for x in found.group(1).split(",")] if found else None
+
+
 def onset(xs, rate, floor=0.01):
     """The first time (s) a channel passes `floor` (-40 dBFS), or None."""
     for i, s in enumerate(xs):
@@ -2594,7 +2605,10 @@ def stage19():
     def c197():
         time.sleep(0.5)
         lane = lane_nodes()
-        return verdict(lane["filters"] == 2 and lane["colour"] == 0 and not lane["fx"], f"at rest {lane}")
+        kinds = lane_kinds()
+        ok = (lane["filters"] == 2 and lane["colour"] == 0 and not lane["fx"]
+              and kinds == ["four_filt_lo"] * 4)
+        return verdict(ok, f"at rest {lane}; every lane's filter {kinds}")
 
     def c198():
         n.set("t2_cutoff", 400)
@@ -2606,6 +2620,7 @@ def stage19():
                 n.set("t2_filt_type", v)
                 time.sleep(0.4)
                 seen[name] = lane_nodes()
+                seen[name]["kinds"] = lane_kinds()
                 time.sleep(0.3)
 
         rate, chans = during(step, "19.8_filter_swap", 7)
@@ -2614,7 +2629,9 @@ def stage19():
         loud = audio.stats(chans[0])["rms_db"]
         n.set("t2_cutoff", 20000)
         ok = (loud > -40 and seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
-              and all(x["filters"] == 2 for x in seen.values()) and not hits)
+              and all(x["filters"] == 2 for x in seen.values()) and not hits
+              and seen["HP"]["kinds"] == ["four_filt_lo", "four_filt_hi", "four_filt_lo", "four_filt_lo"]
+              and seen["LP"]["kinds"] == ["four_filt_lo"] * 4)
         return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; level {loud} dB; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
 
     def c199():
@@ -2926,6 +2943,35 @@ def stage19():
         return verdict(ok, f"busiest scsynth thread and xruns over 60 s: {out}. 2026-11-13: 53.0% and 57.3%")
 
     check("19.27", c1927)
+
+    # every track's sends, each on its own. Until the fortieth change tracks 2
+    # to 4 never reached the delay or the reverb, and no check saw it.
+    def c1928():
+        for pid, v in (("delay_mix", 0.8), ("rev_mix", 0.6), ("delay_time", 0.25),
+                       ("delay_fb", 0.5), ("dly_rev", 0), ("rev_decay", 4)):
+            n.set(pid, v)
+        out = {}
+        for t in (1, 2, 3, 4):
+            names = ["OFF"] * 4
+            names[t - 1] = "PLAY"
+            modes(*names)
+            for kind in ("dly", "rev"):
+                sends(dly=1 if kind == "dly" else 0, rev=1 if kind == "rev" else 0, track=t)
+                time.sleep(1.5)
+                n.set(tp(t, "mode"), MODE["OFF"])
+                time.sleep(0.3)
+                out[f"t{t} {kind}"] = level(f"19.28_t{t}_{kind}", 1)
+                sends(dly=0, rev=0, track=t)
+                n.set(tp(t, "mode"), MODE["PLAY"])
+        modes("OFF", "PLAY", "OFF", "OFF")
+        for pid, v in (("delay_mix", 0), ("rev_mix", 0), ("delay_time", 0.3), ("delay_fb", 0.3),
+                       ("rev_decay", 2)):
+            n.set(pid, v)
+        # silence reads -92.5 dB: every send must leave a tail well above it
+        return verdict(all(v > -75 for v in out.values()),
+                       f"what rings on after each track stops, by its one send: {out}")
+
+    check("19.28", c1928)
 
 
 def cleanup():

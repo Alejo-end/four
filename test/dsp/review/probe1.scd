@@ -68,7 +68,7 @@ Engine_Four.new(ctx, { arg eng;
              [0.001, [\s_new, \four_io, 1001, 1, 0, \in1, 60, \in2, 61, \out, 0, \buf_l, 0, \buf_r, 1,
                 \play_bus, 70, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 0, \level, 1,
                 \lane_bus, 72, \dly_send, 74, \dly_ret, 76, \rev_send, 78, \rev_ret, 80, \t2_ret, 82,
-                \t_dly, 84, \t_rev, 86, \own_out, 88, \rec_level, 1, \pre_level, 0]],
+                \lanes_dly, 84, \lanes_rev, 86, \own_out, 88, \rec_level, 1, \pre_level, 0]],
              [0.5, [\n_set, 1001, \rec, 1]],
              [3.4, [\n_set, 1001, \rec, 0]],
              [3.55, [\b_write, 0, dir +/+ tag ++ "_limrecL.wav", "wav", "float"]],
