@@ -4402,3 +4402,17 @@ four, thirty-first change: **a README that says what four is, and a safer deploy
 - Every documented deploy rsync now has `--exclude='.claude'`. Agent worktrees live in
   `.claude/worktrees`, each with its own `lib/Engine_Four.sc`, and a second copy on the
   norns hangs every script (invariant 1). The worktree of `proposal-dsp-fixes` was there.
+
+four, thirty-second change: **animated screen clips for the website (a test tool only)**.
+`test/uisim/export_clips.lua` plays four in the offscreen renderer and writes one PNG
+sprite sheet per clip (128 by 64 per frame, 16 grey levels) and `clips.json`, for the
+four-site website.
+- usage: `$LUA53 test/uisim/export_clips.lua four.lua <outdir> [contact.png]`. Lua has
+  no zlib, so it writes a PGM and converts it with `test/uisim/pgm2png.py`.
+- 18 clips: the opening, TAKE recording, the five voices, TRACKS and its sends, TAPE,
+  FILTER, EFFECT through every type, DELAY, REVERB, MIX, PADS, MOTION and SCENE. Each page
+  clip starts with four's own E1 page pop, then loops. About 140 KB in all.
+- The first 200 ticks replay render_pages' scenario, and its first shot is byte for byte
+  the same as render_pages' `base_01_TAKE`. Two runs give identical files.
+- VOICE CLOUD and the ECHO effect are drawn for the first time. Nothing in four's runtime
+  changed.
