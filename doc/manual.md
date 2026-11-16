@@ -110,7 +110,7 @@ the code.
 | MIX | Input, engine, tape and output levels | throw the engine | throw the tape |
 | PADS | The take as eight slices to play | play the slice | route notes |
 | MOTION | Record knob moves, and set the four modulators | record | play |
-| SCENE | Keep a sound, call it back, morph to it | recall, hold: peek | capture |
+| SCENE | Keep a sound, call it back, fade from A to B | recall, hold: peek | capture |
 
 TAKE, VOICE, FILTER and EFFECT edit the focused track. The header shows the focus as
 1 2 3 4.
@@ -212,14 +212,29 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
 
 | | |
 |---|---|
-| ![SCENE](ui/scene.png) | ![SCENE, the orbit](ui/scene-orbit.png) |
-| E2 picks a slot and E3 morphs toward it. | The orbit wanders between the stored scenes. |
+| ![SCENE](ui/scene.png) | ![SCENE, A and B](ui/scene-ab.png) |
+| E2 picks B. E3 fades from the sound you have to B. | Hold K1 and turn E2 to pick A. E3 fades from A to B. |
+| ![SCENE, the peek](ui/scene-peek.png) | ![SCENE, the orbit](ui/scene-orbit.png) |
+| Hold K2 to borrow B. | The orbit wanders between the stored scenes. |
 
-- K3 captures the sound into the slot. K2 recalls it. Hold K2 to borrow the scene, and
-  release to come back.
+- K3 captures the sound into the selected slot. K2 recalls it. Hold K2 to borrow the
+  scene, and release to come back.
+- E3 is a crossfader with two ends. B, the right end, is the selected slot. A, the left
+  end, is LIVE or a stored slot: hold K1 and turn E2. The rail names both ends, and a
+  small A sits under the cell of slot A.
+- With A on LIVE, E3 fades from the sound you have when it leaves 0. Back at 0 you hear
+  that sound again.
+- With A on a slot, E3 at 0 is A and E3 at 1 is B, both ways. A new A changes nothing
+  while E3 rests at 0. The first turn of E3 brings A in at once.
+- If you pick another A during a fade, the fade keeps its A until E3 is back at 0, so the
+  sound never jumps. The new A shows dim under its cell until then.
+- An empty slot as A counts as LIVE. With B empty, E3 does nothing.
+- E3 never lands a scene. At 1 the holds, the note routing, the buffer writers and the
+  voice count are still as you left them, and K2 lands the rest of B.
+- The orbit, a K2 peek and a GLIDE recall start from the sound you have, whatever A is.
 - Slot zero, the left arrow, is the way back. Every recall parks the sound before it there.
-- The orbit picks a scene, morphs part of the way, rests, and picks the next one. Hold K1
-  for its drift time and its reach. Start it with the `orbit run` parameter.
+- The orbit picks a scene, morphs part of the way, rests, and picks the next one. Start it
+  with the `orbit run` parameter. Its drift time and its reach are in PARAMS > orbit.
 - `recall quantize` sets the moment of a recall: NOW, the next BEAT or BAR, or GLIDE, a
   morph over `glide beats`.
 - `capture scope` makes a scene of the effects only. It then lands on any material.

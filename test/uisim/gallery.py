@@ -57,6 +57,7 @@ SHOTS = {
     "motion-rec": "base_11_MOTION_REC",
     "motion-lfo": "base_11_MOTION_LFO",
     "scene": "base_12_SCENE_MORPH",
+    "scene-ab": "base_12_SCENE_AB",
     "scene-peek": "base_12_SCENE_PEEK",
     "scene-orbit": "base_12_SCENE_ORBIT",
 }

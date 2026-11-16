@@ -629,6 +629,31 @@ else
   redraw()
   export(pfx("SCENE", "_ORBIT"))
   params:set("orbit_on", 0)
+  -- the two-scene crossfader, after the orbit so no shot above moves: A is
+  -- slot 1, B slot 4. At rest the rail names both ends and the A mark sits
+  -- under cell 1; then halfway; then K1 held and E2 turned to pick A = 7
+  -- mid-fade: the fade keeps the A it left from (the rail still says A 1),
+  -- so the mark under 7 waits dim
+  params:set("scene_morph_amt", 0)
+  run_ticks(2)
+  params:set("scene_slot", 4)
+  params:set("scene_slot_a", 1)
+  run_ticks(25)                          -- the orbit's last word has gone
+  redraw()
+  export(pfx("SCENE", "_AB_REST"))
+  params:set("scene_morph_amt", 0.4)
+  run_ticks(3)
+  redraw()
+  export(pfx("SCENE", "_AB"))
+  key(1, 1)
+  enc(2, 6)
+  run_ticks(1)
+  redraw()
+  export(pfx("SCENE", "_AB_PICK"))
+  key(1, 0)
+  params:set("scene_morph_amt", 0)
+  run_ticks(2)
+  params:set("scene_slot_a", 0)
   -- the header with every flag lit on a long title: the words that do not
   -- fit shrink to dots and pips, and none of them drops off. Shot in the
   -- blink's lit phase, so the write letters show. The sequencer's and the

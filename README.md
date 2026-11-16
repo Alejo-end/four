@@ -24,9 +24,9 @@ its own chain:
 
 Around the tracks sit a tape loop deck for the input or the whole mix, and eight pads that
 slice a take. A step sequencer plays the pads. Scenes hold a whole sound, and one knob
-morphs from one scene to the next. MOTION loops your knob moves, and four modulators sway
-the sound around your settings. Three keys and three encoders reach everything. A grid is
-optional, and every parameter maps to MIDI.
+crossfades from the sound you play, or from one scene, into another scene. MOTION loops
+your knob moves, and four modulators sway the sound around your settings. Three keys and
+three encoders reach everything. A grid is optional, and every parameter maps to MIDI.
 
 ## Install
 
