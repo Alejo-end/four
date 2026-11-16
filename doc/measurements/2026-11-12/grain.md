@@ -3,7 +3,7 @@
 Device: norns shield, Pi 4. 2026-11-12. Count: 173. Every capture is 6 s of
 `SuperCollider:out_1/2`, recorded with `jack_rec` before crone. The system
 output level was at -inf, so crone's outputs were silent. The take is
-`set_s1h1p1.wav`, which is mono in effect: PLAY has an L/R correlation of 1.00.
+a loop of the album set, which is mono in effect: PLAY has an L/R correlation of 1.00.
 "quiet" is the share of 10 ms blocks below -50 dBFS. "lim" is the share of
 blocks that peak above 0.88: the master limiter sits at 0.92.
 

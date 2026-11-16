@@ -3455,7 +3455,7 @@ then retested there.
 
 Hundred-and-seventh change: **the album set, twelve new presets (presets and
 tools only, the engine and the script do not change)**. The ten shipped presets are
-replaced by a set for one album. `tools/make_set.lua` builds them as a
+replaced by a set made for one album. `tools/make_set.lua` builds them as a
 chain (each preset is the one before it plus a short list of changes) and checks every value
 against the real paramset. `tools/set_audio.py` cuts the loops and `tools/deploy_set.sh` puts
 the set on a norns. The audio is not in the repo.
@@ -3540,7 +3540,7 @@ The display shows FF or REW on a scene change, the page name on a page change, P
 Cold start tested twice on the device: after `sudo reboot` with the clean-shutdown flag false (a pulled plug) the norns shows NO SCRIPT and sends nothing (norns does not auto-load after an unclean shutdown); with the flag true (a normal SLEEP) it loaded mangler, read `osc.cfg` and the bridge saw OSC again within about 90 seconds, with no setting touched.
 Mistake: a test wrote `params:write(12)` on the device and replaced the files of preset 12
 (pset, scenes, padlock, tape, take, decks). They were restored from the repo and from the audio
-folder (tape-12.wav from set_alb2_tape.wav, no take or deck files, as the deploy script does).
+folder (tape-12.wav from the set's tape loop, no take or deck files, as the deploy script does).
 Use a slot above 12 for a test write.
 
 Hundred-and-twelfth change: **the grid drives the visuals, and the strip colours (Lua only,
@@ -4521,18 +4521,19 @@ the device with the plugin and said "it sounds nice".
   bridge.js use (it still said `/mangler/`). The bridge test passes. The visuals are not
   yet tested with four, and the README says so.
 
-four, thirty-eighth change: **the album set leaves the repo (presets, tools and
+four, thirty-eighth change: **the album preset set leaves the repo (presets, tools and
 tests; nothing on the device changes)**. The user does not want it public, and asked for
 example presets on freely usable ambient samples instead.
-- Gone from `main`: the twelve presets with their scene and padlock files, `data/layers/`,
-  `doc/set-album.md`, `test/make_set.lua`, `test/set_audio.py`,
-  `test/deploy_set.sh` and `test/test_set.lua`. They stay on the local branch
-  `private-set` (not pushed), at the thirty-seventh change. Older commits on GitHub
-  still hold them.
+- Gone: the twelve presets with their scene and padlock files, `data/layers/`, the set's
+  scene list, its builder, its audio and deploy scripts, and `test/test_set.lua`. The user
+  keeps them privately.
 - `data/` ships the two MIDI maps, and its README says what they map.
 - test_control's preset checks now read whatever `data/` ships (`SHIPPED`), instead of
   twelve names and `data/layers/`. With no presets they check the two maps.
   test/check.lua runs no test_set.
 - README, doc/README.md, the manual, the visuals guide, the plan and the STATUS block no
   longer point at the set.
+- No document names the album or its tools any more, and the set's measurement record of
+  2026-11-11 is gone with it. The public history was replaced by one clean commit, so no
+  older commit holds the set either.
 

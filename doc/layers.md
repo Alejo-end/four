@@ -4,8 +4,7 @@
 > removed them in its thirteenth change (doc/changelog.md): the four engine tracks
 > replaced them, and the tape is the one softcut deck left. This page is mangler's
 > design from S25, kept for its reasoning. Its presets left the repo in four's
-> thirty-eighth change (they are on the local branch `private-set`). The current
-> plan is doc/plan.md.
+> thirty-eighth change. The current plan is doc/plan.md.
 
 ## The decision
 

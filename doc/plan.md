@@ -39,8 +39,7 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
    (doc/measurements/2026-11-16/). A silent CLOUD track costs more than a sounding one:
    3.9% against 2.5%.
 4. Look at REVERB's four squares and at `NO SEND - TRACKS K1` on the OLED.
-5. (The album presets left the repo in the thirty-eighth change. They are on
-   the local branch `private-set` (not pushed).)
+5. (The album presets left the repo in the thirty-eighth change.)
 6. Run the gate with stage 19 (`python3 test/device/gate.py 19`). It also times a GRAIN
    pad's first sound and the gap at a mode change (the twenty-second change). The
    device runs scsynth 3.13.0-dev. The bug depends on how `Impulse` starts: since
@@ -118,8 +117,8 @@ doc/device-gate.md, and fix or revert it.
    picture of each one clear? RESON's level was raised (four, fifth change): is
    it even with the others now, at every note? FLANGE is new and ECHO is new
    (four, fourteenth change). Then the second slot (K1+E2 and K1+E3).
-9. (The album presets left the repo. New example presets on free
-   ambient samples are to come, and they need a listen too.)
+9. (The album presets left the repo. New example presets on free ambient
+   samples are to come, and they need a listen too.)
 10. The stretch voices of FourStretch: PV, WARP and PLAY at pitch 1 and away
     from it. The user liked them on 2026-11-13, before the ninth change.
 11. The level (four, tenth change): everything is 7 dB quieter. Is that right?
@@ -271,8 +270,7 @@ Each one needs a yes or a no. Ask the user. Do not decide.
 1. (done 2026-11-13: `main` is pushed and the GitHub repo is `four`.)
 2. Rename the local folder from mangler to four?
 3. Remove the `../mangler2` worktree?
-4. (Answered 2026-11-16: the album presets and `data/layers/` left the
-   repo. They are on the local branch `private-set` (not pushed).)
+4. (Answered 2026-11-16: the album presets and `data/layers/` left the repo.)
 5. Delete `CLAUDE_PLAN.md` (the original S0 plan)?
 6. Which MIDI controller do they own?
 7. One SPACE page (doc/space-plan.md, section 7.2), or DELAY and REVERB as two

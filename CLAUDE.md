@@ -131,7 +131,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | the user, 2026-11-16: "it sounds nice" |
 | 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | the user, 2026-11-16: "it sounds nice" |
 | 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
-| 38th: the album set leaves the repo | nothing on the device changes | |
+| 38th: the album preset set leaves the repo | nothing on the device changes | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -167,13 +167,11 @@ passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 (doc/measurements/2026-11-06/README.md). It has not run on four. When it passes, write
 the date and the count here. Costs, budgets and platform traps: doc/norns-platform.md.
 
-**The album set is not in the repo** (thirty-eighth change). The user did not
-want it public. The twelve presets for the album, their tools (`make_set.lua`,
-`set_audio.py`, `deploy_set.sh`), `test/test_set.lua` and `data/layers/` live on the
-local branch `private-set` (not pushed), at the thirty-seventh change. Older commits
-on GitHub still hold them. `data/` ships the two MIDI maps only. The user wants example presets built on freely usable ambient samples instead:
-none are chosen yet. A new example set needs a harness like test_set to load every
-pset and scene through the offscreen script.
+**No presets ship.** `data/` holds the two MIDI maps only. The user's own preset set for
+a live show, its tools and its test are private: they are not in this repo and must never
+be pushed (the agent memory says where they are). The user wants example presets built on
+freely usable ambient samples instead, and none are chosen yet. A new example set needs a
+harness that loads every pset and scene through the offscreen script.
 
 **The visuals link.** lib/mosc.lua sends the state as OSC to visuals/bridge.js, which
 feeds Hydra (visuals/hydra.js). It ran with mangler on the device (the 110th and 111th
