@@ -4498,3 +4498,26 @@ one RESTART give the full sound (engine and Lua, the count stays 198, on the dev
 - test_plugin runs the script through lib/mplugin.lua and calls it as the startup does
   (off Linux it says unknown and writes nothing): 24 assertions. check_dsp passes.
 - The README and the website say that the install needs nothing more than the RESTART.
+
+four, thirty-seventh change: **the documents tidied, with the known limits (documents and
+the visuals scripts, nothing on the device changes)**. The user asked for the limits in
+the repo and for tidier, more professional documents. The user also listened to four on
+the device with the plugin and said "it sounds nice".
+- README: Requirements, Install, The plugin, Documentation, Status and known limits
+  (tested only on a shield with a Pi 4 and the 32-bit system; other norns not tried; the
+  CPU limits, with CLOUD's cost in silence), a link to GitHub issues, Credits and license.
+  The first-minutes step for SCENE says K1+E3 fades (it said E3, which picks B since the
+  thirty-fourth change).
+- doc/README.md is new: every document, for players and for developers.
+- doc/manual.md: no internal notes for players. The clone deploy moved to For
+  developers, What comes next is the Roadmap, Requirements say that four needs nothing
+  else, and Troubleshooting has the plugin and dropouts. SCENE's first step says K1+E3.
+- ugen/README.md: for players first (How it installs, Tested on, Uninstall), then the
+  build, the proof, FourCloud, the cost (CLOUD measured on the norns) and the files.
+- data/README.md: an example set, the audio not included, headings in sentence case, the
+  fade is K1+E3 (it said K1+E1).
+- visuals/: the README, the page title and the Mac scripts say four (`/tmp/four-bridge.log`,
+  `~/.four-visuals`). fields.json lists the `/four/` addresses that mosc.lua and
+  bridge.js use (it still said `/mangler/`). The bridge test passes. The visuals are not
+  yet tested with four, and the README says so.
+

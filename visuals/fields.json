@@ -1,11 +1,11 @@
 {
-  "prefix": "/mangler/",
+  "prefix": "/four/",
   "note": "Every field is one OSC message with one argument. Floats from params are 0..1. Keep this list equal to FIELDS in lib/mosc.lua: test/test_control.lua checks it.",
   "events": [
-    { "path": "/mangler/ev/note", "args": "channel note velocity (ints)" },
-    { "path": "/mangler/ev/cc", "args": "channel cc value (ints), only when the value changed" },
-    { "path": "/mangler/ev/pc", "args": "channel program (ints)" },
-    { "path": "/mangler/ev/run", "args": "1 for start or continue, 0 for stop" }
+    { "path": "/four/ev/note", "args": "channel note velocity (ints)" },
+    { "path": "/four/ev/cc", "args": "channel cc value (ints), only when the value changed" },
+    { "path": "/four/ev/pc", "args": "channel program (ints)" },
+    { "path": "/four/ev/run", "args": "1 for start or continue, 0 for stop" }
   ],
   "fields": [
     { "key": "page", "type": "int" },

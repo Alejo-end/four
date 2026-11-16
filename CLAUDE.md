@@ -129,8 +129,9 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 31st, 32nd: README, safer deploy line, the clip exporter | documents, test tool | |
 | 33rd: SCENE A and B crossfader (Lua) | yes, 2026-11-16 | no |
 | 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | yes, 2026-11-16 | no |
-| 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | no |
-| 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | no |
+| 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | the user, 2026-11-16: "it sounds nice" |
+| 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | the user, 2026-11-16: "it sounds nice" |
+| 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -153,9 +154,11 @@ and installed, and the costs above are measured. Still open: REVERB's squares on
 OLED, the gate's stage 19, the frame period, and why a silent CLOUD track costs more than
 one that sounds.
 
-**Not heard.** No listening session for four took place yet. The one judgement on record
-is the user's on FourStretch, above. The shipped presets have never been heard. The list
-to listen to is doc/plan.md, Phase 2.
+**Heard.** On 2026-11-16 the user listened to four on the device, the thirty-sixth change
+with the plugin (FourCloud included), and said "it sounds nice". That is a general
+judgement, the first on four as a whole. The item-by-item session of doc/plan.md, Phase 2,
+has not taken place, and the shipped presets have never been heard. The earlier judgement
+is the user's on FourStretch, above.
 
 **The walkthrough.** doc/device-gate.md, stages 0 to 19, top to bottom. Stage 19 is
 four's own work. It has not

@@ -94,8 +94,9 @@ whether the show works.
 
 ## Phase 2: the listening session (the gate for everything after it)
 
-No test can judge sound. Before more engine work, sit with the user and walk this
-list on the device. For each item, write down what they heard in
+No test can judge sound. On 2026-11-16 the user listened to four with the plugin and
+said "it sounds nice", a general judgement. The list below is still open. Before more
+engine work, sit with the user and walk it on the device. For each item, write down what they heard in
 doc/device-gate.md, and fix or revert it.
 
 1. GRAIN at grain jitter 0 (a steady stream) and at 1 (random). Then CLOUD on

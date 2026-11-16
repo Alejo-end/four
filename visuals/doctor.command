@@ -5,7 +5,7 @@ bad() { printf "  FAIL  %s\n" "$1"; }
 PORT=8080
 echo "computer"
 curl -s -o /dev/null "http://127.0.0.1:$PORT/" && ok "bridge answers on port $PORT" || bad "bridge is not running (run start.command)"
-LINE=$(tail -1 /tmp/mangler-bridge.log 2>/dev/null)
+LINE=$(tail -1 /tmp/four-bridge.log 2>/dev/null)
 echo "  last bridge line: $LINE"
 RATE=$(echo "$LINE" | sed -n 's/^osc :[0-9]* \([0-9]*\) msg\/s.*/\1/p')
 PAGES=$(echo "$LINE" | sed -n 's/.*ws :[0-9]* \([0-9]*\) page.*/\1/p')

@@ -47,7 +47,8 @@ than the sum of one each. The cause is not known: denormals in Clouds' feedback 
 or the cache with several Clouds buffers. Four in SPECTRAL stays well under the 60% where
 the scsynth thread xruns.
 
-Nobody listened. The numbers say that each voice sounds, not how it sounds.
+The numbers say that each voice sounds, not how it sounds. After these runs the user
+listened to four on this device and said "it sounds nice".
 
 ## The startup install (the thirty-sixth change)
 

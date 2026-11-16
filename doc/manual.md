@@ -1,11 +1,8 @@
 # four: the full guide
 
-The short version is the [README](../README.md). This guide has every page, its
-pictures and the details.
-
-A four-track live sampler for [norns](https://monome.org/docs/norns/).
-
-Record any sound, then loop, stretch and grain it on four tracks.
+four is a four-track live sampler for [norns](https://monome.org/docs/norns/). The
+[README](../README.md) is the short version. This guide has every page, its pictures and
+the details.
 
 ![The twelve pages of four](ui/four.png)
 
@@ -14,43 +11,31 @@ effects. A track can send to the other tracks, to the delay and to the reverb. T
 and three encoders reach everything. A grid is welcome and never needed. Every parameter
 maps to MIDI.
 
-four was called mangler. It is in active development. Most changes are measured on the
-device, and the newest sounds still wait for a listening session.
+four is in active development. It is built, measured and played on a norns shield with a
+Raspberry Pi 4.
 
 ## Requirements
 
-- A norns with current software. four is built and measured on a shield XL with a
-  Raspberry Pi 4. Older hardware is not tested.
+- A norns with current software. four is tested on a norns shield with a Raspberry Pi 4.
+  The README lists what is not tested yet.
 - A sound at line level on the norns input.
 - Optional: a MIDI controller, a USB typing keyboard, a crow.
 - Optional: a grid. A monome grid and a Launchpad Mini MK3 work directly. Other Launchpad
   and APC models work through [midigrid](https://github.com/jaggednz/midigrid).
-- Optional: the `FourStretch` plugin, JPverb (sc3-plugins) and MiClouds (mi-UGens). If
-  the engine finds one, it uses it. The engine also plays without them. CLOUD needs the
-  plugin or MiClouds; without either it plays GRAIN.
+
+four needs nothing else. It ships its own plugin, and it uses JPverb (sc3-plugins) when
+it is there. Without the plugin, four plays stock versions of its voices and effects, and
+CLOUD uses MiClouds (mi-UGens) if it is installed, or else GRAIN.
 
 ## Install
 
-In maiden, type this line and then SYSTEM > RESTART:
+In maiden, type this line:
 
 ```
 ;install https://github.com/Alejo-end/four
 ```
 
-To work from a clone instead, copy the script to the norns:
-
-```sh
-rsync -av --delete --exclude='.git' --exclude='.claude' ./ we@norns.local:~/dust/code/four/
-```
-
-Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
-
-1. Keep `--delete`. A second copy of `Engine_Four.sc` under `dust/code` hangs every norns
-   script on LOADING.
-2. If the engine file changes, do SYSTEM > RESTART. A Lua change needs only a script
-   reload.
-3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
-   A different number means that an old engine still runs.
+Then do SYSTEM > RESTART and pick four in SELECT.
 
 The `FourStretch` plugin holds the instrument's own stretch, grain, delay, reverb and
 Clouds code. The repo ships it, built on a norns shield with a Raspberry Pi 4, in
@@ -74,8 +59,8 @@ the plugin yourself, see [ugen/README.md](../ugen/README.md).
    the send D or R of the track.
 6. Hold K1 and turn E1 to pick track 2. TAKE now records into track 2. TRACKS shows the
    four tracks together.
-7. On SCENE, K3 keeps the whole sound in a slot. Change everything, then turn E3 to morph
-   toward the stored scene.
+7. On SCENE, K3 keeps the whole sound in a slot. Change everything, then hold K1 and turn
+   E3 to fade toward the stored scene.
 8. Two moves work on every page. K1 plus K2 stops and starts all sound. A tap of K1 plus
    K3 turns all effects off.
 
@@ -301,8 +286,8 @@ other gear. It goes out as a MIDI CC, and as 0 to 5 volts on crow output 1.
 ## Saving
 
 PARAMS > PSET saves the whole session: the parameters, the MIDI map, the four takes, the
-tape, the scenes, the motion loop and the slices. `data/` holds twelve presets for one
-album. No person listened to them yet.
+tape, the scenes, the motion loop and the slices. `data/` holds twelve presets made for one
+album: see [data/README.md](../data/README.md).
 
 ## Grid
 
@@ -314,8 +299,8 @@ erases. `lib/mgrid.lua` has the details.
 ## Visuals
 
 `lib/mosc.lua` sends the state of the instrument as OSC. `visuals/` holds a bridge that
-feeds it to Hydra in a browser: see [visuals/README.md](../visuals/README.md). The link ran
-with mangler on the device. No run with four's `/four/` addresses is on record.
+feeds it to Hydra in a browser: see [visuals/README.md](../visuals/README.md). The visuals
+ran with mangler, four's predecessor, and are not yet tested with four.
 
 ## Signal flow
 
@@ -340,12 +325,16 @@ is off, an effect at zero and a reverb at zero do not run.
    the tape on TAPE with K1 plus K3.
 7. The screen is black or frozen after the load. A Lua error is inside the redraw. Scroll
    maiden below the ok line for the traceback.
+8. WARP, PV and CLOUD sound plain, and the SuperCollider tab says
+   `four: FourStretch absent`. Do SYSTEM > RESTART. If the plugin is still absent, see
+   [ugen/README.md](../ugen/README.md).
+9. The sound drops out. SuperCollider is over its share of the processor. Set the tracks
+   you do not use to OFF: a CLOUD track keeps working in silence.
 
-## What comes next
+## Roadmap
 
 The plan for the effects is [doc/space-plan.md](space-plan.md). The room reverb, the
-bucket brigade delay and the sends are built. The delay and the sends are not on the device
-yet, and no person listened to any of them. Still to do:
+bucket brigade delay and the sends are built. Planned next:
 
 - Knobs for the delay's AGE (noise) and TONE, and for the room's COLOR.
 - The room's first reflections, and SIZE that moves while the room plays.
@@ -353,19 +342,34 @@ yet, and no person listened to any of them. Still to do:
 - A screen with fixed rules: geometry only, four levels of grey, and motion only where
   there is sound.
 
-Not decided: doc/space-plan.md proposes one SPACE page for the sends, the delay and the
-reverb. Today they are TRACKS with K1 held, DELAY and REVERB. In July the user asked for
-DELAY and REVERB as two pages (doc/ux-feedback.md, point 21), so the user decides.
-
 ## For developers
+
+To work from a clone, copy the script to the norns:
+
+```sh
+rsync -av --delete --exclude='.git' --exclude='.claude' ./ we@norns.local:~/dust/code/four/
+```
+
+Then do SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
+
+1. Keep `--delete`. A second copy of `Engine_Four.sc` under `dust/code` hangs every norns
+   script on LOADING.
+2. If the engine file changes, do SYSTEM > RESTART. A Lua change needs only a script
+   reload.
+3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
+   A different number means that an old engine still runs.
+
+The documents:
+
+- [doc/README.md](README.md): every document, for players and for developers.
 
 - [CLAUDE.md](../CLAUDE.md): the status on the device, the hard rules, the lessons, and which
   documents are current.
 - [doc/plan.md](plan.md): the next work.
 - [doc/changelog.md](changelog.md): every change, oldest first.
 - [doc/device-gate.md](device-gate.md): the walkthrough on the device.
-- [doc/engine-map.md](engine-map.md): why the engine is shaped as it is. It was written
-  for mangler's engine of one track.
+- [doc/engine-map.md](engine-map.md): why the engine has its shape. It was written for
+  the engine of mangler, four's one-track predecessor.
 - [doc/norns-platform.md](norns-platform.md): costs, budgets and platform traps.
 - `lua test/check.lua` runs every check. `python3 test/uisim/gallery.py` rebuilds the
   pictures of this page from the real redraw code, with no hardware.

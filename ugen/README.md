@@ -1,8 +1,12 @@
-# FourStretch: the UGens of four
+# FourStretch: four's plugin
 
-The SuperCollider UGens that the stock set cannot give. The engine uses them
-when the binary is on the server and falls back to its stock voices when it is
-not, so the instrument plays either way.
+FourStretch holds the SuperCollider UGens that the stock set cannot give. The
+engine uses them when the plugin is on the server. Without it, the engine
+builds its stock voices and effects, so four plays either way.
+
+Players do not need to build anything. The repo ships the plugin, and it
+installs itself during the SYSTEM > RESTART after `;install`. This page is for
+anyone who wants to know what is in it, or to build it.
 
 | UGen | Voice | Method |
 |---|---|---|
@@ -19,73 +23,20 @@ not, so the instrument plays either way.
 The three stretch voices return the take sample for sample at speed 1 and
 pitch 1.
 
-## Files
+## How it installs
 
-- `four_core.h`: the algorithms, with no SuperCollider in them.
-- `four_cloud.h`: the Clouds code of `vendor/` in one piece, with no
-  SuperCollider in it.
-- `vendor/`: Clouds and stmlib, copied unchanged from mi-UGens.
-  `vendor/README.md` names the commit and the licenses.
-- `test_core.cpp`: the proof of the core, and a smoke test of the Clouds
-  core. It must print `all passed`.
-- `bench_core.cpp`: the cost of each voice and its worst block.
-- `FourStretch.cpp`: the SuperCollider wrapper.
-- `build_mac.sh`: builds `FourStretch.scx` for the Mac bench.
-- `build_norns.sh`: builds `FourStretch.so` on the norns and puts it in
-  `../ignore/plugins/<arch>/`, where four ships it.
-- `../lib/FourStretch.sc`: the classes. This is the only copy.
-- `../lib/mplugin.lua`: installs the shipped binary on the norns.
-
-Every build needs `-Iugen/vendor/eurorack` (the Clouds files include each
-other from that root). The plugin is built with `-fvisibility=hidden`: the
-server sees its entry points only, so the Clouds code in it never binds to
-the same code in an installed MiClouds.
-
-## Prove it on the Mac
-
-```sh
-clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
-clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/bench_core ugen/bench_core.cpp && /tmp/bench_core
-ugen/build_mac.sh /tmp/plug
-FOUR_PLUGIN_DIR=/tmp/plug test/dsp/check_dsp.sh <work folder outside the repo>
-```
-
-The last command compiles the real engine with the UGens, renders every
-voice offline (CLOUD in its four modes among them) and gives one verdict.
-
-## FourCloud and MiClouds
-
-FourCloud is MiClouds under its own name. It takes the same inputs in the
-same order (`FourCloud.ar([inL, inR], pit, pos, size, dens, tex, drywet,
-in_gain, spread, rvb, fb, freeze, mode, lofi, trig)`), so the engine builds
-one CLOUD def for either. Rendered offline against a MiClouds built from the
-same commit, with the same input, it gives the same samples in all four modes.
-
-The engine takes, in this order: FourCloud when the plugin on the server
-holds it, MiClouds when mi-UGens is installed, else the GRAIN granulator. The
-SuperCollider log says which: `four: CLOUD is FourCloud`.
-
-What differs from MiClouds, none of it heard: the core comes from the
-real-time memory pool (MiClouds took it from the heap on the audio thread); a
-failed start or a block size that is not a multiple of 32 gives silence and a
-message (MiClouds left the unit without a calc function); one audio input is
-read on both sides (MiClouds wrote past it); `add` is applied.
-
-## Install on the norns
-
-four installs its own plugin. The repo ships a binary built on a norns in
+The repo ships a binary built on a norns in
 `ignore/plugins/<what uname -m prints>/FourStretch.so`. norns compiles
-nothing under a folder named `ignore`, so the folder is inert there, and the
-deploy copies it like any other.
+nothing under a folder named `ignore`, so the folder is inert there.
 
 `lib/install_plugin.sh` holds the rule, and two callers run it. The engine
 class runs it while sclang starts (`Engine_Four.installPlug`, from
 `*initClass`), before sclang boots the server. So the SYSTEM > RESTART that
-follows `;install` puts the plugin in place and the server loads it in the
-same start: one restart in all, and the log says
-`four: installed the FourStretch plugin at startup`. Then `lib/mplugin.lua`
-runs it again when four loads, as a fallback, and that one asks for a
-restart when it installs:
+follows `;install` puts the plugin in place, and the server loads it in the
+same start. The log then says
+`four: installed the FourStretch plugin at startup`. `lib/mplugin.lua` runs
+the script again when four loads, as a fallback, and asks for a restart when
+it installs:
 
 | On the norns | What the script does |
 |---|---|
@@ -103,23 +54,31 @@ keeps to its stock voices: it uses the plugin only when the binary is the one
 that was there when sclang started, and says
 `four: FourStretch is new since the restart` when it is not.
 
-A trap: a Pi with a 64-bit kernel under the 32-bit norns system prints
-`aarch64` for `uname -m` and still needs the 32-bit binary. `build_norns.sh`
-builds for the system it runs on and files the binary under what `uname -m`
-prints there, so a binary built on a device fits that device. The repo ships
-the 32-bit binary under both `armv7l` and `aarch64` (one file to git): the
-ELF check keeps it off a server that is really 64-bit. No norns that prints
-`aarch64` has tried it yet.
+A Pi with a 64-bit kernel under the 32-bit norns system prints `aarch64`
+for `uname -m` and still needs the 32-bit binary. The repo ships the 32-bit
+binary under both `armv7l` and `aarch64` (one file to git). The ELF check
+keeps it off a server that is really 64-bit.
 
-The binary shipped now was built on 2026-11-16 on a norns shield with a
-Raspberry Pi 4 (armv7l, g++ 10) and heard nowhere yet. On that norns, four
-installed it into an empty Extensions folder, and after the RESTART the log
-said `four: FourStretch on` and `four: CLOUD is FourCloud` at `count: 198`.
-With the startup install (the thirty-sixth change), one RESTART did it all:
-the log said `four: installed the FourStretch plugin at startup`, and four's
-first load said `four: FourStretch on`. The next RESTART said nothing.
+## Tested on
 
-### Build the binary on the norns
+| System | Status |
+|---|---|
+| norns shield, Raspberry Pi 4, 32-bit system (`armv7l`) | Built there with g++ 10 on 2026-11-16. Installed by the startup, measured and played. |
+| A 64-bit kernel under the 32-bit system (`aarch64`) | Ships the same binary. Not tried yet. |
+| Original norns (CM3) or a shield on a Raspberry Pi 3 | Same instruction set, so it is made to load. Not tried yet. |
+
+If the plugin does not load on your norns, four plays its stock voices.
+Please report it in a GitHub issue, with the lines that start with `four:`
+in maiden's SuperCollider tab.
+
+## Uninstall
+
+To go back to the stock voices, delete
+`~/.local/share/SuperCollider/Extensions/FourStretch/` and restart. The next
+start installs the shipped plugin again, unless you also delete
+`ignore/plugins/` in the script folder.
+
+## Build the binary on the norns
 
 The SuperCollider headers are in `/usr/local/include/SuperCollider`.
 
@@ -155,13 +114,64 @@ file there: `lib/FourStretch.sc` is in the script already, and a second copy
 of a class hangs every norns script on LOADING. Install the binary BEFORE
 you deploy an engine that uses a new UGen, then restart.
 
-Measured cost with four tracks in one voice (2026-11-13, before FourCloud):
-PV at pitch 1 takes 49% of the audio thread, WARP 39% and PLAY 36%. Four PV
-tracks at pitch 2 take 64%, which is over the 60% budget. CLOUD is not
-measured on the norns. On the Mac the Clouds core takes 0.6% of a core in
-GRANULAR and 2% in SPECTRAL (`bench_core`), which is the cost of MiClouds as
-well.
+## Prove it on the Mac
 
-To go back to the stock voices, delete the `FourStretch` folder and restart.
-With a binary shipped in `ignore/plugins/`, four installs it again at its next
-load: delete that one too.
+```sh
+clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
+clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/bench_core ugen/bench_core.cpp && /tmp/bench_core
+ugen/build_mac.sh /tmp/plug
+FOUR_PLUGIN_DIR=/tmp/plug test/dsp/check_dsp.sh <work folder outside the repo>
+```
+
+The last command compiles the real engine with the UGens, renders every
+voice offline (CLOUD in its four modes among them) and gives one verdict.
+
+## FourCloud and MiClouds
+
+FourCloud is MiClouds under its own name. It takes the same inputs in the
+same order (`FourCloud.ar([inL, inR], pit, pos, size, dens, tex, drywet,
+in_gain, spread, rvb, fb, freeze, mode, lofi, trig)`), so the engine builds
+one CLOUD def for either. Rendered offline against a MiClouds built from the
+same commit, with the same input, it gives the same samples in all four modes.
+
+The engine takes, in this order: FourCloud when the plugin on the server
+holds it, MiClouds when mi-UGens is installed, else the GRAIN granulator. The
+SuperCollider log says which: `four: CLOUD is FourCloud`.
+
+What differs from MiClouds: the core comes from the
+real-time memory pool (MiClouds took it from the heap on the audio thread); a
+failed start or a block size that is not a multiple of 32 gives silence and a
+message (MiClouds left the unit without a calc function); one audio input is
+read on both sides (MiClouds wrote past it); `add` is applied.
+
+## Cost
+
+Measured on the norns, with four tracks in one voice. On 2026-11-13, as a
+share of the audio thread: PV at pitch 1 takes 49%, WARP 39% and PLAY 36%.
+Four PV tracks at pitch 2 take 64%, which is over the 60% budget. On
+2026-11-16, as SuperCollider's average load: four CLOUD tracks take 29.1%,
+and 38.7% in SPECTRAL. The figures are in `doc/measurements/`.
+
+## Files
+
+- `four_core.h`: the algorithms, with no SuperCollider in them.
+- `four_cloud.h`: the Clouds code of `vendor/` in one piece, with no
+  SuperCollider in it.
+- `vendor/`: Clouds and stmlib, copied unchanged from mi-UGens.
+  `vendor/README.md` names the commit and the licenses.
+- `test_core.cpp`: the proof of the core, and a smoke test of the Clouds
+  core. It must print `all passed`.
+- `bench_core.cpp`: the cost of each voice and its worst block.
+- `FourStretch.cpp`: the SuperCollider wrapper.
+- `build_mac.sh`: builds `FourStretch.scx` for the Mac bench.
+- `build_norns.sh`: builds `FourStretch.so` on the norns and puts it in
+  `../ignore/plugins/<arch>/`, where four ships it.
+- `../lib/FourStretch.sc`: the classes. This is the only copy.
+- `../lib/install_plugin.sh`: installs the shipped binary on the norns.
+- `../lib/mplugin.lua`: runs that script again when four loads.
+- `../ignore/plugins/`: the shipped binaries, one folder for each machine.
+
+Every build needs `-Iugen/vendor/eurorack` (the Clouds files include each
+other from that root). The plugin is built with `-fvisibility=hidden`: the
+server sees its entry points only, so the Clouds code in it never binds to
+the same code in an installed MiClouds.

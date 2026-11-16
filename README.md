@@ -1,66 +1,69 @@
 # four
 
-four is a live sampler for [norns](https://monome.org/docs/norns/). Record your synth or
-drum machine onto four stereo tracks, then loop, stretch, grain and filter the takes as
-you play.
+four is a live sampler for [norns](https://monome.org/docs/norns/). Record a synth, a drum
+machine or any line-level sound onto four stereo tracks. Then loop, stretch, grain and
+filter the takes while you play.
 
-The website walks through every page on four's real screen:
+The website shows every page on four's real screen:
 [alejo-end.github.io/four-site](https://alejo-end.github.io/four-site/).
 
 ![A pocket-sized version of the norns shield with four on its screen](doc/four-on-device.png)
 
 *A render of four on a pocket-sized version of the norns shield, built around a Raspberry
-Pi Compute Module 4, still in design.*
+Pi Compute Module 4. The device is still in design.*
 
 ## What it does
 
-Anything at line level goes in: a synth, a drum machine, a tape deck, another norns. Each
-track records its own take of up to 60 seconds, loops it and runs it through its own chain:
+Each track records its own take of up to 60 seconds and loops it. The take then runs
+through the track's own chain:
 
 - A voice. PLAY is the take as tape, with varispeed. GRAIN sprays it into a cloud of
   stereo grains. WARP and PV change the speed and keep the pitch. CLOUD is Mutable
   Instruments Clouds.
 - A diode ladder filter (low-pass, high-pass or band-pass), then drive and crush.
 - Two effect slots: chorus, flanger, wobble, resonator, ring modulator or echo.
-- Sends to the other tracks, to a shared bucket brigade delay and to a shared room.
+- Sends to the other tracks, to a shared bucket brigade delay and to a shared room reverb.
 
-Under the tracks runs a softcut tape loop that records the input or four's own output.
-PADS cuts the loop into eight slices, and a step sequencer can play them. SCENE keeps
-whole sounds in eight slots and crossfades between two of them, or from the sound you
-are playing into one. MOTION loops your knob moves, and four modulators swing the sound
-around wherever you left the knobs. It all sits on three keys and three encoders. A grid
-is optional, and every parameter maps to MIDI.
+Under the tracks runs a tape loop that records the input or four's own output. PADS cuts
+the loop into eight slices, and a step sequencer can play them. SCENE keeps whole sounds in
+eight slots and crossfades between two of them. MOTION loops your knob moves, and four
+modulators move the sound around where you left the knobs.
 
-four is in active development. Most of it is measured on a norns, and the newest sounds
-still wait for a proper listen.
+Everything sits on the three keys and three encoders of the norns. A grid is optional, and
+every parameter maps to MIDI.
+
+## Requirements
+
+- A norns with current software. four is tested on a norns shield with a Raspberry Pi 4.
+- A line-level sound on the norns input.
+- Optional: a monome grid or a Launchpad Mini MK3. Other Launchpad and APC models work
+  through [midigrid](https://github.com/jaggednz/midigrid).
+- Optional: a MIDI controller, a USB typing keyboard or a crow.
 
 ## Install
 
-In maiden, type this line, then SYSTEM > RESTART and pick four from SELECT:
+In maiden, type this line:
 
 ```
 ;install https://github.com/Alejo-end/four
 ```
 
-You need a norns and a line-level sound on its input. four is built and tested on a norns
-shield with a Raspberry Pi 4. Older norns hardware has not been tried.
+Then do SYSTEM > RESTART and pick four from SELECT. That is all: the restart also installs
+four's plugin, and there is nothing to build.
 
 ## The plugin
 
-Part of four's sound comes from its own plugin, FourStretch: C++ code for SuperCollider,
-written for four. It gives WARP and PV their clean time-stretch, CLOUD its Clouds, and the
-delay and the reverb their bucket brigade and room.
+Part of four's sound comes from its own plugin, FourStretch. It is C++ code for
+SuperCollider, written for four. It gives WARP and PV their clean time-stretch, CLOUD its
+Clouds, and the delay and the reverb their bucket brigade and room.
 
-You do not need to do anything for it. The SYSTEM > RESTART after the install puts the
-plugin in place, and maiden's SuperCollider tab then says `four: FourStretch on` when four
-loads. If four's screen ever says `PLUGIN INSTALLED / SYSTEM > RESTART` (after an update,
-for example), do one more restart.
+The plugin installs itself during the restart after the install. When four loads, maiden's
+SuperCollider tab says `four: FourStretch on`. If four's screen ever says
+`PLUGIN INSTALLED / SYSTEM > RESTART`, for example after an update, do one more restart.
 
 On a norns where the plugin does not fit, four plays simpler stock versions of the same
-voices and effects. Everything else works the same.
-
-The plugin in this repo was built on a norns shield with a Raspberry Pi 4. To build it
-yourself, see [ugen/README.md](ugen/README.md).
+voices and effects. Everything else works the same. To build the plugin yourself, see
+[ugen/README.md](ugen/README.md).
 
 ## First minutes
 
@@ -71,7 +74,8 @@ yourself, see [ugen/README.md](ugen/README.md).
 5. The delay and the reverb stay silent until a track sends to them. On TRACKS, hold K1,
    turn E2 to D or R and turn E3 up.
 6. Hold K1 and turn E1 to pick track 2. Record a second take there.
-7. On SCENE, press K3 to capture the sound. Change things, then turn E3 to fade back to it.
+7. On SCENE, press K3 to capture the sound. Change things, then hold K1 and turn E3 to fade
+   back to it.
 
 Two moves work on every page. K1 + K2 stops and starts everything. A tap of K1 + K3 turns
 every effect off.
@@ -81,21 +85,41 @@ every effect off.
 ![The twelve pages of four](doc/ui/four.png)
 
 TAKE, VOICE, TRACKS, TAPE, FILTER, EFFECT, DELAY, REVERB, MIX, PADS, MOTION and SCENE.
-E1 moves between them, and the bottom of the screen names what K2, K3, E2 and E3 do on
-each one.
+E1 moves between them. The bottom line of the screen names what K2, K3, E2 and E3 do on
+each page.
 
-## More
+## Documentation
 
 - [The full guide](doc/manual.md): every page with pictures, the grid, MIDI, saving and
   troubleshooting.
 - [Every key and knob](doc/controls.md), generated from the code.
-- Optional extras: a monome grid or a Launchpad Mini MK3.
+- [The plugin](ugen/README.md): what is in it, how it installs and how to build it.
+- [An Octatrack as a controller](doc/octatrack-midi.md).
+- [The album presets](data/README.md), a set made for one album.
+- [Visuals](visuals/README.md): live visuals in a browser that follow four over OSC.
+- [All documents](doc/README.md), including the notes for developers.
 
-## License
+## Status and known limits
 
-four is free software under the [GNU General Public License v3](LICENSE). You can use
-it, change it and share it.
+four is in active development. It is built, measured and played on one norns: a shield
+with a Raspberry Pi 4 and the 32-bit norns system.
 
-CLOUD is Mutable Instruments Clouds by Emilie Gillet (MIT license), as Volker Böhm
-ported it to SuperCollider in mi-UGens (GPL v3). The copied code and its notices are in
+- The plugin in this repo is built for that system. It is made to load on other norns too
+  (the original norns, a shield on a Raspberry Pi 3, or a norns with a 64-bit kernel), but
+  nobody tried it there yet. Where it does not fit, four plays its stock voices.
+- SuperCollider gets one processor core on a norns, and the sound drops out above about
+  60% load. Four CLOUD tracks take about 30%, or 40% in SPECTRAL mode. Four PV tracks
+  pitched up come close to the limit. A track set to OFF costs nothing, but a CLOUD track
+  keeps working in silence, so set the tracks you do not use to OFF.
+
+If something does not work, please open an
+[issue on GitHub](https://github.com/Alejo-end/four/issues).
+
+## Credits and license
+
+four is free software under the [GNU General Public License v3](LICENSE). You can use it,
+change it and share it.
+
+CLOUD is Mutable Instruments Clouds by Emilie Gillet (MIT license), as Volker Böhm ported
+it to SuperCollider in mi-UGens (GPL v3). The copied code and its notices are in
 [ugen/vendor](ugen/vendor/README.md).

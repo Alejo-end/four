@@ -1,4 +1,7 @@
-# Visuals for mangler
+# Visuals
+
+Live visuals in a browser that follow four. They were built for live shows with mangler,
+four's predecessor, and are not yet tested with four.
 
 The visuals show the live news as old VHS tape, with a reactive look on top. They
 react to the norns in two ways: to the sound (an audio cable) and to the state of
@@ -6,7 +9,7 @@ the instrument (OSC over Wi-Fi).
 
 ## Plug and play
 
-1. Switch on the norns. If it was shut down properly (SYSTEM, SLEEP), it loads mangler by itself and sends to the computer it remembers. If the power was pulled instead, the norns shows NO SCRIPT: pick mangler with K3 in the script list (SELECT), and it then sends as before.
+1. Switch on the norns. If it was shut down properly (SYSTEM, SLEEP), it loads four by itself and sends to the computer it remembers. If the power was pulled instead, the norns shows NO SCRIPT: pick four with K3 in the script list (SELECT), and it then sends as before.
 2. On the computer, double click `visuals/start.command`. It starts the bridge, keeps the computer awake and opens the page full screen in Brave or Chrome.
 3. Run `sh visuals/doctor.command`. Every line must say "ok".
 4. Audio: the default input of the computer must be the norns return (System Settings, Sound, Input). The page cannot change it.
@@ -90,8 +93,8 @@ display, above the page name. Nothing is drawn unless an event arrives: the shap
 shards, spirals, bursts, lattices, scribbles, one colour per track) and the words come only from
 the Octatrack. The MIDI clock is not forwarded.
 
-The same notes also play mangler (pads or the drone) if "keys enable" is on and the channel
-matches. To use the Octatrack for the picture only, set mangler's "midi channel" to one the
+The same notes also play four (the pads) if "keys enable" is on and the channel
+matches. To use the Octatrack for the picture only, set four's "midi channel" to one the
 Octatrack does not send on, or switch "keys enable" off.
 
 ## What goes out
@@ -99,13 +102,13 @@ Octatrack does not send on, or switch "keys enable" off.
 Every field is one message, /four/<key>, one argument. fields.json lists them. A knob goes
 out as 0 to 1 on its own scale. The norns sends a field when it changes, and the whole state
 again every two seconds and when you switch on or change the host or port. The rate is the
-frame rate of mangler (15 per second). Hydra smooths between messages.
+frame rate of four (15 per second). Hydra smooths between messages.
 
 ## If something is wrong
 
 The page shows "NO BRIDGE" or "WAITING FOR THE NORNS" in the middle of the picture when
 nothing arrives for four seconds. `doctor.command` says which part is missing.
-The bridge log is `/tmp/mangler-bridge.log`.
+The bridge log is `/tmp/four-bridge.log`.
 
 ## Tests
 

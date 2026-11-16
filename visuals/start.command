@@ -1,11 +1,11 @@
 #!/bin/sh
-# Start the mangler visuals: the bridge, and the browser full screen on this
+# Start the four visuals: the bridge, and the browser full screen on this
 # display. Double click this file in Finder, or run it in a terminal.
 #   KIOSK=0 sh visuals/start.command    starts the bridge only
 #   LAN=1 sh visuals/start.command      also lets other computers on this network open the page
 # Stop with visuals/stop.command.
 cd "$(dirname "$0")/.." || exit 1
-LOG=/tmp/mangler-bridge.log
+LOG=/tmp/four-bridge.log
 PORT=8080
 # the first Chromium browser found: Brave, Chrome, Chromium or Edge
 BROWSER=""
@@ -26,7 +26,7 @@ fi
 # the bridge, restarted by a loop if it ever stops
 if ! lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
   ( while true; do MANGLER_LAN="${LAN:-0}" node visuals/bridge.js >>"$LOG" 2>&1; sleep 1; done ) >/dev/null 2>&1 &
-  echo $! > /tmp/mangler-bridge.pid
+  echo $! > /tmp/four-bridge.pid
 fi
 for i in 1 2 3 4 5 6 7 8 9 10; do
   curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break
@@ -46,12 +46,12 @@ echo "browser: $BROWSER"
 
 # A new profile every time: the browser restores the tabs of its last session,
 # and each start would add one more page, every one of them drawing.
-pkill -f "user-data-dir=$HOME/.mangler-visuals" 2>/dev/null
+pkill -f "user-data-dir=$HOME/.four-visuals" 2>/dev/null
 sleep 1
-rm -rf "$HOME/.mangler-visuals"
+rm -rf "$HOME/.four-visuals"
 # A private profile, so the flags apply even when the browser is already open:
 #   autoplay with sound, and the audio input granted without a question.
-exec "$BROWSER" --user-data-dir="$HOME/.mangler-visuals" --no-first-run --no-default-browser-check \
+exec "$BROWSER" --user-data-dir="$HOME/.four-visuals" --no-first-run --no-default-browser-check \
   --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream \
   --disable-session-crashed-bubble --hide-crash-restore-bubble \
   --kiosk "http://127.0.0.1:$PORT/"

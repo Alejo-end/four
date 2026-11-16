@@ -1,4 +1,4 @@
-// mangler for Hydra, served by visuals/bridge.js at http://127.0.0.1:8080
+// four for Hydra, served by visuals/bridge.js at http://127.0.0.1:8080
 // (index.html loads this file). Start `node visuals/bridge.js` first.
 //
 // m   = the latest value of every field the norns sends (see fields.json),
