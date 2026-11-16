@@ -135,7 +135,8 @@ GRAIN through the sinc read, and every feature in the last step of the order.
 ### A test bench on the Mac
 
 SuperCollider is on the Mac since 2026-11-13. sc3-plugins and mi-UGens are
-not, so DFM1, JPverb and MiClouds cannot render there yet.
+not, so DFM1, JPverb and MiClouds cannot render there yet. CLOUD renders there through
+FourCloud, the same code in four's own plugin, since the thirty-third change.
 `scsynth -N` then renders any SynthDef offline from a score, with no audio
 hardware.
 

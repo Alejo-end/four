@@ -4,7 +4,7 @@
 --
 -- What it runs, in order:
 --   1. a syntax check of the script, the modules and the single-file build
---   2. the seven harnesses (each prints its assertion count; test_control
+--   2. the eight harnesses (each prints its assertion count; test_control
 --      also fails on a stale single-file build)
 --   3. the render suite over the source AND the single-file build, all five
 --      variants, compared byte for byte (the build must draw what the source
@@ -49,7 +49,8 @@ step("syntax: script, modules, single-file build",
 
 -- 2. the harnesses
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",
-                     "test_launchpad", "test_purity", "test_screen", "test_set" }) do
+                     "test_launchpad", "test_purity", "test_screen", "test_set",
+                     "test_plugin" }) do
   step("harness: " .. t, sh(LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
 end
 

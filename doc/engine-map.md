@@ -64,7 +64,7 @@ the output limiter, which it cannot push past because it only replays what passe
 Exactly one `Engine_Mangler` class may exist on the device. A duplicate hangs every norns
 script on LOADING, which is why deploys use `rsync --delete`.
 
-Every plugin UGen (JPverb, MiClouds, DFM1) is looked up by name so the file compiles without
+Every plugin UGen (JPverb, MiClouds, DFM1, and four's own FourStretch set) is looked up by name so the file compiles without
 it, and wrapped in `try` so a mismatch degrades to the stock fallback instead of failing to
 load. A missing plugin costs lushness, never the instrument.
 
@@ -130,9 +130,10 @@ GRAIN triggers grains with `Dust`, random rather than periodic, at audio rate so
 not quantized to the control block. Every per grain random value is audio rate too, because
 a control rate random sampled against audio rate triggers goes stale. Loudness is
 compensated across the whole density and size plane: sparse clouds get a boost, dense clouds
-get pulled down instead of pumping the limiter. With mi-UGens installed GRAIN becomes
-MiClouds, fed by the same window scrub, called with positional arguments because keyword
-arguments do not survive dispatch on a class held in a variable.
+get pulled down instead of pumping the limiter. CLOUD is Clouds: FourCloud from four's own
+plugin, else MiClouds from mi-UGens, else the GRAIN granulator. It is fed by the same window
+scrub and called with positional arguments, because keyword arguments do not survive
+dispatch on a class held in a variable.
 
 WARP and PV are the stock tools used straight, with cubic interpolation everywhere. Both
 were checked against upstream documentation and left alone on purpose.

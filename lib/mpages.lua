@@ -2691,6 +2691,31 @@ local function draw_page_flash()
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
+-- A NOTICE: what the player must do, once (C.notice, its lines; the plugin's
+-- install asks for a RESTART). A framed box over the page. It starts when the
+-- opening ends, stays ten seconds, and the first key or knob after it showed
+-- takes it away.
+local function draw_notice()
+  local n = C.notice
+  if not n then return end
+  if not C.notice_from then C.notice_from = C.frame end
+  if C.frame - C.notice_from > FPS * 10 or C.last_input > C.notice_from then
+    C.notice = nil
+    return
+  end
+  local w = 0
+  for i = 1, #n do w = max(w, text_w(n[i], 1)) end
+  local h = 8 * #n + 10
+  local x, y = floor(64 - (w + 12) / 2), floor(34 - h / 2)
+  screen.level(0)
+  screen.rect(x, y, w + 12, h)
+  screen.fill()
+  screen.level(12)
+  screen.rect(x, y, w + 12, h)
+  screen.stroke()
+  for i = 1, #n do ptext_c(n[i], 64, y + 6 + (i - 1) * 8, 1, 15) end
+end
+
 -- THE OPENING: a second and a half, once, when the script starts. Four bars
 -- rise one after the other (the four tracks) and the name lands on them. Any
 -- key or knob ends it at once.
@@ -2743,6 +2768,7 @@ function M.redraw()
   draw_body()
   draw_footer()
   draw_page_flash()
+  draw_notice()
   screen.update()
   screen.level = orig_level
 end

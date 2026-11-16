@@ -604,4 +604,26 @@ do
   _h.run_ticks(1)
 end
 
+-- ============================================================================
+-- 13 · the notice (the plugin's install asks for a RESTART): framed, whole,
+--      and gone at the first key after it showed
+-- ============================================================================
+do
+  T.goto_page("TAKE"); _h.run_ticks(2)
+  CTX.notice, CTX.notice_from = { "PLUGIN INSTALLED", "SYSTEM > RESTART" }, nil
+  redraw()
+  local w = math.max(CTX.font.text_w("PLUGIN INSTALLED", 1), CTX.font.text_w("SYSTEM > RESTART", 1))
+  local x0 = math.floor(64 - (w + 12) / 2)
+  ok(x0 >= 2 and x0 + w + 12 <= 126, "the notice fits the screen (" .. x0 .. " to " .. (x0 + w + 12) .. ")")
+  ok(px(x0, 25) == 12 and px(x0 + w + 11, 25) == 12, "the notice is framed")
+  local ink = 0
+  for y = 26, 45 do for x = x0 + 2, x0 + w + 9 do if px(x, y) == 15 then ink = ink + 1 end end end
+  ok(ink > 60, "the notice's two lines are drawn (" .. ink .. " lit pixels)")
+  _h.run_ticks(2); redraw()
+  ok(CTX.notice ~= nil, "the notice stays while nothing is touched")
+  enc(3, 1); enc(3, -1); _h.run_ticks(1); redraw()
+  ok(CTX.notice == nil, "the first knob after it showed takes it away")
+  ok(px(x0, 25) ~= 12 or px(x0 + w + 11, 25) ~= 12, "...and its frame is gone")
+end
+
 T.report("screen harness OK")

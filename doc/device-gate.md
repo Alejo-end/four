@@ -68,7 +68,7 @@ errors land there, not in matron. A duplicate engine class is the classic cause.
 |---|---|---|---|
 | 1.1 | E1 through all **12** pages | Every page draws. No black screen | A black screen is a Lua error in `redraw`. Scroll maiden below `<ok>` for the traceback |
 | 1.2 | Page order | TAKE VOICE TRACKS · TAPE · FILTER EFFECT DELAY REVERB · MIX · PADS MOTION SCENE | |
-| 1.3 | SC tab clean | No errors after load. With the plugin, the log says `four: FourStretch on` | The guarded plugins (FourStretch, JPverb, MiClouds, DFM1) fall back without a word. A *posted* error means a wrong argument order |
+| 1.3 | SC tab clean | No errors after load. With the plugin, the log says `four: FourStretch on` and `four: CLOUD is FourCloud` | The guarded plugins (FourStretch with FourCloud, JPverb, MiClouds, DFM1) fall back without a word. A *posted* error means a wrong argument order |
 | 1.4 | Input reaches the meter | TAKE's IN meter moves with your source | Levels / `monitor_level`, not the engine |
 
 ---
@@ -427,7 +427,7 @@ of the whole JACK cycle, not the engine's. The budget is 60% of that thread.
 | 19.13 | The second slot | Set track 2's `effect 2` in PARAMS. On EFFECT, turn K1+E2 and K1+E3 | K1+E2 turns `effect2_amt` and K1+E3 `effect2_rate`, and the first slot's knobs do not move. The second slot's name shows top right. The second slot changes the sound of the first | `ENC_MAP.EFFECT`, `body_EFFECT` |
 | 19.14 | **PV, WARP and PLAY at pitch 1** | Track 2's tone at pitch 1, in PLAY, WARP and PV | The three play the same take at the same level, within 1 dB. Listen for warble or a smear | FourPV, FourWarp, FourRead, `exactRd` |
 | 19.15 | **GRAIN's first grain** | Density 4. Start track 2's GRAIN and track 3's PLAY together. Then tap a grain pad with track 3's PLAY | The grain sounds with the PLAY, not a quarter of a second after it. Offline the first grain comes 1 to 1.6 ms after the press | `Impulse.ar(0)` in `\four_grain` and `\four_voice_grain` (twenty-second change) |
-| 19.16 | CLOUD | Track 2 in CLOUD | It sounds. With mi-UGens the node is `four_clouds`, without them `four_grain` | `droneDef`, MiClouds |
+| 19.16 | CLOUD | Track 2 in CLOUD | It sounds. With the plugin (FourCloud) or mi-UGens the node is `four_clouds`, without either `four_grain` | `droneDef`, FourCloud, MiClouds |
 | 19.17 | The voices' cost | Four tracks in PLAY, then WARP, PV and GRAIN, at pitch 1 | Record the thread for each. Compare with doc/measurements/2026-11-13/lanes.md and the sixteenth change | |
 | 19.18 | **The sends start at 0** | A fresh script | `fx_dly`, `fx_rev`, every `t<n>_fx_dly` and `t<n>_fx_rev`, and `dly_rev` read 0 | `ROUTES` (nineteenth change) |
 | 19.19 | A send at 0 gives no echo | Drums on track 1, `delay_mix` and `rev_mix` up, every send at 0. Stop the voice. Then open track 1's sends (TRACKS, hold K1, D and R) and stop it again | With the sends at 0 nothing rings on. With them open, echoes and a tail ring on | the sends in io and the lanes |

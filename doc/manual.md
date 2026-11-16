@@ -26,7 +26,8 @@ device, and the newest sounds still wait for a listening session.
 - Optional: a grid. A monome grid and a Launchpad Mini MK3 work directly. Other Launchpad
   and APC models work through [midigrid](https://github.com/jaggednz/midigrid).
 - Optional: the `FourStretch` plugin, JPverb (sc3-plugins) and MiClouds (mi-UGens). If
-  the engine finds one, it uses it. The engine also plays without them.
+  the engine finds one, it uses it. The engine also plays without them. CLOUD needs the
+  plugin or MiClouds; without either it plays GRAIN.
 
 ## Install
 
@@ -51,9 +52,12 @@ Then SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
 3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
    A different number means that an old engine still runs.
 
-The `FourStretch` plugin holds the instrument's own stretch, grain and delay code. It is
-built on the norns: the steps are in [ugen/README.md](../ugen/README.md). With it, the
-SuperCollider log says `four: FourStretch on`.
+The `FourStretch` plugin holds the instrument's own stretch, grain, delay and Clouds
+code. It is built on the norns: the steps are in [ugen/README.md](../ugen/README.md).
+When the repo ships a binary for your norns (in `ignore/plugins/`), four installs it at
+load and shows `PLUGIN INSTALLED / SYSTEM > RESTART` once. Do the restart: until then
+four plays its stock voices. With the plugin, the SuperCollider log says
+`four: FourStretch on` and `four: CLOUD is FourCloud`.
 
 ## First session
 
@@ -124,7 +128,8 @@ TAKE, VOICE, FILTER and EFFECT edit the focused track. The header shows the focu
 | ![WARP](ui/voice-warp.png) | ![PV](ui/voice-pv.png) |
 | WARP: slow or fast at the same pitch. | PV: a phase vocoder. A held head is a freeze. |
 
-CLOUD is MiClouds, for texture. OFF silences the track and frees its CPU.
+CLOUD is Mutable Instruments Clouds, for texture: `FourCloud` from the plugin, or
+MiClouds. OFF silences the track and frees its CPU.
 
 In PLAY on track 1, hold K1 for erode and wear. Each pass of the loop then rewrites the
 take a little darker and quieter, and GEN counts the passes. K2 becomes HEAL: it parks the

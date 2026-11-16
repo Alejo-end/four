@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-15)
+## STATUS (2026-11-16)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -34,7 +34,8 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
   a rate. The second slot's type has no key yet: it is in PARAMS.
 - GRAIN is a granulator that reads the take: stereo grain pairs, spray, and timing from
   regular to Poisson. A cloud holds 48 pairs with the plugin and 32 without. CLOUD is
-  MiClouds.
+  Mutable Instruments Clouds: `FourCloud` from our plugin, else an installed MiClouds,
+  else the GRAIN granulator. The log says which (`four: CLOUD is FourCloud`).
 - Four modulators, each on any track.
 - Twelve pages: TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE.
   TRACKS is the hub: E2 picks the focused track, which TAKE, VOICE, FILTER and EFFECT
@@ -53,15 +54,32 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
   (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md stay, labelled as old.
 
 **FourStretch, our own plugin.** `ugen/` holds our UGens (FourPV, FourWarp, FourRead,
-FourGrain, FourDelay, FourRoom, FourBBD, FourTanh) and their proof `ugen/test_core.cpp`,
-in plain C++. `lib/FourStretch.sc` is their ONLY class file: the binary goes alone into
-`~/.local/share/SuperCollider/Extensions/FourStretch/`, never with a second class file.
-Build it on the norns with `-DFOUR_FFTW` (ugen/README.md). Install the binary BEFORE an
-engine that names a new UGen. With the binary the log says `four: FourStretch on`. Without
-it the engine builds the stock voices and effects.
+FourGrain, FourDelay, FourRoom, FourBBD, FourTanh, FourCloud) and their proof
+`ugen/test_core.cpp`, in plain C++. `lib/FourStretch.sc` is their ONLY class file: the
+binary goes alone into `~/.local/share/SuperCollider/Extensions/FourStretch/`, never with
+a second class file. With the binary the log says `four: FourStretch on`. Without it the
+engine builds the stock voices and effects.
+- `FourCloud` is Clouds, the code of mi-UGens' MiClouds copied unchanged into
+  `ugen/vendor/` (commit and licenses in `ugen/vendor/README.md`). Same inputs, same
+  samples (rendered offline against a MiClouds of the same commit). Never name it
+  `MiClouds`: a second MiClouds class next to an installed mi-UGens hangs every script.
+  Every build needs `-Iugen/vendor/eurorack`.
+- **four installs its own plugin** (lib/mplugin.lua, 33rd change). A binary built on a
+  norns with `ugen/build_norns.sh` lands in `ignore/plugins/<uname -m>/FourStretch.so`
+  (inert on the norns, deployed like the rest). At init, four copies that `.so` alone
+  into Extensions when none is there or the shipped one is newer with other bytes, and
+  says `PLUGIN INSTALLED / SYSTEM > RESTART` once. It checks the ELF class and machine
+  against scsynth's, writes nothing else, and never touches mi-UGens. No binary shipped
+  for the machine: nothing happens. `test/test_plugin.lua` proves the cases.
+- The engine uses the plugin only when the binary is the one that was there when
+  sclang started (`Engine_Four.bootPlug`). One installed since then waits for the
+  RESTART (`four: FourStretch is new since the restart`), so a reload without a RESTART
+  plays the stock voices instead of silence. FourCloud needs a binary that holds it
+  (`plugHas`): an older binary leaves CLOUD to MiClouds or the granulator.
 
 **SuperCollider on the Mac (2026-11-13).** 3.14.1, without sc3-plugins or mi-UGens, so
-DFM1, JPverb and MiClouds take their fallbacks there. `test/dsp/run_engine.sh` compiles the
+DFM1 and JPverb take their fallbacks there, and CLOUD is FourCloud only in the plugin
+build. `test/dsp/run_engine.sh` compiles the
 real engine with a stand-in for CroneEngine, prints the command count and renders the
 SynthDefs offline. `an_engine.py` measures them. `test/dsp/check_dsp.sh` runs the whole
 offline DSP check with one verdict (see the workflow). Invariant 3 below is out of date for
@@ -106,6 +124,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 31st, 32nd: README, safer deploy line, the clip exporter | documents, test tool | |
 | 33rd: SCENE A and B crossfader (Lua) | NO | no |
 | 34th: SCENE: E2 is A, E3 is B, K1+E3 fades (Lua) | NO | no |
+| 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | NO, no norns binary yet | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -120,11 +139,17 @@ xruns past about 60%.
   preset loaded by hand gave 3 to 7 xruns (doc/plan.md, Phase 3).
 
 **What is pending on the device** (doc/plan.md, Phase 0):
-1. Build the plugin with `FourBBD` (its core changed again in the twenty-second change),
-   and install it BEFORE the engine.
-2. Deploy, RESTART, and read `count: 198`.
-3. Measure the delay's cost. Make sure that silence costs nothing: the denormal repair is
-   not confirmed there.
+1. Deploy, then build the plugin there with `ugen/build_norns.sh` (it has `FourBBD`,
+   changed in the twenty-second change, and `FourCloud`, new in the thirty-third). Its
+   proof must print `all passed`: it includes the Clouds smoke test, whose cost check
+   (silence against sound) is a real denormal check only on the Pi.
+2. Load four: it installs the binary and asks for SYSTEM > RESTART. RESTART, read
+   `count: 198`, `four: FourStretch on` and `four: CLOUD is FourCloud`.
+3. Copy `ignore/plugins/<uname -m>/FourStretch.so` back to the Mac and commit it: the
+   next `rsync --delete` removes it otherwise.
+4. Measure the delay's cost and CLOUD's (four CLOUD tracks, and SPECTRAL, which costs
+   three to four times GRANULAR on the Mac). Make sure that silence costs nothing: the
+   denormal repair is not confirmed there.
 
 **Not heard.** No listening session for four took place yet. The one judgement on record
 is the user's on FourStretch, above. The shipped presets have never been heard. The list
@@ -407,7 +432,7 @@ Each line was learned the hard way; the change log has the story.
 ## Workflow
 
 ```sh
-# EVERYTHING below in one command, with one verdict: syntax, the seven harnesses,
+# EVERYTHING below in one command, with one verdict: syntax, the eight harnesses,
 # and source == single-file build across all render variants. With LUA53 set to a
 # Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
 # it runs on 5.3, which is the only check of what the device actually accepts.
@@ -436,6 +461,7 @@ lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills 
 lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
 lua test/test_set.lua       # the album presets: every pset and scene loads
+lua test/test_plugin.lua    # the plugin installer (lib/mplugin.lua), over real files
 
 # single-file build: inlines lib/*.lua into dist/four_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
@@ -453,6 +479,11 @@ lua test/controls.lua
 # and the deploy rsync would copy it to the norns (invariant 1). The scripts refuse it.
 FOUR_PLUGIN_DIR=<plugin folder> test/dsp/check_dsp.sh <work folder outside the repo>
 
+# the plugin's own proof and its build on the Mac (ugen/README.md; every build of
+# ugen/ needs -Iugen/vendor/eurorack). On the norns: ugen/build_norns.sh
+clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
+ugen/build_mac.sh <plugin folder>
+
 # on a connected device: run the walkthrough and the measurements (doc/norns-platform.md
 # says how, and why one SSH session must stay open)
 python3 test/device/gate.py 2 4:4.10,4.14
@@ -461,6 +492,8 @@ python3 test/device/measure.py states voices
 # deploy (the repo IS the script; --delete kills stale engine copies). Keep
 # --exclude='.claude': agent worktrees live in .claude/worktrees, each with its own
 # lib/Engine_Four.sc, and a second copy on the norns hangs every script (invariant 1).
+# ignore/ goes too, on purpose: it carries the shipped plugin binaries, and norns
+# compiles nothing under a folder named ignore.
 rsync -av --delete --exclude='.git' --exclude='.claude' ./ <norns>:~/dust/code/four/
 ```
 

@@ -94,8 +94,9 @@
 -- font), mtape (the softcut tape + the mix law), mdeck (the loop deck law),
 -- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
 -- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
--- the wav file reader). they share one `ctx` table and params are the single
--- source of truth. the plan: doc/plan.md. the history: doc/changelog.md.
+-- the wav file reader), mplugin (installs four's own SuperCollider plugin).
+-- they share one `ctx` table and params are the single source of truth. the
+-- plan: doc/plan.md. the history: doc/changelog.md.
 
 engine.name = "Four"
 
@@ -7953,6 +7954,31 @@ local function draw_page_flash()
   framed2x(name, floor(64 - (text_w(name, 2) + 9) / 2 + 0.5), 23)
 end
 
+-- A NOTICE: what the player must do, once (C.notice, its lines; the plugin's
+-- install asks for a RESTART). A framed box over the page. It starts when the
+-- opening ends, stays ten seconds, and the first key or knob after it showed
+-- takes it away.
+local function draw_notice()
+  local n = C.notice
+  if not n then return end
+  if not C.notice_from then C.notice_from = C.frame end
+  if C.frame - C.notice_from > FPS * 10 or C.last_input > C.notice_from then
+    C.notice = nil
+    return
+  end
+  local w = 0
+  for i = 1, #n do w = max(w, text_w(n[i], 1)) end
+  local h = 8 * #n + 10
+  local x, y = floor(64 - (w + 12) / 2), floor(34 - h / 2)
+  screen.level(0)
+  screen.rect(x, y, w + 12, h)
+  screen.fill()
+  screen.level(12)
+  screen.rect(x, y, w + 12, h)
+  screen.stroke()
+  for i = 1, #n do ptext_c(n[i], 64, y + 6 + (i - 1) * 8, 1, 15) end
+end
+
 -- THE OPENING: a second and a half, once, when the script starts. Four bars
 -- rise one after the other (the four tracks) and the name lands on them. Any
 -- key or knob ends it at once.
@@ -8005,6 +8031,7 @@ function M.redraw()
   draw_body()
   draw_footer()
   draw_page_flash()
+  draw_notice()
   screen.update()
   screen.level = orig_level
 end
@@ -8021,6 +8048,102 @@ function M.init(ctx)
   for _, f in ipairs(HFLAGS) do f.w = text_w(f.ch, 1) end
   for i, ch in ipairs(RP_CH) do RP_W[i] = text_w(ch, 1) end
   layout_dots()
+end
+
+return M
+
+end)()
+local Mplugin = (function()  -- inlined lib/mplugin.lua
+-- mplugin: four installs its own plugin.
+--
+-- The FourStretch plugin (ugen/: the stretch voices, THE ROOM, THE BUCKET
+-- BRIGADE, THE CLOUD) is a binary for one kind of machine. The repo can ship
+-- one built on a norns, in ignore/plugins/<what `uname -m` prints>/ (norns
+-- compiles nothing under a folder named ignore; ugen/build_norns.sh builds it
+-- and puts it there). At init, when the user Extensions folder has no
+-- FourStretch.so, or has an older one with other bytes, this copies the
+-- shipped one there and says SYSTEM > RESTART once, on screen and in maiden.
+--
+-- It copies that .so only. Never a class file: lib/FourStretch.sc is the only
+-- copy, and a second copy of a class hangs every norns script on LOADING. It
+-- writes nothing outside Extensions/FourStretch/, so a separately installed
+-- mi-UGens stays as it is. scsynth loads its plugins only when it boots, so
+-- a new binary waits for the RESTART; until then the engine keeps to its
+-- stock voices (Engine_Four.bootPlug). With no binary for this machine it
+-- does nothing and says nothing: four plays its stock voices, as before.
+
+local M = {}
+
+local NAME = "FourStretch.so"
+local SERVERS = { "/usr/local/bin/scsynth", "/usr/bin/scsynth" }
+
+-- a path in single quotes, for the shell
+local function q(s)
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+local function sh(cmd)
+  local ok = os.execute(cmd)
+  return ok == true or ok == 0
+end
+
+-- the ELF class (32 or 64 bit) and machine of a binary, as one string; nil
+-- when the file is not an ELF binary
+local function elf(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local h = f:read(20)
+  f:close()
+  if not h or #h < 20 or h:sub(1, 4) ~= "\127ELF" then return nil end
+  return h:byte(5) .. "/" .. (h:byte(19) + 256 * h:byte(20))
+end
+
+-- Installs the shipped plugin when it is missing or out of date. Returns what
+-- it did: "installed", "current" (what is installed stays), "none" (nothing
+-- shipped for this machine), "foreign" (the shipped binary is not for this
+-- scsynth), "failed", or "unknown" (not on a norns). `o` replaces what it
+-- would ask the system, for the tests: home, dir (the script folder, with its
+-- last slash), arch, servers (paths to try for scsynth).
+function M.check(o)
+  o = o or {}
+  local cap = util and util.os_capture
+  local home = o.home or (_path and _path.home) or os.getenv("HOME")
+  local dir = o.dir or (norns and norns.state and norns.state.path)
+  local arch = o.arch or (cap and cap("uname -m"))
+  if not (home and dir and arch and util and util.file_exists) then return "unknown" end
+  if not arch:match("^[%w_]+$") then return "unknown" end
+  if dir:sub(-1) ~= "/" then dir = dir .. "/" end
+  local src = dir .. "ignore/plugins/" .. arch .. "/" .. NAME
+  if not util.file_exists(src) then return "none" end
+  -- the binary must suit the server that would load it: the same ELF class
+  -- and machine as scsynth. (A 64-bit kernel under a 32-bit system says
+  -- aarch64 to uname, and still needs a 32-bit binary.)
+  for _, p in ipairs(o.servers or SERVERS) do
+    local want = util.file_exists(p) and elf(p)
+    if want then
+      if elf(src) ~= want then return "foreign" end
+      break
+    end
+  end
+  local ext = home .. "/.local/share/SuperCollider/Extensions/FourStretch"
+  local dst = ext .. "/" .. NAME
+  if util.file_exists(dst) and (not sh("[ " .. q(src) .. " -nt " .. q(dst) .. " ]")
+      or sh("cmp -s " .. q(src) .. " " .. q(dst))) then
+    return "current"
+  end
+  -- beside it first, then renamed over it: a running scsynth has the old file
+  -- mapped, and writing into that file in place could crash it. (scsynth
+  -- loads only files that end in .so, so the .tmp is never loaded.)
+  local tmp = dst .. ".tmp"
+  if not (sh("mkdir -p " .. q(ext)) and sh("cp " .. q(src) .. " " .. q(tmp))
+      and sh("mv -f " .. q(tmp) .. " " .. q(dst))) then
+    os.remove(tmp)
+    print("four: could not install the FourStretch plugin into " .. ext)
+    return "failed"
+  end
+  print("four: installed the FourStretch plugin for " .. arch .. " into " .. ext
+    .. ". Do SYSTEM > RESTART to hear it. Until then four plays its stock voices.")
+  return "installed"
 end
 
 return M
@@ -10937,6 +11060,17 @@ function init()
   end
   ctx.splash_from = ctx.frame      -- the opening picture, see Mpages.redraw
   print("four: init() done, params built")
+
+  -- four's own plugin: the binary shipped for this machine goes where
+  -- SuperCollider finds it (lib/mplugin.lua), and is heard after a RESTART.
+  -- The engine is already built by now, so this load keeps its voices. A
+  -- failure here must never stop the instrument.
+  local okp, got = pcall(Mplugin.check)
+  if not okp then
+    print("four: the plugin check failed, four plays on: " .. tostring(got))
+  elseif got == "installed" then
+    ctx.notice = { "PLUGIN INSTALLED", "SYSTEM > RESTART" }
+  end
 
   -- the norns SYSTEM aux reverb sits after the engine and colors everything;
   -- if another script left it on, "dry" playback isn't — say so at load

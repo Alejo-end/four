@@ -84,8 +84,9 @@
 -- font), mtape (the softcut tape + the mix law), mdeck (the loop deck law),
 -- minput (midi/keyboard notes), mgrid (grid surface), mmotion (the gesture
 -- looper), mscenes (scenes, morph, orbit, the way back), mpages (the screen and
--- the wav file reader). they share one `ctx` table and params are the single
--- source of truth. the plan: doc/plan.md. the history: doc/changelog.md.
+-- the wav file reader), mplugin (installs four's own SuperCollider plugin).
+-- they share one `ctx` table and params are the single source of truth. the
+-- plan: doc/plan.md. the history: doc/changelog.md.
 
 engine.name = "Four"
 
@@ -256,6 +257,7 @@ local Mosc = include "lib/mosc"
 local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
+local Mplugin = include "lib/mplugin"
 
 ctx.font = Mfont
 ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
@@ -3167,6 +3169,17 @@ function init()
   end
   ctx.splash_from = ctx.frame      -- the opening picture, see Mpages.redraw
   print("four: init() done, params built")
+
+  -- four's own plugin: the binary shipped for this machine goes where
+  -- SuperCollider finds it (lib/mplugin.lua), and is heard after a RESTART.
+  -- The engine is already built by now, so this load keeps its voices. A
+  -- failure here must never stop the instrument.
+  local okp, got = pcall(Mplugin.check)
+  if not okp then
+    print("four: the plugin check failed, four plays on: " .. tostring(got))
+  elseif got == "installed" then
+    ctx.notice = { "PLUGIN INSTALLED", "SYSTEM > RESTART" }
+  end
 
   -- the norns SYSTEM aux reverb sits after the engine and colors everything;
   -- if another script left it on, "dry" playback isn't — say so at load

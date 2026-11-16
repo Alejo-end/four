@@ -72,11 +72,16 @@ each one.
 - [The full guide](doc/manual.md): every page with pictures, the grid, MIDI, saving and
   troubleshooting.
 - [Every key and knob](doc/controls.md), generated from the code.
-- Optional extras: the FourStretch plugin, four's own stretch, grain, delay and reverb
-  code, built on the norns ([ugen/README.md](ugen/README.md)). A monome grid or a
+- Optional extras: the FourStretch plugin, four's own stretch, grain, delay, reverb and
+  Clouds code ([ugen/README.md](ugen/README.md)). When the repo ships it for your norns,
+  four installs it itself and asks for one SYSTEM > RESTART. A monome grid or a
   Launchpad Mini MK3.
 
 ## License
 
 four is free software under the [GNU General Public License v3](LICENSE). You can use
 it, change it and share it.
+
+CLOUD is Mutable Instruments Clouds by Emilie Gillet (MIT license), as Volker Böhm
+ported it to SuperCollider in mi-UGens (GPL v3). The copied code and its notices are in
+[ugen/vendor](ugen/vendor/README.md).
