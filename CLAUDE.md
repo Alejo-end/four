@@ -103,6 +103,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 28th: the pre-merge review's fixes (test tools, documents) | not run there yet | |
 | 29th: a short README, the guide in doc/manual.md, the GPL v3 license | documents only | |
 | 30th: the README picture on the handheld case | documents only | |
+| 31st, 32nd: README, safer deploy line, the clip exporter | documents, test tool | |
+| 33rd: SCENE A and B crossfader (Lua) | NO | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

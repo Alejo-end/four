@@ -4416,3 +4416,25 @@ four-site website.
   the same as render_pages' `base_01_TAKE`. Two runs give identical files.
 - VOICE CLOUD and the ECHO effect are drawn for the first time. Nothing in four's runtime
   changed.
+
+four, thirty-third change: **the SCENE crossfader has two chosen ends (Lua only, the count
+stays 198, NOT on the device)**. The user found the morph hard to aim: its left end was
+always the sound at the start of the sweep.
+- E2 picks B (`scene_slot`, same id). K1+E2 picks A (`scene_slot_a`, new: 0 = LIVE, the
+  default, or a stored slot). E3 fades from A to B and back, and it never lands: K2 RCL
+  lands B as before.
+- The orbit's drift and reach left SCENE's K1 layer. Their params stay in PARAMS > orbit,
+  and the presets still name them.
+- The fade latches A when it leaves 0 and keeps it until it comes home, so a new A
+  mid-fade never jumps. An empty A is LIVE. The orbit, a K2 peek and a GLIDE leave 0 from
+  LIVE. Two slots that agree on a value the live sound lacks now move it. Any id a slot
+  does not carry falls back to the live sound at that end.
+- The rail names both ends (`A LIVE` or `A n`, and `n B`), a small A marks A's cell (dim
+  while it waits), and the footer reads `B` and, with K1, `A`.
+- `grp_scene` 12 to 13. `scene_slot_a` is in `SCENE_EXCLUDE` and `MOTION_EXCLUDE`. The
+  presets carry `scene_slot_a 0`. Tests: test_control 791, test_screen 105, test_set
+  9487. The gallery adds `scene-ab.png`. doc/device-gate.md gains row 13.3b, and 13.3
+  no longer says K1+E1.
+- The README and the website were rewritten by an editor's pass at the same time, with
+  the website link and the A and B crossfader.
+Nobody has played it yet.
