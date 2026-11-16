@@ -107,9 +107,10 @@ local min, max = math.min, math.max
 -- (PADS MOTION SCENE). EROSION and ORBIT are no longer pages: erosion only
 -- ever worked in PLAY mode, so its controls live on VOICE's PLAY face (the
 -- alt pair, which was a redundant scan/pitch copy there); the orbit drives
--- the scene machinery, so its knobs live on SCENE's alt pair and its RUN
--- switch on the grid/PARAMS/MIDI. The params are UNCHANGED (ids are never
--- renamed), only their surfaces moved.
+-- the scene machinery, and its knobs live in PARAMS (orbit), its RUN switch
+-- on the grid/PARAMS/MIDI. SCENE's alt pair picks the crossfader's A end.
+-- The params are UNCHANGED (ids are never renamed), only their surfaces
+-- moved.
 local PAGES = {
   "TAKE", "VOICE", "TRACKS", "TAPE", "FILTER", "EFFECT", "DELAY", "REVERB",
   "MIX", "PADS", "MOTION", "SCENE",
@@ -995,10 +996,11 @@ local ENC_MAP = {
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
   MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
-  -- the alt pair is the ORBIT: drift time + how far each leg reaches. the
-  -- recall quantize (scene_recall_mode) moved to PARAMS — a set-and-forget
-  -- config knob lost its encoder to a performance one.
-  SCENE  = { "scene_slot", "orbit_rate", "scene_morph_amt", "orbit_reach" },
+  -- the crossfader: E2 picks B (the slot K2 recalls and K3 captures into),
+  -- K1+E2 picks A (LIVE or a slot), E3 fades between them. K1+E3 is
+  -- nothing. The orbit's drift and reach, and the recall quantize, are
+  -- set-and-forget: they live in PARAMS.
+  SCENE  = { "scene_slot", "scene_slot_a", "scene_morph_amt", nil },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
@@ -3008,18 +3010,26 @@ local function init_params()
   -- and the whole point is a footswitch that captures, recalls, rescues or
   -- throws. every action fires on the press edge (v == 1) only — a stray 0
   -- from params:bang() or a pset read must never do anything.
-  params:add_group("grp_scene", "scenes", 12)
+  params:add_group("grp_scene", "scenes", 13)
   -- ONE selector, three jobs: the slot K2 recalls, K3 captures into, and the
-  -- morph aims at. (there used to be two more — `morph A`/`morph B` — on the
-  -- alt layer, where you couldn't see them. see mscenes' morph_from.)
+  -- morph aims at (B, the crossfader's right end).
   -- slot 0 is the ◄ cell — the way back (mscenes branches on it)
-  params:add_number("scene_slot", "scene slot", 0, 8, 1)
+  params:add_number("scene_slot", "scene slot B", 0, 8, 1)
   params:set_action("scene_slot", function()
     -- re-aim a sweep in progress; at rest, picking a slot must stay silent
     if pget("scene_morph_amt", 0) > 0 then Mscenes.touch() end
   end)
-  -- THE performance knob: sweeps from the sound you have toward the selected
-  -- slot. MIDI-map it to a fader/pedal, or record it with the gesture looper
+  -- the crossfader's left end (SCENE K1+E2): 0 = LIVE, the sound you have
+  -- when the fade leaves 0 (the default, the morph as it always was), or a
+  -- stored slot. No action: a fade latches A when it leaves 0 and keeps it
+  -- until it comes home, so picking A never moves the sound by itself.
+  -- (scene_morph_a/b, deleted in the 38th change, were hidden on the K1
+  -- layer; this one is named on the rail and marked on its cell.)
+  params:add_number("scene_slot_a", "scene slot A", 0, 8, 0,
+    function(p) local v = p:get() return v < 1 and "LIVE" or tostring(v) end)
+  -- THE performance knob: fades from A (the sound you have, or slot A)
+  -- toward the selected slot B, and back. MIDI-map it to a fader/pedal, or
+  -- record it with the gesture looper
   -- (it's in MOTION_IDS — one lane replays the whole sweep). only this writes
   -- params, and only from the next frame's tick (mscenes coalesces so a fast
   -- CC can't flood the engine).

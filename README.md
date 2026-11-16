@@ -26,7 +26,8 @@ track records its own take of up to 60 seconds, loops it and runs it through its
 
 Under the tracks runs a softcut tape loop that records the input or four's own output.
 PADS cuts the loop into eight slices, and a step sequencer can play them. SCENE keeps
-whole sounds in eight slots and crossfades between two of them. MOTION loops your knob
+whole sounds in eight slots and crossfades between two of them, or from the sound you
+are playing into one. MOTION loops your knob
 moves, and four modulators swing the sound around wherever you left the knobs. It all
 sits on three keys and three encoders. A grid is optional, and every parameter maps to
 MIDI.

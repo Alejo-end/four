@@ -509,4 +509,98 @@ do
   ok(not FZ.on, "...and FZ goes with it")
 end
 
+-- ============================================================================
+-- 12 · SCENE names both ends of the crossfader
+-- ============================================================================
+-- The rail reads "A 1 ====*---- 4 B" (A LIVE when A is the live sound), a
+-- small A sits under A's cell, and the footer reads B·4, with K1 A·1.
+-- reads() compares the lit pixels in a string's box with that string drawn
+-- alone in the same font, so a label that is cut, moved or overdrawn fails.
+do
+  local Mf = CTX.font
+  local function mask(x, y, w)
+    local t = {}
+    for yy = y, y + 4 do
+      for xx = x, x + w - 1 do t[#t + 1] = px(xx, yy) > 0 and "1" or "0" end
+    end
+    return table.concat(t)
+  end
+  local function reads(str, x, y)
+    local w = Mf.text_w(str, 1)
+    local drawn = mask(x, y, w)
+    screen.clear()
+    Mf.ptext(str, x, y, 1, 15)
+    local want = mask(x, y, w)
+    redraw()
+    return drawn == want
+  end
+  local function lmax(x0, y0, x1, y1)
+    local m = 0
+    for y = y0, y1 do for x = x0, x1 do m = math.max(m, px(x, y)) end end
+    return m
+  end
+  local function cell_x(i) return 16 + (i - 1) * 14 end
+  T.goto_page("SCENE")
+  params:set("orbit_on", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_slot", 1); T.pulse("scene_capture")
+  params:set("cutoff", 5000)
+  params:set("scene_slot", 4); T.pulse("scene_capture")
+  params:set("scene_slot", 8); T.pulse("scene_capture")
+  params:set("scene_slot", 4)
+  params:set("scene_slot_a", 1)
+  _h.run_ticks(25)                           -- the SAVED word has gone
+  params:set("scene_morph_amt", 0.4); _h.run_ticks(2)
+  redraw()
+  local bw = Mf.text_w("4 B", 1)
+  ok(reads("A 1", 4, 43), "the rail's left end reads A 1")
+  ok(reads("4 B", 124 - bw, 43), "...its right end reads 4 B")
+  ok(lmax(4, 43, 16, 47) > lmax(124 - bw, 43, 123, 47),
+    "...and the nearer end (A, at 0.4) is the brighter")
+  ok(reads("A", cell_x(1) + 4, 36), "a small A sits under A's cell")
+  ok(lmax(cell_x(1), 36, cell_x(1) + 11, 40) == 12, "...bright: it is the fader's A")
+  local others = 0
+  for i = 2, 8 do others = math.max(others, lmax(cell_x(i), 36, cell_x(i) + 11, 40)) end
+  ok(others == 0, "...and under no other cell")
+  ok(reads("B", Mp.FOOT.e2, 58) and reads("4", Mp.FOOT.e2 + 7, 58),
+    "the footer names E2 B·4 (" .. tostring(Mp.FOOT.e2) .. ")")
+  key(1, 1); redraw()
+  ok(reads("A", Mp.FOOT.e2, 58) and reads("1", Mp.FOOT.e2 + 7, 58),
+    "...and K1 held names it A·1")
+  key(1, 0); redraw()
+
+  -- A changed mid-fade: the rail keeps the A the fade left from, and the
+  -- mark under the new A waits dim
+  params:set("scene_slot_a", 8); _h.run_ticks(1); redraw()
+  ok(reads("A 1", 4, 43), "A changed mid-fade: the rail still reads A 1")
+  ok(reads("A", cell_x(8) + 4, 36) and lmax(cell_x(8), 36, cell_x(8) + 11, 40) == 4,
+    "...and the A under cell 8 waits dim")
+  params:set("scene_morph_amt", 0); _h.run_ticks(2); redraw()
+  ok(reads("A 8", 4, 43) and lmax(cell_x(8), 36, cell_x(8) + 11, 40) == 12,
+    "...home at 0, A 8 takes over, on the rail and on its cell")
+
+  -- the widest labels stay on the screen and clear of the rail
+  params:set("scene_slot_a", 0); params:set("scene_slot", 8)
+  params:set("scene_morph_amt", 0.6); _h.run_ticks(2); redraw()
+  local lw, w8 = Mf.text_w("A LIVE", 1), Mf.text_w("8 B", 1)
+  ok(reads("A LIVE", 4, 43), "A = LIVE: the left end reads A LIVE")
+  ok(reads("8 B", 124 - w8, 43), "...and slot 8 reads 8 B")
+  local any = 0
+  for i = 1, 8 do any = math.max(any, lmax(cell_x(i), 36, cell_x(i) + 11, 40)) end
+  ok(any == 0, "...and with A LIVE no cell carries the A")
+  -- the handle parked at either end keeps a gap of dark columns to the label
+  params:set("scene_morph_amt", 0); _h.run_ticks(2); redraw()
+  ok(reads("A LIVE", 4, 43) and lmax(4 + lw, 43, 4 + lw + 2, 47) == 0,
+    "the handle at 0 stays clear of A LIVE (x " .. (4 + lw - 1) .. ")")
+  params:set("scene_morph_amt", 1); _h.run_ticks(2); redraw()
+  ok(reads("8 B", 124 - w8, 43) and lmax(124 - w8 - 3, 43, 124 - w8 - 1, 47) == 0,
+    "the handle at 1 stays clear of 8 B (x " .. (124 - w8) .. ")")
+  ok(lmax(124, 36, 127, 47) == 0, "...and nothing reaches the last four columns")
+
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  for _, s in ipairs({ 1, 4, 8 }) do params:set("scene_slot", s); T.pulse("scene_clear") end
+  params:set("scene_slot", 1); params:set("cutoff", 20000)
+  _h.run_ticks(1)
+end
+
 T.report("screen harness OK")

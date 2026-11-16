@@ -18,6 +18,11 @@ Released while the arc fills, it does nothing. SCENE's RCL recalls on a
 tap and borrows the scene while held (PEEK). On the < cell a tap is the
 way back. A key with no mark acts on the press.
 
+SCENE is a crossfader with two ends: E2 picks B, the slot K2 recalls and
+K3 captures into. K1+E2 picks A: LIVE (the sound you have when E3 leaves
+0) or a stored slot. E3 fades from A to B and back. The orbit's drift and
+reach are in PARAMS (orbit).
+
 Compound targets: `@win_move` slides the take window. `@trk_level` is the
 focused track's level. `@route_to` and `@route_amt` pick and set one of the
 focused track's sends. `@mo_sel` walks MOTION's rows: the recorded lanes,
@@ -59,7 +64,7 @@ modes, and VOICE draws HELD dim.
 | MOTION (LFO 2) | LANE `@mo_sel` | DEPTH `lfo2_depth` | PERIOD `lfo2_period` | TARGET `lfo2_target` | REC* | PLAY* | yes |
 | MOTION (LFO 3) | LANE `@mo_sel` | DEPTH `lfo3_depth` | PERIOD `lfo3_period` | TARGET `lfo3_target` | REC* | PLAY* | yes |
 | MOTION (LFO 4) | LANE `@mo_sel` | DEPTH `lfo4_depth` | PERIOD `lfo4_period` | TARGET `lfo4_target` | REC* | PLAY* | yes |
-| SCENE | SLOT `scene_slot` | MORPH `scene_morph_amt` | DRIFT `orbit_rate` | REACH `orbit_reach` | RCL, hold PEEK | CAP | yes |
+| SCENE | B `scene_slot` | MORPH `scene_morph_amt` | A `scene_slot_a` | none | RCL, hold PEEK | CAP | yes |
 
 On tracks 2 to 4 (shown for track 2) these rows differ from track 1's.
 Track 1 alone has the erosion, so VOICE in PLAY keeps SPEED and PITCH

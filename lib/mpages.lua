@@ -307,7 +307,8 @@ local SHORT = {
   effect2 = "FX 2", effect2_amt = "AMT 2", effect2_rate = "RATE 2",
   seq_slice = "SLICE", pad_pitch = "PTCH", pad_voice = "TYPE",
   pad_level = "PLVL",
-  scene_slot = "SLOT", scene_morph_amt = "MRF",
+  -- the crossfader's two ends (SCENE E2 and K1+E2): they read B·4 and A·3
+  scene_slot = "B", scene_slot_a = "A", scene_morph_amt = "MRF",
   orbit_rate = "DRFT", orbit_reach = "RCH", erode = "ERO", wear = "WEAR",
   -- nicer MOTION lane labels for params that aren't footer encoders (safe:
   -- SHORT is only read for the current page's enc ids + MOTION lane names)
@@ -426,6 +427,16 @@ local FX_TYPE_OF = { effect_rate = "effect", t2_effect_rate = "t2_effect",
   effect2_rate = "effect2", t2_effect2_rate = "t2_effect2",
   t3_effect2_rate = "t3_effect2", t4_effect2_rate = "t4_effect2" }
 local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+-- the scene slots' words, built once: the footer and the SCENE rail read
+-- them every frame (the redraw allocates nothing). [n] the number, a[n] the
+-- rail's A label ("A LIVE" at 0), b[n] its B label. One local: the chunk is
+-- near Lua's 200 locals.
+local SLOT_STR = { a = { [0] = "A LIVE" }, b = {} }
+for i = 1, 8 do
+  SLOT_STR[i] = tostring(i)
+  SLOT_STR.a[i] = "A " .. i
+  SLOT_STR.b[i] = i .. " B"
+end
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
@@ -441,7 +452,11 @@ local function fmt_value(id)
   end
   if key == "scene_slot" then
     local v = floor(params:get(id) + 0.5)
-    return v < 1 and "<" or tostring(v)                -- 0 = the ◄ cell
+    return v < 1 and "<" or SLOT_STR[v] or "?"         -- 0 = the ◄ cell
+  end
+  if key == "scene_slot_a" then
+    local v = floor(params:get(id) + 0.5)
+    return v < 1 and "LIVE" or SLOT_STR[v] or "?"      -- 0 = the live sound
   end
   if key == "motion_lane" then
     -- show the SELECTED lane's param name (or "-" when none picked)
@@ -545,7 +560,7 @@ end
 -- the selection IS the state, so it reads at rest (SLICE·3, LANE·…)
 local SELECTOR_IDS = {
   route_sel = true, track_sel = true, ["@route_to"] = true,
-  seq_slice = true, motion_lane = true, scene_slot = true,
+  seq_slice = true, motion_lane = true, scene_slot = true, scene_slot_a = true,
   ["@mo_sel"] = true,
 }
 
@@ -2249,6 +2264,8 @@ end
 local function body_SCENE(frame)
   local sc = C.scene
   local sel = clamp(floor(pget("scene_slot", 1) + 0.5), 0, 8)
+  local sel_a = clamp(floor(pget("scene_slot_a", 0) + 0.5), 0, 8)
+  local a_end = sc.a_end()             -- the A the fader starts from (0 = LIVE)
   local amt = pget("scene_morph_amt", 0)
   -- status row: the message line outranks the morph cue
   local msg_live = sc.msg ~= nil and (frame - sc.msg_at) < FPS * 1.2
@@ -2303,6 +2320,10 @@ local function body_SCENE(frame)
     end
     ptext_c(tostring(i), x + 6, 25, 1, (filled or pending or flash) and 0 or 4)
     if i == sel then slot_brackets(x - 1, x + 12) end   -- cursor brackets
+    -- the A end, under its cell: bright while it is the fader's A, dim while
+    -- it waits (an empty slot, the orbit or a K2 peek departs from LIVE, a
+    -- fade still on the A it left from)
+    if i == sel_a then ptext("A", x + 4, 36, 1, a_end == i and 12 or 4) end
   end
   -- a queued recall: the emptying wedge counts down to the sync point
   -- (clock.get_beats is device-side; the sim has no clock, so no wedge)
@@ -2330,7 +2351,7 @@ local function body_SCENE(frame)
       64, 44, 1, 5)
     return
   end
-  -- the morph rail: LIVE toward the selected slot, from wherever you are
+  -- the morph rail: from A (LIVE or a slot) toward B, the selected slot
   if nfilled == 0 then
     ptext_c("EMPTY - K3 CAP", 64, 44, 1, 10)
     return
@@ -2340,9 +2361,12 @@ local function body_SCENE(frame)
     return
   end
   local live = amt > 0.001 and amt < 0.999
-  ptext("LIVE", 4, 43, 1, amt < 0.5 and 11 or 4)
-  ptext_r(tostring(sel), 124, 43, 1, amt >= 0.5 and 11 or 4)
-  local x0, x1 = 28, 108
+  -- both ends named, the nearer one the brighter (labels from SLOT_STR):
+  -- "A LIVE ====*---- 4 B". The handle at either end keeps 3 px from the
+  -- widest labels, A LIVE (x 4..28) and n B (x 112..123)
+  ptext(SLOT_STR.a[a_end] or SLOT_STR.a[0], 4, 43, 1, amt < 0.5 and 11 or 4)
+  ptext_r(SLOT_STR.b[sel], 124, 43, 1, amt >= 0.5 and 11 or 4)
+  local x0, x1 = 34, 106
   screen.level(3)
   screen.move(x0, 45.5) screen.line(x1, 45.5)
   screen.stroke()

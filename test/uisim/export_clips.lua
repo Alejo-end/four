@@ -580,8 +580,8 @@ end
 
 -- SCENE: two slots stored, the morph sweeps toward slot 4 and back
 page_clip{ id = "scene", page = "SCENE", loop = 45,
-  caption = "SCENE: eight slots of stored states. E3 morphs the sound from where it "
-    .. "is toward the selected slot, and back.",
+  caption = "SCENE: eight slots of stored states. E3 fades from A, here the sound "
+    .. "you have, toward B, the selected slot, and back.",
   setup = function()
     params:set("scene_slot", 1)
     params:set("cutoff", 700); params:set("delay_mix", 0.1)
