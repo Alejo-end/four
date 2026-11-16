@@ -578,6 +578,23 @@ do
     .. table.concat(dead_chaos, ",") .. ")")
 end
 
+-- the files that ship directly in a folder (not in its subfolders) whose path
+-- matches one of the patterns, sorted. A global: the checks below and section
+-- 10b use it.
+function SHIPPED(dir, ...)
+  local pats, out = { ... }, {}
+  local p = io.popen("ls -1 " .. dir .. " 2>/dev/null")
+  for name in p:lines() do
+    local path = dir .. name
+    for _, pat in ipairs(pats) do
+      if path:find(pat) then out[#out + 1] = path; break end
+    end
+  end
+  p:close()
+  table.sort(out)
+  return out
+end
+
 -- ============================================================================
 -- 10 · the shipped presets and pmap name only params that exist
 -- ============================================================================
@@ -599,10 +616,8 @@ do
   -- the one system param a preset sets on purpose: the clock the sequencer and
   -- the beat-locked modulators run on (the paramset here is mangler's alone)
   local SYSTEM_IDS = { clock_tempo = true }
-  -- data/layers/ holds the old presets of the `layers` build, kept until the
-  -- user decides about them. They name the params of the two layer decks,
-  -- which are gone (four, thirteenth change). Those ids, and no others, are
-  -- allowed to be dead there, and nowhere else.
+  -- the params of the two layer decks are gone (four, thirteenth change), and
+  -- no shipped file may name them
   local LAYER_IDS = { layer_sel = true, layer_wet = true }
   for n = 1, 2 do
     for _, k in ipairs({ "rec", "play", "level", "rate", "reverse", "start",
@@ -613,17 +628,10 @@ do
   for id in pairs(LAYER_IDS) do
     ok(not lookup[id], "the layer param " .. id .. " is gone from the paramset")
   end
-  local function dead_ok(path, id)
-    return SYSTEM_IDS[id]
-      or (path:find("^data/layers/") ~= nil and LAYER_IDS[id] == true)
-  end
+  local function dead_ok(_, id) return SYSTEM_IDS[id] end
   local checked, dead = 0, {}
-  local sets = { "data/four.pmap.example",
-    "data/layers/layers.pmap.example" }
-  for n = 1, 10 do
-    sets[#sets + 1] = string.format("data/four-%02d.pset", n)
-    sets[#sets + 1] = string.format("data/layers/layers-%02d.pset", n)
-  end
+  -- every preset and MIDI map that ships in data/, whatever their names
+  local sets = SHIPPED("data/", "%.pset$", "%.pmap$", "%.pmap%.example$")
   for _, path in ipairs(sets) do
     local ids = ids_in(path)
     if ids then
@@ -635,46 +643,41 @@ do
       end
     end
   end
-  ok(checked >= 21, "the shipped presets are all readable (" .. checked .. ")")
+  ok(checked == #sets and checked >= 1, "the shipped presets and maps are all readable (" .. checked .. ")")
   ok(#dead == 0, "every preset/pmap id exists in the paramset (dead: "
     .. table.concat(dead, ",") .. ")")
 
   -- the scene SIDECARS name params by id too, and a dead id there is even
   -- quieter: apply() skips unknown ids without a word. Scan every ["id"]= key.
   local sdead, schecked = {}, 0
-  for _, dir in ipairs({ "data/", "data/layers/" }) do
-    for n = 1, 10 do
-      local path = string.format("%sscenes-%02d.lua", dir, n)
-      local f = io.open(path)
-      if f then
-        schecked = schecked + 1
-        for line in f:lines() do
-          local id = line:match('^%s*%["([%w_]+)"%]=')
-          if id and id ~= "slots" and id ~= "safe" and id ~= "v"
-              and not lookup[id] and not dead_ok(path, id) then
-            sdead[#sdead + 1] = path:match("[^/]+$") .. ":" .. id
-          end
+  local banks = SHIPPED("data/", "^data/scenes%-%d+%.lua$")
+  for _, path in ipairs(banks) do
+    local f = io.open(path)
+    if f then
+      schecked = schecked + 1
+      for line in f:lines() do
+        local id = line:match('^%s*%["([%w_]+)"%]=')
+        if id and id ~= "slots" and id ~= "safe" and id ~= "v"
+            and not lookup[id] and not dead_ok(path, id) then
+          sdead[#sdead + 1] = path:match("[^/]+$") .. ":" .. id
         end
-        f:close()
       end
+      f:close()
     end
   end
-  ok(schecked >= 20, "the shipped scene sidecars are all readable (" .. schecked .. ")")
+  ok(schecked == #banks, "the shipped scene sidecars are all readable (" .. schecked .. ")")
   ok(#sdead == 0, "every scene-sidecar id exists in the paramset (dead: "
     .. table.concat(sdead, ",") .. ")")
   -- and none of them may carry the window pair: a stored full-buffer window
   -- recalled over a short sample is the "long silence" trap (the runtime clamp
   -- guards live captures; the SHIPPED banks simply leave the window alone)
   local wnd = {}
-  for _, dir in ipairs({ "data/", "data/layers/" }) do
-    for n = 1, 10 do
-      local path = string.format("%sscenes-%02d.lua", dir, n)
-      local f = io.open(path)
-      if f then
-        local s = f:read("a"); f:close()
-        if s:find('"pos_start"', 1, true) or s:find('"pos_end"', 1, true) then
-          wnd[#wnd + 1] = path:match("[^/]+$")
-        end
+  for _, path in ipairs(banks) do
+    local f = io.open(path)
+    if f then
+      local s = f:read("a"); f:close()
+      if s:find('"pos_start"', 1, true) or s:find('"pos_end"', 1, true) then
+        wnd[#wnd + 1] = path:match("[^/]+$")
       end
     end
   end
@@ -1458,10 +1461,8 @@ do
   -- pset line fires its action on load, so a 1 on print_take or chaos_throw
   -- goes off the moment the preset opens
   local bad = {}
-  for _, dir in ipairs({ "data/", "data/layers/" }) do
-    for k = 1, 10 do
-      local path = string.format("%s%s-%02d.pset", dir,
-        dir == "data/" and "four" or "layers", k)
+  for _, path in ipairs(SHIPPED("data/", "%.pset$")) do
+    do
       local f = io.open(path)
       if f then
         for line in f:lines() do

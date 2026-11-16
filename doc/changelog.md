@@ -4521,3 +4521,18 @@ the device with the plugin and said "it sounds nice".
   bridge.js use (it still said `/mangler/`). The bridge test passes. The visuals are not
   yet tested with four, and the README says so.
 
+four, thirty-eighth change: **the album set leaves the repo (presets, tools and
+tests; nothing on the device changes)**. The user does not want it public, and asked for
+example presets on freely usable ambient samples instead.
+- Gone from `main`: the twelve presets with their scene and padlock files, `data/layers/`,
+  `doc/set-album.md`, `test/make_set.lua`, `test/set_audio.py`,
+  `test/deploy_set.sh` and `test/test_set.lua`. They stay on the local branch
+  `private-set` (not pushed), at the thirty-seventh change. Older commits on GitHub
+  still hold them.
+- `data/` ships the two MIDI maps, and its README says what they map.
+- test_control's preset checks now read whatever `data/` ships (`SHIPPED`), instead of
+  twelve names and `data/layers/`. With no presets they check the two maps.
+  test/check.lua runs no test_set.
+- README, doc/README.md, the manual, the visuals guide, the plan and the STATUS block no
+  longer point at the set.
+

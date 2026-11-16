@@ -95,7 +95,7 @@ each page.
 - [Every key and knob](doc/controls.md), generated from the code.
 - [The plugin](ugen/README.md): what is in it, how it installs and how to build it.
 - [An Octatrack as a controller](doc/octatrack-midi.md).
-- [The album presets](data/README.md), a set made for one album.
+- [MIDI maps](data/README.md) that ship with four.
 - [Visuals](visuals/README.md): live visuals in a browser that follow four over OSC.
 - [All documents](doc/README.md), including the notes for developers.
 

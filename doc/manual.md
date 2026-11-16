@@ -286,8 +286,7 @@ other gear. It goes out as a MIDI CC, and as 0 to 5 volts on crow output 1.
 ## Saving
 
 PARAMS > PSET saves the whole session: the parameters, the MIDI map, the four takes, the
-tape, the scenes, the motion loop and the slices. `data/` holds twelve presets made for one
-album: see [data/README.md](../data/README.md).
+tape, the scenes, the motion loop and the slices.
 
 ## Grid
 

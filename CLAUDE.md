@@ -96,9 +96,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
   (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
   `dust/data/mangler2` stay as backups.
-- `dust/data/four` holds older presets. The set rebuilt in `data/` (the thirteenth and
-  nineteenth changes) is not there: `test/deploy_set.sh` overwrites slots 1 to 12, and
-  the user has not said yes. A test that writes a PSET on the device uses slot 90.
+- `dust/data/four` holds older presets of the user's. A test that writes a PSET on the
+  device uses slot 90.
 
 | Change of four | On the device | Heard |
 |---|---|---|
@@ -132,6 +131,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 35th: FourCloud, four installs its own plugin (engine, plugin, Lua) | yes: installed itself, `four: CLOUD is FourCloud` | the user, 2026-11-16: "it sounds nice" |
 | 36th: the plugin installs while the norns starts: one RESTART (engine, Lua) | yes: one RESTART, then `four: FourStretch on` | the user, 2026-11-16: "it sounds nice" |
 | 37th: the documents tidied, the known limits, the visuals named four | documents, visuals scripts | |
+| 38th: the album set leaves the repo | nothing on the device changes | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -167,12 +167,13 @@ passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 (doc/measurements/2026-11-06/README.md). It has not run on four. When it passes, write
 the date and the count here. Costs, budgets and platform traps: doc/norns-platform.md.
 
-**The album set.** `data/` holds twelve presets for one album: ten half-songs
-walked in whole parts, and two album walks, ALBUM 1 and 2. `test/make_set.lua` builds
-them and is the source of truth, with loops from `test/set_audio.py` and
-`test/deploy_set.sh` to install them. Their mangler form was on the device on
-2026-11-10 (loads, scenes, levels, CPU and temperature measured). Nobody judged them by
-ear yet. After a listen, fix the table in make_set.lua and rebuild.
+**The album set is not in the repo** (thirty-eighth change). The user did not
+want it public. The twelve presets for the album, their tools (`make_set.lua`,
+`set_audio.py`, `deploy_set.sh`), `test/test_set.lua` and `data/layers/` live on the
+local branch `private-set` (not pushed), at the thirty-seventh change. Older commits
+on GitHub still hold them. `data/` ships the two MIDI maps only. The user wants example presets built on freely usable ambient samples instead:
+none are chosen yet. A new example set needs a harness like test_set to load every
+pset and scene through the offscreen script.
 
 **The visuals link.** lib/mosc.lua sends the state as OSC to visuals/bridge.js, which
 feeds Hydra (visuals/hydra.js). It ran with mangler on the device (the 110th and 111th
@@ -204,7 +205,7 @@ Current. Keep these true to the code:
 - doc/plan.md: the next work. doc/changelog.md: every change, oldest first.
 - doc/device-gate.md: the walkthrough. It was written for mangler, and its top says what
   that means for four.
-- doc/controls.md and doc/set-album.md: GENERATED, never edit by hand.
+- doc/controls.md: GENERATED, never edit by hand.
 - doc/octatrack-midi.md, data/README.md, ugen/README.md, visuals/README.md.
 
 Design references. Partly built, and each one says what is built:
@@ -465,7 +466,6 @@ lua test/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
 lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
 lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
-lua test/test_set.lua       # the album presets: every pset and scene loads
 lua test/test_plugin.lua    # the plugin installer (lib/mplugin.lua), over real files
 
 # single-file build: inlines lib/*.lua into dist/four_single.lua. GENERATED, never

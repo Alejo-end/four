@@ -9,8 +9,7 @@ Start with the [README](../README.md). This page lists everything else.
 | [manual.md](manual.md) | The full guide: every page with pictures, the grid, MIDI, saving and troubleshooting. |
 | [controls.md](controls.md) | Every key and encoder on every page. Generated from the code. |
 | [octatrack-midi.md](octatrack-midi.md) | An Octatrack as a MIDI controller for four. |
-| [../data/README.md](../data/README.md) | The album presets, a set made for one album. |
-| [set-album.md](set-album.md) | The scenes of every preset in that set. Generated. |
+| [../data/README.md](../data/README.md) | The MIDI maps that ship with four. |
 | [../ugen/README.md](../ugen/README.md) | The FourStretch plugin: what is in it, how it installs, how to build it. |
 | [../visuals/README.md](../visuals/README.md) | Live visuals in a browser that follow four over OSC. |
 

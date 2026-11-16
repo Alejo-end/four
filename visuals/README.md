@@ -59,9 +59,7 @@ with the input) and FACETS (the news as flat shards, like a low-poly model). AUT
 the page.
 
 The look is a scene param, so each scene remembers its own. A recalled scene brings its look,
-and a preset can bring a different look per scene. The album presets use the table
-`VIS_BY_SCENE` in `test/make_set.lua`. Edit the table and run `lua test/make_set.lua` to
-change it. To set one by hand, recall a scene, set "visuals look", and capture the scene again
+and a preset can bring a different look per scene. To set one, recall a scene, set "visuals look", and capture the scene again
 on the SCENE page. The order of the names must match `M.LOOKS` in `lib/mosc.lua` and `NAMES`
 in `visuals/hydra.js`.
 
