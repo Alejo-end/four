@@ -915,16 +915,26 @@ do
   key(2, 1); key(2, 0)
   params:set("mode", 5)
 
-  -- SCENE alt = the orbit knobs
+  -- SCENE alt = the crossfader's A end. The orbit's drift and reach left
+  -- the K1 layer for PARAMS: K1+E2 picks A, K1+E3 is nothing
   goto_page(si)
+  params:set("scene_slot_a", 0)
   key(1, 1)
-  local r0 = params:get("orbit_rate")
+  local r0, rc0 = params:get("orbit_rate"), params:get("orbit_reach")
+  local b0, m0 = params:get("scene_slot"), params:get("scene_morph_amt")
   enc(2, 3)
-  ok(params:get("orbit_rate") ~= r0, "SCENE K1+E2 moves orbit drift")
-  local rc0 = params:get("orbit_reach")
+  ok(params:get("scene_slot_a") == 3, "SCENE K1+E2 picks A (LIVE + 3 = slot 3)")
+  ok(params:get("scene_slot") == b0, "...and leaves B where it was")
+  ok(params:get("orbit_rate") == r0, "...and no longer moves orbit drift")
   enc(3, 3)
-  ok(params:get("orbit_reach") ~= rc0, "SCENE K1+E3 moves orbit reach")
+  ok(params:get("orbit_reach") == rc0 and params:get("scene_morph_amt") == m0,
+    "SCENE K1+E3 moves nothing (not orbit reach, not the morph)")
+  enc(2, -20)
+  ok(params:get("scene_slot_a") == 0, "...and K1+E2 turned down comes back to LIVE")
   key(1, 0)
+  ok(params:lookup_param("orbit_rate").name == "orbit drift"
+      and params:lookup_param("orbit_reach").name == "orbit reach",
+    "the orbit's drift and reach are still params (PARAMS, MIDI, presets)")
 
   -- the grid's scene workspace runs the orbit (the wander's only pad)
   local g = _h.grid
@@ -3360,6 +3370,224 @@ do
     "...the page stays, now on track 3's filter")
   redraw()
   params:set("track_sel", 1)
+end
+
+-- ============================================================================
+-- 33 · the crossfader's two ends: A (LIVE or a slot) and B
+-- ============================================================================
+-- E2 picks B (scene_slot), K1+E2 picks A (scene_slot_a: 0 = LIVE), E3 fades.
+-- A = LIVE is the morph as it always was (the sections above). A = a slot
+-- fades between two stored sounds, both ways: 0 is A, 1 is B, for the
+-- morph-safe params. A is latched when the fade leaves 0 and kept until it
+-- comes home; the orbit, a K2 peek and a GLIDE leave 0 from LIVE.
+do
+  local pulse, sc = T.pulse, CTX.scene
+  local function amt(a) params:set("scene_morph_amt", a); _h.run_ticks(1) end
+  local function sound(cut, fb, rev)
+    params:set("cutoff", cut); params:set("delay_fb", fb); params:set("rev_mix", rev)
+  end
+  local function fill(slot, cut, fb, rev)
+    sound(cut, fb, rev)
+    params:set("scene_slot", slot); pulse("scene_capture")
+  end
+  local function clear_bank()
+    for s = 1, 8 do params:set("scene_slot", s); pulse("scene_clear") end
+  end
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_recall_mode", 1)
+  params:set("scene_scope", 1)
+  params:set("scene_slot_a", 0)
+  clear_bank()
+  fill(1, 500, 0.2, 0.1)                     -- A
+  fill(2, 8000, 0.8, 0.7)                    -- B
+  sound(2000, 0.5, 0.4)                      -- the live sound, neither
+
+  -- (a) the param, its classification and its reach
+  local pa = params:lookup_param("scene_slot_a")
+  ok(pa and pa.min == 0 and pa.max == 8 and params:get("scene_slot_a") == 0,
+    "scene_slot_a is a number 0..8, LIVE (0) by default, so MIDI can map it")
+  ok(params:string("scene_slot_a") == "LIVE", "...and PARAMS reads 0 as LIVE")
+  local excl = {}
+  for _, id in ipairs(sc.SCENE_EXCLUDE) do excl[id] = true end
+  ok(excl.scene_slot_a, "...and no scene captures it (a selector, like scene_slot)")
+  local mo = {}
+  for _, id in ipairs(CTX.motion.MOTION_IDS) do mo[id] = true end
+  ok(not mo.scene_slot_a and mo.scene_morph_amt,
+    "...and motion records the fader, not the selector")
+
+  -- (b) picking A at rest moves nothing; the first move of E3 brings A in
+  params:set("scene_slot", 2)
+  params:set("scene_slot_a", 1); _h.run_ticks(2)
+  near(params:get("cutoff"), 2000, 1e-6, "picking A while E3 is at 0 leaves the sound alone")
+  ok(sc.a_end() == 1, "...and the rail names A 1 as the fader's start")
+  amt(0.01)
+  ok(params:get("cutoff") < 600 and math.abs(params:get("delay_fb") - 0.206) < 0.01,
+    "E3 off 0 with A = slot 1: the sound is A at once (cutoff " .. params:get("cutoff") .. ")")
+  amt(0.5)
+  near(params:get("cutoff"), 2000, 20, "halfway the cutoff is the geometric mean of A and B")
+  near(params:get("delay_fb"), 0.5, 0.01, "...and the feedback the plain mean")
+  amt(1)
+  near(params:get("cutoff"), 8000, 1e-6, "at 1 the fade is exactly B")
+  near(params:get("delay_fb"), 0.8, 1e-9, "...every morph-safe param (feedback)")
+  near(params:get("rev_mix"), 0.7, 1e-9, "...(reverb)")
+  amt(0.5)
+  near(params:get("cutoff"), 2000, 20, "turning back, the fade runs the same line")
+  amt(0)
+  near(params:get("cutoff"), 500, 1e-6, "back at 0 the fade is exactly A, not the live sound")
+  near(params:get("delay_fb"), 0.2, 1e-9, "...(feedback)")
+  near(params:get("rev_mix"), 0.1, 1e-9, "...(reverb)")
+  _h.run_ticks(3)
+  near(params:get("cutoff"), 500, 1e-6, "...and the sound stays on A at rest")
+  amt(1); amt(0)
+  near(params:get("cutoff"), 500, 1e-6, "a second pass, both ways, lands A again")
+
+  -- (c) A changed mid-fade: no jump, the fade keeps the A it left from until
+  -- it comes home, and the next departure takes the new A
+  fill(3, 100, 0.05, 0)
+  params:set("scene_slot", 2)
+  sound(2000, 0.5, 0.4)
+  amt(0.5)
+  local mid = params:get("cutoff")
+  params:set("scene_slot_a", 3); _h.run_ticks(2)
+  near(params:get("cutoff"), mid, 1e-6, "changing A mid-fade does not move the sound")
+  ok(sc.a_end() == 1, "...the rail keeps the A the fade left from")
+  amt(0)
+  near(params:get("cutoff"), 500, 1e-6, "...and 0 still lands that A (slot 1)")
+  ok(sc.a_end() == 3, "...after which the new A is the fader's start")
+  amt(0.01)
+  ok(params:get("cutoff") < 110, "...and the next fade leaves from it (cutoff " .. params:get("cutoff") .. ")")
+  amt(0)
+
+  -- (d) an empty A is LIVE: the fade leaves from the sound you have
+  params:set("scene_slot_a", 5)
+  ok(sc.a_end() == 0, "A on an empty slot: the rail says LIVE")
+  sound(1000, 0.5, 0.4)
+  amt(1)
+  near(params:get("cutoff"), 8000, 1e-6, "...the fade still reaches B")
+  amt(0)
+  near(params:get("cutoff"), 1000, 1e-6, "...and comes home to the live sound")
+
+  -- (e) an empty B: nothing to fade toward; a fade aimed at it mid-way still
+  -- comes home, to A
+  params:set("scene_slot_a", 1)
+  params:set("scene_slot", 6)
+  sound(1000, 0.5, 0.4)
+  amt(0.5)
+  near(params:get("cutoff"), 1000, 1e-6, "B empty: the fader moves nothing")
+  amt(0)
+  params:set("scene_slot", 2)
+  amt(0.5)
+  params:set("scene_slot", 6); _h.run_ticks(1)  -- re-aimed at an empty B mid-fade
+  amt(0)
+  near(params:get("cutoff"), 500, 1e-6, "a fade re-aimed at an empty B still comes home to A")
+
+  -- (f) A == B: the fader holds that scene across its whole travel
+  params:set("scene_slot_a", 2); params:set("scene_slot", 2)
+  sound(1000, 0.5, 0.4)
+  amt(0.3)
+  near(params:get("cutoff"), 8000, 1e-6, "A == B: off 0 the sound is that scene")
+  amt(0.8)
+  near(params:get("cutoff"), 8000, 1e-6, "...wherever the fader is")
+  amt(0)
+  near(params:get("cutoff"), 8000, 1e-6, "...and at 0 too")
+
+  -- (g) an FX-only A carries only the effects: what it does not hold fades
+  -- from the live sound
+  params:set("scene_scope", 2)
+  sound(300, 0.1, 0); params:set("size", 0.4)
+  params:set("scene_slot", 4); pulse("scene_capture")
+  params:set("scene_scope", 1)
+  sound(8000, 0.8, 0.7); params:set("size", 0.2)
+  params:set("scene_slot", 2); pulse("scene_capture")   -- B again, with size 0.2
+  sound(2000, 0.5, 0.4); params:set("size", 0.1)
+  params:set("scene_slot_a", 4)
+  amt(1)
+  near(params:get("size"), 0.2, 1e-6, "FX-only A: B's size at 1")
+  amt(0)
+  near(params:get("cutoff"), 300, 1e-6, "...A's cutoff at 0")
+  near(params:get("size"), 0.1, 1e-6, "...and the live size, which A does not carry")
+
+  -- (h) a recall lands B and zeroes the fader; the next move brings A in
+  params:set("scene_slot_a", 1); params:set("scene_slot", 2)
+  amt(0.5)
+  pulse("scene_recall")
+  near(params:get("cutoff"), 8000, 1e-6, "a recall mid-fade lands B (K2 RCL, as before)")
+  near(params:get("scene_morph_amt"), 0, 1e-9, "...with the fader at 0")
+  amt(0.01)
+  ok(params:get("cutoff") < 600, "...and the next move leaves from A again")
+  amt(0)
+
+  -- (i) a capture mid-fade forgets the sweep; the next move departs from
+  -- the same A on the same line, so the sound does not jump
+  amt(0.5)
+  local before = params:get("cutoff")
+  sc.capture(7)                              -- an explicit slot: B stays 2
+  amt(0.52)
+  local after = params:get("cutoff")
+  ok(after > before and after < before * 1.15,
+    "a capture mid-fade: the next move continues the line (" .. before .. " -> " .. after .. ")")
+  amt(0)
+  near(params:get("cutoff"), 500, 1e-6, "...and home is still A")
+
+  -- (j) a chaos throw mid-fade, released: the way back lands with the fader
+  -- at 0, and the next move departs from A
+  amt(0.5)
+  params:set("chaos_throw", 1); params:set("chaos_throw", 0)
+  near(params:get("scene_morph_amt"), 0, 1e-9, "chaos released mid-fade: the fader is home")
+  amt(0.01)
+  ok(params:get("cutoff") < 600, "...and the next move leaves from A")
+  amt(0)
+
+  -- (k) the orbit departs from LIVE whatever A says: its legs park and
+  -- leave again, and an A slot would pull the sound back at every leg
+  sound(3000, 0.5, 0.4)
+  params:set("scene_slot", 2)                -- the orbit aims at the others
+  params:set("orbit_rate", 60); params:set("orbit_reach", 0.5)
+  params:set("orbit_on", 1)
+  ok(sc.a_end() == 0, "the orbit runs: the rail says A LIVE")
+  _h.run_ticks(30)
+  local c = params:get("cutoff")
+  ok(c > 600 and c < 3000, "...and its leg leaves from the live sound, not A (" .. c .. ")")
+  params:set("orbit_on", 0)
+  params:set("orbit_rate", 12)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  ok(sc.a_end() == 1, "orbit stopped: A 1 is the fader's start again")
+
+  -- (l) K2 works as it did: a peek from rest borrows B from the live sound
+  -- and gives it back; a GLIDE recall crossfades from the live sound
+  T.goto_page("SCENE")
+  sound(3000, 0.5, 0.4)
+  params:set("scene_slot", 2)
+  key(2, 1); _h.run_ticks(10)
+  near(params:get("cutoff"), 8000, 1e-6, "a held RCL peeks B")
+  key(2, 0); _h.run_ticks(8)
+  near(params:get("cutoff"), 3000, 1e-6, "...and its release gives back the live sound, not A")
+  clock.get_tempo = function() return 120 end
+  params:set("scene_recall_mode", 4)         -- GLIDE
+  params:set("scene_glide", 2)               -- 1 second at 120 = 15 frames
+  pulse("scene_recall")
+  _h.run_ticks(7)
+  local g = params:get("cutoff")
+  ok(g > 3000 and g < 8000, "a GLIDE from rest crossfades from the live sound, not A (" .. g .. ")")
+  _h.run_ticks(12)
+  near(params:get("cutoff"), 8000, 1e-6, "...and lands B")
+  params:set("scene_recall_mode", 1)
+  clock.get_tempo = nil
+
+  -- (m) a pset load forgets the fade, like every other landing
+  amt(0.5)
+  params.action_read("none", false, 98766)
+  ok(not sc.engaged and sc.a_end() == 1, "a pset load drops the fade; A stays selected")
+
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_slot_a", 0)
+  clear_bank()
+  params:set("scene_slot", 1)
+  params:set("size", 0.1)
+  sound(20000, 0.3, 0)
 end
 
 T.report("control harness OK")

@@ -7,9 +7,11 @@
 --            engine, the tape and the display all follow for free — a scene
 --            is not a second source of truth, it's a photograph of the one
 --            that exists.
---   MORPH    a continuous sweep from the sound you have now toward a stored
---            slot, over the subset of params that can be interpolated. one
---            knob (scene_morph_amt) moves the whole instrument along that line.
+--   MORPH    a crossfade between two ends, over the subset of params that
+--            can be interpolated. B is a stored slot (scene_slot). A is the
+--            sound you have now (LIVE, the default) or another stored slot
+--            (scene_slot_a). one knob (scene_morph_amt) moves the whole
+--            instrument along that line, both ways.
 --   SAFE     one "last known good" snapshot + an instant restore. capture it
 --            before you do something reckless (see the chaos throw below);
 --            restore drops you straight back on your feet.
@@ -279,7 +281,7 @@ local SCENE_EXCLUDE = {
   "lfo3_target", "lfo3_shape", "lfo3_period", "lfo3_rate", "lfo3_depth",
   "lfo4_target", "lfo4_shape", "lfo4_period", "lfo4_rate", "lfo4_depth",
   "lfo1_track", "lfo2_track", "lfo3_track", "lfo4_track",
-  "scene_slot", "scene_morph_amt", "scene_recall_mode", "scene_scope",
+  "scene_slot", "scene_slot_a", "scene_morph_amt", "scene_recall_mode", "scene_scope",
   "scene_glide",
   "scene_capture",
   "scene_recall", "scene_next", "scene_clear", "scene_safe_capture",
@@ -305,14 +307,27 @@ local morphing = false   -- re-entry guard (a param action must never recurse)
 local last_sent = {}     -- morph: the last value/norm we pushed, per param
 local pending_clock      -- the quantized-recall coroutine (nil = none)
 
--- THE MORPH'S OTHER END: the sound you were making when you started sweeping.
--- taken on the rising edge out of 0 and dropped when you come home to 0 (or
--- when something else moves the instrument — see invalidate).
+-- THE MORPH'S A END. B is the selected slot. A is chosen by scene_slot_a:
+-- 0 is LIVE, the sound you were making when the fade left 0, and 1..8 is a
+-- stored slot. Both are taken on the rising edge out of 0 and dropped when
+-- you come home to 0 (or when something else moves the instrument, see
+-- invalidate):
+--   morph_from  the live snapshot at that edge. Every fade has one: it is
+--               the A end when A is LIVE, and the fallback for any id the
+--               A slot (or B) does not carry.
+--   morph_a     the A slot's table, LATCHED at that edge (nil = LIVE).
+--               Changing scene_slot_a mid-fade does not move it: the fade
+--               keeps the A it left from until it comes home, so it never
+--               jumps, and 0 always lands on a stored sound. The new A
+--               takes over at the next departure.
 --
--- "from HERE to that slot" needs no A/B selector: recall A (K2) then sweep
--- toward B still does the old A->B, and it makes ONE stored scene immediately
--- useful — with a single capture you can mangle the sound and slide back.
+-- A = LIVE is the default, and it is the morph as it always was: "from HERE
+-- to that slot" makes ONE stored scene immediately useful (capture, mangle,
+-- slide back). A = a slot is the two-scene crossfader: E3 at 0 is A, at 1
+-- is B, and a recorded sweep replays between two fixed sounds.
 local morph_from = nil
+local morph_a = nil
+local morph_a_n = 0      -- the latched A's number, for the screen (0 = LIVE)
 
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
 local GLIDE_MODE = 4              -- ...and GLIDE (scene_glide beats, then land)
@@ -353,6 +368,7 @@ local function reset_morph()
   for k in pairs(last_sent) do last_sent[k] = nil end
   M.engaged = false
   morph_from = nil
+  morph_a, morph_a_n = nil, 0
 end
 
 -- the INSTRUMENT moved (a recall, a restore, a chaos throw, a pset load):
@@ -710,7 +726,7 @@ function M.clear(slot)
 end
 
 -- ===========================================================================
--- morph — from where you are toward a slot, one knob
+-- morph: a crossfade from A (LIVE or a slot) to B (a slot), one knob
 -- ===========================================================================
 -- continuous params interpolate in the controlspec's OWN (warped) space
 -- (ctx.warped_lerp): cutoff 20 -> 20000 is exponential, so a raw lerp would
@@ -747,24 +763,38 @@ local MORPH_EPS = 1 / 400
 local sw_amt, sw_force = 0, false
 local pair_done = {}       -- edge partners already written this pass (reused)
 
--- one param's step of the sweep. `vb` arrives already clamped to the
--- material (clamp_stored).
+-- the A end of one id: the latched A slot's stored value (clamped to the
+-- material like every stored value), or the live origin when A is LIVE or
+-- the A slot does not carry it (an FX-only slot). nil = no such param.
+local function end_a(id)
+  local live = morph_from[id]
+  if live == nil then return nil end
+  local A = morph_a
+  if A and A[id] ~= nil then return clamp_stored(id, A[id], A) end
+  return live
+end
+
+-- one param's step of the sweep. `va` comes from end_a; `vb` is B's stored
+-- value, already clamped to the material (clamp_stored).
 --   va nil              the origin never had it (an older capture): skip.
---   vb nil              the CURRENT aim does not carry it (an FX-only slot,
---                       a partial preset slot). If this sweep already moved it
---                       under an earlier aim, its line now runs from the
---                       origin to itself, so it goes home; otherwise skip.
---   va == vb            the Octatrack rule: a param identical at both ends is
---                       not the morph's to move, so a hand riding it stays
---                       live, even through the forced ends. An id this sweep
---                       already displaced (last_sent) still tracks the line.
+--   vb nil              B does not carry it (an FX-only slot, a partial
+--                       preset slot). Its B end is the live origin, as it is
+--                       for a param an Octatrack scene does not lock. With A
+--                       LIVE that line runs from the origin to itself: an id
+--                       this sweep already moved under an earlier aim goes
+--                       home, any other is skipped.
+--   va == vb == origin  the Octatrack rule: a param both ends leave where
+--                       the sound had it is not the morph's to move, so a
+--                       hand riding it stays live, even through the forced
+--                       ends. An id this sweep already displaced (last_sent)
+--                       still tracks the line. Two SLOTS that agree on a
+--                       value the live sound does not have do move it: the
+--                       fader is between those two scenes.
 local function emit(id, va, vb)
   if va == nil or not params.lookup[id] then return end
-  if vb == nil then
-    if last_sent[id] == nil then return end
-    vb = va
-  end
-  if va == vb and last_sent[id] == nil then return end
+  local live = morph_from[id]
+  if vb == nil then vb = live end
+  if va == vb and vb == live and last_sent[id] == nil then return end
   local v, tn = morph_value(id, va, vb, sw_amt)
   if v == nil then return end
   local key = tn or v          -- continuous: compare norms; discrete: values
@@ -778,11 +808,38 @@ local function emit(id, va, vb)
   end
 end
 
--- morph `amt` (0..1) of the way from where you were toward `slot`.
---   amt 0   the sound you had when you started sweeping (exactly)
---   amt 1   that slot's stored sound (exactly, for the morph-safe subset)
+-- the A slot the NEXT fade latches when it leaves 0 (0 = LIVE): the selected
+-- scene_slot_a when it holds a scene, LIVE when that slot is empty. And LIVE
+-- whenever a machine, not the fader, takes the amount out of 0:
+--   the orbit   every leg parks and departs again, so an A slot would pull
+--               the sound back to A at the start of each leg. The wander
+--               always departs from the sound the last leg found.
+--   K2          a PEEK borrows B from the sound you have, and its release
+--               comes back to it; a GLIDE recall crossfades from the sound
+--               you have into B. K2 works as it always did. (Started while
+--               a fade is engaged, both continue that fade instead.)
+local function a_next()
+  if orbit.on or C.peek_on or C.peek_back or M.glide then return 0 end
+  local n = clamp(floor(pget("scene_slot_a", 0) + 0.5), 0, NUM_SLOTS)
+  if n >= 1 and M.slots[n] then return n end
+  return 0
+end
+
+-- the A end the SCENE rail names (0 = LIVE): the latched one while a fade is
+-- engaged, else the one the next departure would latch
+function M.a_end()
+  if morph_from then return morph_a_n end
+  return a_next()
+end
+
+-- morph `amt` (0..1) of the way from A toward `slot` (B).
+--   amt 0   A: the sound you had when you started sweeping (A = LIVE), or
+--           the A slot's stored sound (exactly, for the morph-safe subset)
+--   amt 1   B's stored sound (exactly, for the morph-safe subset)
 -- returns false when the slot is empty, or when there's nothing to do (parked
 -- at 0 with no sweep in progress — at rest the sound is just the sound).
+-- With A = a slot, the first move out of 0 brings A in at once: at rest the
+-- sound is whatever you play, and A is where the fader's line starts.
 function M.morph(slot, amt)
   if morphing then return false end    -- a param action can never recurse in
   amt = clamp(amt or 0, 0, 1)
@@ -790,7 +847,7 @@ function M.morph(slot, amt)
   if not B then
     -- ◄ / an empty slot can't be swept TOWARD — but a sweep already engaged
     -- must still come HOME: re-aim the selector at a dead target mid-sweep
-    -- and turning the knob to 0 restores the origin of everything this sweep
+    -- and turning the knob to 0 restores the A end of everything this sweep
     -- displaced (exactly the ids in last_sent). without this the sweep was
     -- stranded: neither able to move nor to land home.
     if not (amt <= 0 and morph_from) then return false end
@@ -801,9 +858,9 @@ function M.morph(slot, amt)
     -- follow: restored in bare list order a pair can cross for one write,
     -- and a crossed pair hits the 100ms loop floor and jumps the head.
     local function back(k)
-      if last_sent[k] ~= nil and morph_from[k] ~= nil
-          and params.lookup[k] then
-        pset(k, morph_from[k])
+      if last_sent[k] ~= nil and params.lookup[k] then
+        local v = end_a(k)
+        if v ~= nil then pset(k, v) end
       end
     end
     local rdone
@@ -811,9 +868,10 @@ function M.morph(slot, amt)
       local id = SCENE_MORPH_IDS[i]
       if not (rdone and rdone[id]) then
         local partner = EDGE_PAIRS[id]
-        if partner and morph_from[id] ~= nil and params.lookup[id]
-            and morph_from[partner] ~= nil and params.lookup[partner] then
-          if morph_from[id] < params:get(id) then back(id); back(partner)
+        local va = partner and params.lookup[id] and params.lookup[partner]
+          and end_a(id) or nil
+        if va and end_a(partner) ~= nil then
+          if va < params:get(id) then back(id); back(partner)
           else back(partner); back(id) end
           rdone = rdone or {}
           rdone[partner] = true
@@ -827,9 +885,13 @@ function M.morph(slot, amt)
     return true
   end
   if amt <= 0 and not morph_from then return false end
-  -- rising edge out of 0: where we are RIGHT NOW is the other end of the sweep
-  local A = morph_from or snapshot_ids(SCENE_MORPH_IDS)
-  morph_from = A
+  if not morph_from then
+    -- rising edge out of 0: where we are RIGHT NOW is the live origin, and
+    -- the A end is latched here too, both held until the fade comes home
+    morph_from = snapshot_ids(SCENE_MORPH_IDS)
+    morph_a_n = a_next()
+    morph_a = morph_a_n >= 1 and M.slots[morph_a_n] or nil
+  end
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
   sw_amt, sw_force = amt, amt <= 0 or amt >= 1
   morphing = true
@@ -839,36 +901,38 @@ function M.morph(slot, amt)
     local id = ids[i]
     if not pair_done[id] then
       local partner = EDGE_PAIRS[id]
-      local bv = clamp_stored(id, B[id], B)   -- a stored loop aims at material
-      if partner and params.lookup[partner]
-          and A[id] ~= nil and B[id] ~= nil
-          and A[partner] ~= nil and B[partner] ~= nil then
+      local va = end_a(id)
+      local vb = clamp_stored(id, B[id], B)   -- a stored loop aims at material
+      if partner and params.lookup[partner] and va ~= nil
+          and morph_from[partner] ~= nil then
         -- a REGION's two edges move together, and the WIDENING one goes first —
         -- the same rule apply() follows, and for the same reason: written in
         -- list order a sweep can momentarily cross the pair, and a crossed pair
         -- hits the 100ms minimum-length floor, which jumps the softcut head.
         -- The morph runs this 15 times a second, so it meets the hazard far
         -- more often than a recall does.
-        local pv = clamp_stored(partner, B[partner], B)
-        local nv = morph_value(id, A[id], bv, amt)
+        local pa, pb = end_a(partner), clamp_stored(partner, B[partner], B)
+        local nv = morph_value(id, va, vb == nil and morph_from[id] or vb, amt)
         if nv ~= nil and nv < params:get(id) then
-          emit(id, A[id], bv); emit(partner, A[partner], pv)
+          emit(id, va, vb); emit(partner, pa, pb)
         else
-          emit(partner, A[partner], pv); emit(id, A[id], bv)
+          emit(partner, pa, pb); emit(id, va, vb)
         end
         pair_done[partner] = true
       else
-        emit(id, A[id], bv)
+        emit(id, va, vb)
       end
     end
   end
   morphing = false
   M.engaged = amt > 0   -- the morph is what's driving the sound... unless home
   if amt <= 0 then
-    -- home again, exactly where you started. forget the "from" so the NEXT
-    -- sweep departs from wherever you are by then, and forget what we sent so
-    -- it re-asserts from scratch.
+    -- home again, on A: exactly where you started (A = LIVE), or the A
+    -- slot's sound. forget both ends so the NEXT sweep departs from wherever
+    -- you are by then with the A selected by then, and forget what we sent
+    -- so it re-asserts from scratch.
     morph_from = nil
+    morph_a, morph_a_n = nil, 0
     for k in pairs(last_sent) do last_sent[k] = nil end
   end
   return true
@@ -912,6 +976,9 @@ end
 -- the SCENE page shows the wander live, and CAP bottles any moment of it.
 -- with one filled slot each leg halves the remaining distance toward it;
 -- with none the orbit idles. math.random stays out of the draw path.
+-- While it runs, the A end is LIVE whatever scene_slot_a says (a_next): a
+-- leg departs from the sound the last one found, never from a fixed A.
+-- Its drift and reach live in PARAMS (orbit), its run switch on the grid.
 
 -- (`orbit` itself is declared above capture, which reads it)
 
@@ -1009,8 +1076,9 @@ local function glide_tick()
 end
 
 -- one per redraw frame, from the existing 15fps clock in four.lua.
--- the target is simply the SELECTED slot — the same one K2 recalls and K3
--- captures into. one selector, three jobs.
+-- the target (B) is simply the SELECTED slot, the same one K2 recalls and
+-- K3 captures into. one selector, three jobs. The A end is scene_slot_a,
+-- read once, when the fade leaves 0 (a_next).
 function M.tick()
   glide_tick()                 -- a glide moves the morph before the orbit looks
   orbit_tick()                 -- may set the morph params, marking dirty
