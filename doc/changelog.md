@@ -4575,3 +4575,10 @@ nothing rang on through the delay or the reverb from track 2.
   check also reads `|a, b|` arguments and NamedControls and drops block comments; and
   doc/controls.md's SCENE prose says E2 picks A, E3 picks B and K1+E3 fades.
 
+four, forty-first change: **a design brief for Relay (documents only)**. The brief
+proposes a safe, one-gesture way to capture one track's processed sound as another
+track's new take while the source keeps playing. It distinguishes the proposal from
+the existing track routing, tape source and full-mix PRINT, and defines a small first
+version, its safety rules and a device walkthrough. No code or release behavior
+changes.
+
