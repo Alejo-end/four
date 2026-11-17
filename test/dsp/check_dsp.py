@@ -58,7 +58,7 @@ def buffers():
 # One build: the five probes and engine.scd in parallel, each in its own folder
 # (run_probe.sh and run_engine.sh write conf.yaml and their log into it).
 JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'),
-        ('p6', 'probe6.scd'), ('eng', None)]
+        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('eng', None)]
 
 def render(build):
     env = dict(os.environ)
@@ -167,6 +167,47 @@ def check(build):
                num(line, a6, 1), 0.001, '', fmt='.4f')
         target(build, f"the {name.lower()} is gone 0.1 s after its free: the level then",
                num(line, a6, 3), -120, 'dB')
+
+    # THE AMOUNT KNOB OF EACH EFFECT (the forty-fifth change, probe7). The user
+    # on the device: the effects were "a bit too bland". A slot starts at
+    # amount 0.5. "Moved" is the mean distance in dB between the spectrum of a
+    # phrase through the effect and the phrase alone (an_probe7.py). Before the
+    # change CHORUS moved it by 2.3 dB there, FLANGE 2.5, WOBBLE 3.1, ECHO 3.0,
+    # and RESON and RING were 3.0 and 4.2 dB under the phrase.
+    a7 = analyse(os.path.join(REV, 'an_probe7.py'), runs['p7'][0], 'p7')
+    # RESON and RING moved it by 6.4 and 5.3 dB, and part of that was their loss
+    # of level: RESON at 0.5 was half of the dry sound and half of the ring, and
+    # it now is the whole dry sound with the ring on it. Their rows are a floor,
+    # and their fix is the level row below.
+    for name, floor, was in (('CHORUS', 3.0, ' (was 2.3 dB)'), ('FLANGE', 2.9, ' (was 2.5 dB)'),
+                             ('WOBBLE', 4.0, ' (was 3.1 dB)'), ('RESON', 4.2, ''), ('RING', 4.5, ''),
+                             ('ECHO', 3.7, ' (was 3.0 dB)')):
+        target(build, f"{name} at the start amount 0.5 moves a phrase{was}",
+               num(rf'^MOVED {name} at the start amount 0\.5: ([\d.]+)', a7), floor, 'dB', low=False, fmt='.2f')
+    target(build, "no effect moves the phrase at amount 0: the most moved",
+           max(num(rf'^MOVED {name} at amount 0: ([\d.]+)', a7) for name in
+               ('CHORUS', 'FLANGE', 'WOBBLE', 'RESON', 'RING', 'ECHO')), 0.05, 'dB', fmt='.2f')
+    target(build, "no effect at any amount is quieter than the phrase (RING was 4.6 dB under it)",
+           num(r'^QUIETEST lane: ([-+\d.]+)', a7), -1, 'dB', low=False)
+    target(build, "no effect at any amount is more than 7.5 dB over the phrase",
+           num(r'^LOUDEST lane: ([-+\d.]+)', a7), 7.5, 'dB')
+    # What a def costs on the norns follows its number of UGens: a control-rate
+    # operator there takes about 0.01% of the scsynth thread for each synth. A
+    # first version of these laws had nine more in FLANGE and four more in ECHO,
+    # and the dense set of gate row 19.27 went from 62.4% to 63.5%. The limits
+    # are the counts before the change. RING has one more: the sine's 2.sqrt.
+    for name, limit in (('four_fx_mod', 85), ('four_fx_reson', 41), ('four_fx_ring', 21),
+                        ('four_fx_echo', 20 if build == 'plugin' else 28)) + \
+                       ((('four_fx_flange', 31),) if build == 'plugin' else ()):
+        target(build, f"the UGens of {name} (a law must not grow its def)",
+               num(rf'^UGENS {name} (\d+)', runs['p7'][3].replace('\r', '')), limit, '', fmt='.0f')
+    if build == 'plugin':
+        target(build, "the largest peak of any effect (the phrase alone peaks at 0.35)",
+               num(r'^LARGEST peak: ([\d.]+)', a7), 0.75, '', fmt='.2f')
+    else:
+        # the stock FLANGE is a bare comb with nothing in its loop to bound a peak
+        known(build, "the stock FLANGE's comb peaks far over the phrase (the phrase alone peaks at 0.35; was 1.75)",
+              num(r'^LARGEST peak: ([\d.]+)', a7), 1.19, 0.15, '')
 
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')

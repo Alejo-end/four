@@ -121,7 +121,9 @@ doc/device-gate.md, and fix or revert it.
    and ECHO on one track, on the EFFECT page. Is each one worth keeping? Is the
    picture of each one clear? RESON's level was raised (four, fifth change): is
    it even with the others now, at every note? FLANGE is new and ECHO is new
-   (four, fourteenth change). Then the second slot (K1+E2 and K1+E3).
+   (four, fourteenth change). Then the second slot (K1+E2 and K1+E3). The user
+   found them "a bit too bland" on 2026-11-17, and the forty-fifth change made
+   each one stronger at the same knob: is that enough, and is any too much now?
 9. (The album presets left the repo. New example presets on free ambient
    samples are to come, and they need a listen too.)
 10. The stretch voices of FourStretch: PV, WARP and PLAY at pitch 1 and away

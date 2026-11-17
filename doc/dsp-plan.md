@@ -8,6 +8,10 @@
 > sentence "Nothing here is built" below is from 2026-11-13. The text below the
 > line is the plan as written. The last section, **The acceptance checklist**, is
 > current: each target, its test and the last measured value.
+>
+> **2026-11-17.** The forty-fifth change moved the amount laws of the effects: CHORUS
+> runs from 8 to 50 cents, and WOBBLE's wow reaches 100 cents and its flutter 30. The
+> figures for CHORUS and WOBBLE below are the plan's. doc/changelog.md has the laws.
 
 Written 2026-11-13 from a read of `lib/Engine_Four.sc`. Nothing here is built.
 This version replaces the first draft of the same day. The first draft chose

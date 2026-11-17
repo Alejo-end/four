@@ -1224,60 +1224,87 @@ Engine_Four : CroneEngine {
             }).add;
         };
         fxSlot.value(\four_fx_mod, { arg sig, type, a, r;
-            var idx, lfoCh, lfoFl, wow, flut, dt, decay, comb, dryG, wetG;
-            var chF, chD, wowF, wowD, flF, flD;
+            var idx, lfoCh, lfoFl, wow, flut, flw, dt, decay, comb, dryG, wetG;
+            var chF, chD, wowF, wowD, flF, flD, p, flN;
             idx = (type - 1).clip(0, 2);
+            // THE AMOUNT KNOB RISES FAST AT FIRST (the forty-fifth change).
+            // The user on the device, 2026-11-17: the effects were "a bit too
+            // bland". Measured (test/dsp/review/probe7.scd), CHORUS and FLANGE
+            // moved the sound least at 0.5, where a slot starts, and RESON
+            // and RING were 3 to 4 dB under the dry sound there. `p` is the
+            // knob on a curve, its square root: 0.71 at its middle, 1 at its top.
+            // EVERY LAW HERE COSTS NO MORE UGENS THAN THE ONE IT REPLACED. On
+            // the norns a control-rate operator costs about 0.01% of the
+            // scsynth thread for each synth: a first version with nine more of
+            // them in FLANGE and four in ECHO took the dense set of gate row
+            // 19.27 from 62.4% to 63.5%. probe7 counts each def's UGens.
+            p = a.sqrt;
             // DEPTH IS SET AS PITCH, not as time. A delay that moves by
             // D*sin(2pi*f*t) bends the pitch by the ratio 2pi*f*D at its
             // peak, so a fixed depth in time grew with the rate: measured,
             // CHORUS reached -456 to +361 cents at the top of both knobs and
             // WOBBLE +-140. D = (2^(cents/1200) - 1) / (2pi*f) holds the
             // bend whatever the rate, up to the room the delay line has.
-            // CHORUS 5 to 30 cents; WOBBLE's wow up to 50, its flutter 15.
+            // CHORUS 8 to 50 cents. WOBBLE's wow reaches 50 cents at the
+            // knob's middle and 100 at its top, and its flutter 15 and 30.
             chF = 0.1 * (60 ** r);
-            chD = (((2 ** ((5 + (25 * a)) / 1200)) - 1) / (2pi * chF)).min(0.012);
+            chD = (((2 ** ((8 + (42 * a)) / 1200)) - 1) / (2pi * chF)).min(0.012);
             wowF = 0.3 * (6 ** r);
-            wowD = (((2 ** (50 / 1200)) - 1) / (2pi * wowF)).min(0.010);
+            wowD = ((a * (2 * ((2 ** (50 / 1200)) - 1))) / (2pi * wowF)).min(0.010);
             flF = 6 * (2 ** r);
-            flD = ((2 ** (15 / 1200)) - 1) / (2pi * flF);
+            flD = (a * (2 * ((2 ** (15 / 1200)) - 1))) / (2pi * flF);
             lfoCh = SinOsc.kr(chF, [0, 0.5pi]);
             lfoFl = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
             wow = (SinOsc.kr(wowF, [0, 0.3]) * 0.7)
                 + (LFNoise2.kr(0.5 * (6 ** r)) * 0.3);
             flut = SinOsc.kr(flF);
+            flw = flD * flut;
             dt = 2.collect({ arg ch;
                 Select.kr(idx, [
                     0.015 + (chD * lfoCh[ch]),
                     0.0035 + (0.003 * lfoFl[ch]),
-                    0.012 + (a * ((wowD * wow[ch]) + (flD * flut)))
+                    0.012 + (wowD * wow[ch]) + flw
                 ]).lag(0.1)
             });
-            decay = Select.kr(idx, [DC.kr(0), a * 0.12, DC.kr(0)]).lag(0.05);
-            dryG = Select.kr(idx, [1 - (0.3 * a), (1 + (0.5 * a)).reciprocal,
-                DC.kr(0)]).lag(0.05);
-            wetG = Select.kr(idx, [0.7 * a, a * (1 + (0.5 * a)).reciprocal,
-                DC.kr(1)]).lag(0.05);
+            // the stock FLANGE's level: the comb's ring adds to the sound, and
+            // without this its top came out 6 dB over the dry sound
+            flN = (1 + (1.2 * p)).reciprocal;
+            decay = Select.kr(idx, [DC.kr(0), p * 0.12, DC.kr(0)]).lag(0.05);
+            dryG = Select.kr(idx, [1 - (0.25 * p), flN, DC.kr(0)]).lag(0.05);
+            wetG = Select.kr(idx, [0.9 * p, p * flN, DC.kr(1)]).lag(0.05);
             comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], decay) });
             (sig * dryG) + (comb * wetG)
         });
         // RESON: the gain law holds a long ring near the level of a short
         // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
         // exact law for noise) music came out about 8dB under the other
-        // effects on the device
+        // effects on the device.
+        // THE DRY SOUND STAYS WHOLE UP TO THE KNOB'S MIDDLE, and the ring is
+        // added to it. Above the middle the dry sound leaves, and the top is
+        // the ring alone. On a straight crossfade the middle was half of
+        // each: 3 dB under the dry sound on a chord, and 7 dB on a tone that
+        // is off the resonator's note (gate row 19.11 on the device), where
+        // the ring is weak. The ring's level is `a * (3.26 - (2.21 * a))`:
+        // 0.68 at a quarter of the knob, 1.08 at its middle, 1.05 at its top,
+        // where the long ring is loud by itself.
+        // One gain serves both sides: their notes are 0.3% apart.
         fxSlot.value(\four_fx_reson, { arg sig, type, a, r;
-            var note, rdt, rdec, fb, res;
+            var note, rdt, rdec, fb, gain, res;
             note = (36 + (r * 48)).round(1).midicps;
             rdt = [note, note * 1.003].reciprocal;
             rdec = 0.05 + (a * a * 3);
-            fb = 0.001 ** (rdt / rdec);
+            fb = 0.001 ** (rdt[0] / rdec);
+            gain = ((1 - fb.squared) ** 0.25) * (a * (3.26 - (2.21 * a)));
             res = 2.collect({ arg ch;
-                th.value(CombC.ar(sig[ch], 0.02, rdt[ch].lag(0.05), rdec)
-                    * ((1 - fb[ch].squared) ** 0.25))
+                th.value(CombC.ar(sig[ch], 0.02, rdt[ch].lag(0.05), rdec) * gain)
             });
-            LinXFade2.ar(sig, res, (a * 2 - 1))
+            (sig * (2 - (2 * a)).min(1)) + res
         });
+        // RING: a product with a sine has half the power of the sound, so the
+        // sine is 3 dB louder (2.sqrt), and the two cross at equal power. On
+        // a straight crossfade the knob's middle was 4 dB under the dry sound.
         fxSlot.value(\four_fx_ring, { arg sig, type, a, r;
-            LinXFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r)), (a * 2 - 1))
+            XFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r), 0, 2.sqrt), (a * 2 - 1))
         });
         // FLANGE with the plugin (without it, type 2 of \four_fx_mod). The
         // first one sounded harsh, for three reasons, and each has its answer:
@@ -1288,28 +1315,40 @@ Engine_Four : CroneEngine {
         //   it never reached zero. The dry signal is now 1.41ms late, the
         //     middle of the sweep, so the wet one passes THROUGH it: the
         //     notches run up out of hearing and come back, as on two tapes
-        // amt is the feedback and the mix, rate is the sweep speed.
+        // amt is the feedback and the mix, rate is the sweep speed. Both rise
+        // fast at first (the forty-fifth change): at the knob's middle the
+        // wet sound is at 0.71 of the dry one and the feedback at 0.64. The
+        // gain holds the level: the loop's ring adds to the sound, and the
+        // top came out 7 dB over a chord.
         stretchOn.if({ fxSlot.value(\four_fx_flange, { arg sig, type, a, r;
             var lfo = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
             var d = 0.0014142 * (5.657 ** lfo);
+            var p = a.sqrt;
+            var fb = p * 0.9;
             var wet = 2.collect({ arg ch;
-                delayClass.ar(sig[ch], d[ch], a * 0.9, 5000, 0.02) });
-            (DelayN.ar(sig, 0.002, 0.0014142) + (wet * a)) * (1 + (0.5 * a)).reciprocal
+                delayClass.ar(sig[ch], d[ch], fb, 5000, 0.02) });
+            (DelayN.ar(sig, 0.002, 0.0014142) + (wet * p)) * (1 - (0.55 * a))
         }) });
         // ECHO: a delay of the track's own, 30ms to 1.2s. rate is the time
         // (it glides like tape when turned), amt is the feedback and the
-        // level of the echoes. The loop darkens and saturates softly.
+        // level of the echoes. The loop darkens and saturates softly. Both
+        // rise fast at first (the forty-fifth change): at the knob's middle
+        // the echoes are at 0.71 of the sound and the feedback at 0.57. The
+        // top is where it was: the echoes at the level of the sound, and the
+        // feedback at 0.8.
         fxSlot.value(\four_fx_echo, { arg sig, type, a, r;
             var t = (0.03 * (40 ** r)).lag(0.3);
+            var p = a.sqrt;
+            var fb = p * 0.8;
             var wet = stretchOn.if({
-                2.collect({ arg ch; delayClass.ar(sig[ch], t, a * 0.8, 3500, 1.3) })
+                2.collect({ arg ch; delayClass.ar(sig[ch], t, fb, 3500, 1.3) })
             }, {
                 // stock: a comb. Its decay is the time for the same feedback
                 // to fall by 60dB
                 2.collect({ arg ch; CombC.ar(sig[ch], 1.3, t,
-                    t * (0.001.log / (a * 0.8).max(0.001).log)) })
+                    t * (0.001.log / fb.max(0.001).log)) })
             });
-            sig + (wet * a)
+            sig + (wet * p)
         });
 
         // ---- the lane's other synths

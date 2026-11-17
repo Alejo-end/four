@@ -2666,12 +2666,20 @@ def stage19():
         n.set("t2_effect", 1)
         dry = out["OFF"]
 
+        # Only the bands that sound in OFF count. The tone has no partial at
+        # 884 Hz, and that band's floor moved by 3 to 60 dB from run to run
+        # (2026-11-17), which hid what the effects did.
         def change(x):
-            return max([abs(x[0][hz] - dry[0][hz]) for hz in dry[0]] + [abs(x[1] - dry[1]), abs(x[2] - dry[2])])
+            return max([abs(x[0][hz] - dry[0][hz]) for hz in dry[0] if dry[0][hz] > -60]
+                       + [abs(x[1] - dry[1]), abs(x[2] - dry[2])])
 
         d = {name: round(change(x), 1) for name, x in out.items() if name != "OFF"}
-        return verdict(all(v > 1 for v in d.values()),
-                       f"largest change against OFF in dB {d}; RESON level {out['RESON'][1] - dry[1]:+.1f} dB. "
+        # the level of each type against OFF, at the amount a slot starts with.
+        # Before the forty-fifth change RESON was 7.2 dB under OFF on this
+        # tone and RING 4.3 dB: an effect that drops the track sounds weak.
+        lv = {name: round(x[1] - dry[1], 1) for name, x in out.items() if name != "OFF"}
+        return verdict(all(v > 1 for v in d.values()) and all(v > -3 for v in lv.values()),
+                       f"largest change against OFF in dB {d}; level against OFF in dB {lv}. "
                        "Each type apart: listen to 19.11_*.wav", "measured")
 
     def c1912():

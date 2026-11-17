@@ -4674,3 +4674,51 @@ doc/signature-workflow.md.
   second later. Rows 10.1 to 10.4, 19.7, 19.12, 19.21, 19.28 and 19.29 pass.
   doc/measurements/2026-11-17/ has the numbers.
 
+four, forty-fifth change: **the effects are stronger at the same knob, and none is
+quieter than the dry sound (engine and test tools; the count stays 198; on the device
+2026-11-17, not heard)**. The user tested the forty-fourth change on the device and
+said: "the effects should be a bit more punchier, like more noticeable, because they're
+a bit too like bland now".
+- Measured first. test/dsp/review/probe7.scd plays one phrase through each type at five
+  amounts, and an_probe7.py reads the level and how far the spectrum moved, in dB. A
+  slot starts at amount 0.5. There CHORUS moved the phrase by 2.3 dB and FLANGE by 2.5,
+  the least of the six, and RESON and RING were 3.0 and 4.2 dB under the dry sound. On
+  the device, on the gate's tone, RESON was 7.2 dB under OFF and RING 4.3 dB: an effect
+  that drops the track sounds weak.
+- The amount knob now rises fast at first: `p` is its square root, 0.71 at the knob's
+  middle.
+  - CHORUS: the wet arm at 0.9 `p` (it was 0.7 `a`), the depth 8 to 50 cents (5 to 30).
+  - FLANGE: the wet arm at `p` and the feedback at 0.9 `p`. The gain `1 - 0.55a` holds
+    the level: the top was 7 dB over a chord and is 3.6 dB.
+  - WOBBLE: the wow reaches 50 cents at the knob's middle and 100 at its top, and the
+    flutter 15 and 30, up to the room the line has.
+  - ECHO: the echoes at `p` and the feedback at 0.8 `p`. The top is where it was.
+  - RESON: the dry sound stays whole up to the knob's middle and the ring is added to
+    it. Above the middle the dry sound leaves. The ring is louder in the lower half.
+  - RING: the two cross at equal power, and the sine is 3 dB louder (a product with a
+    sine has half the power of the sound).
+- Offline, at amount 0.5 the phrase now moves by 3.4 dB through CHORUS, 3.2 through
+  FLANGE, 4.5 through WOBBLE and 4.1 through ECHO: about what the old knob gave at three
+  quarters, and for WOBBLE at its top. No type at any amount is quieter than the phrase
+  (the lowest was -4.6 dB and is 0.0). The loudest is RESON's top at +6.7 dB (+6.3
+  before). check_dsp.sh runs the probe: fourteen or fifteen new rows for each build.
+- On the device, `count: 198`. Row 19.11 now reads each type's level against OFF at
+  amount 0.5: CHORUS +1.1 dB (-1.2 before), FLANGE +1.1 (+0.1), WOBBLE -0.1 (0.0), RESON
+  -1.2 (-7.2), RING -0.1 (-4.3), ECHO -0.5 (-0.2). Rows 19.12 and 19.29 have no break:
+  the largest step is 0.0013 and 0.0012 (0.0008 before), where the tone alone has about
+  0.0006. Rows 19.1, 19.7, 19.10, 19.13 and 19.30 pass.
+- The cost. A first version of these laws held nine more control-rate operators in
+  FLANGE and four more in ECHO, and `measure.py budget` read 5.2 and 4.5 points for
+  four slots of each, where the old laws took 4.8 and 4.2. On the norns one such
+  operator costs about 0.01% of the scsynth thread for each synth. The laws were
+  written again with the same number of UGens as before (RING has one more), and
+  check_dsp.sh now holds each def's count. Four FLANGE then read 4.9 points and four
+  ECHO 4.0. The dense set of row 19.27 read 63.3% that evening against 62.4% in the
+  morning: the states under the effects were 1.0 point higher, at 62 C against 52 C.
+- The norns's own scsynth renders the probe within 0.06 dB of the Mac.
+- A saved amount sounds stronger than before: a PSET or a scene keeps its number.
+- Row 19.11's "largest change" read the band at 884 Hz, where the tone has no partial,
+  and its floor moved by 3 to 60 dB from run to run. It now reads only the bands that
+  sound in OFF.
+- The stock FLANGE (no plugin) is a bare comb, and its peak is far over the phrase:
+  1.19 where the phrase peaks at 0.35 (1.75 before). It is a KNOWN row of check_dsp.sh.

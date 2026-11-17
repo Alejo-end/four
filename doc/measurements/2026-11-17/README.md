@@ -213,3 +213,109 @@ plays into both. "Before" is the forty-second change, the same hour.
 gone at a mix of 0, and INF with KILL keeps its loop), 19.21 and 19.28 (the sends), 19.7,
 19.12 and 19.29. The 141 xruns the JACK log counted in this hour all fall in the second
 of a service restart. Nobody has listened to these recordings yet.
+
+## The effects at each amount (the forty-fifth change)
+
+The user tested the forty-fourth change and found the effects "a bit too bland". The
+first step was a number for it. `test/dsp/review/probe7.scd` plays one phrase through
+each type at five amounts, at rate 0.5. The phrase is a chord of four saws under a slow
+swell, a kick and a tick, the same on both sides. `an_probe7.py` reads each lane against
+the phrase alone, from 1 s to 9 s:
+
+- "Level" is the lane's RMS over the phrase's.
+- "Moved" is the mean distance in dB between the two spectra, over every 43 ms frame and
+  every band that sounds in either. A gain of 3 dB and nothing else reads 3. The lane is
+  first moved back by the delay its type has at amount 0 (WOBBLE 12 ms, FLANGE 1.4 ms),
+  so a late copy alone reads 0.
+
+A slot starts at amount 0.5. With the plugin, on the Mac. The norns's own scsynth
+renders the same numbers within 0.06 dB (`test/device/norns_nrt.sh`). WOBBLE's wow is
+partly random, and it is the only type that differs.
+
+| Moved, dB | 0.25 before | after | 0.5 before | after | 0.75 before | after | 1 before | after |
+|---|---|---|---|---|---|---|---|---|
+| CHORUS | 1.2 | 2.6 | 2.3 | 3.4 | 3.2 | 4.0 | 3.9 | 4.4 |
+| FLANGE | 1.4 | 2.5 | 2.5 | 3.2 | 3.3 | 3.9 | 4.4 | 4.9 |
+| WOBBLE | 1.8 | 3.1 | 3.1 | 4.5 | 4.0 | 5.4 | 4.6 | 5.4 |
+| RESON | 3.1 | 3.2 | 6.4 | 4.7 | 9.3 | 7.8 | 8.5 | 8.4 |
+| RING | 3.0 | 3.4 | 5.3 | 5.2 | 6.7 | 6.4 | 7.3 | 7.3 |
+| ECHO | 1.6 | 3.0 | 3.0 | 4.1 | 4.3 | 4.9 | 5.5 | 5.5 |
+
+| Level against the phrase, dB | 0.25 before | after | 0.5 before | after | 0.75 before | after | 1 before | after |
+|---|---|---|---|---|---|---|---|---|
+| CHORUS | -0.3 | +0.4 | -0.3 | +1.0 | +0.1 | +1.1 | +0.6 | +1.3 |
+| FLANGE | +0.3 | +2.1 | +1.5 | +3.0 | +3.7 | +3.6 | +7.0 | +3.6 |
+| WOBBLE | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 |
+| RESON | -2.6 | +0.7 | -3.0 | +3.4 | +1.2 | +5.3 | +6.3 | +6.7 |
+| RING | -2.2 | +0.1 | -4.2 | +0.1 | -4.6 | 0.0 | -3.0 | 0.0 |
+| ECHO | +0.2 | +1.0 | +1.0 | +2.1 | +2.4 | +3.5 | +5.5 | +5.5 |
+
+- CHORUS and FLANGE moved the phrase least at 0.5. They and ECHO now move it at 0.5
+  about as far as the old knob did at 0.75, and WOBBLE as far as the old knob's top.
+- RESON and RING were under the phrase at 0.5, by 3.0 and 4.2 dB. Part of what they
+  "moved" was that loss. RESON at 0.5 was half of the dry sound and half of the ring. It
+  now is the whole dry sound with the ring on it, so it moves the spectrum less and
+  drops nothing.
+- FLANGE's top was 7 dB over the phrase and is 3.6 dB. On white noise the top was
+  +0.3 dB and is -3.1 dB (probe 1).
+- The largest peak with the plugin is 0.68, where the phrase peaks at 0.35 (0.98 before,
+  FLANGE's top). Without the plugin FLANGE is a bare comb and peaks at 1.19 (1.75).
+- CHORUS bends the pitch by 29 cents at amount 0.5 and by 45 at the top of both knobs.
+  WOBBLE bends it by 97 to 99 cents at the top, and by 46 to 49 at rate 0, where the
+  line's room is the limit (`an_engine.py`).
+
+On the norns, `count: 198`, gate row 19.11: track 2 plays the tone of 220, 331 and
+442 Hz, and each type runs at amount 0.5 and rate 0.5. The level against OFF, left
+channel:
+
+| Row 19.11 | Before | After |
+|---|---|---|
+| CHORUS | -1.2 dB | +1.1 dB |
+| FLANGE | +0.1 dB | +1.1 dB |
+| WOBBLE | 0.0 dB | -0.1 dB |
+| RESON | -7.2 dB | -1.2 dB |
+| RING | -4.3 dB | -0.1 dB |
+| ECHO | -0.2 dB | -0.5 dB |
+
+The tone is off RESON's note (C4 at rate 0.5), so its ring is weak there, and half of
+the dry sound was all that came out.
+
+The rows around it, on this engine: 19.12 (six TYPE taps) has no break, and its largest
+step is 0.0013. 19.29 (the fade rocked across the middle) has no break, and its largest
+step is 0.0012. The tone alone has about 0.0006, and the forty-second change read
+0.0008: a stronger effect moves the samples more. Rows 19.1, 19.7, 19.10, 19.13 and
+19.30 pass.
+
+Row 19.11's "largest change against OFF" read a band at 884 Hz, where the tone has no
+partial. That band's floor moved from -132 dB to -95 dB between two runs, and the row
+printed 3 to 60 dB for the same effect. It now reads only the bands that sound in OFF.
+
+### What the stronger effects cost
+
+`measure.py budget` again, three times: the morning's table above (the old laws), a
+first version of the new laws, and the final one. The first version held nine more
+control-rate operators in FLANGE and four more in ECHO.
+
+| State, thread mean | The old laws, morning | First version | Final |
+|---|---|---|---|
+| The dense voices, nothing else | 42.0% | 42.2% | 42.7% |
+| + the reverb, shimmer, the delay, drive on every track | 53.4% | 53.8% | 54.4% |
+| + FLANGE in every first slot | 58.2% | 59.0% | 59.3% |
+| + ECHO in every second slot: row 19.27's dense set | 62.4% | 63.5% | 63.3% |
+| Four FLANGE add | 4.8 | 5.2 | 4.9 |
+| Four ECHO add | 4.2 | 4.5 | 4.0 |
+| Four PV at pitch 2 with all of it | 55.9% | 57.2% | 56.8% |
+
+- The eight slots cost 9.0 points with the old laws, 9.7 with the first version and 8.9
+  with the final one. One control-rate operator costs about 0.01% of the scsynth thread
+  for each synth that holds it.
+- The final laws hold the same number of UGens as the old ones: `four_fx_mod` 85,
+  `four_fx_flange` 31, `four_fx_reson` 41 and `four_fx_echo` 20. `four_fx_ring` has 21,
+  one more, for the sine's level. check_dsp.sh holds the counts.
+- The states under the effects read 1.0 point more in the last run than in the morning.
+  The norns was at 62 C, not throttled, against 52 C in the morning. Row 19.27 read
+  57.8% and 65.7% on the first version (56.6% and 64.5% in the morning). It was not run
+  again on the final one.
+- No state had an xrun.
+
+Nobody has listened to this change yet.
