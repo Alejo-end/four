@@ -232,6 +232,12 @@ def check(build):
            num(r'^BUFFER start, largest step in its first 50 ms: ([\d.]+)', a8), 0.002, '', fmt='.4f')
     target(build, "the UGens of four_io (106 before, and one more for the head's trigger)",
            num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 107, '', fmt='.0f')
+    # A CLEAR WITH REGEN RUNNING (the fiftieth change, gate row 10.8, probe8's
+    # _clear). The script stops regen a moment after the clear, and io's write
+    # fades out over 10 ms into the pair that was just zeroed. The engine
+    # zeroes the pair again when that fade is over.
+    target(build, "a clear with regen running leaves nothing in the buffer: frames (were 576, 12 ms)",
+           num(r'^CLEAR with regen running: frames left in the buffer (\d+)', a8), 0, '', fmt='.0f')
 
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')

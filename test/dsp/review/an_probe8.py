@@ -52,3 +52,14 @@ print(f"BUFFER past the first pass, 1.1 to 2.2 s: {lv:.1f} dB")
 seg = buf[: int(0.05 * SR)]
 d2 = np.abs(seg[2:] - 2 * seg[1:-1] + seg[:-2])
 print(f"BUFFER start, largest step in its first 50 ms: {d2.max():.4f}")
+
+# A CLEAR WITH REGEN RUNNING (the fiftieth change): what stays in the pair
+import os
+if os.path.exists(f'{d}/{tag}_clear.wav'):
+    c, sr2 = sf.read(f'{d}/{tag}_clear.wav')
+    c = c if c.ndim == 1 else c[:, 0]
+    left = c[int(2.0 * SR):]
+    nz = np.where(np.abs(left) > 0)[0]
+    print(f"CLEAR with regen running: frames left in the buffer {len(nz)}"
+          + (f", {len(nz) / SR * 1000:.1f} ms from {nz[0] / SR:.4f} s, peak {np.abs(left).max():.4f}" if len(nz) else ""))
+

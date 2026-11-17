@@ -16,6 +16,15 @@
 //            played back from its start, so the file shows where each pass is.
 // The buffer then holds 550 Hz, 331 Hz, 442 Hz and 220 Hz, in that order, in
 // its first 1.01 s. An engine without rec_pass lays the four end to end.
+//
+// _clear.wav  A CLEAR WITH REGEN RUNNING (the fiftieth change, gate row 10.8).
+//            regen at 0.4 writes io's output into the pair. At 1.5 s the pair
+//            is zeroed, as the engine's `clear` does. 3 ms later regen goes to
+//            0, as the script's clear does after it, and io's write fades out
+//            over 10 ms: into the pair that was just zeroed. The engine zeroes
+//            the pair again `clearWait` later (none: an engine from before).
+//            KEEP THIS IN STEP WITH the clear command and ctx.clear_recording.
+//            Channel 0, from 2.0 s: the left buffer played back from its start.
 (
 var dir = "BENCH_DIR".getenv, tag = "BENCH_TAG".getenv ? "run";
 var s = FakeServer(\fake, NetAddr("127.0.0.1", 57999));
@@ -33,9 +42,11 @@ Engine_Four.new(ctx, { arg eng;
     var b = 600, block = 64 / 48000;
     // does this engine's io know rec_pass? An older one ignores the control.
     var has = SynthDescLib.global[\four_io].controlNames.includes(\rec_pass);
+    var wait = eng.respondsTo(\clearWait).if({ eng.clearWait }, { nil });
     var jobs, run;
     ("COMMANDS " ++ eng.cmdNames.size).postln;
     ("REC PASS " ++ has).postln;
+    ("CLEAR WAIT " ++ wait).postln;
     ("UGENS four_io " ++ SynthDescLib.global[\four_io].def.children.size).postln;
     "FOUR_PLUGIN_DIR".getenv.notNil.if({
         opts.ugenPluginsPath = [Platform.resourceDir +/+ "plugins", "FOUR_PLUGIN_DIR".getenv];
@@ -62,7 +73,20 @@ Engine_Four.new(ctx, { arg eng;
             [3.6 + block, [\n_set, 1010, \rec, 1]],
             [3.8, [\n_set, 1010, \rec, 0]],
             [4.2, [\n_free, 1000]],
-            [4.3, [\s_new, \bufplay, 1030, 1, 0, \buf, 0, \out, 3]]]]
+            [4.3, [\s_new, \bufplay, 1030, 1, 0, \buf, 0, \out, 3]]]],
+        [\clear, 6.2, 1, [
+            [0.0, [\b_alloc, 0, 192000, 1]], [0.0, [\b_alloc, 1, 192000, 1]],
+            [0.001, [\s_new, \sine, 1000, 0, 0, \out, b]],
+            [0.002, [\s_new, \four_io, 1010, 1, 0, \in1, b, \in2, b + 1, \out, 2, \buf_l, 0, \buf_r, 1,
+                \play_bus, b + 2, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 0.5, \level, 1,
+                \lane_bus, b + 4, \dly_send, b + 6, \dly_ret, b + 8, \rev_send, b + 10, \rev_ret, b + 12,
+                \t2_ret, b + 14, \lanes_dly, b + 16, \lanes_rev, b + 18, \own_out, b + 20, \rec, 0]],
+            [0.5, [\n_set, 1010, \regen, 0.4]],
+            [1.5, [\b_zero, 0], [\b_zero, 1]],
+            [1.503, [\n_set, 1010, \regen, 0]]]
+            ++ wait.notNil.if({ [[1.5 + wait, [\b_zero, 0], [\b_zero, 1]]] }, { [] })
+            ++ [[1.9, [\n_free, 1000]],
+            [2.0, [\s_new, \bufplay, 1030, 1, 0, \buf, 0, \out, 0]]]]
     ];
     run = { |i|
         if (i >= jobs.size) { "PROBE_DONE".postln; 0.exit } {

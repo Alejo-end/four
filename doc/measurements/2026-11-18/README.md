@@ -78,6 +78,29 @@ this change, and three erases on this engine show its cause:
 
 The script clears the buffer first and stops regen after. Regen's write then fades over
 10 ms into the buffer that was just cleared. The row last ran on 2026-11-06, under
-mangler, and passed. It is the next change.
+mangler, and passed.
+
+## A clear with a write running (the fiftieth change)
+
+The engine's `clear` now zeroes the pair a second time, 60 ms later, unless a file, a
+new take or another clear came to that pair since.
+
+Offline, probe8's `_clear.wav`: regen at 0.4 writes into the pair, the pair is zeroed at
+1.5 s, and regen goes to 0 3 ms later, as the script does it.
+
+| What stays in the buffer | Before | After |
+|---|---|---|
+| Offline, on the Mac and with the norns's scsynth | 576 frames, 12 ms, peak 0.07 | 0 frames |
+| On the norns, row 10.8 (an erase with regen at 0.4) | 320 frames, 6.7 ms | 0: "buffer all zero" |
+
+On the norns the second zero spares what comes right after a clear:
+
+| In the same moment as the clear | The buffer after |
+|---|---|
+| A file of 5.2 s is loaded | holds the file from its first frame to its last |
+| A new take of 1 s is armed | holds the take from its start, 1.05 s |
+
+`count: 198`. The other rows of stage 10 pass or are measured as before, and rows 19.1
+and 19.4 pass.
 
 Nobody has listened to this change yet.

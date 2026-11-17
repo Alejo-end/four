@@ -4831,3 +4831,21 @@ C4 of doc/signature-workflow.md.
   running leaves 6.7 ms of sound in the buffer. That fault is older (the script stops
   regen after the clear), and it is the next change.
 - The README no longer lists "a take that runs past the end of its buffer".
+
+four, fiftieth change: **a clear leaves nothing in the buffer when a write was running
+(engine and test tools; the count stays 198; on the device 2026-11-18)**.
+- Found by gate row 10.8, on its first run on four. After an erase with regen at 0.4,
+  320 frames of the buffer were not zero: 6.7 ms, where regen's write head stood. A
+  track that plays that buffer ticks once in its loop.
+- The cause: the script clears the buffer and stops regen a moment after. io's write
+  then fades out over 10 ms, into the pair that was just zeroed. With regen stopped
+  before the erase, nothing stayed.
+- The engine's `clear` now zeroes the pair again 60 ms later (`clearWait`). A counter
+  for each pair (`bufGen`) stops that second zero when a file, a new take or another
+  clear came to the pair since.
+- Offline: probe8 has a second file, `_clear.wav`. 576 frames (12 ms) stayed with the
+  engine before, and none stay. check_dsp.sh has a row for each build, and the norns's
+  own scsynth gives the same.
+- On the device, `count: 198`: row 10.8 reads "buffer all zero". A file loaded in the
+  same moment as a clear is whole, and so is a take armed in that moment. The other rows
+  of stage 10 pass, and rows 19.1 and 19.4.

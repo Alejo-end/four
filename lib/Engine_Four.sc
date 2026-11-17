@@ -57,6 +57,10 @@ Engine_Four : CroneEngine {
     // recPass counts the passes that began at the start of their buffer
     // (rec_track's second argument). io's write head goes to 0 when it steps.
     var <recPass = 0;
+    // bufGen counts, for each pair, the commands that put material in it or
+    // cleared it. A clear zeroes the pair again a moment later (clearWait),
+    // and only if nothing else came to that pair since.
+    var bufGen;
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
@@ -370,6 +374,14 @@ Engine_Four : CroneEngine {
     // row 19.30). A mix that comes back inside the wait keeps the synth.
     spaceWait { ^0.1 }
 
+    // How long after a clear the pair is zeroed a second time. A write that
+    // ran at the clear (regen, or a take) fades out over 10 ms in io, and the
+    // script stops regen a moment after the clear: that fade wrote into the
+    // pair that was just zeroed. On the device 6.7 ms of sound stayed in an
+    // erased buffer, where regen's head stood (gate row 10.8, the fiftieth
+    // change).
+    clearWait { ^0.06 }
+
     // spawn/free the reverb synth on rev_mix. placed AFTER ioSynth (reads io's
     // fresh send this block; io reads the return via InFeedback next block).
     updateReverb { arg mix;
@@ -527,6 +539,7 @@ Engine_Four : CroneEngine {
         // together, or positions drift with no error anywhere.
         var bufSecs = 60;
 
+        bufGen = Array.fill(4, 0);
         bufLs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufRs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufL = bufLs[0];
@@ -1845,6 +1858,7 @@ Engine_Four : CroneEngine {
             recIdx = msg[1].asInteger.clip(0, 3);
             ((msg[2] ? 0) > 0).if({
                 recPass = recPass + 1;
+                bufGen[recIdx] = bufGen[recIdx] + 1;   // a new take: see clearWait
                 ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx], \rec_pass, recPass);
             }, {
                 ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx]);
@@ -1920,8 +1934,21 @@ Engine_Four : CroneEngine {
         // clear/load act on the SAME bufL/bufR the synths hold (Buffer:zero and
         // instance readChannel into the existing buffer) — no bufnum ever changes.
         this.addCommand(\clear, "", { arg msg;
-            bufLs[opIdx].zero;
-            bufRs[opIdx].zero;
+            var idx = opIdx, gen;
+            bufGen[idx] = bufGen[idx] + 1;
+            gen = bufGen[idx];
+            bufLs[idx].zero;
+            bufRs[idx].zero;
+            // ...and once more when a write that was running has faded out
+            // (clearWait), unless a file, a take or another clear came to
+            // this pair since
+            SystemClock.sched(this.clearWait, {
+                (bufGen[idx] == gen).if({
+                    bufLs[idx].zero;
+                    bufRs[idx].zero;
+                });
+                nil
+            });
             // a clear must be SILENCE: the delay line and the reverb/shimmer
             // recirculation still ring with the erased material. their state
             // lives inside the spawn/free synths, so a free + respawn IS the
@@ -1953,6 +1980,7 @@ Engine_Four : CroneEngine {
                 var frames = sf.numFrames.min(s.sampleRate * bufSecs);
                 var bl = bufLs[opIdx], br = bufRs[opIdx];
                 sf.close;
+                bufGen[opIdx] = bufGen[opIdx] + 1;   // a clear's second zero must not land on this
                 bl.zero;
                 br.zero;
                 bl.readChannel(path, 0, frames, 0, false, [0]);
@@ -2000,6 +2028,7 @@ Engine_Four : CroneEngine {
                 var frames = sf.numFrames.min(s.sampleRate * bufSecs);
                 var bl = bufLs[opIdx], br = bufRs[opIdx];
                 sf.close;
+                bufGen[opIdx] = bufGen[opIdx] + 1;   // a clear's second zero must not land on this
                 bl.zero;
                 br.zero;
                 bl.readChannel(pathL, 0, frames, 0, false, [0]);
@@ -2041,6 +2070,8 @@ Engine_Four : CroneEngine {
         // (the counts stop a free that still waits from freeing a node twice)
         revGen = revGen + 1;
         dlyGen = dlyGen + 1;
+        // (...and a clear's second zero from landing on a freed pair)
+        bufGen.notNil.if({ bufGen = bufGen + 1 });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });

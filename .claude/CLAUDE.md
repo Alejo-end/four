@@ -97,7 +97,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-18 it runs the forty-ninth change at `count: 198`, with the plugin
+- Since 2026-11-18 it runs the fiftieth change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -150,6 +150,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
 | 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
 | 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
+| 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -190,7 +191,9 @@ test, and they are the forty-fifth change (stronger effects) and the forty-sixth
 tape records what four plays). Both are on the device, and the user has not heard them.
 Row 19.31 then found that a tape pass that crossed the tape's end kept the whole 60 s as
 its loop, and the forty-eighth change starts a new take at the tape's start. C4 is the
-forty-ninth change, on the device (doc/measurements/2026-11-18/), not heard. Next: C2.
+forty-ninth change, on the device (doc/measurements/2026-11-18/), not heard. The wide
+run after it found row 10.8 failing (a clear with regen running left 6.7 ms of sound),
+and the fiftieth change is its fix. Next: C2.
 The work is on the local branch `phase-a`. Another session shares this checkout (the
 forty-seventh change, an Exquis driver): stage only your own hunks.
 
@@ -458,6 +461,10 @@ Each line was learned the hard way; the change log has the story.
   that material (RESON was 7 dB under OFF on an off-note tone). Cross at equal power, or
   keep the dry sound whole up to the middle. Measure the level of every effect against
   OFF at the amount it starts with (gate row 19.11, probe7).
+- A write that fades out outlives the command that stopped it. io's rec and regen
+  gates ramp over 10 ms, so a buffer zeroed while one of them runs is written to after
+  the zero. The engine's `clear` zeroes again 60 ms later, behind a counter that a file,
+  a new take or another clear steps (`clearWait`, `bufGen`).
 - When a command's arity changes, the script reads the command's format
   (`engine.commands.<name>.fmt`) and keeps the old law for an old engine. The count
   cannot tell the two apart, and norns only warns about a wrong number of arguments.

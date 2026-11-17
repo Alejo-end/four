@@ -17,13 +17,13 @@
 {"id": "5.8", "status": "pass", "note": "message=True; window (0.0, 0.02) to (0.0, 0.02)"}
 {"id": "5.9", "status": "pass", "note": "['four: PRINT \u2014 recording the master mix, 2.0s', 'four: PRINT done \u2014 four-print-001.wav is the new take']; take 2.07s"}
 {"id": "10.1", "status": "measured", "note": "-22.2 dB dry, -21.3 dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav"}
-{"id": "10.2", "status": "measured", "note": "delay on (12.2, 12.6), off (10.7, 11.0): the node is gone, the difference is under the noise. No older build to compare"}
-{"id": "10.3", "status": "pass", "note": "after INF, voice off, KILL, wait, un-KILL: the loop plays at -26.0 dB"}
+{"id": "10.2", "status": "measured", "note": "delay on (12.2, 12.5), off (10.5, 10.8): the node is gone, the difference is under the noise. No older build to compare"}
+{"id": "10.3", "status": "pass", "note": "after INF, voice off, KILL, wait, un-KILL: the loop plays at -24.8 dB"}
 {"id": "10.4", "status": "measured", "note": "raised with E2: breaks []. Jumped from 0 to 0.4 by a param set, as MIDI or a scene can: breaks []. Listen to 10.4_spawn_knob.wav"}
-{"id": "10.5", "status": "pass", "note": "take and tape heads: (0.018718032166362, 0.010000000397364) and (0.018718032166362, 0.010000000397364) under STOP, (0.055006872862577, 0.047500002384186) after START"}
-{"id": "10.6", "status": "pass", "note": "write head 0.02953 and 0.02953 under STOP; silent 50ms blocks near the stop 0"}
-{"id": "10.7", "status": "measured", "note": "head 0.0544, thrown 0.0563 and 0.0563, released 0.0086. Whether it feels right is yours"}
-{"id": "10.8", "status": "fail", "note": "-16.4 dB, then -91.7 dB after the erase; buffer all zero=False; regen 0.0. Listen to 10.8_after.wav"}
+{"id": "10.5", "status": "pass", "note": "take and tape heads: (0.01930827088654, 0.010416666666667) and (0.01930827088654, 0.010416666666667) under STOP, (0.056308154016733, 0.048749999205271) after START"}
+{"id": "10.6", "status": "pass", "note": "write head 0.02962 and 0.02962 under STOP; silent 50ms blocks near the stop 0"}
+{"id": "10.7", "status": "measured", "note": "head 0.0565, thrown 0.0584 and 0.0584, released 0.0105. Whether it feels right is yours"}
+{"id": "10.8", "status": "measured", "note": "-16.9 dB, then -91.7 dB after the erase; buffer all zero=True; regen 0.0. Listen to 10.8_after.wav"}
 {"id": "11.2d", "status": "pass", "note": "the tape's first pass, after 3s of playing: softcut -17.1 dB"}
 {"id": "11.9", "status": "pass", "note": "file 24 bit; take_len 0.0852 and 0.0861"}
 {"id": "11.10", "status": "pass", "note": "/home/we/dust/audio/mg_gate.wav: channels and bits ['2', '24']. <ok>\n\n@@791@@\n<ok>\n\nfour: exported /home/we/dust/audio/mg_gate.wav"}
@@ -61,5 +61,5 @@
 {"id": "16.16", "status": "you", "note": "needs a crow"}
 {"id": "16.17", "status": "you", "note": "only a hand and an ear can judge this"}
 {"id": "19.1", "status": "pass", "note": "count: 198 seen=True; log: four: FourStretch on; hasStretch=True; plugin folder ['FourStretch.so']"}
-{"id": "19.4", "status": "pass", "note": "digests after each track's pass {1: '505e73684b16 67e7598d5c36', 2: '080875abef9d d088ab1c45ef', 3: 'b9ab6b4c1ef8 3766a3894775', 4: '7c9d58abb169 fb1744215168'}; at the end {1: '505e73684b16 67e7598d5c36', 2: '080875abef9d d088ab1c45ef', 3: 'b9ab6b4c1ef8 3766a3894775', 4: '7c9d58abb169 fb1744215168'}; recIdx and opIdx by focus {1: (0, 0), 2: (1, 1), 3: (2, 2), 4: (3, 3)}"}
+{"id": "19.4", "status": "pass", "note": "digests after each track's pass {1: 'bfe8c0c96541 c87c40651cf6', 2: '7979ae760fd9 58772ac76840', 3: '8b4ea075673a 01f0ec24e975', 4: 'cdd05da0fce8 d36279863375'}; at the end {1: 'bfe8c0c96541 c87c40651cf6', 2: '7979ae760fd9 58772ac76840', 3: '8b4ea075673a 01f0ec24e975', 4: 'cdd05da0fce8 d36279863375'}; recIdx and opIdx by focus {1: (0, 0), 2: (1, 1), 3: (2, 2), 4: (3, 3)}"}
 {"id": "19.32", "status": "measured", "note": "four parts of 20 s, one on each track, then more passes on track 1: {'parts': {1: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 2: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 3: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 4: {'window_s': (0.0, 20.04), 'take_len_s': 20.04, 'plays_db': -18.8}}, \"ten passes of 2 s, the window's length against 2 s, ms\": [-2, -1, -1, 1, -2, -2, -1, -1, -1, 1], 'a pass with a STOP of 1 s in it, window_s': (0.0, 2.09), 'a pass that moves from track 1 to track 2, windows_s': ((0.0, 1.53), (0.0, 1.53))}. Listen to 19.32_part*.wav"}
