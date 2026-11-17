@@ -1,0 +1,11 @@
+{"kind": "budget", "name": "all four OFF", "thread": 3.2, "thread_max": 3.4, "poll": 10.5, "poll_max": 10.534562110901, "xruns": 0}
+{"kind": "budget", "name": "four PLAY", "thread": 10.9, "thread_max": 11.0, "poll": 16.2, "poll_max": 16.749044418335, "xruns": 0}
+{"kind": "budget", "name": "four PV at pitch 2, nothing else", "thread": 35.4, "thread_max": 35.5, "poll": 41.8, "poll_max": 42.225593566895, "xruns": 0}
+{"kind": "budget", "name": "the dense voices, nothing else", "thread": 42.0, "thread_max": 42.2, "poll": 48.3, "poll_max": 49.059211730957, "xruns": 0}
+{"kind": "budget", "name": "+ the reverb (mix 0.5, every send 0.5)", "thread": 48.0, "thread_max": 48.2, "poll": 54.5, "poll_max": 54.960292816162, "xruns": 0}
+{"kind": "budget", "name": "+ shimmer 0.5", "thread": 48.2, "thread_max": 48.4, "poll": 54.7, "poll_max": 54.911373138428, "xruns": 0}
+{"kind": "budget", "name": "+ the delay (mix 0.5, every send 0.5)", "thread": 50.9, "thread_max": 51.0, "poll": 57.5, "poll_max": 58.15291595459, "xruns": 0}
+{"kind": "budget", "name": "+ drive 0.5 on every track", "thread": 53.4, "thread_max": 53.5, "poll": 60.0, "poll_max": 60.329521179199, "xruns": 0}
+{"kind": "budget", "name": "+ FLANGE in every first slot", "thread": 58.2, "thread_max": 58.4, "poll": 64.7, "poll_max": 64.957092285156, "xruns": 0}
+{"kind": "budget", "name": "+ ECHO in every second slot: row 19.27's dense set", "thread": 62.4, "thread_max": 62.4, "poll": 68.8, "poll_max": 69.242263793945, "xruns": 0}
+{"kind": "budget", "name": "four PV at pitch 2 with all of it: row 19.27's other set", "thread": 55.9, "thread_max": 56.1, "poll": 63.0, "poll_max": 63.948516845703, "xruns": 0}

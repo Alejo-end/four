@@ -1,4 +1,4 @@
-# 2026-11-17: an effect's type change (the forty-second change)
+# 2026-11-17: an effect's type change (the forty-second change) and the CPU budget
 
 Offline on the Mac first, then on the norns. The Mac runs scsynth 3.14.1 and the norns
 3.13.0-dev. They differ, and the last two sections say how.
@@ -137,3 +137,44 @@ measurement. Recordings are in `four-device-recordings/2026-11-17`, outside the 
 The rows list holes by the 5 ms law and do not score them. Row 19.12 had one in each
 run, at the tap into RESON or under RESON. Row 19.29 had one or two in each run, most of
 them under CHORUS with no change near. Nobody has listened to these recordings yet.
+
+## The CPU budget, part by part (the forty-third change, C5 of the plan)
+
+`python3 test/device/measure.py budget`, on the engine of the fortieth change, before
+the forty-second went on. All four tracks hold a take. Each state settles for 3 s and is
+then read in four windows of 5 s. "Thread" is the busiest scsynth thread in `top -H`,
+the number with the limit of about 60%. "Poll" is the norns poll `cpu_avg`. It is
+`Crone.server.avgCPU`, the load of the whole JACK cycle: the two read the same number to
+the last digit.
+
+| State | Thread, mean | Largest window | Poll | Added |
+|---|---|---|---|---|
+| All four tracks OFF | 3.2% | 3.4% | 10.5% | |
+| Four PLAY | 10.9% | 11.0% | 16.2% | |
+| Four PV at pitch 2, nothing else | 35.4% | 35.5% | 41.8% | |
+| The dense voices, nothing else: PV at 1.96 and 2.5, GRAIN at density 200 with sizes 0.29 and 0.5 s | 42.0% | 42.2% | 48.3% | |
+| + the reverb (mix 0.5, every send 0.5) | 48.0% | 48.2% | 54.5% | 6.0 |
+| + shimmer 0.5 | 48.2% | 48.4% | 54.7% | 0.2 |
+| + the delay (mix 0.5, every send 0.5) | 50.9% | 51.0% | 57.5% | 2.7 |
+| + drive 0.5 on every track | 53.4% | 53.5% | 60.0% | 2.5 |
+| + FLANGE in every first slot | 58.2% | 58.4% | 64.7% | 4.8 |
+| + ECHO in every second slot: row 19.27's dense set | 62.4% | 62.4% | 68.8% | 4.2 |
+| Four PV at pitch 2 with all of it: row 19.27's other set | 55.9% | 56.1% | 63.0% | |
+
+No state had an xrun. The norns was at 52 C and not throttled.
+
+- Nothing grew between 2026-11-13 and 2026-11-16. The 57.3% of 2026-11-13 was the four
+  dense voices inside preset 1, read once over 6 s (2026-11-13/lanes.md). The 64.1% of
+  2026-11-16 is row 19.27's set: the same voices with the reverb, shimmer, the delay,
+  drive on every track and both effect slots on every track. The voices alone take 42.0%.
+- What row 19.27 adds to the voices costs 20.4 points: the reverb 6.0, the delay 2.7,
+  drive 2.5 (0.6 a track), four FLANGE 4.8 (1.2 each), four ECHO 4.2 (1.1 each) and
+  shimmer 0.2.
+- Row 19.27 reads the largest of 11 windows. It came out 1.6 to 2.1 points above the
+  means of this table: 64.0% and 56.2% on this engine, the same hour.
+- The poll reads 5.3 to 7.3 points above the thread at every load. A header word that
+  reads the poll can take the thread's limit plus 6.
+- The forty-second change costs at most half a point on row 19.27's sets (56.6% and
+  64.5% against 56.2% and 64.0%), which is inside the spread from run to run.
+
+Open: the supported set for the README. It is the user's choice (question 8 of the plan).

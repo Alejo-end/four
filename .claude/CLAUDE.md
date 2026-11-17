@@ -136,6 +136,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 40th: tracks 2 to 4 reach the delay and the reverb (io's `t_dly` was a trigger control) (engine) | yes, `count: 198`, measured | no |
 | 41st: the Relay brief and the plan doc/signature-workflow.md | documents only | |
 | 42nd: an effect synth and the shared delay fill their lines from silence (C1 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: rows 19.12, 19.29 and 10.4 with no break. Not pushed | no |
+| 43rd: the CPU budget part by part, `measure.py budget` (the first step of C5) (test tool, documents) | measured there, 2026-11-17 | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -153,13 +154,21 @@ xruns past about 60%.
   One CLOUD track 12.2%, four 29.1%, four in SPECTRAL 38.7%. The delay adds 1.4%, and
   20 s after the sound stops it costs less than with sound. A silent CLOUD track costs
   3.9% against 2.5% for one that sounds: Clouds in silence is not free. No xruns.
+- The budget, part by part (2026-11-17, doc/measurements/2026-11-17/): all OFF 3.2% of
+  the thread, four PLAY 10.9%, four PV at pitch 2 35.4%, the dense voices 42.0%. The
+  reverb adds 6.0 points, the delay 2.7, drive 0.6 a track, FLANGE 1.2 a slot, ECHO 1.1 a
+  slot. Row 19.27's sets are dressed with all of that: 62.4% and 55.9% as means, 64.5%
+  and 56.6% as the row's largest window. The norns poll `cpu_avg` is
+  `Crone.server.avgCPU`, and it reads 5 to 7 points above the thread at every load.
 
 **Phase A of doc/signature-workflow.md is under way** (C1, C3, C4, then C2 and C6, with
 C5 measured). The user's rule, 2026-11-17: push nothing and merge nothing of it until
 the user has tested it. C1 is the forty-second change: it passes offline and on the
 device (doc/measurements/2026-11-17/). The user has not listened to it. The dip at a
 change into WOBBLE, CHORUS or FLANGE is question 10 of the plan, for their ears, and the
-README keeps its known issue until then. Next: C3.
+README keeps its known issue until then. C5's measurement is the forty-third change:
+nothing grew, row 19.27's set is dressed with every effect. Its supported set waits for
+the user's answer to question 8. Next: C3. The work is on the local branch `phase-a`.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when

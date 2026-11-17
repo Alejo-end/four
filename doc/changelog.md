@@ -4636,3 +4636,19 @@ over a tone gave breaks at 1.1, 3.4 and 3.9 s.
 - The README keeps "Changing an effect's type gives a short dip" until the user has
   listened: the break is gone, and the comb dip is theirs to judge.
 
+four, forty-third change: **the CPU budget, measured part by part (a test tool and
+documents; the first step of C5 of doc/signature-workflow.md)**. The plan asked which
+part grew from 57.3% (2026-11-13) to 64.1% (2026-11-16) on the dense set.
+- `python3 test/device/measure.py budget` builds row 19.27's dense set one part at a
+  time. Each state reads the busiest scsynth thread and the norns CPU poll.
+- Nothing grew. The 57.3% was the four dense voices inside preset 1, read once over 6 s.
+  The 64.1% is row 19.27's set: the same voices with the reverb, shimmer, the delay,
+  drive on every track and both effect slots on every track, and the largest of 11
+  windows. On the device today the voices alone take 42.0%. The reverb adds 6.0 points,
+  the delay 2.7, drive 2.5, four FLANGE 4.8, four ECHO 4.2 and shimmer 0.2: 62.4%.
+- The norns poll `cpu_avg` is `Crone.server.avgCPU`, the load of the whole JACK cycle.
+  It reads 5.3 to 7.3 points above the scsynth thread at every load, from all tracks OFF
+  (3.2% and 10.5%) to the dense set (62.4% and 68.8%).
+- Not done: the supported set in the README and the header's `CPU` word. The set is the
+  user's choice (question 8 of the plan). doc/measurements/2026-11-17/ has the table.
+

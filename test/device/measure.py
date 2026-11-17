@@ -3,6 +3,7 @@
 
     export NORNS_CTL=<control socket>       # see norns.py
     python3 test/device/measure.py system states pages voices two_server patch soak
+    python3 test/device/measure.py budget   # the dense set of gate row 19.27, part by part
 
 Each state settles, then reads over the same window: the main scsynth's average
 and peak CPU, xruns, screen frames per second, the system's idle share and the
@@ -10,6 +11,7 @@ busiest threads. Results go to doc/measurements/<date>/performance.jsonl.
 """
 import json
 import os
+import re
 import sys
 import time
 
@@ -359,7 +361,86 @@ def hold_two():
     server_trial("two servers held for 5 min", second=True, targets=(50,), hold=300)
 
 
-TASKS = dict(hold_two=hold_two, system=system, states=states, grain=grain, pages=pages, voices=voices, everything=everything,
+def thread_poll(windows=4):
+    """The busiest scsynth thread over `windows` windows of 5 s in top -H, and
+    the norns CPU poll (Crone.server.avgCPU, the load of the whole JACK cycle)
+    read at the end of each window. Returns the mean and the largest of each."""
+    threads, polls = [], []
+    for _ in range(windows):
+        t = gate.sc_thread(5)
+        if t is not None:
+            threads.append(t)
+        reply = n.sc('("MGCPU " ++ Crone.server.avgCPU ++ " " ++ Crone.server.peakCPU).postln;')
+        found = re.search(r"MGCPU ([\d.]+) ([\d.]+)", reply)
+        if found:
+            polls.append(float(found.group(1)))
+    mean = lambda xs: round(sum(xs) / len(xs), 1) if xs else None
+    return mean(threads), max(threads, default=None), mean(polls), max(polls, default=None)
+
+
+def budget():
+    """The dense set of gate row 19.27, built up one part at a time, so that
+    each part's share of the scsynth thread shows (C5 of
+    doc/signature-workflow.md). The last state is the one row 19.27 scores.
+    Each state also reads the norns CPU poll, to see how far it lies from the
+    thread."""
+    n.load_script()
+    n.set("dry_wet", 1)
+    for t, kind, amp in ((1, "drums", None), (2, "tone", None), (3, "tone", 0.12), (4, "drums", 0.25)):
+        n.set("track_sel", t)
+        time.sleep(0.4)
+        record_take(4, kind, amp)
+    n.set("track_sel", 1)
+    tp = gate.tp
+
+    def every(pid, v):
+        for t in range(1, 5):
+            n.set(tp(t, pid), v)
+
+    def dense():
+        gate.modes("PV", "PV", "GRAIN", "GRAIN")
+        for t, vals in ((1, {"pitch": 1.96}), (2, {"pitch": 2.5}),
+                        (3, {"density": 200, "size": 0.29}), (4, {"density": 200, "size": 0.5})):
+            for pid, v in vals.items():
+                n.set(tp(t, pid), v)
+
+    def pv4():
+        gate.modes("PV", "PV", "PV", "PV")
+        every("pitch", 2)
+
+    def rest():
+        for pid, v in (("effect", 1), ("effect2", 1), ("drive", 0), ("fx_dly", 0), ("fx_rev", 0),
+                       ("pitch", 1), ("density", 20), ("size", 0.1)):
+            every(pid, v)
+        for pid in ("delay_mix", "rev_mix", "shimmer"):
+            n.set(pid, 0)
+
+    steps = (
+        ("all four OFF", lambda: gate.modes("OFF", "OFF", "OFF", "OFF")),
+        ("four PLAY", lambda: gate.modes("PLAY", "PLAY", "PLAY", "PLAY")),
+        ("four PV at pitch 2, nothing else", pv4),
+        ("the dense voices, nothing else", lambda: (every("pitch", 1), dense())),
+        ("+ the reverb (mix 0.5, every send 0.5)", lambda: (every("fx_rev", 0.5), n.set("rev_mix", 0.5))),
+        ("+ shimmer 0.5", lambda: n.set("shimmer", 0.5)),
+        ("+ the delay (mix 0.5, every send 0.5)", lambda: (every("fx_dly", 0.5), n.set("delay_mix", 0.5))),
+        ("+ drive 0.5 on every track", lambda: every("drive", 0.5)),
+        ("+ FLANGE in every first slot", lambda: every("effect", 3)),
+        ("+ ECHO in every second slot: row 19.27's dense set", lambda: every("effect2", 7)),
+        ("four PV at pitch 2 with all of it: row 19.27's other set", pv4),
+    )
+    rest()
+    for name, fn in steps:
+        fn()
+        time.sleep(3)
+        x0 = n.now()
+        thread, thread_max, poll, poll_max = thread_poll()
+        save("budget", name, thread=thread, thread_max=thread_max, poll=poll, poll_max=poll_max,
+             xruns=n.xruns_since(x0))
+    rest()
+    gate.modes("OFF", "PLAY", "OFF", "OFF")
+
+
+TASKS = dict(budget=budget, hold_two=hold_two, system=system, states=states, grain=grain, pages=pages, voices=voices, everything=everything,
              two_server=two_server, patch=patch, soak=soak)
 
 
