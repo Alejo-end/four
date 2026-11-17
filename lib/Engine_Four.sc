@@ -15,7 +15,8 @@
 // output into another track's filter, 12 sends in all. A send arrives one
 // block late (InFeedback) and goes through a tanh, so a ring of sends can
 // feed back but never runs away. OWN MATERIAL: each track plays its own
-// 60s buffer pair; rec_track picks the pair io records into, buf_track the
+// 60s buffer pair; rec_track picks the pair io records into (and, with a
+// second argument of 1, puts the write head at its start), buf_track the
 // pair the buffer commands use. THE EFFECT: every track has two effect slots
 // in series after its COLOR (`effect` and `effect2` pick OFF, CHORUS, FLANGE,
 // WOBBLE, RESON, RING or ECHO; `_amt` and `_rate` are each slot's knobs).
@@ -53,6 +54,9 @@ Engine_Four : CroneEngine {
     // voices act on (buf_track); the Lua side sets both to the focused track
     // and moves opIdx alone to save or restore the other tracks.
     var <bufLs, <bufRs, <recIdx = 0, <opIdx = 0;
+    // recPass counts the passes that began at the start of their buffer
+    // (rec_track's second argument). io's write head goes to 0 when it steps.
+    var <recPass = 0;
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
@@ -1431,7 +1435,7 @@ Engine_Four : CroneEngine {
 
         SynthDef(\four_io, {
             arg in1, in2, out, buf_l, buf_r, play_bus, rec_phase_out, rec_amp_out,
-                level = 1.0, rec = 0, rec_level = 1.0, pre_level = 0.0,
+                level = 1.0, rec = 0, rec_pass = 0, rec_level = 1.0, pre_level = 0.0,
                 freeze = 0, dry_wet = 0.5, resample = 0.0, regen = 0.0,
                 grain_level = 1.0,
                 filt_type = 0, cutoff = 20000, resonance = 0, drive = 0.0,
@@ -1455,6 +1459,7 @@ Engine_Four : CroneEngine {
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
+            var newPass;
             var sendIn, others, revIn, dm;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
@@ -1532,7 +1537,19 @@ Engine_Four : CroneEngine {
             // RecordBuf gets (rec OR regen): driven by rec alone, a regen pass
             // walked the real head while rec_phase stayed parked, so the next
             // take's window snapped to stale positions.
-            recPhase = Phasor.ar(0, runW * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
+            // EACH PART STARTS AT THE START OF ITS OWN BUFFER (C4 of
+            // doc/signature-workflow.md, the forty-ninth change). The head
+            // stopped where a pass ended and the next pass went on from
+            // there, on any track: four parts of 20 s did not fit, and the one
+            // that crossed the end became a 60 s loop with silence in it.
+            // rec_pass steps up by 1 when Lua opens a new take (rec_track's
+            // second argument), and that step is the trigger: the polled
+            // phase and both RecordBufs go to 0 in the same block. A STOP and
+            // START, an overdub and a regen never step it, so they go on from
+            // where the head is. (rec_pass is a plain control: a t_ argument
+            // falls to 0 after one block, and test_control rejects the name.)
+            newPass = HPZ1.kr(rec_pass);
+            recPhase = Phasor.ar(newPass, runW * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
             Out.kr(rec_phase_out, A2K.kr(recPhase));
             // LeakDC on the take's dry arm: a line input with DC offset would
             // print it into the buffer and eat limiter headroom. (the regen
@@ -1555,8 +1572,8 @@ Engine_Four : CroneEngine {
             recLvl = (Lag.kr(rec_level, 0.01) * recG) + (Lag.kr(regen, 0.01) * regG);
             preLvl = 1 - (recG * (1 - Lag.kr(pre_level, 0.01)))
                 - (regG * Lag.kr(regen, 0.01));
-            RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1);
-            RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1);
+            RecordBuf.ar(srcL, buf_l, 0, recLvl, preLvl, runW, 1, newPass);
+            RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1, newPass);
             Out.kr(rec_amp_out,
                 Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
             Out.ar(out, sig);
@@ -1819,9 +1836,19 @@ Engine_Four : CroneEngine {
 
         // own material per track: which pair io records into (and regen and
         // PRINT write), and which pair the buffer commands and pads act on
-        this.addCommand(\rec_track, "i", { arg msg;
+        // The second argument: 1 opens a new take, and io's write head
+        // goes to the start of that pair (rec_pass, in \four_io). The format
+        // is "ii" since the forty-ninth change: an arity change does not
+        // move the command count, so the script reads the format to tell an
+        // old engine (four.lua, head_resets).
+        this.addCommand(\rec_track, "ii", { arg msg;
             recIdx = msg[1].asInteger.clip(0, 3);
-            ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx]);
+            ((msg[2] ? 0) > 0).if({
+                recPass = recPass + 1;
+                ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx], \rec_pass, recPass);
+            }, {
+                ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx]);
+            });
         });
         this.addCommand(\buf_track, "i", { arg msg;
             opIdx = msg[1].asInteger.clip(0, 3);

@@ -74,7 +74,8 @@ if EMPTY then
   end
 else
   SCENARIO = function(t)
-    -- a take: rec from t=10 to t=150, write head walks 0.05 -> 0.55
+    -- a take: rec from t=10 to t=150. A new take starts at the start of its
+    -- buffer (the forty-ninth change): the write head walks 0 -> 0.50
     if t == 10 then params:set("rec", 1) end
     if t == 150 then params:set("rec", 0) end
     if t == 20 then params:set("tape_rec", 1) end
@@ -91,7 +92,7 @@ else
       params:set("density", 22)
       params:set("size", 0.12)
     end
-    local rp = 0.05 + math.min(t > 10 and (t - 10) or 0, 140) * 0.0036
+    local rp = math.min(t > 10 and (t - 10) or 0, 140) * 0.0036
     push("rec_phase", rp)
     local env = math.abs(math.sin(t * 0.31)) * (0.6 + 0.4 * math.sin(t * 0.077))
     push("rec_amp", 0.05 + 0.5 * math.max(env, 0))
@@ -373,6 +374,9 @@ else
   -- TAKE armed: write head laying material, hot input, R flag blinking
   goto_page("TAKE")
   params:set("rec", 1)
+  -- the shot is 37 s into the pass: by then a poll of the head is believed
+  -- (for three frames after an arm one that is too far is not)
+  script_ctx().rec_reset_at = nil
   push("rec_phase", 0.62)
   push("rec_amp", 0.6)
   push("amp_in_l", 0.7)

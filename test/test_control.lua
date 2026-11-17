@@ -54,6 +54,20 @@ for i = 1, 255 do
 end
 assert(CTX, "could not reach the script's ctx")
 
+-- A NEW TAKE puts the write head at 0, wherever it stood (C4, the forty-ninth
+-- change). `head_runs(to)` is the head's polls from an arm to `to` of the
+-- buffer: four frames at the speed the head really has, then the place
+-- itself. Each poll is one frame. (A poll that is further than the time
+-- since the arm allows is not believed: see ctx.head_poll.)
+local function head_runs(to, amp)
+  for k = 1, 4 do
+    _h.push("rec_phase", math.min(k * 0.001, to))
+    if amp then _h.push("rec_amp", amp) end
+    _h.run_ticks(1)
+  end
+  _h.push("rec_phase", to); _h.run_ticks(1)
+end
+
 -- 0 · a fresh session holds no take. params:bang() at init fires every
 -- action with its default, and the rec action's rec-stop bookkeeping used to
 -- run on that 0 and mark the whole 60s buffer as the take before anything was
@@ -784,7 +798,8 @@ do
     for id in s:gmatch('add_eng_control%("([%w_]+)"') do used[id] = true end
     for id in s:gmatch('add_eng_binary%("([%w_]+)"') do used[id] = true end
     for id in s:gmatch("engine%.([%w_]+)") do
-      if id ~= "name" then used[id] = true end
+      -- (name and commands are norns' own fields of the engine table)
+      if id ~= "name" and id ~= "commands" then used[id] = true end
     end
   end
   collect("four.lua")
@@ -2198,13 +2213,22 @@ end
 -- ============================================================================
 -- An arm with rec_wait on records at once, and the take starts where the
 -- head stood on the last quiet frame before the sound, less one frame.
+-- A new take's head starts at 0 (C4), so these places are how far the head
+-- went since the arm. An overdub's head goes on from where it stood.
 do
   local PRE = (1 / CTX.FPS) / CTX.BUF_SECS
-  local function pass(arm, quiet_to, sound_at, stop_at)
-    _h.push("rec_amp", 0); _h.push("rec_phase", arm); _h.run_ticks(1)
+  -- `head`: where the head stood before the arm. Quiet up to `quiet_to`, the
+  -- sound at `sound_at` (nil: none), the stop at `stop_at`.
+  local function pass(head, quiet_to, sound_at, stop_at)
+    _h.push("rec_amp", 0); _h.push("rec_phase", head); _h.run_ticks(1)
+    local base = params:get("pre_level") < 0.001 and 0 or head
     params:set("rec", 1)
     local waited = CTX.rec_waiting
-    local ph = arm
+    local ph = base
+    for k = 1, 4 do                            -- the head's first four frames
+      ph = base + k * 0.001
+      _h.push("rec_phase", ph % 1); _h.push("rec_amp", 0.01); _h.run_ticks(1)
+    end
     while ph < quiet_to - 1e-9 do
       ph = ph + 0.002
       _h.push("rec_phase", ph % 1); _h.push("rec_amp", 0.01); _h.run_ticks(1)
@@ -2219,56 +2243,74 @@ do
   end
   params:set("stop_all", 0); params:set("freeze", 0)
   params:set("rec_wait", 1); params:set("rec_thresh", 0.05)
-  local waited, still = pass(0.10, 0.12, 0.13, 0.20)
+  local waited, still = pass(0.10, 0.02, 0.03, 0.10)
   ok(waited and still, "an arm with start-on-sound waits, through input under the threshold")
   ok(not CTX.rec_waiting, "...and a sound over it ends the wait")
-  near(params:get("pos_start"), 0.12 - PRE, 1e-4,
+  near(params:get("pos_start"), 0.02 - PRE, 1e-4,
     "...the take starts at the last quiet frame, less one more")
-  near(params:get("pos_end"), 0.20, 1e-4, "...and ends where the pass stopped")
-  pass(0.50, 0.50, 0.501, 0.55)
-  near(params:get("pos_start"), 0.50, 1e-4, "the pre-roll never reaches back before the arm")
-  pass(0.30, 0.35, nil, 0.36)
-  near(params:get("pos_start"), 0.30, 1e-4, "a pass with no sound is the whole pass")
+  near(params:get("pos_end"), 0.10, 1e-4, "...and ends where the pass stopped")
+  -- the sound in the very first frame: the pre-roll stops at the arm
+  _h.push("rec_amp", 0); _h.push("rec_phase", 0.50); _h.run_ticks(1)
+  params:set("rec", 1)
+  _h.push("rec_phase", 0.001); _h.push("rec_amp", 0.3); _h.run_ticks(1)
+  for k = 2, 4 do _h.push("rec_phase", k * 0.001); _h.run_ticks(1) end
+  _h.push("rec_phase", 0.05); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0, 1e-4, "the pre-roll never reaches back before the arm")
+  near(params:get("pos_end"), 0.05, 1e-4, "...and the take is the pass")
+  pass(0.30, 0.05, nil, 0.06)
+  near(params:get("pos_start"), 0, 1e-4, "a pass with no sound is the whole pass")
+  near(params:get("pos_end"), 0.06, 1e-4, "...from the start of the buffer")
   ok(not CTX.rec_waiting, "...and ends its wait")
-  pass(0.95, 1.03, 0.04, 0.07)                -- the head wrapped while it waited
+  pass(0.95, 1.03, 0.04, 0.07)                -- 62 s of quiet: the head came round
   near(params:get("pos_start"), 0.03 - PRE, 1e-4,
     "a wait that wrapped the buffer starts the take at the sound")
   near(params:get("pos_end"), 0.07, 1e-4, "...a window, not the whole buffer")
   -- a hit stopped a moment later is still a take (the 0.3s floor), not the
   -- previous take's window left over the silence this pass wrote
-  pass(0.20, 0.30, 0.302, 0.303)
-  near(params:get("pos_start"), 0.30 - PRE, 1e-4, "a short hit after a long wait is the take")
-  near(params:get("pos_end"), 0.30 - PRE + 0.005, 1e-4, "...at least the 0.3s floor long")
-  -- an overdub keeps the old material under the new, so it never waits
+  pass(0.20, 0.10, 0.102, 0.103)
+  near(params:get("pos_start"), 0.10 - PRE, 1e-4, "a short hit after a long wait is the take")
+  near(params:get("pos_end"), 0.10 - PRE + 0.005, 1e-4, "...at least the 0.3s floor long")
+  -- an overdub keeps the old material under the new, so it never waits, and
+  -- its head goes on from where it stood
   params:set("pre_level", 0.7)
   pass(0.60, 0.65, 0.66, 0.70)
   near(params:get("pos_start"), 0.60, 1e-4, "an overdub does not wait: the take starts at the arm")
+  near(params:get("pos_end"), 0.70, 1e-4, "...where the head stood, and not at the buffer's start")
   params:set("pre_level", 0)
   -- read live: turned off while WAIT shows, the start stays at the arm
   _h.push("rec_amp", 0); _h.push("rec_phase", 0.40); _h.run_ticks(1)
   params:set("rec", 1)
-  _h.push("rec_phase", 0.42); _h.run_ticks(1)
+  _h.push("rec_phase", 0.001); _h.run_ticks(1)
   ok(CTX.rec_waiting, "armed to start on sound, WAIT shows")
   params:set("rec_wait", 0); _h.run_ticks(1)
   ok(not CTX.rec_waiting, "...turned off, it stops waiting at once")
-  _h.push("rec_phase", 0.43); _h.push("rec_amp", 0.3); _h.run_ticks(1)
-  _h.push("rec_phase", 0.48); _h.run_ticks(1)
+  _h.push("rec_phase", 0.003); _h.push("rec_amp", 0.3); _h.run_ticks(1)
+  _h.push("rec_phase", 0.004); _h.run_ticks(1)
+  _h.push("rec_phase", 0.08); _h.run_ticks(1)
   params:set("rec", 0)
-  near(params:get("pos_start"), 0.40, 1e-4, "...and the take starts at the arm")
+  near(params:get("pos_start"), 0, 1e-4, "...and the take starts at the arm")
+  near(params:get("pos_end"), 0.08, 1e-4, "...and ends at the stop")
   params:set("rec_wait", 1)
-  -- a take laid past the old window's end: the pair never crosses on the way
+  -- the window moves to the take without crossing its pair on the way: a new
+  -- take left of a window set by hand, then an overdub right of the take
   params:set("rec_wait", 0)
   local crossed = false
   local real_set = params.set
+  params:set("pos_end", 0.80); params:set("pos_start", 0.70)   -- by hand
   params.set = function(self, id, v, ...)
     real_set(self, id, v, ...)
     if params:get("pos_start") > params:get("pos_end") then crossed = true end
   end
-  pass(0.10, 0.10, nil, 0.20)                 -- window 0.10..0.20
-  pass(0.70, 0.70, nil, 0.80)                 -- the next take, past its end
+  pass(0.75, 0.004, nil, 0.05)                -- a new take: 0..0.05
+  ok(not crossed and math.abs(params:get("pos_end") - 0.05) < 1e-4,
+    "a new take left of the old window moves the window without crossing it")
+  params:set("pre_level", 0.7)
+  pass(0.70, 0.704, nil, 0.80)                -- an overdub past its end
   params.set = real_set
+  params:set("pre_level", 0)
   ok(not crossed and math.abs(params:get("pos_start") - 0.70) < 1e-4,
-    "a new take past the old window's end moves the window without crossing it")
+    "an overdub past the old window's end moves the window without crossing it")
   params:set("rec_wait", 1)
   -- a STOP holds the wait: the head writes nothing, so a level then is not sound
   _h.push("rec_amp", 0); _h.push("rec_phase", 0.6); _h.run_ticks(1)
@@ -2276,12 +2318,12 @@ do
   params:set("stop_all", 1)
   _h.push("rec_amp", 0.3); _h.run_ticks(2)
   ok(CTX.rec_waiting, "under a STOP a sound does not end the wait")
-  params:set("stop_all", 0); _h.push("rec_phase", 0.62); _h.run_ticks(1)
+  params:set("stop_all", 0); _h.push("rec_phase", 0.002); _h.run_ticks(1)
   ok(not CTX.rec_waiting, "...and on START it does")
   params:set("rec", 0)
   params:set("rec_wait", 0)
-  pass(0.40, 0.42, 0.43, 0.48)
-  near(params:get("pos_start"), 0.40, 1e-4, "with start-on-sound off, the take starts at the arm")
+  pass(0.40, 0.02, 0.03, 0.08)
+  near(params:get("pos_start"), 0, 1e-4, "with start-on-sound off, the take starts at the arm")
   _h.push("rec_amp", 0)
 end
 
@@ -2851,11 +2893,12 @@ do
   state("F", 0.2, 0.3)
   _h.push("rec_phase", 0.4); _h.run_ticks(1)
   label = "G"
-  params:set("rec", 1); _h.push("rec_phase", 0.5); _h.run_ticks(1)
+  params:set("rec", 1); head_runs(0.1)       -- a new take: the head starts at 0
   T.pulse("clear_rec")
   CTX.take_undo()
   ok(reads[#reads] == "G", "UNDO after a clear made while armed brings back the pass")
-  near(params:get("pos_start"), 0.4, 1e-6, "...with that pass's own window")
+  near(params:get("pos_start"), 0, 1e-6, "...with that pass's own window")
+  near(params:get("pos_end"), 0.1, 1e-6, "...both edges")
   -- back to an empty buffer forgets the loaded file, as a clear does
   CTX.take_undo()
   ok(not CTX.wave_any and params:get("sample_file") == "", "UNDO to empty forgets the loaded file too")
@@ -2863,7 +2906,7 @@ do
   -- a record pass marks a state
   local w0 = writes
   _h.push("rec_phase", 0.1); _h.run_ticks(1)
-  params:set("rec", 1); _h.push("rec_phase", 0.2); _h.run_ticks(1); params:set("rec", 0)
+  params:set("rec", 1); head_runs(0.1); params:set("rec", 0)
   ok(writes == w0 + 1, "a record pass that stops is a finished take")
   -- off, it writes nothing, and never offers a take older than the last
   params:set("undo_keep", 0)
@@ -3462,12 +3505,183 @@ do
 end
 
 -- ============================================================================
+-- four · each part starts at the start of its own buffer (C4, the forty-ninth change)
+-- ============================================================================
+-- The write head is one for the four tracks. It stopped where a pass ended,
+-- and the next pass went on from there, on any track. Four parts of 20 s did
+-- not fit in 60 s of head travel, and a part that crossed the end became a
+-- 60 s loop with silence in it.
+do
+  local sent = {}
+  local saved = { engine.rec_track, engine.rec, engine.write_take }
+  engine.rec_track = function(i, f) sent[#sent + 1] = "track" .. i .. (f == 1 and "!" or (f == 0 and "" or "?")) end
+  engine.rec = function(v) sent[#sent + 1] = "rec" .. v end
+  engine.write_take = function() end
+  params:set("rec", 0)
+  params:set("rec_end", 1); params:set("rec_wait", 0); params:set("pre_level", 0)
+  params:set("stop_all", 0); params:set("freeze", 0); params:set("regen", 0)
+  for t = 2, 4 do params:set("t" .. t .. "_mode", 1) end
+
+  -- four parts of 20 s, one on each track
+  local head = 0.45                              -- wherever the head was left
+  for t = 1, 4 do
+    params:set("track_sel", t)
+    CTX.take_len = 0                             -- an empty track
+    _h.push("rec_phase", head); _h.run_ticks(1)
+    sent = {}
+    params:set("rec", 1)
+    ok(sent[1] == "track" .. (t - 1) .. "!" and sent[2] == "rec1",
+      "part " .. t .. ": the engine starts a new take on track " .. t .. "'s buffer, then records ("
+        .. table.concat(sent, ",") .. ")")
+    near(CTX.rec_phase, 0, 1e-12, "...and the script holds the head at 0")
+    head_runs(1 / 3)
+    params:set("rec", 0)
+    local pre = t == 1 and "" or ("t" .. t .. "_")
+    near(params:get(pre .. "pos_start"), 0, 1e-9, "...its window starts at 0")
+    near(params:get(pre .. "pos_end"), 1 / 3, 1e-9, "...and is its 20 s")
+    near(CTX.take_len, 1 / 3, 1e-9, "...and a PSET saves 20 s of it, not more")
+    head = 1 / 3                                 -- the next part used to go on from here
+  end
+
+  -- a poll that left before the head went to 0 is not believed
+  params:set("track_sel", 1)
+  params:set("pos_start", 0.5); params:set("pos_end", 0.6)
+  _h.push("rec_phase", 0.4); _h.run_ticks(1)
+  params:set("rec", 1)
+  _h.push("rec_phase", 0.4)                      -- late, from the old place
+  near(CTX.rec_phase, 0, 1e-12, "a late poll from the old place is dropped")
+  params:set("rec", 0)                           -- and the pass stops at once
+  near(params:get("pos_start"), 0.5, 1e-9, "...so a pass that stops at once leaves the window alone")
+  near(params:get("pos_end"), 0.6, 1e-9, "...and does not make 24 s of the old buffer the take")
+  -- ...for three frames: the head can be far by then (a pass at the speed of
+  -- the test), and from the fourth frame a poll is believed again
+  params:set("rec", 1)
+  _h.run_ticks(4)
+  _h.push("rec_phase", 0.2)
+  near(CTX.rec_phase, 0.2, 1e-12, "four frames after the arm a poll is believed")
+  params:set("rec", 0)
+
+  -- a STOP and START inside a pass goes on: one take, and the head stays
+  _h.push("rec_phase", 0.7); _h.run_ticks(1)
+  params:set("rec", 1); head_runs(0.1)
+  sent = {}
+  params:set("stop_all", 1); _h.run_ticks(2)
+  params:set("stop_all", 0)
+  ok(table.concat(sent, ","):find("rec0") and sent[#sent] == "rec1" and not table.concat(sent, ","):find("track"),
+    "a STOP and START inside a pass sends rec 0 and rec 1, and no new take (" .. table.concat(sent, ",") .. ")")
+  near(CTX.rec_phase, 0.1, 1e-12, "...the head is where the STOP held it")
+  _h.push("rec_phase", 0.15); _h.run_ticks(1); _h.push("rec_phase", 0.2); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0, 1e-9, "...and the take is the two halves as one")
+  near(params:get("pos_end"), 0.2, 1e-9, "...up to the stop")
+
+  -- an overdub goes on from where the head is, as before
+  params:set("pre_level", 0.5)
+  _h.push("rec_phase", 0.2); _h.run_ticks(1)
+  sent = {}
+  params:set("rec", 1)
+  ok(sent[1] == "track0" and sent[2] == "rec1", "an overdub picks the buffer and does not move the head (" .. table.concat(sent, ",") .. ")")
+  near(CTX.rec_phase, 0.2, 1e-12, "...the script still holds it where it was")
+  _h.push("rec_phase", 0.25); _h.run_ticks(1); _h.push("rec_phase", 0.3); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0.2, 1e-9, "...and its window is where it wrote")
+  near(params:get("pos_end"), 0.3, 1e-9, "...both edges")
+  params:set("pre_level", 0)
+
+  -- a pass longer than the buffer comes round its end (LOOP): the take is
+  -- the whole buffer, and not the stretch after the wrap
+  params:set("rec", 1); head_runs(0.5)
+  _h.push("rec_phase", 0.9); _h.run_ticks(1); _h.push("rec_phase", 0.99); _h.run_ticks(1)
+  _h.push("rec_phase", 0.02); _h.run_ticks(1); _h.push("rec_phase", 0.1); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0, 1e-9, "a pass longer than 60 s is the whole buffer")
+  near(params:get("pos_end"), 1, 1e-9, "...and not its last 6 s")
+  near(CTX.take_len, 1, 1e-9, "...and a PSET saves all of it")
+
+  -- the focus moves inside a pass: the pass ends on the old track, and its
+  -- part on the new one starts at 0 of that track's buffer
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  params:set("rec", 1); head_runs(0.1)
+  sent = {}
+  params:set("track_sel", 2)
+  local all = table.concat(sent, ",")
+  ok(all == "rec0,track1,track1!,rec1", "a focus change inside a pass: rec 0, track 2, a new take there, rec 1 (" .. all .. ")")
+  near(params:get("pos_end"), 0.1, 1e-9, "...track 1 keeps its part")
+  near(CTX.rec_phase, 0, 1e-12, "...and track 2's part starts at 0")
+  head_runs(0.05)
+  params:set("rec", 0)
+  near(params:get("t2_pos_start"), 0, 1e-9, "...its window starts at 0")
+  near(params:get("t2_pos_end"), 0.05, 1e-9, "...and is what was played there")
+  params:set("track_sel", 1)
+
+  -- the end of the take is where the head is at the stop: its last poll plus
+  -- the time since, one frame at most. (The offscreen norns has no clock of
+  -- its own, so this part lends it one.)
+  local had_time, now_t = util.time, 1000
+  util.time = function() return now_t end
+  params:set("track_sel", 1)
+  params:set("rec", 1); head_runs(0.1)           -- the last poll comes at now_t
+  now_t = now_t + 0.040                          -- and the stop 40 ms after it
+  params:set("rec", 0)
+  near(params:get("pos_end"), 0.1 + 0.040 / 60, 1e-9,
+    "the take ends where the head is at the stop: 40 ms past its last poll")
+  params:set("rec", 1); head_runs(0.1)
+  now_t = now_t + 5
+  params:set("rec", 0)
+  near(params:get("pos_end"), 0.1 + (1 / CTX.FPS) / 60, 1e-9, "...and never more than a frame past it")
+  params:set("rec", 1); head_runs(0.1)
+  params:set("stop_all", 1); now_t = now_t + 0.040
+  params:set("rec", 0)
+  near(params:get("pos_end"), 0.1, 1e-9, "a pass that stops under a STOP ends at the poll: the head was held")
+  params:set("stop_all", 0)
+  -- a pass that stops at once is still declined: the time runs from the arm
+  params:set("pos_start", 0.5); params:set("pos_end", 0.6)
+  now_t = now_t + 3
+  params:set("rec", 1); now_t = now_t + 0.02; params:set("rec", 0)
+  near(params:get("pos_end"), 0.6, 1e-9, "a pass of 20 ms is no take, whenever the last poll came")
+  util.time = had_time
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  _h.run_ticks(4)                                -- past the frames a poll is checked in
+
+  -- an engine from before this change has a rec_track of one argument. The
+  -- count is 198 for both, so the script reads the format, says so once, and
+  -- keeps the old law until the RESTART
+  local had = engine.commands
+  engine.commands = { rec_track = { fmt = "i" } }
+  ok(not CTX.head_resets(), "an engine whose rec_track takes one argument is an old one")
+  _h.push("rec_phase", 0.3); _h.run_ticks(1)
+  sent = {}
+  params:set("rec", 1)
+  ok(sent[1] == "track0?" and sent[2] == "rec1", "...it gets the one argument it knows (" .. table.concat(sent, ",") .. ")")
+  near(CTX.rec_phase, 0.3, 1e-12, "...and the take starts where the head is")
+  _h.push("rec_phase", 0.35); _h.run_ticks(1); _h.push("rec_phase", 0.4); _h.run_ticks(1)
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0.3, 1e-9, "...its window too")
+  engine.commands = { rec_track = { fmt = "ii" } }
+  ok(CTX.head_resets(), "an engine whose rec_track takes two is this one")
+  engine.commands = had
+
+  -- leave the four tracks as this section found them: empty, whole, OFF
+  for t = 4, 1, -1 do
+    params:set("track_sel", t)
+    CTX.take_len, CTX.wave_any = 0, false
+    local pre = t == 1 and "" or ("t" .. t .. "_")
+    params:set(pre .. "pos_start", 0); params:set(pre .. "pos_end", 1)
+    if t > 1 then params:set("t" .. t .. "_mode", 1) end
+  end
+  CTX.undo_forget()
+  _h.push("rec_phase", 0); _h.run_ticks(1)
+  engine.rec_track, engine.rec, engine.write_take = saved[1], saved[2], saved[3]
+end
+
+-- ============================================================================
 -- four · own material per track: the focus, the saves, ONE-SHOT
 -- ============================================================================
 do
   local calls, writes = {}, {}
   local saved = { engine.rec_track, engine.buf_track, engine.write_take }
-  engine.rec_track = function(i) calls[#calls + 1] = "rec" .. i end
+  -- (a ! marks a new take: the write head goes to the start of the buffer)
+  engine.rec_track = function(i, f) calls[#calls + 1] = "rec" .. i .. (f == 1 and "!" or "") end
   engine.buf_track = function(i) calls[#calls + 1] = "buf" .. i end
   engine.write_take = function(stem) writes[#writes + 1] = stem end
   params:set("rec", 0)
@@ -3494,11 +3708,16 @@ do
   params:set("rec_end", 2)
   params:set("t3_mode", 1)
   CTX.rec_phase = 0.3
+  calls = {}
   params:set("rec", 1)
   ok(params:get("t2_mode") ~= 1, "recording into an OFF track switches it on (PLAY)")
-  CTX.rec_phase = 0.25; _h.run_ticks(1)     -- 0.95 of the way round
-  CTX.rec_phase = 0.31; _h.run_ticks(1)     -- ...and past the start: full
+  ok(calls[1] == "rec1!" and CTX.rec_phase == 0, "...and the new take starts at the start of track 2's buffer")
+  CTX.rec_phase = 0.95; _h.run_ticks(1)     -- 0.95 of the way round
+  calls = {}
+  CTX.rec_phase = 0.01; _h.run_ticks(1)     -- ...and past the start: full
   ok(CTX.focus() == 3 and params:get("rec") == 1, "ONE-SHOT: the full track hands on to track 3, still recording")
+  ok(calls[#calls] == "rec2!" and CTX.rec_phase == 0,
+    "...and its part there starts at the start of track 3's buffer (" .. table.concat(calls, ",") .. ")")
   ok(params:get("t2_pos_start") == 0 and params:get("t2_pos_end") == 1, "...and track 2's take is the whole 60s")
   ok(params:get("t3_mode") == 5, "...and track 3 plays what it records")
   params:set("rec", 0)

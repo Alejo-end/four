@@ -100,6 +100,12 @@ because a muted minute of regen used to overwrite the take with silence. The pol
 position advances with the same signal the record head uses, so the next take's window
 cannot snap to a stale position.
 
+The record head is one for the four tracks. A new take (overdub at 0) puts it at the
+start of the focused track's buffer: `rec_track` has a second argument, and 1 steps io's
+`rec_pass`, which resets the polled phase and both RecordBufs in one block. An overdub,
+and a START after a STOP inside a pass, go on from where the head is (four, the
+forty-ninth change).
+
 `erode` runs on its OWN head, one pass per window length regardless of playback speed or
 direction. The head reads the exact stored sample without interpolation and writes back a
 slightly darkened, slightly quieter copy. The write fades in and out over fifty

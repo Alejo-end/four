@@ -58,7 +58,7 @@ def buffers():
 # One build: the five probes and engine.scd in parallel, each in its own folder
 # (run_probe.sh and run_engine.sh write conf.yaml and their log into it).
 JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'),
-        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('eng', None)]
+        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('p8', 'probe8.scd'), ('eng', None)]
 
 def render(build):
     env = dict(os.environ)
@@ -208,6 +208,30 @@ def check(build):
         # the stock FLANGE is a bare comb with nothing in its loop to bound a peak
         known(build, "the stock FLANGE's comb peaks far over the phrase (the phrase alone peaks at 0.35; was 1.75)",
               num(r'^LARGEST peak: ([\d.]+)', a7), 1.19, 0.15, '')
+
+    # A NEW TAKE STARTS AT THE START OF ITS BUFFER (C4 of the plan, the
+    # forty-ninth change, probe8). io's write head stopped where a pass ended
+    # and the next pass went on from there. Four passes on a buffer of 4 s: the
+    # second and the fourth are new takes, the third is rec alone, as a START
+    # after a STOP. Before, the four lay end to end, and 1 of 4 was in place.
+    a8 = analyse(os.path.join(REV, 'an_probe8.py'), runs['p8'][0], 'p8')
+    target(build, "a new take puts the write head at the start of its buffer: the head 5 ms after (was at 1.013 s)",
+           num(r'^HEAD 5 ms after the new take of 2\.0 s: ([\d.]+)', a8), 0.006, 's', fmt='.4f')
+    target(build, "...and so does one whose step comes a block before its rec (was at 1.830 s)",
+           num(r'^HEAD 5 ms after the new take of 3\.6 s: ([\d.]+)', a8), 0.006, 's', fmt='.4f')
+    target(build, "a rec alone goes on from where the head is: the head 5 ms after it, away from 0.513 s",
+           abs(num(r'^HEAD 5 ms after the rec alone of 3\.0 s: ([\d.]+)', a8) - 0.513), 0.005, 's', fmt='.4f')
+    jumps = re.search(r'^HEAD jumps back at: \[(.*)\] s', a8, re.M).group(1)
+    say('PASS' if jumps == '2.0, 3.6' else 'FAIL', build,
+        f"the head jumps back at the two new takes and nowhere else: [{jumps}] (needs [2.0, 3.6])")
+    target(build, "the four passes lie in the buffer where a new take puts them (was 1 of 4)",
+           num(r'^PASSES in their place: (\d) of 4', a8), 4, 'of 4', low=False, fmt='.0f')
+    target(build, "the buffer past the first pass stays empty (was -15.9 dB: the next pass lay there)",
+           num(r'^BUFFER past the first pass, 1\.1 to 2\.2 s: ([-\d.]+)', a8), -100, 'dB')
+    target(build, "the start of a new take in the buffer has no step (a 550 Hz tone alone has 0.0013)",
+           num(r'^BUFFER start, largest step in its first 50 ms: ([\d.]+)', a8), 0.002, '', fmt='.4f')
+    target(build, "the UGens of four_io (106 before, and one more for the head's trigger)",
+           num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 107, '', fmt='.0f')
 
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')

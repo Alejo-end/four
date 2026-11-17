@@ -3167,6 +3167,84 @@ def stage19():
 
     check("19.31", c1931)
 
+    # Each part starts at the start of its own buffer (C4 of the plan, the
+    # forty-ninth change). io's write head is one for the four tracks. It
+    # stopped where a pass ended and the next pass went on from there: four
+    # parts of 20 s did not fit in its 60 s, and the part that crossed the end
+    # became a 60 s loop with silence in it. A new take now starts at 0.
+    def c1932():
+        modes("OFF", "OFF", "OFF", "OFF")
+        for pid, v in (("rec_end", 1), ("rec_wait", 0), ("pre_level", 0), ("regen", 0)):
+            n.set(pid, v)
+        out = {"parts": {}}
+        n.signal("tone")
+        time.sleep(0.4)
+        for t in range(1, 5):
+            n.set("track_sel", t)
+            time.sleep(0.3)
+            n.set("rec", 1)
+            time.sleep(20)
+            n.set("rec", 0)
+            time.sleep(0.3)
+            lo, hi = n.get(tp(t, "pos_start")), n.get(tp(t, "pos_end"))
+            out["parts"][t] = {"window_s": (round(lo * 60, 2), round(hi * 60, 2)),
+                               "take_len_s": round(num(n.ctx("c.take_len")) * 60, 2)}
+        n.signal(None)
+        time.sleep(0.4)
+        # each part plays its own 20 s at once: one track at a time, in PLAY
+        for t in range(1, 5):
+            modes(*["PLAY" if k == t else "OFF" for k in range(1, 5)])
+            out["parts"][t]["plays_db"] = level(f"19.32_part{t}", 2)
+        modes("OFF", "OFF", "OFF", "OFF")
+
+        # the end of a take: ten passes of exactly 2 s, timed on the norns.
+        # The window ended at the head's last poll, up to 67 ms before the stop.
+        n.set("track_sel", 1)
+        n.signal("tone")
+        ends = []
+        for _ in range(10):
+            n.lua('__c4 = nil clock.run(function() params:set("rec", 1) clock.sleep(2) params:set("rec", 0) '
+                  '__c4 = params:get("pos_end") - params:get("pos_start") end)')
+            time.sleep(2.6)
+            ends.append(round((num(n.lua("print(__c4)")) * 60 - 2) * 1000))
+        out["ten passes of 2 s, the window's length against 2 s, ms"] = ends
+
+        # a STOP and START inside a pass: one take, and the head does not go back
+        n.set("rec", 1)
+        time.sleep(1)
+        n.set("stop_all", 1)
+        time.sleep(1)
+        n.set("stop_all", 0)
+        time.sleep(1)
+        n.set("rec", 0)
+        time.sleep(0.3)
+        out["a pass with a STOP of 1 s in it, window_s"] = (round(n.get("pos_start") * 60, 2), round(n.get("pos_end") * 60, 2))
+
+        # the focus moves inside a pass: the part on the new track starts at 0
+        n.set("rec", 1)
+        time.sleep(1.5)
+        n.set("track_sel", 2)
+        time.sleep(1.5)
+        n.set("rec", 0)
+        time.sleep(0.3)
+        out["a pass that moves from track 1 to track 2, windows_s"] = (
+            (round(n.get("pos_start") * 60, 2), round(n.get("pos_end") * 60, 2)),
+            (round(n.get("t2_pos_start") * 60, 2), round(n.get("t2_pos_end") * 60, 2)))
+        n.signal(None)
+        n.set("track_sel", 2)
+        parts = out["parts"]
+        stop = out["a pass with a STOP of 1 s in it, window_s"]
+        moved = out["a pass that moves from track 1 to track 2, windows_s"]
+        ok = (all(p["window_s"][0] < 0.05 and abs(p["window_s"][1] - 20) < 0.4 and abs(p["take_len_s"] - 20) < 0.4
+                  and p["plays_db"] > -40 for p in parts.values())
+              and all(-15 <= e <= 25 for e in ends)
+              and stop[0] < 0.05 and abs(stop[1] - 2) < 0.3
+              and all(w[0] < 0.05 and abs(w[1] - 1.5) < 0.3 for w in moved))
+        return verdict(ok, f"four parts of 20 s, one on each track, then more passes on track 1: {out}. "
+                           "Listen to 19.32_part*.wav", "measured")
+
+    check("19.32", c1932)
+
 
 def cleanup():
     n.signal_quit()

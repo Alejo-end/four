@@ -4783,3 +4783,51 @@ test tools; on the device 2026-11-17)**. The forty-seventh number is the Exquis 
   tape plays the take at once at -17.3 dB. The older tape rows pass: 7.1 and 7.2 (the
   tape in a PSET), 11.2d (the first pass loops) and 12.6 (a short loop's seam). The
   README no longer lists the fault.
+
+four, forty-ninth change: **each part starts at the start of its own buffer (engine,
+Lua and test tools; the count stays 198; on the device 2026-11-18, not heard)**. This is
+C4 of doc/signature-workflow.md.
+- Before: io's write head is one for the four tracks. It stopped where a pass ended, and
+  the next pass went on from there, on any track. Four parts of 20 s did not fit in its
+  60 s. On the device the four windows were 16.5 to 36.5 s, 36.6 to 56.6 s, the whole
+  60 s (the part crossed the end) and 16.7 to 36.7 s.
+- Now a new take (overdub at 0) puts the head at the start of the focused track's
+  buffer. The command `rec_track` has a second argument: 1 steps io's `rec_pass`, and
+  that step resets the polled phase and both RecordBufs in one block. The count stays
+  198, and an arity change does not move it, so the script reads the command's format
+  (`engine.commands.rec_track.fmt`). With an engine from before the change it says so
+  once and keeps the old law.
+- What goes on from where the head is, as before: an overdub, and a START after a STOP
+  inside a pass.
+- The script takes 0 as the arm phase. A poll of the head that left before the reset can
+  still arrive, so for three frames a poll further than the time since the arm allows is
+  not believed (`ctx.head_poll`).
+- The end of a take is where the head is at the stop, not where its last poll saw it:
+  the script adds the time since that poll, one frame at most. On the device ten passes
+  of exactly 2 s gave windows 36 to 49 ms short of 2 s, and now within 2 ms of it.
+- A pass that comes round the end of its buffer is the whole buffer. The script reads
+  the wrap from the polls. By the old law a pass of 70 s that began at 12 s kept 10 s
+  of it.
+- The focus that moves inside a pass, and ONE-SHOT's hand to the next track: the pass
+  goes on with no gap, and its part on the new track starts at 0 of that buffer. The
+  plan had the pass arm again one frame later, after the 10 ms ramp. That lost 67 ms of
+  what was played at each seam, so it was not built.
+- `take_len` is then the length of the take, and a PSET saves that much. It was the
+  place the head had reached.
+- Offline: test/dsp/review/probe8.scd lays four passes into a buffer of 4 s, and
+  check_dsp.sh has eight rows for each build. Before, the four lay end to end, and 1 of
+  4 was where a new take puts it. io has one UGen more (107). The norns's own scsynth
+  renders the same.
+- test_control: four parts of 20 s, the late poll, the STOP and START, the overdub, the
+  pass longer than the buffer, the focus change, and the old engine. Section 25 (start
+  on sound), the undo tests and ONE-SHOT follow the new law. The simulated take of the
+  render suite starts at 0, so fourteen pictures in doc/ui/ moved.
+- On the device, `count: 198`, the new row 19.32: each of four parts of 20 s has the
+  window 0 to 20.03 s and plays at once. The pass with a STOP in it is one take of
+  2.09 s. The pass that moves to track 2 leaves 1.53 s on each track, each from 0.
+  Rows 19.1 and 19.4 pass.
+- The older rows on this engine: stages 2, 3, 5, 10, 11, 12 and 16, 53 rows that the
+  script checks. All pass or are measured as before, except 10.8: a clear with regen
+  running leaves 6.7 ms of sound in the buffer. That fault is older (the script stops
+  regen after the clear), and it is the next change.
+- The README no longer lists "a take that runs past the end of its buffer".

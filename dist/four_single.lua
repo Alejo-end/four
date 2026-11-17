@@ -133,6 +133,8 @@ local tape_arm_phase      -- head position when tape rec opened a pass; nil = no
 local tape_arm_was        -- the loop that pass widened, put back if it is declined
 local tape_arm_jumped     -- that pass moved the head to the tape's start (it plays forward)
 local rec_open = false    -- an engine record pass is open (armed by a real 1)
+local rec_wrapped = false -- that pass came round the end of its buffer
+local rec_last = 0        -- ...read from the write head's last poll
 local polls = {}
 local redraw_clock
 local prev_midi_add, prev_midi_remove   -- norns' hot-plug callbacks, restored
@@ -227,6 +229,8 @@ local ctx = {
   play_phases = { 0, 0, 0, 0 },
   rec_phase = 0,             -- engine poll: normalized write-head position
   rec_arm_phase = 0,         -- write-head position when rec was armed
+  rec_reset_at = nil,        -- the frame a new take put the write head at 0 (see head_poll)
+  rec_poll_time = nil,       -- when the write head's last poll came (util.time)
   rec_amp = 0,               -- engine poll: amplitude of what's being written
   rec_waiting = false,       -- armed to start on sound, none heard yet (TAKE: WAIT)
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
@@ -9390,6 +9394,55 @@ end
 -- `rec_wait` is read every frame, not latched at the arm, so turning it on or
 -- off while WAIT shows takes effect at once.
 local REC_PREROLL = 1 / FPS
+
+-- Does this engine put the write head at 0 for a new take? The command
+-- `rec_track` took one argument until the forty-ninth change. An arity
+-- change does not move the command count, so `count: 198` cannot tell an old
+-- engine: its format can. (The offscreen norns has no format table.)
+local warned_old_head = false
+function ctx.head_resets()
+  local c = engine.commands and engine.commands.rec_track
+  if c and c.fmt ~= "ii" then
+    if not warned_old_head then
+      warned_old_head = true
+      print("four: the engine is older than the script (rec_track) - SYSTEM > RESTART. "
+        .. "Until then a take starts where the write head is.")
+    end
+    return false
+  end
+  return true
+end
+-- point io at track n's buffer pair. `fresh` opens a new take there: the
+-- write head goes to the start of the pair.
+local function rec_track(n, fresh)
+  if not engine.rec_track then return end
+  if ctx.head_resets() then
+    engine.rec_track(n - 1, fresh and 1 or 0)
+  else
+    engine.rec_track(n - 1)
+  end
+end
+
+-- THE WRITE HEAD'S POLL, once a frame. Just after a new take put the head at
+-- 0, a poll that left before can still arrive, with the place the head was.
+-- The head moves at one second a second, so for three frames a poll that
+-- is further than the time since the reset allows is not believed. It also
+-- notes a head that came round the end of the buffer (rec_wrapped).
+function ctx.head_poll(v)
+  local at = ctx.rec_reset_at
+  if at then
+    local n = ctx.frame - at
+    if n > 3 then
+      ctx.rec_reset_at = nil
+    elseif v > (n + 2) / (FPS * BUF_SECS) then
+      return
+    end
+  end
+  if rec_open and v < rec_last - 0.5 then rec_wrapped = true end
+  rec_last = v
+  ctx.rec_phase = v
+  ctx.rec_poll_time = util.time and util.time() or nil
+end
 local rec_heard, rec_quiet = false, 0   -- this pass: sound seen, last quiet head
 local rec_moved = false                 -- this pass's start moved to the sound
 local function waits()
@@ -9411,6 +9464,7 @@ local function tick_rec_wait()
   local from = rec_quiet - REC_PREROLL / BUF_SECS
   from = rec_quiet >= arm and max(from, arm) or max(from, 0)
   ctx.rec_arm_phase, rec_moved = from, true
+  rec_wrapped = false   -- the take begins here: a wrap before the sound is not its own
   print(string.format("four: sound at %.2fs into the pass, the take starts there",
     ((ctx.rec_phase - arm) % 1) * BUF_SECS))
 end
@@ -9781,7 +9835,10 @@ function ctx.focus_take(n)
   WIN[1], WIN[2] = tid_n(n, "pos_start"), tid_n(n, "pos_end")
   take_gen = take_gen + 1     -- a job for the old track's buffer must not land here
   Mpages.focus_wave(n)
-  if engine.rec_track then engine.rec_track(n - 1) end
+  -- (the rec action below picks the buffer again, and puts the write head
+  -- at its start for a new take: a pass that moves to another track goes on
+  -- with no gap, and its part there starts at 0)
+  rec_track(n, false)
   buf_track(n)
   if recording then params:set("rec", 1) end
 end
@@ -10402,6 +10459,24 @@ local function init_params()
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
   params:set_action("rec", function(v)
+    if v == 1 then
+      -- EACH PART STARTS AT THE START OF ITS OWN BUFFER (C4 of
+      -- doc/signature-workflow.md, the forty-ninth change). The write head
+      -- is one for the four tracks, and it stopped where a pass ended. The
+      -- next pass went on from there, on any track: four parts of 20 s did
+      -- not fit, and the part that crossed the end became a 60 s loop with
+      -- silence in it. A new take (overdub at 0) now tells the engine to put
+      -- the head at 0, BEFORE the rec below. An overdub goes on from where
+      -- the head is, as before. So does a STOP and START inside a pass: the
+      -- stop action sends the engine its rec, and never comes through here.
+      local fresh = pget("pre_level", 0) < 0.001 and ctx.head_resets()
+      rec_track(FOCUS, fresh)
+      if fresh then
+        ctx.rec_phase, ctx.rec_reset_at = 0, ctx.frame
+      end
+      -- the head starts to move now, from the place the script holds
+      ctx.rec_poll_time = util.time and util.time() or nil
+    end
     if engine.rec then
       -- under a STOP everything is halted, capture included: an arm made
       -- while stopped takes effect on START (the stop action re-sends it).
@@ -10415,6 +10490,7 @@ local function init_params()
         params:set("t" .. FOCUS .. "_mode", 5)
       end
       rec_open = true
+      rec_wrapped, rec_last = false, ctx.rec_phase
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
       ctx.rec_arm_phase = ctx.rec_phase
       -- a fresh pass for start on sound (see tick_rec_wait)
@@ -10433,16 +10509,33 @@ local function init_params()
       ctx.rec_waiting = false
       print("four: no sound crossed the threshold — the take is the whole pass")
     end
+    -- THE END OF THE TAKE IS WHERE THE HEAD IS NOW, not where its last poll
+    -- saw it. The poll comes once a frame, so the window ended up to 67 ms
+    -- before the stop, and the loop lost that much of what was played. The
+    -- head moves at one second a second while it records: add the time since
+    -- the poll, one frame at most. A head held by a STOP or a freeze has not
+    -- moved since.
+    local now = ctx.rec_phase
+    if ctx.rec_poll_time and util.time and pget("stop_all", 0) == 0
+        and pget("freeze", 0) == 0 then
+      now = now + clamp(util.time() - ctx.rec_poll_time, 0, 1 / FPS) / BUF_SECS
+      if now >= 1 then now, rec_wrapped = now - 1, true end
+    end
     -- the window writes go through set_pair, widening edge first: a take
     -- laid down past the old window's end used to cross the pair for a moment
-    if rec_moved and ctx.rec_phase >= ctx.rec_arm_phase then
+    if rec_wrapped then
+      -- the pass came round the end of the buffer (LOOP: it is longer than
+      -- 60 s, or an overdub began near the end). A window cannot cross the
+      -- seam, so the take is the whole buffer.
+      Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
+    elseif rec_moved and now >= ctx.rec_arm_phase then
       -- started on sound: a hit stopped soon after is still a take (at least
       -- the 0.3s floor below), not the previous take's window over silence
       local a = ctx.rec_arm_phase
-      Mdeck.set_pair(WIN[1], WIN[2], a, max(ctx.rec_phase, min(1, a + 0.005)))
-    elseif ctx.rec_phase > ctx.rec_arm_phase + 0.005 then
-      Mdeck.set_pair(WIN[1], WIN[2], ctx.rec_arm_phase, ctx.rec_phase)
-    elseif ctx.rec_phase < ctx.rec_arm_phase - 0.005 then
+      Mdeck.set_pair(WIN[1], WIN[2], a, max(now, min(1, a + 0.005)))
+    elseif now > ctx.rec_arm_phase + 0.005 then
+      Mdeck.set_pair(WIN[1], WIN[2], ctx.rec_arm_phase, now)
+    elseif now < ctx.rec_arm_phase - 0.005 then
       -- the write head wrapped past the buffer end mid-take. a wrapped
       -- window (start > end) would be SORTED into the wrong slice by
       -- window_bounds, so fall back to the whole buffer — the take is in
@@ -11197,7 +11290,7 @@ function init()
   watch("play_phase2", function(v) ctx.play_phase2 = v; ctx.play_phases[2] = v end)
   watch("play_phase3", function(v) ctx.play_phases[3] = v end)
   watch("play_phase4", function(v) ctx.play_phases[4] = v end)
-  watch("rec_phase", function(v) ctx.rec_phase = v end)
+  watch("rec_phase", ctx.head_poll)
   watch("rec_amp", function(v) ctx.rec_amp = v end)
   watch("amp_in_l", function(v) ctx.amp_in[1] = v end)
   watch("amp_in_r", function(v) ctx.amp_in[2] = v end)

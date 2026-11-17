@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-17)
+## STATUS (2026-11-18)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -28,6 +28,8 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
 
 **The instrument.**
 - Four tracks, each with its own material (four 60 s buffers). K1+E1 picks the track.
+  A new take starts at the start of its track's buffer (the forty-ninth change), so four
+  parts of up to 60 s each fit. An overdub goes on from where the write head is.
 - Each track has a voice (OFF GRAIN WARP PV PLAY CLOUD), a window, a filter, COLOR
   (drive, crush), two EFFECT slots in series and its sends to the delay and the reverb.
   The effect types are OFF CHORUS FLANGE WOBBLE RESON RING ECHO, each with an amount and
@@ -95,7 +97,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-17 it runs the forty-eighth change at `count: 198`, with the plugin
+- Since 2026-11-18 it runs the forty-ninth change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -147,6 +149,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 45th: the effects are stronger at the same knob, and none is quieter than the dry sound (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.11's levels, 19.12 and 19.29 with no break. Not pushed | no. The user asked for it: the effects were "a bit too bland" |
 | 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
 | 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
+| 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -186,7 +189,8 @@ tested that build on 2026-11-17: "I think it sounds good". Two requests came out
 test, and they are the forty-fifth change (stronger effects) and the forty-sixth (the
 tape records what four plays). Both are on the device, and the user has not heard them.
 Row 19.31 then found that a tape pass that crossed the tape's end kept the whole 60 s as
-its loop, and the forty-eighth change starts a new take at the tape's start. Next: C4.
+its loop, and the forty-eighth change starts a new take at the tape's start. C4 is the
+forty-ninth change, on the device (doc/measurements/2026-11-18/), not heard. Next: C2.
 The work is on the local branch `phase-a`. Another session shares this checkout (the
 forty-seventh change, an Exquis driver): stage only your own hunks.
 
@@ -232,7 +236,9 @@ doc/changelog.md holds that history.
 3. load the script and check `Engine.register_commands; count: 198` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
-   source no longer adds up to 198.
+   source no longer adds up to 198. `rec_track` took a second argument in the
+   forty-ninth change: the script reads `engine.commands.rec_track.fmt` (`ii`) and says
+   so when the engine is older.
 
 Lua-only changes skip all this: save and reload the script.
 
@@ -452,6 +458,17 @@ Each line was learned the hard way; the change log has the story.
   that material (RESON was 7 dB under OFF on an off-note tone). Cross at equal power, or
   keep the dry sound whole up to the middle. Measure the level of every effect against
   OFF at the amount it starts with (gate row 19.11, probe7).
+- When a command's arity changes, the script reads the command's format
+  (`engine.commands.<name>.fmt`) and keeps the old law for an old engine. The count
+  cannot tell the two apart, and norns only warns about a wrong number of arguments.
+- A trigger in a SynthDef without a `t_` name: step a plain control by 1 and read the
+  step with `HPZ1.kr` (io's `rec_pass`). It gives one block above 0, on both scsynths,
+  and nothing at the synth's start.
+- The engine's write head is polled once a frame. A poll that left before the head was
+  reset can arrive after it. The head moves at one second a second, so for three frames
+  a poll further than the time since the reset allows is not believed (`ctx.head_poll`).
+  And the end of a pass is the last poll plus the time since it: the window was 36 to
+  49 ms short of what was played.
 - softcut reports a head every 25 ms, and a report from the place the head left can
   arrive after `softcut.position`. On the norns 4 of 40 passes that closed 10 or 20 ms
   after a jump read the old place. After a jump, believe a report only when it is near

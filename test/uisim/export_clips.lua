@@ -157,7 +157,7 @@ SCENARIO = function(t)
     params:set("density", 22)
     params:set("size", 0.12)
   end
-  local rp = 0.05 + math.min(t > 10 and (t - 10) or 0, 140) * 0.0036
+  local rp = math.min(t > 10 and (t - 10) or 0, 140) * 0.0036   -- a new take starts at 0
   push("rec_phase", rp)
   local e = math.abs(math.sin(t * 0.31)) * (0.6 + 0.4 * math.sin(t * 0.077))
   push("rec_amp", 0.05 + 0.5 * math.max(e, 0))

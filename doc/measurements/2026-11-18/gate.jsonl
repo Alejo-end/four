@@ -1,0 +1,65 @@
+{"id": "2.1", "status": "pass", "note": "control: erosion moved the take=True. Under STOP for 5 min the digest stayed d757a3b6f1b9 11e358d9e24d = d757a3b6f1b9 11e358d9e24d"}
+{"id": "2.2", "status": "pass", "note": "take_len 0.1687 before the punch, 0.1687 after, 0.1696 loaded; the file holds 10.174417s"}
+{"id": "2.3", "status": "pass", "note": "aborted message=True; take digest same=True; print files 0 to 0"}
+{"id": "3.1", "status": "measured", "note": "dB before, stopped, after: {'TAKE': (-26.3, -180.0, -26.3), 'MIX': (-25.8, -180.0, -25.7), 'SCENE': (-26.3, -180.0, -26.3)}"}
+{"id": "3.2", "status": "pass", "note": "{'delay_mix': 0.0, 'rev_mix': 0.0, 'shimmer': 0.0, 'drive': 0.0, 'crush': 0.0, 'effect': 1.0, 'clouds_fb': 0.0, 'resonance': 0.0, 'cutoff': 20000.0}"}
+{"id": "3.3", "status": "pass", "note": "take_len 0.0, wave_any false, engine -92.5 dB"}
+{"id": "3.4", "status": "pass", "note": "K1 let go at 0.6s: take_len 0.068816591302554, delay_mix 0.3 (DRY did not fire)"}
+{"id": "3.5", "status": "pass", "note": "K3 let go at 0.55s: take_len 0.068816591302554, delay_mix 0.3"}
+{"id": "3.6", "status": "pass", "note": "file before: True, after the empty save: False, take_len after load 0.0"}
+{"id": "5.1", "status": "pass", "note": "message=True; dB by Hz {404: -131.2, 440: -8.2, 480: -135.7}"}
+{"id": "5.2", "status": "pass", "note": "no resample=True; {404: -134.5, 440: -8.2, 480: -131.4}"}
+{"id": "5.3", "status": "pass", "note": "a 3s file has 0.375s slices. Pad held for 2s sounded about 0.2s"}
+{"id": "5.4", "status": "pass", "note": "boundaries in seconds [0.0, 0.06, 1.06, 1.44, 2.56, 3.19, 4.56, 5.56, 6.12]. The last slice is 0.56s of 6.12s"}
+{"id": "5.5", "status": "pass", "note": "6 slices; the eight pads play 0 1 2 3 4 5 0 1"}
+{"id": "5.6", "status": "pass", "note": "chopped before the load=true; even slices after=true"}
+{"id": "5.7", "status": "pass", "note": "start 0.00s to 1.50s; sound begins at 1.50s. ['four: TIGHTEN \u2014 window is 2.50s of sound (was 4.00s)']"}
+{"id": "5.8", "status": "pass", "note": "message=True; window (0.0, 0.02) to (0.0, 0.02)"}
+{"id": "5.9", "status": "pass", "note": "['four: PRINT \u2014 recording the master mix, 2.0s', 'four: PRINT done \u2014 four-print-001.wav is the new take']; take 2.07s"}
+{"id": "10.1", "status": "measured", "note": "-22.2 dB dry, -21.3 dB with echoes; delay node present. Darkening: listen to 10.1_echo.wav"}
+{"id": "10.2", "status": "measured", "note": "delay on (12.2, 12.6), off (10.7, 11.0): the node is gone, the difference is under the noise. No older build to compare"}
+{"id": "10.3", "status": "pass", "note": "after INF, voice off, KILL, wait, un-KILL: the loop plays at -26.0 dB"}
+{"id": "10.4", "status": "measured", "note": "raised with E2: breaks []. Jumped from 0 to 0.4 by a param set, as MIDI or a scene can: breaks []. Listen to 10.4_spawn_knob.wav"}
+{"id": "10.5", "status": "pass", "note": "take and tape heads: (0.018718032166362, 0.010000000397364) and (0.018718032166362, 0.010000000397364) under STOP, (0.055006872862577, 0.047500002384186) after START"}
+{"id": "10.6", "status": "pass", "note": "write head 0.02953 and 0.02953 under STOP; silent 50ms blocks near the stop 0"}
+{"id": "10.7", "status": "measured", "note": "head 0.0544, thrown 0.0563 and 0.0563, released 0.0086. Whether it feels right is yours"}
+{"id": "10.8", "status": "fail", "note": "-16.4 dB, then -91.7 dB after the erase; buffer all zero=False; regen 0.0. Listen to 10.8_after.wav"}
+{"id": "11.2d", "status": "pass", "note": "the tape's first pass, after 3s of playing: softcut -17.1 dB"}
+{"id": "11.9", "status": "pass", "note": "file 24 bit; take_len 0.0852 and 0.0861"}
+{"id": "11.10", "status": "pass", "note": "/home/we/dust/audio/mg_gate.wav: channels and bits ['2', '24']. <ok>\n\n@@791@@\n<ok>\n\nfour: exported /home/we/dust/audio/mg_gate.wav"}
+{"id": "11.11", "status": "measured", "note": "dB by Hz {440: -8.2, 880: -105.5, 3000: -129.7, 9000: -135.2, 15000: -136.3}. Whistle or grit: listen to 11.11_96k.wav"}
+{"id": "11.12", "status": "measured", "note": "Pi 4: seconds to load, and lowest frames per second while it converts: {'long44k.wav': (15.1, 15), 'long96k.wav': (8.1, 15)}. long44k is 30s of audio, long96k is 10s"}
+{"id": "11.13", "status": "you", "note": "only an ear can judge these. Use resample 0.5; for 11.14 open track 1's sends first (TRACKS, hold K1, D and R), then slam an INF delay"}
+{"id": "11.14", "status": "you", "note": "only an ear can judge these. Use resample 0.5; for 11.14 open track 1's sends first (TRACKS, hold K1, D and R), then slam an INF delay"}
+{"id": "12.1", "status": "pass", "note": "window 3.15s, and 3.15s after the late conversion; dropped message=True"}
+{"id": "12.2", "status": "pass", "note": "first tap 60.00s, second tap back on the take 4.13s; the PSET file holds 4.180187s"}
+{"id": "12.4", "status": "you", "note": "test/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.5", "status": "pass", "note": "loop (0.1, 0.14) and (0.1, 0.14) after two quick taps"}
+{"id": "12.6", "status": "pass", "note": "tape loop 0.3s, seam 0.4s: softcut -19.8 dB"}
+{"id": "12.7", "status": "measured", "note": "see 12.7_stopped_TAPE.png and 12.7_stopped_VOICE.png"}
+{"id": "12.8", "status": "you", "note": "needs a physical grid"}
+{"id": "12.9", "status": "pass", "note": "dB by Hz {404: -138.9, 440: -8.2, 480: -153.0}; picture in 12.9_float.png"}
+{"id": "12.10", "status": "measured", "note": "see 12.10_right_only.png: the strip must show the hits"}
+{"id": "12.11", "status": "you", "note": "test/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.13", "status": "you", "note": "test/test_control covers the logic offscreen. Try these by hand"}
+{"id": "12.14", "status": "pass", "note": "9.2s to load 10s at 96k; lowest frames per second 14"}
+{"id": "16.1", "status": "pass", "note": "WAIT shown=true; the loop is 1.17s; ['four: sound at 3.73s into the pass, the take starts there']"}
+{"id": "16.2", "status": "pass", "note": "waiting after a quiet hit=true, after a loud sound=false"}
+{"id": "16.3", "status": "pass", "note": "previous take 4.13s; the loop is now 0.43s, the hit plus the REPL's delay before K2"}
+{"id": "16.4", "status": "measured", "note": "engine {'peak_db': -25.7, 'rms_db': -37.9, 'clipped': 0}. Progression: listen to 16.4_sequencer.wav"}
+{"id": "16.5", "status": "measured", "note": "running true, after a tempo change true, after a restart true. On the beat: listen"}
+{"id": "16.6", "status": "pass", "note": "STOP -180.0 dB; held voices 0; after run off -92.5 dB"}
+{"id": "16.7", "status": "pass", "note": "knob stays 500.0 and 500.0; the level swings 13.4 dB over a bar"}
+{"id": "16.8", "status": "pass", "note": "ENV on the cutoff: engine -19.7 dB without input, -32.5 dB with input"}
+{"id": "16.9", "status": "pass", "note": "reverb node with the LFO=True, at depth 0=False; CPU (14.7, 15.0)"}
+{"id": "16.10", "status": "pass", "note": "at 120 BPM the window is 2.000s, and 2.000s after E2"}
+{"id": "16.11", "status": "pass", "note": "at 60 BPM the window is 4.000s"}
+{"id": "16.12", "status": "pass", "note": "bar 2.00s, K3 opens to 60.00s, K3 back to 2.00s"}
+{"id": "16.13", "status": "pass", "note": "windows: first 3.12s, second 5.12s, undo 3.12s, undo again 5.12s"}
+{"id": "16.14", "status": "pass", "note": "take_len 0.0 after the erase, 0.0853367994229 after undo"}
+{"id": "16.15", "status": "you", "note": "needs a synth or a MIDI monitor on port 1"}
+{"id": "16.16", "status": "you", "note": "needs a crow"}
+{"id": "16.17", "status": "you", "note": "only a hand and an ear can judge this"}
+{"id": "19.1", "status": "pass", "note": "count: 198 seen=True; log: four: FourStretch on; hasStretch=True; plugin folder ['FourStretch.so']"}
+{"id": "19.4", "status": "pass", "note": "digests after each track's pass {1: '505e73684b16 67e7598d5c36', 2: '080875abef9d d088ab1c45ef', 3: 'b9ab6b4c1ef8 3766a3894775', 4: '7c9d58abb169 fb1744215168'}; at the end {1: '505e73684b16 67e7598d5c36', 2: '080875abef9d d088ab1c45ef', 3: 'b9ab6b4c1ef8 3766a3894775', 4: '7c9d58abb169 fb1744215168'}; recIdx and opIdx by focus {1: (0, 0), 2: (1, 1), 3: (2, 2), 4: (3, 3)}"}
+{"id": "19.32", "status": "measured", "note": "four parts of 20 s, one on each track, then more passes on track 1: {'parts': {1: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 2: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 3: {'window_s': (0.0, 20.03), 'take_len_s': 20.03, 'plays_db': -18.8}, 4: {'window_s': (0.0, 20.04), 'take_len_s': 20.04, 'plays_db': -18.8}}, \"ten passes of 2 s, the window's length against 2 s, ms\": [-2, -1, -1, 1, -2, -2, -1, -1, -1, 1], 'a pass with a STOP of 1 s in it, window_s': (0.0, 2.09), 'a pass that moves from track 1 to track 2, windows_s': ((0.0, 1.53), (0.0, 1.53))}. Listen to 19.32_part*.wav"}

@@ -115,8 +115,6 @@ Raspberry Pi 4 and the 32-bit norns system.
 Known issues in this beta:
 
 - Changing an effect's type gives a short dip in the sound.
-- A take that runs past the end of its 60-second buffer becomes a full 60-second loop,
-  with silence in it. Move its start and end on TAKE with E2 and E3.
 - The densest set tried so far went past the CPU limit.
 
 If something does not work, please open an
