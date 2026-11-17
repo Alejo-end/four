@@ -58,12 +58,14 @@ Engine_Four : CroneEngine {
     var <phaseBus, <recPhaseBus, <recAmpBus;
     var <playParams;
     var <ioKeys;
-    // reverb+shimmer spawn/free synth: freed at rev_mix==0. send/return busses
-    // + last-known reverb params (handed over when the synth is spawned).
-    var <revSynth, <revSendBus, <revRetBus, <revParams, <revMixV;
+    // reverb+shimmer spawn/free synth: freed once rev_mix is 0 (spaceWait
+    // later). send/return busses + last-known reverb params (handed over when
+    // the synth is spawned). revGen counts the calls of updateReverb, so a
+    // free that waits knows if the mix moved again.
+    var <revSynth, <revSendBus, <revRetBus, <revParams, <revMixV, revGen = 0;
     // delay spawn/free synth, same shape: its regeneration loop lives inside
     // it, so freeing it is what flushes the line (which is what \clear wants)
-    var <delaySynth, <dlySendBus, <dlyRetBus, <delayParams;
+    var <delaySynth, <dlySendBus, <dlyRetBus, <delayParams, dlyGen = 0;
     // erosion spawn/free synth, alive only while erode > 0 in PLAY mode (so
     // at rest nothing writes the take). it reads eroKeys out of playParams;
     // modeV is the mode setMode last switched to (4 = PLAY).
@@ -357,9 +359,19 @@ Engine_Four : CroneEngine {
         this.updateErode;
     }
 
+    // How long the delay and the reverb live on once their mix is 0. io plays
+    // a return at its mix through a 30ms lag, so 0.1s later the return is
+    // 100dB down and the free cuts nothing that sounds. A free at once cut
+    // the tail at its full level: a click (test/dsp/review/probe6.scd, gate
+    // row 19.30). A mix that comes back inside the wait keeps the synth.
+    spaceWait { ^0.1 }
+
     // spawn/free the reverb synth on rev_mix. placed AFTER ioSynth (reads io's
     // fresh send this block; io reads the return via InFeedback next block).
     updateReverb { arg mix;
+        var gen;
+        revGen = revGen + 1;
+        gen = revGen;
         (mix > 0).if({
             revSynth.isNil.if({
                 revSynth = Synth.new(\four_reverb, [
@@ -367,7 +379,16 @@ Engine_Four : CroneEngine {
                 ] ++ revParams.getPairs, ioSynth, \addAfter);
             });
         }, {
-            revSynth.notNil.if({ revSynth.free; revSynth = nil });
+            revSynth.notNil.if({
+                SystemClock.sched(this.spaceWait, {
+                    // look again: only if nothing moved the mix since
+                    ((gen == revGen) and: { revSynth.notNil }).if({
+                        revSynth.free;
+                        revSynth = nil;
+                    });
+                    nil
+                });
+            });
         });
     }
 
@@ -379,8 +400,13 @@ Engine_Four : CroneEngine {
     // hold is kept alive. (delay_fb arrives CURVED from Lua: 0.9 here is
     // ~0.87 on the knob; the INF throw sends 0.98.) in the DEFAULT state
     // (mix 0, fb ~0.48) the synth is gone and the delay costs nothing.
+    // It leaves like the reverb: spaceWait after the last call that did not
+    // want it, and only if no call came since.
     updateDelay {
         var want = (delayParams[\delay_mix] > 0) or: { delayParams[\delay_fb] > 0.9 };
+        var gen;
+        dlyGen = dlyGen + 1;
+        gen = dlyGen;
         want.if({
             delaySynth.isNil.if({
                 delaySynth = Synth.new(\four_delay, [
@@ -388,7 +414,15 @@ Engine_Four : CroneEngine {
                 ] ++ delayParams.getPairs, ioSynth, \addAfter);
             });
         }, {
-            delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
+            delaySynth.notNil.if({
+                SystemClock.sched(this.spaceWait, {
+                    ((gen == dlyGen) and: { delaySynth.notNil }).if({
+                        delaySynth.free;
+                        delaySynth = nil;
+                    });
+                    nil
+                });
+            });
         });
     }
 
@@ -1826,6 +1860,9 @@ Engine_Four : CroneEngine {
             // recirculation still ring with the erased material. their state
             // lives inside the spawn/free synths, so a free + respawn IS the
             // flush (the update methods re-spawn only if the mixes want them).
+            // (at once, not after spaceWait: the count stops a free that waits)
+            dlyGen = dlyGen + 1;
+            revGen = revGen + 1;
             delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
             revSynth.notNil.if({ revSynth.free; revSynth = nil });
             // ...and a held repeat would go on playing the erased sound
@@ -1935,6 +1972,9 @@ Engine_Four : CroneEngine {
             tr[\synth].notNil.if({ tr[\synth].free });
             tr[\strip].notNil.if({ tr[\strip].free });   // the lane group, with all in it
         }) });
+        // (the counts stop a free that still waits from freeing a node twice)
+        revGen = revGen + 1;
+        dlyGen = dlyGen + 1;
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });

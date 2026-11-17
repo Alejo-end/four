@@ -3023,6 +3023,84 @@ def stage19():
 
     check("19.29", c1929)
 
+    # The delay and the reverb leave under a tail (the forty-fourth change).
+    # The engine frees each one 0.1 s after its mix reaches 0, when io's return
+    # is 100 dB down. A free at once cut the tail at its level: a click.
+    def c1930():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        n.set("track_sel", 2)
+        for pid, v in (("rev_decay", 4), ("delay_time", 0.3), ("delay_fb", 0.5), ("dly_rev", 0),
+                       ("rev_mix", 0), ("delay_mix", 0)):
+            n.set(pid, v)
+        time.sleep(0.5)
+        out = {}
+
+        def tail(name, mix, send):
+            # the track plays into the effect and stops: the tail rings alone
+            sends(**{send: 1}, track=2)
+            n.set(mix, 0.6)
+            n.set("t2_mode", MODE["PLAY"])
+            time.sleep(2)
+            n.set("t2_mode", MODE["OFF"])
+
+            def leave():
+                time.sleep(0.3)
+                n.set(mix, 0)
+                time.sleep(0.7)
+
+            rate, chans = during(leave, f"19.30_{name}", 2)
+            gone = ("four_" + name) not in n.nodes()
+            sends(**{send: 0}, track=2)
+            # the tail's level, from the 0.5 s before the mix moves
+            before = audio.stats(chans[0][: int(rate * 0.5)])["rms_db"]
+            out[name] = {"breaks": audio.breaks(chans, rate), "step": audio.step(chans),
+                         "tail_db": before, "gone": gone}
+
+        tail("reverb", "rev_mix", "rev")
+        tail("delay", "delay_mix", "dly")
+
+        # DRY as the player does it: K1+K3 while the track plays into both
+        sends(dly=1, rev=1, track=2)
+        n.set("rev_mix", 0.6)
+        n.set("delay_mix", 0.6)
+        n.set("t2_mode", MODE["PLAY"])
+        time.sleep(2)
+
+        def dry():
+            time.sleep(0.3)
+            n.key(1, 1)
+            time.sleep(0.05)
+            n.tap(3, 0.08)
+            n.key(1, 0)
+            time.sleep(0.9)
+
+        rate, chans = during(dry, "19.30_dry", 2.5)
+        mixes = param_state("rev_mix", "delay_mix")
+        out["dry"] = {"breaks": audio.breaks(chans, rate), "step": audio.step(chans), "mixes": mixes,
+                      "gone": not any(x in n.nodes() for x in ("four_reverb", "four_delay"))}
+
+        # a mix that comes back inside the wait keeps the synth, and its tail
+        n.set("rev_mix", 0.6)
+        time.sleep(1)
+        node = '("MGRV " ++ Crone.engine.revSynth.notNil.if({ Crone.engine.revSynth.nodeID }, { -1 })).postln;'
+        first = re.search(r"MGRV (-?\d+)", n.sc(node))
+        n.lua('params:set("rev_mix", 0) clock.run(function() clock.sleep(0.04) params:set("rev_mix", 0.6) end)')
+        time.sleep(0.6)
+        second = re.search(r"MGRV (-?\d+)", n.sc(node))
+        kept = bool(first and second and first.group(1) == second.group(1) and int(first.group(1)) > 0)
+        n.set("rev_mix", 0)
+        n.set("delay_mix", 0)
+        sends(dly=0, rev=0, track=2)
+        n.set("delay_fb", 0.3)
+        n.set("rev_decay", 2)
+        ok = (all(not x["breaks"] and x["gone"] for x in out.values()) and kept
+              and out["reverb"]["tail_db"] > -60 and out["delay"]["tail_db"] > -60
+              and mixes == {"rev_mix": 0, "delay_mix": 0})
+        return verdict(ok, f"the mix to 0 under a tail, both channels: {out}; a reverb mix that comes back after "
+                           f"40 ms keeps its synth: {kept}. Listen to 19.30_*.wav", "measured")
+
+    check("19.30", c1930)
+
 
 def cleanup():
     n.signal_quit()

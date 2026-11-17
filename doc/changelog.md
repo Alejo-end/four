@@ -4652,3 +4652,25 @@ part grew from 57.3% (2026-11-13) to 64.1% (2026-11-16) on the dense set.
 - Not done: the supported set in the README and the header's `CPU` word. The set is the
   user's choice (question 8 of the plan). doc/measurements/2026-11-17/ has the table.
 
+four, forty-fourth change: **the delay and the reverb leave without a click (engine and
+test tools; the count stays 198; on the device 2026-11-17, not heard)**. This is C3 of
+doc/signature-workflow.md.
+- Before: when `delay_mix` or `rev_mix` reached 0, the engine freed the synth in the same
+  moment. io plays a return at its mix through a 30 ms lag, so the tail was cut at its
+  full level. DRY, a scene or a fade that took a mix to 0 clicked under a tail.
+- Now `updateReverb` and `updateDelay` free the synth `spaceWait` (0.1 s) later, when
+  io's return is 100 dB down. Each call counts, and a free that waits runs only if no
+  call came since. So a mix that comes back inside the wait keeps the synth and its
+  tail. A clear still frees both at once.
+- The deliberate decision holds: a mix of 0 frees the synth and cuts its tail, and the
+  CPU win stays. It happens 0.1 s later.
+- Offline: probe6 has a fourth file, `_leave.wav`, and check_dsp.sh has six new targets
+  for each build. The largest step when the mix reaches 0 falls from 0.0204 to 0.0000
+  for the reverb and from 0.0794 to 0.0004 for the delay with the plugin, and from
+  0.1149 to 0.0003 for the delay without it. The norns's scsynth gives the same.
+- On the device, the new gate row 19.30: the reverb's step falls from 0.0046 to 0.0002,
+  the delay's from 0.0181 (a break) to 0.0007, and DRY under both from 0.0795 (a break)
+  to 0.0008 and 0.0012, where the tone alone has about 0.0006. Each synth is gone half a
+  second later. Rows 10.1 to 10.4, 19.7, 19.12, 19.21, 19.28 and 19.29 pass.
+  doc/measurements/2026-11-17/ has the numbers.
+

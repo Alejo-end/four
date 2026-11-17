@@ -148,11 +148,25 @@ def check(build):
     # random, so the depth moves from run to run: -11 to -17 dB over six runs.
     known(build, "a change of type dips while the old and the new sound comb: deepest 5 ms against the quieter side",
           num(r'^DEEPEST series ([-\d.]+) dB', a6), -15, 6, 'dB', worse_up=False, fmt='.1f')
-    # scsynth 3.14 frees a released synth one control step short of 0. The
-    # filter's 20 ms straight fade ends 1/15 above 0. The device recording of
-    # gate row 19.8 (2026-11-16) shows no step there: look again on the device.
-    known(build, "a filter family swap ends on a step offline: LP to HP at 400 Hz under the tone",
+    # The Mac's scsynth (3.14) frees a released synth one control step short of
+    # 0, so the filter's 20 ms straight fade ends 1/15 above 0 here. The norns's
+    # scsynth (3.13) runs the release to its end: rendered there, this step is
+    # 0.0005 (test/device/norns_nrt.sh, doc/measurements/2026-11-17). The row
+    # is the Mac's alone.
+    known(build, "a filter family swap ends on a step on the Mac's scsynth: LP to HP at 400 Hz under the tone",
           num(r'^FILTER LP to HP at 400 Hz: largest step ([\d.]+)', a6), 0.013, 0.004, '', fmt='.4f')
+
+    # THE DELAY AND THE REVERB LEAVE (the forty-fourth change, probe6's _leave):
+    # the mix goes to 0 under a tail, and the engine frees the synth 0.1 s
+    # later, when io's return is 100 dB down. A free at once cut the tail.
+    for name, was in (('REVERB', '1 click and 0.0204 with the plugin'), ('DELAY', '2 clicks and 0.079 to 0.115')):
+        line = rf'^{name} leaves under its tail.*largest step ([\d.]+) at.*clicks (\d+); 0.1 s after the free ([-\d.]+) dB'
+        target(build, f"fix: the {name.lower()} leaves under its tail, clicks on both channels (was {was})",
+               num(line, a6, 2), 0, '', fmt='.0f')
+        target(build, f"fix: the {name.lower()} leaves under its tail, largest step",
+               num(line, a6, 1), 0.001, '', fmt='.4f')
+        target(build, f"the {name.lower()} is gone 0.1 s after its free: the level then",
+               num(line, a6, 3), -120, 'dB')
 
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')

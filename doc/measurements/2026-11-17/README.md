@@ -178,3 +178,38 @@ No state had an xrun. The norns was at 52 C and not throttled.
   64.5% against 56.2% and 64.0%), which is inside the spread from run to run.
 
 Open: the supported set for the README. It is the user's choice (question 8 of the plan).
+
+## The delay and the reverb leave (the forty-fourth change, C3 of the plan)
+
+Until this change the engine freed the delay or the reverb in the same moment that its
+mix reached 0. io plays a return at its mix through a 30 ms lag, so the tail was cut
+at its full level. Now the engine frees the synth 0.1 s later, when the return is
+100 dB down, and only if the mix did not move again.
+
+Offline (`test/dsp/review/probe6.scd`, `_leave.wav`): io plays a 1 s burst of the tone
+into the reverb and into the delay. Under the tail, 0.5 s after the burst, the mix goes
+to 0. The table is the Mac's. The norns's scsynth gives the same within 1%.
+
+| The largest step when the mix reaches 0 | Before | After |
+|---|---|---|
+| The reverb, with the plugin (the room), tail at -38.0 dB | 0.0204, 1 click | 0.0000, 0 clicks |
+| The reverb, without it (FreeVerb on the Mac), tail at -60.5 dB | 0.0005 | 0.0000 |
+| The delay, with the plugin (the bucket brigade), tail at -26.9 dB | 0.0794, 2 clicks | 0.0004, 0 clicks |
+| The delay, without it, tail at -21.7 dB | 0.1149, 2 clicks | 0.0003, 0 clicks |
+
+On the norns, the new row 19.30, on both channels. Track 2 plays the tone into the
+effect and stops, and the mix goes to 0 under the tail. Then DRY (K1+K3) while the track
+plays into both. "Before" is the forty-second change, the same hour.
+
+| Row 19.30 | Before | After, two runs |
+|---|---|---|
+| The reverb, tail at -41 dB: largest step | 0.0046 | 0.0002 and 0.0002 |
+| The delay, tail at -26 dB: largest step | 0.0181, a break | 0.0007 and 0.0007 |
+| DRY while the tone plays (the tone alone has about 0.0006) | 0.0795, a break | 0.0008 and 0.0012 |
+| The synth is gone half a second later | yes | yes |
+| A reverb mix that comes back after 40 ms keeps its synth | no | yes |
+
+`count: 198`. The rows around it pass on this engine: 10.1 to 10.4 (the delay's node is
+gone at a mix of 0, and INF with KILL keeps its loop), 19.21 and 19.28 (the sends), 19.7,
+19.12 and 19.29. The 141 xruns the JACK log counted in this hour all fall in the second
+of a service restart. Nobody has listened to these recordings yet.

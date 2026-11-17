@@ -89,7 +89,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-17 it runs the forty-second change at `count: 198`, with the plugin
+- Since 2026-11-17 it runs the forty-fourth change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -137,6 +137,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 41st: the Relay brief and the plan doc/signature-workflow.md | documents only | |
 | 42nd: an effect synth and the shared delay fill their lines from silence (C1 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: rows 19.12, 19.29 and 10.4 with no break. Not pushed | no |
 | 43rd: the CPU budget part by part, `measure.py budget` (the first step of C5) (test tool, documents) | measured there, 2026-11-17 | |
+| 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -168,7 +169,8 @@ device (doc/measurements/2026-11-17/). The user has not listened to it. The dip 
 change into WOBBLE, CHORUS or FLANGE is question 10 of the plan, for their ears, and the
 README keeps its known issue until then. C5's measurement is the forty-third change:
 nothing grew, row 19.27's set is dressed with every effect. Its supported set waits for
-the user's answer to question 8. Next: C3. The work is on the local branch `phase-a`.
+the user's answer to question 8. C3 is the forty-fourth change, on the device, not
+heard. Next: C4. The work is on the local branch `phase-a`.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
@@ -465,6 +467,8 @@ Each line was learned the hard way; the change log has the story.
 - `ctx.record_stop` / `ctx.record_limit` stay for the `foundry` merge.
 - The two resamplers (`main` vs `foundry`) stay separate.
 - Freeing the reverb and delay synths at mix 0 cuts their tails: the CPU win is the point.
+  (Since the forty-fourth change the free comes 0.1 s after the mix reaches 0, so it
+  cuts nothing that still sounds.)
 - The DELAY page's bouncing echoes are the keeper; the top-down REVERB room and the
   8-boxes-on-the-wave PADS were rejected. Do not restore them unasked.
 - NORMALIZE (a fourth buffer writer) waits until rec, regen and erode are heard on

@@ -112,3 +112,19 @@ for name, t in [('LP to HP', T), ('HP to BP', T + 0.5)]:
     v, ms = step_at(x[:, 2:4], t, t + 0.3)
     n = sum(len(clicks(x[int(t * SR) - 480: int((t + 0.3) * SR), ch])) for ch in (2, 3))
     print(f"FILTER {name} at 400 Hz: largest step {v:.4f}, {ms:.1f} ms after the change; clicks {n}")
+
+# the reverb and the delay leave under a tail: the mix goes to 0 at T, and the
+# engine frees the synth `wait` later (at once before the forty-fourth change)
+x, _ = sf.read(f'{d}/{tag}_leave.wav')
+import re
+wait = float(re.search(r'SPACE WAIT ([\d.]+)', open(f'{d}/plog_{tag}.txt', errors='replace').read()).group(1))
+for name, y in (('REVERB', x[:, 0:2]), ('DELAY', x[:, 2:4])):
+    i0 = int(T * SR)
+    tail = rms_db(y[i0 - int(0.1 * SR): i0])
+    own = np.abs(np.diff(y[i0 - int(0.1 * SR): i0 - 240], 2, axis=0)).max()
+    v, ms = step_at(y, T - 0.002, T + wait + 0.05)
+    n = sum(len(clicks(y[i0 - int(0.05 * SR): i0 + int((wait + 0.3) * SR), ch])) for ch in range(2))
+    after = rms_db(y[i0 + int((wait + 0.1) * SR): i0 + int((wait + 0.4) * SR)])
+    print(f"{name} leaves under its tail, freed {wait * 1000:.0f} ms after the mix reaches 0: tail {tail:.1f} dB, "
+          f"largest step {v:.4f} at {ms - 2:.1f} ms, the tail's own {own:.4f}, ratio {v / max(own, 1e-9):.1f}, "
+          f"clicks {n}; 0.1 s after the free {after:.1f} dB")
