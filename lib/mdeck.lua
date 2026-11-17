@@ -191,10 +191,38 @@ function M.update_width(d)
   sc.pan(d.vb, w)
 end
 
--- drop both heads at a normalized position inside this deck's region
+-- drop both heads at a normalized position inside this deck's region.
+-- softcut reports the head every 25 ms, and a report from the place the head
+-- left can still be on its way: M.trust drops those.
 function M.jump(d, ph)
-  local at = d.from + clamp(ph, 0, 1) * d.len
+  ph = clamp(ph, 0, 1)
+  local at = d.from + ph * d.len
   both(d, function(v) sc.position(v, at) end)
+  d.jump_at, d.jump_left = ph, 3
+end
+
+-- Is this report of the head (`ph`, 0..1 in the region) to be believed? `was`
+-- is the place the last believed one gave. After a jump, up to three reports
+-- that are not near the place the head went to are dropped: without this a
+-- pass that closed 30 ms after it opened took the old place as its end. A
+-- believed report that lies far before the last one is a head that came
+-- round the region's end (d.wrapped). A pass reads that when it closes: its
+-- loop cannot cross the end.
+function M.trust(d, ph, was)
+  if (d.jump_left or 0) > 0 then
+    if math.abs(ph - d.jump_at) > 0.02 then
+      d.jump_left = d.jump_left - 1
+      return false
+    end
+    d.jump_left = 0
+  end
+  if ph < was - 0.5 then d.wrapped = true end
+  return true
+end
+
+-- does this deck play forward? A stopped deck does not.
+function M.forward(d)
+  return get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1) > 0
 end
 
 -- how long this deck's loop actually is, in seconds. One law for every
@@ -261,17 +289,29 @@ function M.arm_loop(d)
   -- frame, and without this it left the deck looping the whole 60 seconds.
   d.arm_was = { clamp(get(d, "start", 0), 0, 1), clamp(get(d, "end", 1), 0, 1) }
   set_bounds(d, 0, 1)
+  -- A NEW LOOP STARTS AT THE START OF THE REGION (the forty-eighth change).
+  -- The head runs on while nothing records, so a pass began anywhere in the
+  -- region, and one that crossed its end could not become a loop: the whole
+  -- region stayed open, and the pass came back once a minute. A deck that
+  -- plays backward keeps the old law: its pass starts where the head is.
+  -- The tape's own copy of this law is in four.lua (tape_rec).
+  d.arm_jumped = M.forward(d)
+  if d.arm_jumped then
+    M.jump(d, 0)
+    d.phase = 0
+  end
+  d.wrapped = false
   d.arm_phase = d.phase
 end
 
 -- forget the mark without closing anything: the erase disarms on its way to
 -- wiping the deck, and closing a loop around material about to be destroyed
 -- is noise. The loop stays as the arm left it, because the erase resets it.
-function M.abort_loop(d) d.arm_phase, d.arm_was = nil, nil end
+function M.abort_loop(d) d.arm_phase, d.arm_was, d.arm_jumped = nil, nil, nil end
 
 function M.close_loop(d)
-  local a, was = d.arm_phase, d.arm_was
-  d.arm_phase, d.arm_was = nil, nil
+  local a, was, jumped = d.arm_phase, d.arm_was, d.arm_jumped
+  d.arm_phase, d.arm_was, d.arm_jumped = nil, nil, nil
   if not a then return end
   local b = d.phase
   -- Which way the head was moving decides which end of the recording is the
@@ -282,12 +322,19 @@ function M.close_loop(d)
   local back = get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1) < 0
   local lo, hi = a, b
   if back then lo, hi = b, a end
+  -- A forward pass that came round the region's end is longer than the
+  -- region. It filled it: the loop is the whole region, as the arm left it.
+  if jumped and d.wrapped then return end
   -- The head ran off the end and round to the start, or barely moved at all.
   -- A loop cannot span that join, so there is nothing to close here. Put back
   -- the loop we widened, rather than leave the deck on the full 60 seconds,
   -- which is the once-a-minute playback this whole law exists to prevent.
   if (hi - lo) < (0.1 / d.len) then
-    if was then set_bounds(d, was[1], was[2]) end
+    if was then
+      set_bounds(d, was[1], was[2])
+      -- the arm moved the head to the region's start: put it back on the loop
+      if jumped then M.jump(d, was[1]) end
+    end
     return
   end
   set_bounds(d, lo, hi)
@@ -393,7 +440,9 @@ function M.on_phase(voice, pos)
   for i = 1, #M.decks do
     local d = M.decks[i]
     if d.va == voice then
-      d.phase = clamp((pos - d.from) / d.len, 0, 1)
+      local ph = clamp((pos - d.from) / d.len, 0, 1)
+      if not M.trust(d, ph, d.phase) then return end   -- a report from before a jump
+      d.phase = ph
       M.settle_rec(d)
       if get(d, "rec", 0) == 1 then
         M.track_extent(d, d.phase)

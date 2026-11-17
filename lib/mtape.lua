@@ -80,7 +80,11 @@ end
 -- The two now agree that stopping a recording may only re-cut the loop if
 -- starting it opened one, that a pass too short to be a loop gives back the
 -- loop it widened, and both move their
--- edges through D.set_loop. Two things still differ:
+-- edges through D.set_loop. Since the forty-eighth change both also start a
+-- new loop at the start of the tape (the region) when it plays forward, and
+-- both keep the whole of it when the pass comes round its end. The jump, the
+-- trust in a report after it and the wrap mark are mdeck's (D.jump, D.trust).
+-- Two things still differ:
 --   * the shortest recording the tape accepts is measured against the whole
 --     tape; mdeck measures 100ms against the deck's own region
 --   * mdeck checks which way the playhead was moving, so a deck playing
@@ -97,7 +101,15 @@ function M.set_loop(lo, hi) D.set_loop(TAPE, lo, hi) end
 -- a recording uses this to drop the head at the start of what was just
 -- played, so it loops back straight away. Through the deck law: two
 -- copies of "put the head here" is how the loop maths drifted apart before.
-function M.jump_to(pos) D.jump(TAPE, pos) end
+function M.jump_to(pos)
+  D.jump(TAPE, pos)
+  -- the head is there now. softcut's next reports are checked by D.trust in
+  -- the phase handler, so a late one from the old place cannot undo this.
+  C.tape_phase = math.min(math.max(pos, 0), 1)
+end
+
+-- does the tape play forward? The record action asks before it moves the head.
+function M.forward() return D.forward(TAPE) end
 
 -- the seam, through the deck law: capped at a quarter of the loop, so a long
 -- fade on a short loop cannot leave the tape spending all its time fading
@@ -156,7 +168,11 @@ function M.init_tape()
   -- ONE softcut phase handler exists, and it lives here.
   sc.event_phase(function(v, pos)
     if v == 1 then
-      C.tape_phase = pos / TAPE_LEN
+      local ph = pos / TAPE_LEN
+      -- a report from the place the head left before a jump is dropped, and
+      -- a head that came round the tape's end is noted (TAPE.wrapped)
+      if not D.trust(TAPE, ph, C.tape_phase) then return end
+      C.tape_phase = ph
       D.settle_rec(TAPE)
       -- the written stretch, from the 25ms phase events
       if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then

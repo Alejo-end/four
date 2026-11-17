@@ -346,8 +346,33 @@ The screens are `screens/19.31_*.png`.
 The first run of the row failed, and it showed a second fault. The head runs on over the
 60 s of tape while nothing records. That pass began 2 s before the tape's end and crossed
 it. The tape's law then keeps the whole 60 s as the loop, so the 3 s of sound play once a
-minute. A pass of 8 s crosses the end one time in seven. The row now waits for room. The
-fault is open, and the README lists it.
+minute. A pass of 8 s crosses the end one time in seven.
+
+### A new take starts at the tape's start (the forty-eighth change)
+
+A REPLACE pass now puts the head at the tape's start before it records. Row 19.31 arms
+its WET pass with the head 2 s before the tape's end, on purpose:
+
+| Row 19.31, the WET pass | Before | After |
+|---|---|---|
+| The head at the arm | 0.974 of the tape | 0.974 |
+| The loop when the pass closes | 0 to 1: the whole tape | 0 to 0.062: its first 3.7 s |
+| The tape plays back, in the next 2 s | -180 dB: silence | -17.3 dB |
+
+softcut reports its head every 25 ms, and a report from the old place can arrive after
+the jump. The script drops up to three such reports. A loop from 30 to 36 s, the head
+in it, and a pass that closes soon after it opens. A right result gives the loop back:
+
+| A pass that closes | With the guard | With the guard taken away |
+|---|---|---|
+| 0 ms after it opens | 12 of 12 right | not run |
+| 10 ms | 12 of 12 | 18 of 20: two kept the whole tape |
+| 20 ms | not run | 18 of 20: two kept the whole tape |
+| 30 ms | 12 of 12 | 20 of 20 |
+| 60 ms and 120 ms | 24 of 24 | not run |
+
+The older tape rows pass on this script: 7.1 and 7.2 (the tape in a PSET), 11.2d (the
+first pass loops, at -17.2 dB) and 12.6 (a loop of 0.3 s under a seam of 0.4 s).
 
 The norns had booted on a stale clock (09:14), and the time sync moved it to 20:36. sclang
 then took 98% of a core and matron 108%, as on 2026-11-06. A restart of the services

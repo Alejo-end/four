@@ -121,6 +121,7 @@ local FPS = 15
 
 local tape_arm_phase      -- head position when tape rec opened a pass; nil = none
 local tape_arm_was        -- the loop that pass widened, put back if it is declined
+local tape_arm_jumped     -- that pass moved the head to the tape's start (it plays forward)
 local rec_open = false    -- an engine record pass is open (armed by a real 1)
 local polls = {}
 local redraw_clock
@@ -2655,8 +2656,9 @@ local function init_params()
   params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
   -- mirror the SC side's workflow: arming with no overdub opens the loop to
-  -- the full tape for a fresh take; stopping snaps the loop around the take
-  -- and jumps the head to its start, so it plays back tight immediately.
+  -- the full tape for a fresh take and puts the head at the tape's start;
+  -- stopping snaps the loop around the take and jumps the head to its start,
+  -- so it plays back tight immediately.
   -- lib/mdeck.lua holds the same law as arm_loop / close_loop.
   -- This is the older, hand-written copy, still here on purpose: lib/mtape.lua
   -- explains why and lists where the two differ. Change one, change both.
@@ -2669,7 +2671,7 @@ local function init_params()
       -- the loop shorter, down towards a tenth of a second, with all the
       -- audio still sitting in the buffer. Mdeck.arm_loop draws the same line
       -- by asking whether the deck already holds anything.
-      tape_arm_phase, tape_arm_was = nil, nil
+      tape_arm_phase, tape_arm_was, tape_arm_jumped = nil, nil, nil
       ctx.tape_heard, ctx.tape_quiet, ctx.tape_msg = false, 0, nil
       if pget("tape_pre", 0) == 0 then
         -- remember the loop this pass widens: a pass too short to be a loop
@@ -2678,24 +2680,42 @@ local function init_params()
         if (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
           Mtape.set_loop(0, 1)
         end
+        -- A NEW TAKE STARTS AT THE START OF THE TAPE (the forty-eighth
+        -- change). The head runs on while nothing records, so a pass began
+        -- anywhere in the 60 s. One that crossed the tape's end could not
+        -- become a loop: the whole tape stayed open, and the take came back
+        -- once a minute. A pass of 8 s did that one time in seven (gate row
+        -- 19.31 met it on its first run). A tape that plays backward keeps
+        -- the old law: its pass starts where the head is.
+        tape_arm_jumped = Mtape.forward()
+        if tape_arm_jumped then Mtape.jump_to(0) end
+        ctx.tape_deck.wrapped = false
         tape_arm_phase = ctx.tape_phase
       end
     elseif not tape_arm_phase then
       -- an overdub, or a pass this action never opened: leave the loop alone
+    elseif (tape_arm_jumped and ctx.tape_deck.wrapped)
+        or ctx.tape_phase < tape_arm_phase - 0.005 then
+      -- the head came round the tape's end: softcut loops can't cross the
+      -- seam, so keep the full tape rather than snapping a wrong slice. For
+      -- a pass that began at the tape's start this is a pass longer than
+      -- the tape, and the page says so.
+      Mtape.set_loop(0, 1)
+      if tape_arm_jumped then
+        ctx.tape_msg, ctx.tape_msg_at = "TAPE FULL - 60 S", ctx.frame or 0
+      end
     elseif ctx.tape_phase > tape_arm_phase + 0.005 then
       Mtape.set_loop(tape_arm_phase, ctx.tape_phase)
       Mtape.jump_to(tape_arm_phase)
-    elseif ctx.tape_phase < tape_arm_phase - 0.005 then
-      -- head wrapped past the tape end mid-take: softcut loops can't cross
-      -- the seam, so keep the full tape rather than snapping a wrong slice
-      Mtape.set_loop(0, 1)
     elseif tape_arm_was then
       -- too short to be a loop (a mis-tap): give back the loop it widened
-      -- instead of leaving the whole 60s tape playing
+      -- instead of leaving the whole 60s tape playing, and put the head
+      -- back on it
       Mtape.set_loop(tape_arm_was[1], tape_arm_was[2])
+      if tape_arm_jumped then Mtape.jump_to(tape_arm_was[1]) end
     end
     if v == 0 then
-      tape_arm_phase, tape_arm_was = nil, nil
+      tape_arm_phase, tape_arm_was, tape_arm_jumped = nil, nil, nil
       -- a pass that heard nothing says so: the strip stayed flat, and a
       -- silent source looks like a tape that does not record
       if ctx.tape_heard == false then

@@ -54,7 +54,8 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
 - The tape is the one softcut deck, on the deck law in lib/mdeck.lua. A pass records
   what four plays: `cut_source` starts at 1 (WET, the engine's output), and K1+E3 on
   TAPE turns it to DRY, the line input alone. TAPE names the source and says when a pass
-  hears nothing. The layer decks are gone. `MOTION_IDS` keeps their fourteen ids in
+  hears nothing. A new take (a REPLACE pass) starts at the tape's start, and its loop is
+  the first seconds of the tape. The layer decks are gone. `MOTION_IDS` keeps their fourteen ids in
   place as tombstones (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md stay,
   labelled as old.
 
@@ -94,7 +95,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-17 it runs the forty-sixth change at `count: 198`, with the plugin
+- Since 2026-11-17 it runs the forty-eighth change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -145,6 +146,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | the user, 2026-11-17, on the build as a whole: "I think it sounds good" |
 | 45th: the effects are stronger at the same knob, and none is quieter than the dry sound (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.11's levels, 19.12 and 19.29 with no break. Not pushed | no. The user asked for it: the effects were "a bit too bland" |
 | 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
+| 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -183,8 +185,10 @@ the user's answer to question 8. C3 is the forty-fourth change, on the device. T
 tested that build on 2026-11-17: "I think it sounds good". Two requests came out of the
 test, and they are the forty-fifth change (stronger effects) and the forty-sixth (the
 tape records what four plays). Both are on the device, and the user has not heard them.
-Next: the tape's head (a pass that crosses the tape's end keeps the whole 60 s as its
-loop, found by row 19.31), then C4. The work is on the local branch `phase-a`.
+Row 19.31 then found that a tape pass that crossed the tape's end kept the whole 60 s as
+its loop, and the forty-eighth change starts a new take at the tape's start. Next: C4.
+The work is on the local branch `phase-a`. Another session shares this checkout (the
+forty-seventh change, an Exquis driver): stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
@@ -448,6 +452,14 @@ Each line was learned the hard way; the change log has the story.
   that material (RESON was 7 dB under OFF on an off-note tone). Cross at equal power, or
   keep the dry sound whole up to the middle. Measure the level of every effect against
   OFF at the amount it starts with (gate row 19.11, probe7).
+- softcut reports a head every 25 ms, and a report from the place the head left can
+  arrive after `softcut.position`. On the norns 4 of 40 passes that closed 10 or 20 ms
+  after a jump read the old place. After a jump, believe a report only when it is near
+  the place the head went to (`Mdeck.jump`, `Mdeck.trust`).
+- A loop pedal's pass starts where its loop can live. A softcut loop cannot cross the
+  end of its region, and a head that runs on while nothing records is anywhere in it.
+  The tape began its pass there, and one pass in seven of 8 s kept the whole 60 s
+  (the forty-eighth change).
 - A page that records says what a pass will record, and says when a pass hears nothing.
   The tape recorded the line input alone, the knob for its source was under K1+E3, and
   a pass over playing tracks came back empty with `EMPTY - K2 REC` (the forty-sixth

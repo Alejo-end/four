@@ -1140,38 +1140,101 @@ do
   params:set("tape_rec", 0)
   params:set("tape_pre", 0)
 
-  -- REPLACE still defines the take: arm opens the loop, disarm closes on it
+  -- REPLACE still defines the take: the arm opens the loop and puts the head
+  -- at the tape's start (the forty-eighth change), the disarm closes on the take
   params:set("loop_start", 0.2); params:set("loop_end", 0.3)
   _h.phase(1, 0.10 * 60)
+  sc_calls = {}
   params:set("tape_rec", 1)
   near(params:get("loop_start"), 0, 1e-9, "a REPLACE arm still opens the tape loop")
   near(params:get("loop_end"), 1, 1e-9, "...at both ends")
-  _h.phase(1, 0.30 * 60)
+  near((sc_last("position", 1) or {})[3] or -1, 0, 1e-9, "...and puts the head at the tape's start")
+  near((sc_last("position", 2) or {})[3] or -1, 0, 1e-9, "...on both voices")
+  near(CTX.tape_phase, 0, 1e-9, "...and the script knows the head is there")
+  _h.phase(1, 0.02)                         -- softcut reports from the start
+  _h.phase(1, 0.20 * 60)
   params:set("tape_rec", 0)
-  near(params:get("loop_start"), 0.10, 1e-6, "...and the take closes the loop around it")
-  near(params:get("loop_end"), 0.30, 1e-6, "...at the head it stopped on")
+  near(params:get("loop_start"), 0, 1e-6, "...and the take closes the loop around it")
+  near(params:get("loop_end"), 0.20, 1e-6, "...at the head it stopped on")
+  _h.phase(1, 0.01)                         -- the head is back at the loop's start
 
   -- OVERDUB stacks into the loop it has, and must leave it exactly alone
   params:set("tape_pre", 1)
-  _h.phase(1, 0.15 * 60)
+  _h.phase(1, 0.05 * 60)
+  sc_calls = {}
   params:set("tape_rec", 1)
-  near(params:get("loop_start"), 0.10, 1e-6, "an OVERDUB arm leaves the loop alone")
-  near(params:get("loop_end"), 0.30, 1e-6, "...as it always did")
-  _h.phase(1, 0.22 * 60)
+  near(params:get("loop_start"), 0, 1e-6, "an OVERDUB arm leaves the loop alone")
+  near(params:get("loop_end"), 0.20, 1e-6, "...as it always did")
+  ok(sc_last("position", 1) == nil, "...and it leaves the head where it is")
+  _h.phase(1, 0.12 * 60)
   params:set("tape_rec", 0)
-  near(params:get("loop_start"), 0.10, 1e-6, "...and so does the DISARM")
-  near(params:get("loop_end"), 0.30, 1e-6, "...so a stacked pass cannot shrink it")
+  near(params:get("loop_start"), 0, 1e-6, "...and so does the DISARM")
+  near(params:get("loop_end"), 0.20, 1e-6, "...so a stacked pass cannot shrink it")
 
   -- and the wrap branch cannot blow an overdub loop out to the whole tape
-  _h.phase(1, 0.28 * 60)
+  _h.phase(1, 0.18 * 60)
   params:set("tape_rec", 1)
-  _h.phase(1, 0.12 * 60)                    -- wrapped round the loop
+  _h.phase(1, 0.02 * 60)                    -- wrapped round the loop
   params:set("tape_rec", 0)
-  near(params:get("loop_end"), 0.30, 1e-6,
+  near(params:get("loop_end"), 0.20, 1e-6,
     "a wrapped overdub keeps the loop instead of opening the whole tape")
-
   params:set("tape_pre", 0)
+
+  -- THE ONCE-A-MINUTE PASS (gate row 19.31, first run). The head runs on while
+  -- nothing records. A pass that began 2 s before the tape's end crossed it,
+  -- and the whole tape stayed open. It now begins at the tape's start.
   params:set("loop_start", 0); params:set("loop_end", 1)
+  _h.phase(1, 0.01); _h.phase(1, 0.5 * 60); _h.phase(1, 0.97 * 60)
+  near(CTX.tape_phase, 0.97, 1e-9, "(the head is 2 s before the tape's end)")
+  params:set("tape_rec", 1)
+  _h.phase(1, 0.02); _h.phase(1, 3)
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0, 1e-6, "a pass armed 2 s before the tape's end closes a loop at its start")
+  near(params:get("loop_end"), 0.05, 1e-6, "...3 seconds long, and not the whole tape")
+  ok(CTX.tape_msg ~= "TAPE FULL - 60 S", "...and the page does not call the tape full")
+
+  -- a report from the place the head left is not believed
+  params:set("loop_start", 0.2); params:set("loop_end", 0.3)
+  _h.phase(1, 0.01); _h.phase(1, 0.6 * 60)
+  params:set("tape_rec", 1)
+  _h.phase(1, 0.6 * 60 + 0.02)              -- late, from before the jump
+  near(CTX.tape_phase, 0, 1e-9, "a late report from the old place is dropped")
+  sc_calls = {}
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0.2, 1e-9, "...so a pass that closes at once gives back the loop")
+  near(params:get("loop_end"), 0.3, 1e-9, "...and not 36 seconds of the old tape")
+  near((sc_last("position", 1) or {})[3] or -1, 0.2 * 60, 1e-6, "...with the head back on that loop")
+
+  -- a pass longer than the tape comes round its end: the loop is the whole
+  -- tape, and the page says so
+  params:set("loop_start", 0.2); params:set("loop_end", 0.3)
+  _h.push("amp_out_l", 0.5); _h.push("amp_out_r", 0.5)
+  _h.phase(1, 0.25 * 60)
+  params:set("tape_rec", 1)
+  _h.phase(1, 0.02); _h.run_ticks(1)
+  _h.phase(1, 30); _h.phase(1, 59.9); _h.phase(1, 2)   -- round the end
+  params:set("tape_rec", 0)
+  near(params:get("loop_start"), 0, 1e-9, "a pass that came round the tape's end keeps the whole tape")
+  near(params:get("loop_end"), 1, 1e-9, "...and not its last 2 seconds")
+  ok(CTX.tape_msg == "TAPE FULL - 60 S", "...and TAPE says TAPE FULL - 60 S (got " .. tostring(CTX.tape_msg) .. ")")
+  _h.push("amp_out_l", 0); _h.push("amp_out_r", 0)
+  CTX.tape_msg = nil
+
+  -- a tape that plays backward keeps the old law: the head stays, and the
+  -- pass keeps the whole tape
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  params:set("tape_rate", -1)
+  _h.phase(1, 0.01); _h.phase(1, 0.5 * 60)
+  sc_calls = {}
+  params:set("tape_rec", 1)
+  ok(sc_last("position", 1) == nil, "a backward tape's pass starts where the head is")
+  _h.phase(1, 0.45 * 60)
+  params:set("tape_rec", 0)
+  near(params:get("loop_end"), 1, 1e-9, "...and keeps the whole tape, as before")
+  params:set("tape_rate", 1)
+
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  CTX.clear_twave(); CTX.tape_msg = nil
 end
 
 -- ============================================================================
@@ -1243,9 +1306,11 @@ do
   _h.phase(1, 0.3 * 60)
   params:set("tape_rec", 1)
   near(params:get("loop_end"), 1, 1e-9, "a REPLACE arm opens the tape loop")
+  sc_calls = {}
   params:set("tape_rec", 0)                -- the head has not moved: a mis-tap
   near(params:get("loop_start"), 0.2, 1e-9, "a declined tape pass gives back the loop it widened")
   near(params:get("loop_end"), 0.4, 1e-9, "...both edges")
+  near((sc_last("position", 1) or {})[3] or -1, 0.2 * 60, 1e-6, "...and puts the head back on it")
 
   -- (e) the tape seam is capped by the deck law: a long fade on a short loop
   params:set("loop_start", 0.1); params:set("loop_end", 0.1 + 0.3 / 60)
@@ -1403,12 +1468,13 @@ do
   params:set("loop_start", 0); params:set("loop_end", 1)
   fill_slot(7)
   _h.phase(1, 6)                           -- 6s into the tape
-  params:set("tape_rec", 1)
-  for i = 1, 16 do _h.phase(1, 6 + i * 0.25); _h.run_ticks(1) end
+  params:set("tape_rec", 1)                -- the pass starts at the tape's start
+  for i = 1, 16 do _h.phase(1, i * 0.25); _h.run_ticks(1) end
   params:set("tape_rec", 0)
-  ok(params:get("loop_end") < 0.2, "the tape pass closed its loop (end " .. params:get("loop_end") .. ")")
+  ok(params:get("loop_end") > 0.05 and params:get("loop_end") < 0.08,
+    "the tape pass closed its loop on its 4 s (end " .. params:get("loop_end") .. ")")
   params:set("scene_slot", 7); pulse("scene_recall")
-  ok(params:get("loop_start") > 0.09 and params:get("loop_end") < 0.18,
+  ok(params:get("loop_start") < 0.01 and params:get("loop_end") > 0.05 and params:get("loop_end") < 0.08,
     string.format("recalling a scene captured on an empty tape keeps the loop on the material (%.3f..%.3f)",
       params:get("loop_start"), params:get("loop_end")))
   params:set("loop_start", 0); params:set("loop_end", 1)

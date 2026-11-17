@@ -173,7 +173,9 @@ is `FourBBD`, a model of a bucket brigade chip: a long time is dark.
 A tape pass records what four plays: the tracks and their effects, and the input as far
 as DRY/WET on MIX lets it through. The page says `SRC WET`. Hold K1 and turn E3 down to
 `SRC DRY`, and a pass records the line input alone. If the source is silent while the
-tape records, the page says `NO SOUND - K1+E3 SOURCE`.
+tape records, the page says `NO SOUND - K1+E3 SOURCE`. A new take starts at the start of
+the tape. A take longer than the tape's 60 seconds fills it, and the page says
+`TAPE FULL - 60 S`.
 
 ### PADS
 

@@ -131,6 +131,7 @@ local FPS = 15
 
 local tape_arm_phase      -- head position when tape rec opened a pass; nil = none
 local tape_arm_was        -- the loop that pass widened, put back if it is declined
+local tape_arm_jumped     -- that pass moved the head to the tape's start (it plays forward)
 local rec_open = false    -- an engine record pass is open (armed by a real 1)
 local polls = {}
 local redraw_clock
@@ -466,7 +467,11 @@ end
 -- The two now agree that stopping a recording may only re-cut the loop if
 -- starting it opened one, that a pass too short to be a loop gives back the
 -- loop it widened, and both move their
--- edges through D.set_loop. Two things still differ:
+-- edges through D.set_loop. Since the forty-eighth change both also start a
+-- new loop at the start of the tape (the region) when it plays forward, and
+-- both keep the whole of it when the pass comes round its end. The jump, the
+-- trust in a report after it and the wrap mark are mdeck's (D.jump, D.trust).
+-- Two things still differ:
 --   * the shortest recording the tape accepts is measured against the whole
 --     tape; mdeck measures 100ms against the deck's own region
 --   * mdeck checks which way the playhead was moving, so a deck playing
@@ -483,7 +488,15 @@ function M.set_loop(lo, hi) D.set_loop(TAPE, lo, hi) end
 -- a recording uses this to drop the head at the start of what was just
 -- played, so it loops back straight away. Through the deck law: two
 -- copies of "put the head here" is how the loop maths drifted apart before.
-function M.jump_to(pos) D.jump(TAPE, pos) end
+function M.jump_to(pos)
+  D.jump(TAPE, pos)
+  -- the head is there now. softcut's next reports are checked by D.trust in
+  -- the phase handler, so a late one from the old place cannot undo this.
+  C.tape_phase = math.min(math.max(pos, 0), 1)
+end
+
+-- does the tape play forward? The record action asks before it moves the head.
+function M.forward() return D.forward(TAPE) end
 
 -- the seam, through the deck law: capped at a quarter of the loop, so a long
 -- fade on a short loop cannot leave the tape spending all its time fading
@@ -542,7 +555,11 @@ function M.init_tape()
   -- ONE softcut phase handler exists, and it lives here.
   sc.event_phase(function(v, pos)
     if v == 1 then
-      C.tape_phase = pos / TAPE_LEN
+      local ph = pos / TAPE_LEN
+      -- a report from the place the head left before a jump is dropped, and
+      -- a head that came round the tape's end is noted (TAPE.wrapped)
+      if not D.trust(TAPE, ph, C.tape_phase) then return end
+      C.tape_phase = ph
       D.settle_rec(TAPE)
       -- the written stretch, from the 25ms phase events
       if pget("tape_rec", 0) == 1 and pget("tape_freeze", 0) == 0 then
@@ -799,10 +816,38 @@ function M.update_width(d)
   sc.pan(d.vb, w)
 end
 
--- drop both heads at a normalized position inside this deck's region
+-- drop both heads at a normalized position inside this deck's region.
+-- softcut reports the head every 25 ms, and a report from the place the head
+-- left can still be on its way: M.trust drops those.
 function M.jump(d, ph)
-  local at = d.from + clamp(ph, 0, 1) * d.len
+  ph = clamp(ph, 0, 1)
+  local at = d.from + ph * d.len
   both(d, function(v) sc.position(v, at) end)
+  d.jump_at, d.jump_left = ph, 3
+end
+
+-- Is this report of the head (`ph`, 0..1 in the region) to be believed? `was`
+-- is the place the last believed one gave. After a jump, up to three reports
+-- that are not near the place the head went to are dropped: without this a
+-- pass that closed 30 ms after it opened took the old place as its end. A
+-- believed report that lies far before the last one is a head that came
+-- round the region's end (d.wrapped). A pass reads that when it closes: its
+-- loop cannot cross the end.
+function M.trust(d, ph, was)
+  if (d.jump_left or 0) > 0 then
+    if math.abs(ph - d.jump_at) > 0.02 then
+      d.jump_left = d.jump_left - 1
+      return false
+    end
+    d.jump_left = 0
+  end
+  if ph < was - 0.5 then d.wrapped = true end
+  return true
+end
+
+-- does this deck play forward? A stopped deck does not.
+function M.forward(d)
+  return get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1) > 0
 end
 
 -- how long this deck's loop actually is, in seconds. One law for every
@@ -869,17 +914,29 @@ function M.arm_loop(d)
   -- frame, and without this it left the deck looping the whole 60 seconds.
   d.arm_was = { clamp(get(d, "start", 0), 0, 1), clamp(get(d, "end", 1), 0, 1) }
   set_bounds(d, 0, 1)
+  -- A NEW LOOP STARTS AT THE START OF THE REGION (the forty-eighth change).
+  -- The head runs on while nothing records, so a pass began anywhere in the
+  -- region, and one that crossed its end could not become a loop: the whole
+  -- region stayed open, and the pass came back once a minute. A deck that
+  -- plays backward keeps the old law: its pass starts where the head is.
+  -- The tape's own copy of this law is in four.lua (tape_rec).
+  d.arm_jumped = M.forward(d)
+  if d.arm_jumped then
+    M.jump(d, 0)
+    d.phase = 0
+  end
+  d.wrapped = false
   d.arm_phase = d.phase
 end
 
 -- forget the mark without closing anything: the erase disarms on its way to
 -- wiping the deck, and closing a loop around material about to be destroyed
 -- is noise. The loop stays as the arm left it, because the erase resets it.
-function M.abort_loop(d) d.arm_phase, d.arm_was = nil, nil end
+function M.abort_loop(d) d.arm_phase, d.arm_was, d.arm_jumped = nil, nil, nil end
 
 function M.close_loop(d)
-  local a, was = d.arm_phase, d.arm_was
-  d.arm_phase, d.arm_was = nil, nil
+  local a, was, jumped = d.arm_phase, d.arm_was, d.arm_jumped
+  d.arm_phase, d.arm_was, d.arm_jumped = nil, nil, nil
   if not a then return end
   local b = d.phase
   -- Which way the head was moving decides which end of the recording is the
@@ -890,12 +947,19 @@ function M.close_loop(d)
   local back = get(d, "rate", 1) * (get(d, "reverse", 0) == 1 and -1 or 1) < 0
   local lo, hi = a, b
   if back then lo, hi = b, a end
+  -- A forward pass that came round the region's end is longer than the
+  -- region. It filled it: the loop is the whole region, as the arm left it.
+  if jumped and d.wrapped then return end
   -- The head ran off the end and round to the start, or barely moved at all.
   -- A loop cannot span that join, so there is nothing to close here. Put back
   -- the loop we widened, rather than leave the deck on the full 60 seconds,
   -- which is the once-a-minute playback this whole law exists to prevent.
   if (hi - lo) < (0.1 / d.len) then
-    if was then set_bounds(d, was[1], was[2]) end
+    if was then
+      set_bounds(d, was[1], was[2])
+      -- the arm moved the head to the region's start: put it back on the loop
+      if jumped then M.jump(d, was[1]) end
+    end
     return
   end
   set_bounds(d, lo, hi)
@@ -1001,7 +1065,9 @@ function M.on_phase(voice, pos)
   for i = 1, #M.decks do
     local d = M.decks[i]
     if d.va == voice then
-      d.phase = clamp((pos - d.from) / d.len, 0, 1)
+      local ph = clamp((pos - d.from) / d.len, 0, 1)
+      if not M.trust(d, ph, d.phase) then return end   -- a report from before a jump
+      d.phase = ph
       M.settle_rec(d)
       if get(d, "rec", 0) == 1 then
         M.track_extent(d, d.phase)
@@ -10545,8 +10611,9 @@ local function init_params()
   params:add_group("grp_tape", "tape", 9)
   params:add_binary("tape_rec", "tape record", "toggle", 0)
   -- mirror the SC side's workflow: arming with no overdub opens the loop to
-  -- the full tape for a fresh take; stopping snaps the loop around the take
-  -- and jumps the head to its start, so it plays back tight immediately.
+  -- the full tape for a fresh take and puts the head at the tape's start;
+  -- stopping snaps the loop around the take and jumps the head to its start,
+  -- so it plays back tight immediately.
   -- lib/mdeck.lua holds the same law as arm_loop / close_loop.
   -- This is the older, hand-written copy, still here on purpose: lib/mtape.lua
   -- explains why and lists where the two differ. Change one, change both.
@@ -10559,7 +10626,7 @@ local function init_params()
       -- the loop shorter, down towards a tenth of a second, with all the
       -- audio still sitting in the buffer. Mdeck.arm_loop draws the same line
       -- by asking whether the deck already holds anything.
-      tape_arm_phase, tape_arm_was = nil, nil
+      tape_arm_phase, tape_arm_was, tape_arm_jumped = nil, nil, nil
       ctx.tape_heard, ctx.tape_quiet, ctx.tape_msg = false, 0, nil
       if pget("tape_pre", 0) == 0 then
         -- remember the loop this pass widens: a pass too short to be a loop
@@ -10568,24 +10635,42 @@ local function init_params()
         if (pget("loop_end", 1) - pget("loop_start", 0)) < 0.99 then
           Mtape.set_loop(0, 1)
         end
+        -- A NEW TAKE STARTS AT THE START OF THE TAPE (the forty-eighth
+        -- change). The head runs on while nothing records, so a pass began
+        -- anywhere in the 60 s. One that crossed the tape's end could not
+        -- become a loop: the whole tape stayed open, and the take came back
+        -- once a minute. A pass of 8 s did that one time in seven (gate row
+        -- 19.31 met it on its first run). A tape that plays backward keeps
+        -- the old law: its pass starts where the head is.
+        tape_arm_jumped = Mtape.forward()
+        if tape_arm_jumped then Mtape.jump_to(0) end
+        ctx.tape_deck.wrapped = false
         tape_arm_phase = ctx.tape_phase
       end
     elseif not tape_arm_phase then
       -- an overdub, or a pass this action never opened: leave the loop alone
+    elseif (tape_arm_jumped and ctx.tape_deck.wrapped)
+        or ctx.tape_phase < tape_arm_phase - 0.005 then
+      -- the head came round the tape's end: softcut loops can't cross the
+      -- seam, so keep the full tape rather than snapping a wrong slice. For
+      -- a pass that began at the tape's start this is a pass longer than
+      -- the tape, and the page says so.
+      Mtape.set_loop(0, 1)
+      if tape_arm_jumped then
+        ctx.tape_msg, ctx.tape_msg_at = "TAPE FULL - 60 S", ctx.frame or 0
+      end
     elseif ctx.tape_phase > tape_arm_phase + 0.005 then
       Mtape.set_loop(tape_arm_phase, ctx.tape_phase)
       Mtape.jump_to(tape_arm_phase)
-    elseif ctx.tape_phase < tape_arm_phase - 0.005 then
-      -- head wrapped past the tape end mid-take: softcut loops can't cross
-      -- the seam, so keep the full tape rather than snapping a wrong slice
-      Mtape.set_loop(0, 1)
     elseif tape_arm_was then
       -- too short to be a loop (a mis-tap): give back the loop it widened
-      -- instead of leaving the whole 60s tape playing
+      -- instead of leaving the whole 60s tape playing, and put the head
+      -- back on it
       Mtape.set_loop(tape_arm_was[1], tape_arm_was[2])
+      if tape_arm_jumped then Mtape.jump_to(tape_arm_was[1]) end
     end
     if v == 0 then
-      tape_arm_phase, tape_arm_was = nil, nil
+      tape_arm_phase, tape_arm_was, tape_arm_jumped = nil, nil, nil
       -- a pass that heard nothing says so: the strip stayed flat, and a
       -- silent source looks like a tape that does not record
       if ctx.tape_heard == false then

@@ -3114,6 +3114,11 @@ def stage19():
     # alone: a pass over playing tracks with a silent input gave an empty tape,
     # and the page said EMPTY - K2 REC again. A pass that hears nothing now
     # says so while it runs and when it closes.
+    # A new take starts at the tape's start (the forty-eighth change). The head
+    # runs on over the 60 s of tape while nothing records. On this row's first
+    # run the WET pass began 2 s before the tape's end, crossed it, and kept
+    # the whole 60 s as its loop: 3 s of sound once a minute. The WET pass
+    # here starts from that place on purpose.
     def c1931():
         modes("OFF", "PLAY", "OFF", "OFF")
         n.set("track_sel", 2)
@@ -3121,15 +3126,13 @@ def stage19():
         fresh_src = n.get("cut_source")
         out = {}
 
-        def tape_pass(name, secs=3):
+        def tape_pass(name, secs=3, near_end=False):
             n.goto("TAPE")
             time.sleep(0.3)
-            # The head runs on over the 60 s of tape, and a pass that crosses
-            # the tape's end keeps the whole 60 s as its loop (the tape's law,
-            # lib/mtape.lua). The 2 s read below would then hear silence, as
-            # it did on the first run of this row. Start with room for the pass.
-            while num(n.ctx("c.tape_phase")) > 0.85:
-                time.sleep(1)
+            if near_end:
+                n.lua("softcut.position(1, 58) softcut.position(2, 58)")
+                time.sleep(0.4)
+            head = round(num(n.ctx("c.tape_phase")), 3)
             n.tap(2, 0.08)
             time.sleep(secs)
             quiet = num(n.ctx("c.tape_quiet"))
@@ -3139,23 +3142,28 @@ def stage19():
             said = n.lua("print(__ctx.tape_msg)").strip()
             shot(f"19.31_{name}_closed")
             any_ = n.ctx("c.twave_any")
+            loop = (round(n.get("loop_start"), 4), round(n.get("loop_end"), 4))
             # the tape alone: softcut's own outputs
             db = level(f"19.31_{name}_tape", 2, DECKS_OUT)
-            out[name] = {"quiet_frames": quiet, "said": said, "twave_any": any_, "tape_db": db}
+            out[name] = {"head_at_the_arm": head, "loop": loop, "quiet_frames": quiet, "said": said,
+                         "twave_any": any_, "tape_db": db}
             erase_page("TAPE")
             time.sleep(0.5)
 
-        tape_pass("wet")
+        tape_pass("wet", near_end=True)
         n.set("cut_source", 0)
         time.sleep(0.2)
         tape_pass("dry")
         n.set("cut_source", 1)
-        ok = (fresh_src == 1 and out["wet"]["tape_db"] > -45 and out["wet"]["twave_any"] == "true"
-              and out["wet"]["said"] == "nil" and out["wet"]["quiet_frames"] == 0
+        wet = out["wet"]
+        ok = (fresh_src == 1 and wet["tape_db"] > -45 and wet["twave_any"] == "true"
+              and wet["said"] == "nil" and wet["quiet_frames"] == 0
+              and wet["head_at_the_arm"] > 0.95 and wet["loop"][0] < 0.01 and 0.04 < wet["loop"][1] < 0.07
               and out["dry"]["tape_db"] < -70 and out["dry"]["twave_any"] == "false"
               and out["dry"]["said"] == "NO SOUND RECORDED" and out["dry"]["quiet_frames"] > 15)
         return verdict(ok, f"a fresh script's cut_source {fresh_src}; track 2 plays and the input is silent, "
-                           f"a pass of 3 s at WET and at DRY: {out}. Look at screens/19.31_*.png", "measured")
+                           f"a pass of 3 s at WET, armed 2 s before the tape's end, and at DRY: {out}. "
+                           "Look at screens/19.31_*.png", "measured")
 
     check("19.31", c1931)
 

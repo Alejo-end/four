@@ -4753,3 +4753,33 @@ hears nothing (Lua and test tools; on the device 2026-11-17)**. The user, the sa
 - The norns had booted on a stale clock, and the time sync then moved it by 11 hours.
   sclang and matron each took a whole core (98% and 108%), as on 2026-11-06. A restart
   of the services cleared it before any of this was measured.
+
+four, forty-eighth change: **a new tape take starts at the start of the tape (Lua and
+test tools; on the device 2026-11-17)**. The forty-seventh number is the Exquis driver's.
+- The fault, found by gate row 19.31: the tape's head runs on over its 60 s while nothing
+  records, so a pass began anywhere on the tape. A pass that crossed the tape's end could
+  not become a loop, because a softcut loop cannot span that join. The whole tape stayed
+  open, and the take came back once a minute. A pass of 8 s did that one time in seven.
+- A REPLACE pass (overdub at 0) now puts the head at the tape's start when the tape
+  plays forward. Its loop is the first seconds of the tape. An overdub pass leaves the
+  head alone, and a tape that plays backward keeps the old law.
+- A pass longer than the tape comes round its end. The loop is then the whole tape, and
+  the page says `TAPE FULL - 60 S`.
+- softcut reports the head every 25 ms, and a report from the place the head left can
+  still be on its way when the head jumps. `Mdeck.trust` drops up to three reports that
+  are not near the place the head went to. On the norns, with that guard taken away, 4
+  of 40 passes that closed 10 or 20 ms after they opened kept a wrong loop. With it,
+  none of 60 did.
+- A pass too short to be a loop still gives back the loop it widened, and it now puts
+  the head back on that loop.
+- lib/mdeck.lua holds the jump, the guard and the wrap mark, and its own `arm_loop` and
+  `close_loop` follow the same law (the rule in lib/mtape.lua: change one, change both).
+- test_control: the pass armed 2 s before the tape's end, the late report, the pass
+  longer than the tape, the backward tape and the overdub. test_deck: the same for a
+  deck. The simulated pass of the render suite and of the clip exporter starts at the
+  tape's start.
+- On the device, row 19.31 now arms its pass 2 s before the tape's end. Before: the loop
+  stayed 0 to 1, and the tape played silence. After: the loop is the first 3.7 s, and the
+  tape plays the take at once at -17.3 dB. The older tape rows pass: 7.1 and 7.2 (the
+  tape in a PSET), 11.2d (the first pass loops) and 12.6 (a short loop's seam). The
+  README no longer lists the fault.

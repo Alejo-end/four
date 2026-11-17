@@ -179,7 +179,10 @@ SCENARIO = function(t)
   if h.has_phase() then
     local tl, th = params:get("loop_start"), params:get("loop_end")
     if th < tl then tl, th = th, tl end
-    h.phase(1, (tl + ((t * 0.009) % 1) * (th - tl)) * 60)
+    local tp = tl + ((t * 0.009) % 1) * (th - tl)
+    -- the tape pass of ticks 20 to 140 starts at the tape's start and walks 4.8 s
+    if t >= 20 and t < 140 then tp = (t - 20) * 0.08 / 120 end
+    h.phase(1, tp * 60)
   end
 end
 

@@ -292,15 +292,22 @@ do
   d1.any = false
   P.dk1_start, P.dk1_end = 0.4, 0.55       -- some leftover loop
   d1.phase = 0.10
+  calls = {}
   Mdeck.arm_loop(d1)
   near(P.dk1_start, 0, 1e-9, "arming an EMPTY deck opens the loop to the region")
   near(P.dk1_end, 1, 1e-9, "...at both ends, so nothing played is cut off")
-  d1.phase = 0.30                            -- 12 seconds later, at rate 1
+  -- a new loop starts at the start of the region (the forty-eighth change):
+  -- a pass from where the head was could cross the region's end
+  local j0 = last("position", 3)
+  near(j0 and j0[3] or -1, 120, 1e-6, "...and puts the head at the start of the deck's own region")
+  near(last("position", 4)[3], 120, 1e-6, "...on both voices")
+  near(d1.phase, 0, 1e-9, "...and the deck knows the head is there")
+  d1.phase = 0.30                            -- 18 seconds later, at rate 1
   Mdeck.close_loop(d1)
-  near(P.dk1_start, 0.10, 1e-9, "disarming closes the loop where recording began")
+  near(P.dk1_start, 0, 1e-9, "disarming closes the loop where recording began: the region's start")
   near(P.dk1_end, 0.30, 1e-9, "...and ends it where recording stopped")
   local j = last("position", 3)
-  near(j and j[3] or -1, 120 + 0.10 * 60, 1e-6,
+  near(j and j[3] or -1, 120, 1e-6,
     "...and drops the head at the loop start, inside the deck's own region")
 
   -- a deck that ALREADY holds audio overdubs into the loop it has. That is the
@@ -315,16 +322,51 @@ do
   Mdeck.close_loop(d1)
   near(P.dk1_end, 0.30, 1e-9, "...and disarming does not re-cut it")
 
-  -- too short, or the head wrapped past the region end: softcut loops cannot
-  -- cross the seam, so keep the whole region rather than snap a wrong slice
+  -- a pass that starts near the region's end no longer crosses it: the head
+  -- goes to the start first. This pass was the once-a-minute failure.
   d1.any = false
   P.dk1_start, P.dk1_end = 0, 1
+  d1.phase = 0.97
+  Mdeck.arm_loop(d1)
+  Mdeck.on_phase(3, 120 + 0.02)              -- softcut reports from the start
+  Mdeck.on_phase(3, 120 + 3)                 -- 3 seconds later
+  Mdeck.close_loop(d1)
+  near(P.dk1_start, 0, 1e-9, "a pass armed 2 s before the region's end closes a loop at its start")
+  near(P.dk1_end, 0.05, 1e-9, "...3 seconds long")
+
+  -- a report from the place the head left is not believed: softcut reports
+  -- every 25 ms, and one can be on its way when the head jumps
+  d1.any = false
+  P.dk1_start, P.dk1_end = 0.2, 0.3
+  d1.phase = 0.60
+  Mdeck.arm_loop(d1)
+  Mdeck.on_phase(3, 120 + 0.60 * 60)         -- late, from before the jump
+  near(d1.phase, 0, 1e-9, "a report from the place the head left is dropped")
+  Mdeck.close_loop(d1)                       -- and the pass closes at once
+  near(P.dk1_start, 0.2, 1e-9, "...so a pass that closes at once gives back its loop")
+  near(P.dk1_end, 0.3, 1e-9, "...and not 36 seconds of the old tape")
+  near(last("position", 3)[3], 120 + 0.2 * 60, 1e-6, "...with the head back on that loop")
+  -- the head could really be far away (a position set by hand): the fourth
+  -- far report is believed
+  Mdeck.jump(d1, 0)
+  for _ = 1, 3 do Mdeck.on_phase(3, 120 + 30) end
+  ok(d1.phase ~= 0.5, "three far reports after a jump are dropped")
+  Mdeck.on_phase(3, 120 + 30)
+  near(d1.phase, 0.5, 1e-9, "...and the fourth is believed")
+
+  -- a pass longer than the region comes round its end. A loop cannot span
+  -- that join, and the pass filled the region: the loop is all of it
+  d1.any = false
+  P.dk1_start, P.dk1_end = 0.2, 0.3
   d1.phase = 0.9
   Mdeck.arm_loop(d1)
-  d1.phase = 0.05                            -- wrapped
+  Mdeck.on_phase(3, 120 + 0.02)
+  Mdeck.on_phase(3, 120 + 30)
+  Mdeck.on_phase(3, 120 + 59.9)
+  Mdeck.on_phase(3, 120 + 3)                 -- round the end
   Mdeck.close_loop(d1)
-  near(P.dk1_start, 0, 1e-9, "a pass that wrapped the region keeps the full loop")
-  near(P.dk1_end, 1, 1e-9, "...rather than snapping to a slice that is not it")
+  near(P.dk1_start, 0, 1e-9, "a pass that came round the region's end keeps the full loop")
+  near(P.dk1_end, 1, 1e-9, "...rather than snapping to its last 3 seconds")
 
   -- the erase disarms on its way past, and must not snap around material it
   -- is about to destroy
@@ -381,10 +423,11 @@ do
   d1.phase = 0.100
   Mdeck.arm_loop(d1)
   near(P.dk1_end, 1, 1e-9, "arming still opens an empty deck's loop")
-  d1.phase = 0.1005                             -- ~30ms later: not a pass
+  d1.phase = 0.0005                             -- ~30ms later: not a pass
   Mdeck.close_loop(d1)
   near(P.dk1_start, 0.100, 1e-9, "a pass too short to be a loop gives the old one back")
   near(P.dk1_end, 0.170, 1e-9, "...both edges, not the whole region")
+  near(last("position", 3)[3], 120 + 0.100 * 60, 1e-6, "...and puts the head back on it")
 
   -- a REVERSE deck records downwards, so its pass runs b..a. Read forwards it
   -- looked like a negative span and was declined, leaving the region.

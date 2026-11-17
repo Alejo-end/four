@@ -117,9 +117,6 @@ Known issues in this beta:
 - Changing an effect's type gives a short dip in the sound.
 - A take that runs past the end of its 60-second buffer becomes a full 60-second loop,
   with silence in it. Move its start and end on TAKE with E2 and E3.
-- The tape's head runs on when the tape is empty. A tape pass that runs over the end of
-  the 60-second tape keeps the whole tape as its loop. Erase the tape (K1 plus K3 on
-  TAPE) and record the pass again.
 - The densest set tried so far went past the CPU limit.
 
 If something does not work, please open an
