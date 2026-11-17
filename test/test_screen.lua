@@ -626,4 +626,51 @@ do
   ok(px(x0, 25) ~= 12 or px(x0 + w + 11, 25) ~= 12, "...and its frame is gone")
 end
 
+-- ============================================================================
+-- 14 · TAPE says what a pass records, and says when a pass hears nothing
+-- ============================================================================
+do
+  local function lit(x0, y0, x1, y1, lvl)
+    local n = 0
+    for y = y0, y1 do for x = x0, x1 do if px(x, y) == lvl then n = n + 1 end end end
+    return n
+  end
+  local function amps(i, o)
+    _h.push("amp_in_l", i); _h.push("amp_in_r", i)
+    _h.push("amp_out_l", o); _h.push("amp_out_r", o)
+  end
+  T.goto_page("TAPE"); _h.run_ticks(2)
+  -- the flag sits left of the reels, on rows 20 to 24
+  params:set("cut_source", 1); _h.run_ticks(1); redraw()
+  ok(lit(2, 20, 34, 24, 5) > 20 and lit(2, 20, 34, 24, 9) == 0,
+    "at WET, the default, TAPE draws SRC WET dim")
+  params:set("cut_source", 0); _h.run_ticks(1); redraw()
+  ok(lit(2, 20, 34, 24, 9) > 20, "at DRY it draws SRC DRY bright: the tape records the input alone")
+  params:set("cut_source", 1)
+  -- the message's row, rows 26 to 30. Read it between the reels (x 56 to
+  -- 76), where nothing else draws: the spokes are as bright as the hint
+  local w = CTX.font.text_w("NO SOUND - K1+E3 SOURCE", 1)
+  ok(w <= 124, "the hint fits the screen (" .. w .. " px)")
+  amps(0, 0); _h.run_ticks(1)
+  params:set("tape_rec", 1)
+  _h.run_ticks(4); redraw()
+  ok(lit(56, 26, 76, 30, 10) == 0, "a pass that just opened says nothing yet")
+  _h.run_ticks(30); redraw()
+  ok(lit(56, 26, 76, 30, 10) > 15, "after a second of silence at the source it says NO SOUND - K1+E3 SOURCE")
+  amps(0, 0.5); _h.run_ticks(2); redraw()
+  ok(lit(56, 26, 76, 30, 10) == 0, "the hint leaves when the source sounds")
+  params:set("tape_rec", 0); _h.run_ticks(1); redraw()
+  ok(lit(56, 26, 76, 30, 12) == 0, "a pass that heard a sound closes without a message")
+  amps(0, 0); _h.run_ticks(1)
+  params:set("tape_rec", 1); _h.run_ticks(6)
+  params:set("tape_rec", 0); _h.run_ticks(1); redraw()
+  ok(lit(56, 26, 76, 30, 12) > 15, "a pass that heard nothing closes with NO SOUND RECORDED")
+  _h.run_ticks(40); redraw()
+  ok(lit(56, 26, 76, 30, 12) == 0, "...and the message leaves after two seconds")
+  -- leave the tape empty and whole
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  CTX.clear_twave(); CTX.tape_msg = nil
+  _h.run_ticks(1)
+end
+
 T.report("screen harness OK")

@@ -31,7 +31,9 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
 - Each track has a voice (OFF GRAIN WARP PV PLAY CLOUD), a window, a filter, COLOR
   (drive, crush), two EFFECT slots in series and its sends to the delay and the reverb.
   The effect types are OFF CHORUS FLANGE WOBBLE RESON RING ECHO, each with an amount and
-  a rate. The second slot's type has no key yet: it is in PARAMS.
+  a rate. The second slot's type has no key yet: it is in PARAMS. The amount knob rises
+  fast at first (its square root, the forty-fifth change), and no type is quieter than
+  the dry sound.
 - GRAIN is a granulator that reads the take: stereo grain pairs, spray, and timing from
   regular to Poisson. A cloud holds 48 pairs with the plugin and 32 without. CLOUD is
   Mutable Instruments Clouds: `FourCloud` from our plugin, else an installed MiClouds,
@@ -49,9 +51,12 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
   The presets in `data/` say `fx_dly = 1` and so on for the tracks that sent before.
 - A track leaves its filter at the level of its take (`dfmTrim`). The output is 7 dB
   quieter than before the tenth change, so drive and RESON bite later on the knob.
-- The tape is the one softcut deck, on the deck law in lib/mdeck.lua. The layer decks
-  are gone. `MOTION_IDS` keeps their fourteen ids in place as tombstones
-  (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md stay, labelled as old.
+- The tape is the one softcut deck, on the deck law in lib/mdeck.lua. A pass records
+  what four plays: `cut_source` starts at 1 (WET, the engine's output), and K1+E3 on
+  TAPE turns it to DRY, the line input alone. TAPE names the source and says when a pass
+  hears nothing. The layer decks are gone. `MOTION_IDS` keeps their fourteen ids in
+  place as tombstones (`MOTION_TOMBSTONES`). `data/layers/` and doc/layers.md stay,
+  labelled as old.
 
 **FourStretch, our own plugin.** `ugen/` holds our UGens (FourPV, FourWarp, FourRead,
 FourGrain, FourDelay, FourRoom, FourBBD, FourTanh, FourCloud) and their proof
@@ -89,7 +94,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-17 it runs the forty-fourth change at `count: 198`, with the plugin
+- Since 2026-11-17 it runs the forty-sixth change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -137,7 +142,9 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 41st: the Relay brief and the plan doc/signature-workflow.md | documents only | |
 | 42nd: an effect synth and the shared delay fill their lines from silence (C1 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: rows 19.12, 19.29 and 10.4 with no break. Not pushed | no |
 | 43rd: the CPU budget part by part, `measure.py budget` (the first step of C5) (test tool, documents) | measured there, 2026-11-17 | |
-| 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | no |
+| 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | the user, 2026-11-17, on the build as a whole: "I think it sounds good" |
+| 45th: the effects are stronger at the same knob, and none is quieter than the dry sound (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.11's levels, 19.12 and 19.29 with no break. Not pushed | no. The user asked for it: the effects were "a bit too bland" |
+| 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -161,6 +168,9 @@ xruns past about 60%.
   slot. Row 19.27's sets are dressed with all of that: 62.4% and 55.9% as means, 64.5%
   and 56.6% as the row's largest window. The norns poll `cpu_avg` is
   `Crone.server.avgCPU`, and it reads 5 to 7 points above the thread at every load.
+  The same evening, at 62 C against 52 C, every state read 0.5 to 1.0 point more: the
+  dense set 63.3%. The forty-fifth change costs nothing: four FLANGE add 4.9 points and
+  four ECHO 4.0 (4.8 and 4.2 before).
 
 **Phase A of doc/signature-workflow.md is under way** (C1, C3, C4, then C2 and C6, with
 C5 measured). The user's rule, 2026-11-17: push nothing and merge nothing of it until
@@ -169,8 +179,12 @@ device (doc/measurements/2026-11-17/). The user has not listened to it. The dip 
 change into WOBBLE, CHORUS or FLANGE is question 10 of the plan, for their ears, and the
 README keeps its known issue until then. C5's measurement is the forty-third change:
 nothing grew, row 19.27's set is dressed with every effect. Its supported set waits for
-the user's answer to question 8. C3 is the forty-fourth change, on the device, not
-heard. Next: C4. The work is on the local branch `phase-a`.
+the user's answer to question 8. C3 is the forty-fourth change, on the device. The user
+tested that build on 2026-11-17: "I think it sounds good". Two requests came out of the
+test, and they are the forty-fifth change (stronger effects) and the forty-sixth (the
+tape records what four plays). Both are on the device, and the user has not heard them.
+Next: the tape's head (a pass that crosses the tape's end keeps the whole 60 s as its
+loop, found by row 19.31), then C4. The work is on the local branch `phase-a`.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
@@ -424,6 +438,20 @@ Each line was learned the hard way; the change log has the story.
 - The offline check on the Mac is not the device's scsynth. `test/device/norns_nrt.sh`
   renders a probe's scores with the norns's own scsynth, offline, in seconds. Run it
   before the RESTART for any change that the first block of a synth can decide.
+- On the norns every UGen counts. A control-rate operator costs about 0.01% of the
+  scsynth thread for each synth that holds it: nine more in FLANGE and four in ECHO took
+  the dense set from 62.4% to 63.5% (the forty-fifth change, first version). When a law
+  changes, count the def's UGens before and after (probe7 prints them, check_dsp.sh
+  holds the counts), and write the law so that the count does not grow.
+- An effect that is quieter than the dry sound reads as weak. A straight crossfade of a
+  sound and its effect is 3 dB down at its middle, and more when the effect is weak on
+  that material (RESON was 7 dB under OFF on an off-note tone). Cross at equal power, or
+  keep the dry sound whole up to the middle. Measure the level of every effect against
+  OFF at the amount it starts with (gate row 19.11, probe7).
+- A page that records says what a pass will record, and says when a pass hears nothing.
+  The tape recorded the line input alone, the knob for its source was under K1+E3, and
+  a pass over playing tracks came back empty with `EMPTY - K2 REC` (the forty-sixth
+  change). The user read it as "the tape is not working".
 - A guard added to one of two sibling paths makes the other one a bug with a witness.
   When a fix names a limitation in ANOTHER module, that is an unfixed bug, not a note.
 - A release belongs to whatever took the press: `key_state` routes a key release to the

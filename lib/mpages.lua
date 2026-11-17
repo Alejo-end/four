@@ -101,8 +101,16 @@ function M.update_tape_wave()
     -- engine output, or the blend): a WET print otherwise painted nothing
     -- and left twave_any false over audible tape
     local a = C.cut_rec_amp()
-    if a > 0.01 then C.twave_any = true end
+    if a > 0.01 then
+      C.twave_any = true
+      C.tape_heard, C.tape_quiet = true, 0
+    else
+      -- silence at the source: TAPE says so after a second of it
+      C.tape_quiet = (C.tape_quiet or 0) + 1
+    end
     twave_bin = paint_bins(twave, twave_bin, bin, a, pget("tape_pre", 0))
+  else
+    C.tape_quiet = 0
   end
 end
 
@@ -246,13 +254,17 @@ local function view_x(ph, x0, x1, lo, span)
   return x0 + floor(t * (x1 - x0))
 end
 
--- the record-SOURCE flag: a deck printing PROCESSED audio is never a hidden
--- mode. DRY (the default) draws nothing. Reads the EFFECTIVE source.
+-- the record-SOURCE flag: what a pass records is never a hidden mode. WET
+-- (the default: what four plays) reads dim. A blend and DRY (the line input
+-- alone) read bright. Reads the EFFECTIVE source.
 local function src_flag(x, y)
   local src = C.eff_cut_source()
-  if src > 0.02 then
-    ptext(src > 0.98 and "SRC WET" or ("SRC WET " .. floor(src * 100 + 0.5) .. "%"),
-      x, y, 1, 9)
+  if src > 0.98 then
+    ptext("SRC WET", x, y, 1, 5)
+  elseif src < 0.02 then
+    ptext("SRC DRY", x, y, 1, 9)
+  else
+    ptext("SRC WET " .. floor(src * 100 + 0.5) .. "%", x, y, 1, 9)
   end
 end
 
@@ -1328,6 +1340,16 @@ end
 -- ============================================================================
 local REEL_X = { 46, 86 }   -- the two reel centers
 local reel_angle = 0        -- persistent spin accumulator, driven by tape rate
+-- a line of text over the reels, in a black pocket so that the spokes do not
+-- cross it. The SOURCE knob (K1+E3) picks what a pass records.
+local TAPE_NO_SOUND = "NO SOUND - K1+E3 SOURCE"
+local function tape_say(msg, lvl)
+  local w = text_w(msg, 1)
+  screen.level(0)
+  screen.rect(64 - floor(w / 2) - 3, 25, w + 6, 8)   -- under the SRC flag's rows
+  screen.fill()
+  ptext_c(msg, 64, 26, 1, lvl)
+end
 local function body_TAPE(frame)
   local a2, b2 = pget("loop_start", 0), pget("loop_end", 1)
   local lo, hi = min(a2, b2), max(a2, b2)
@@ -1391,6 +1413,11 @@ local function body_TAPE(frame)
   src_flag(2, 20)
   if recording then
     chip("REC", 2, 12)                -- steady: the header T is the blink
+    -- a pass that hears nothing says so while it runs: a silent source
+    -- looks like a tape that does not record
+    if (C.tape_quiet or 0) > FPS then tape_say(TAPE_NO_SOUND, 10) end
+  elseif C.tape_msg and (frame - (C.tape_msg_at or -1e9)) < FPS * 2 then
+    tape_say(C.tape_msg, 12)          -- what the pass that just closed did
   elseif not C.twave_any then
     ptext_c("EMPTY - K2 REC", 64, 26, 1, 10)
   elseif not heard then

@@ -3109,6 +3109,56 @@ def stage19():
 
     check("19.30", c1930)
 
+    # The tape records what four plays (the forty-sixth change). Its source
+    # starts at WET, the engine's output. At DRY it records the line input
+    # alone: a pass over playing tracks with a silent input gave an empty tape,
+    # and the page said EMPTY - K2 REC again. A pass that hears nothing now
+    # says so while it runs and when it closes.
+    def c1931():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        n.set("track_sel", 2)
+        n.signal(None)
+        fresh_src = n.get("cut_source")
+        out = {}
+
+        def tape_pass(name, secs=3):
+            n.goto("TAPE")
+            time.sleep(0.3)
+            # The head runs on over the 60 s of tape, and a pass that crosses
+            # the tape's end keeps the whole 60 s as its loop (the tape's law,
+            # lib/mtape.lua). The 2 s read below would then hear silence, as
+            # it did on the first run of this row. Start with room for the pass.
+            while num(n.ctx("c.tape_phase")) > 0.85:
+                time.sleep(1)
+            n.tap(2, 0.08)
+            time.sleep(secs)
+            quiet = num(n.ctx("c.tape_quiet"))
+            shot(f"19.31_{name}_rec")
+            n.tap(2, 0.08)
+            time.sleep(0.4)
+            said = n.lua("print(__ctx.tape_msg)").strip()
+            shot(f"19.31_{name}_closed")
+            any_ = n.ctx("c.twave_any")
+            # the tape alone: softcut's own outputs
+            db = level(f"19.31_{name}_tape", 2, DECKS_OUT)
+            out[name] = {"quiet_frames": quiet, "said": said, "twave_any": any_, "tape_db": db}
+            erase_page("TAPE")
+            time.sleep(0.5)
+
+        tape_pass("wet")
+        n.set("cut_source", 0)
+        time.sleep(0.2)
+        tape_pass("dry")
+        n.set("cut_source", 1)
+        ok = (fresh_src == 1 and out["wet"]["tape_db"] > -45 and out["wet"]["twave_any"] == "true"
+              and out["wet"]["said"] == "nil" and out["wet"]["quiet_frames"] == 0
+              and out["dry"]["tape_db"] < -70 and out["dry"]["twave_any"] == "false"
+              and out["dry"]["said"] == "NO SOUND RECORDED" and out["dry"]["quiet_frames"] > 15)
+        return verdict(ok, f"a fresh script's cut_source {fresh_src}; track 2 plays and the input is silent, "
+                           f"a pass of 3 s at WET and at DRY: {out}. Look at screens/19.31_*.png", "measured")
+
+    check("19.31", c1931)
+
 
 def cleanup():
     n.signal_quit()

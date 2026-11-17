@@ -221,6 +221,9 @@ local ctx = {
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
   tape_phase = 0,            -- softcut phase event: tape head, normalized
+  tape_heard = nil,          -- an open tape pass: has it heard a sound yet (nil: no pass)
+  tape_quiet = 0,            -- frames of silence at the tape's source while it records
+  tape_msg = nil,            -- what the last tape pass did, for TAPE to say
   -- display-model flags (mpages paints them)
   wave_any = false,          -- false until something audible lands in the buffer
   twave_any = false,
@@ -310,7 +313,7 @@ end
 -- the EFFECTIVE softcut record source: the cut_source knob. The SRC flag and
 -- the meters read THIS, never the raw param, so one place decides it.
 function ctx.eff_cut_source()
-  return pget("cut_source", 0)
+  return pget("cut_source", 1)
 end
 
 -- ONE writer for the softcut input sends, so the routing can never disagree
@@ -2667,6 +2670,7 @@ local function init_params()
       -- audio still sitting in the buffer. Mdeck.arm_loop draws the same line
       -- by asking whether the deck already holds anything.
       tape_arm_phase, tape_arm_was = nil, nil
+      ctx.tape_heard, ctx.tape_quiet, ctx.tape_msg = false, 0, nil
       if pget("tape_pre", 0) == 0 then
         -- remember the loop this pass widens: a pass too short to be a loop
         -- puts it back (Mdeck.arm_loop does the same with arm_was)
@@ -2690,7 +2694,17 @@ local function init_params()
       -- instead of leaving the whole 60s tape playing
       Mtape.set_loop(tape_arm_was[1], tape_arm_was[2])
     end
-    if v == 0 then tape_arm_phase, tape_arm_was = nil, nil end
+    if v == 0 then
+      tape_arm_phase, tape_arm_was = nil, nil
+      -- a pass that heard nothing says so: the strip stayed flat, and a
+      -- silent source looks like a tape that does not record
+      if ctx.tape_heard == false then
+        ctx.tape_msg, ctx.tape_msg_at = "NO SOUND RECORDED", ctx.frame or 0
+        print("four: the tape pass heard no sound (tape source "
+          .. ctx.eff_cut_source() .. ")")
+      end
+      ctx.tape_heard = nil
+    end
     Mtape.update_tape_rec()
   end)
   params:add_control("tape_rate", "tape rate",
@@ -2710,10 +2724,13 @@ local function init_params()
   params:add_control("tape_fade", "tape fade",
     controlspec.new(0.001, 0.5, "exp", 0, 0.05, "s"))
   params:set_action("tape_fade", Mtape.set_fade)
-  -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET post-FX
-  -- engine output — the tape as a print / resample stage. default DRY = the classic parallel-ADC tap, so nothing changes until
-  -- you reach for it.
-  params:add_control("cut_source", "tape source", unit(0.0))
+  -- tape RECORD SOURCE (K1+E3 on TAPE): 0 = DRY raw input .. 1 = WET, the
+  -- engine's output after the effects: the tape as a print / resample stage.
+  -- The default is WET since the forty-sixth change (doc/ux-feedback.md, 25).
+  -- At DRY a pass recorded the line input alone, so REC over four playing
+  -- tracks gave an empty tape, and nothing on the page said why. The engine's
+  -- output holds the input too (dry_wet), so a WET pass still hears it.
+  params:add_control("cut_source", "tape source", unit(1.0))
   -- through the one source writer
   params:set_action("cut_source", function() ctx.update_cut_source() end)
 

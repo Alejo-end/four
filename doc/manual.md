@@ -94,7 +94,7 @@ the code.
 | TAKE | Record a sound and set its loop | record | snap the loop, hold: undo |
 | VOICE | How the track plays the take | freeze (heal in PLAY) | next voice |
 | TRACKS | The four tracks: on, level and sends | track on | next voice |
-| TAPE | A loop deck for the input or the whole mix | record | reverse |
+| TAPE | A loop deck that records what four plays, or the input alone | record | reverse |
 | FILTER | Low-pass, high-pass or band-pass, with drive and crush | open | type |
 | EFFECT | Two effects in series for the track | on | type |
 | DELAY | The echoes of the tracks that send to it | hold forever | kill |
@@ -169,6 +169,11 @@ is `FourBBD`, a model of a bucket brigade chip: a long time is dark.
 |---|---|
 | ![MIX](ui/mix.png) | ![TAPE](ui/tape.png) |
 | MIX: E2 fades between the engine and the tape. | TAPE: a loop deck with its own speed and direction. |
+
+A tape pass records what four plays: the tracks and their effects, and the input as far
+as DRY/WET on MIX lets it through. The page says `SRC WET`. Hold K1 and turn E3 down to
+`SRC DRY`, and a pass records the line input alone. If the source is silent while the
+tape records, the page says `NO SOUND - K1+E3 SOURCE`.
 
 ### PADS
 
@@ -322,13 +327,16 @@ is off, an effect at zero and a reverb at zero do not run.
 5. Some reverb parameters do nothing. The room reads only decay, damp and size.
 6. A loop plays that is not the take. It is the tape. MIX shows which deck you hear. Erase
    the tape on TAPE with K1 plus K3.
-7. The screen is black or frozen after the load. A Lua error is inside the redraw. Scroll
+7. The tape records nothing, and TAPE says `NO SOUND`. Its source is silent. At `SRC WET`
+   it records what four plays, and at `SRC DRY` the line input alone. On TAPE, hold K1
+   and turn E3.
+8. The screen is black or frozen after the load. A Lua error is inside the redraw. Scroll
    maiden below the ok line for the traceback.
-8. WARP, PV and CLOUD sound plain, and the SuperCollider tab says
+9. WARP, PV and CLOUD sound plain, and the SuperCollider tab says
    `four: FourStretch absent`. Do SYSTEM > RESTART. If the plugin is still absent, see
    [ugen/README.md](../ugen/README.md).
-9. The sound drops out. SuperCollider is over its share of the processor. Set the tracks
-   you do not use to OFF: a CLOUD track keeps working in silence.
+10. The sound drops out. SuperCollider is over its share of the processor. Set the tracks
+    you do not use to OFF: a CLOUD track keeps working in silence.
 
 ## Roadmap
 

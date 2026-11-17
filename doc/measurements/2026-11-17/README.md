@@ -319,3 +319,36 @@ control-rate operators in FLANGE and four more in ECHO.
 - No state had an xrun.
 
 Nobody has listened to this change yet.
+
+## The tape (the forty-sixth change)
+
+The user: "I think the tape is not working. I don't know how can I record the tape."
+The tape recorded, and its source was the line input alone. A fresh script, on the norns:
+
+| A pass of 3 s on TAPE (K2, wait, K2) | `cut_source` | The tape plays back at |
+|---|---|---|
+| A tone at the input, no track | 0, DRY (the old default) | -17.1 dB |
+| Track 1 plays, the input is silent | 0, DRY | -92.6 dB, and the page said `EMPTY - K2 REC` |
+| Track 1 plays, the input is silent | 1, WET | -27.7 dB |
+
+After the change `cut_source` starts at 1. Gate row 19.31, track 2 plays the tone and
+the input is silent:
+
+| Row 19.31 | The WET pass (a fresh script) | The DRY pass (K1+E3 down) |
+|---|---|---|
+| The tape plays back at | -17.2 dB | -92.6 dB |
+| Silent frames counted while it recorded | 0 | 47 |
+| The page while it recorded | `SRC WET`, REC | `SRC DRY`, REC, `NO SOUND - K1+E3 SOURCE` |
+| The page at the stop | the loop | `NO SOUND RECORDED` |
+
+The screens are `screens/19.31_*.png`.
+
+The first run of the row failed, and it showed a second fault. The head runs on over the
+60 s of tape while nothing records. That pass began 2 s before the tape's end and crossed
+it. The tape's law then keeps the whole 60 s as the loop, so the 3 s of sound play once a
+minute. A pass of 8 s crosses the end one time in seven. The row now waits for room. The
+fault is open, and the README lists it.
+
+The norns had booted on a stale clock (09:14), and the time sync moved it to 20:36. sclang
+then took 98% of a core and matron 108%, as on 2026-11-06. A restart of the services
+cleared it. All of this page's evening numbers are from after that restart.

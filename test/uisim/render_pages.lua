@@ -351,14 +351,15 @@ else
   export(pfx("REVERB", "_SHIMMER"))
   params:set("shimmer", 0)
   params:set("rev_mix", 0.28)
-  -- TAPE record SOURCE thrown WET: the tape prints the processed output
-  -- (doc/ux-feedback.md §25) — the "SRC WET" flag must show
+  -- TAPE record SOURCE: WET is the default (doc/ux-feedback.md §25), and the
+  -- base shot shows its dim "SRC WET". At DRY the tape records the line input
+  -- alone, and "SRC DRY" must read bright
   goto_page("TAPE")
-  params:set("cut_source", 1)
+  params:set("cut_source", 0)
   run_ticks(4)
   redraw()
-  export(pfx("TAPE", "_WET"))
-  params:set("cut_source", 0)
+  export(pfx("TAPE", "_DRY"))
+  params:set("cut_source", 1)
   -- MIX thrown full tape: the ENG lane must lie flat-dim (inaudible)
   goto_page("MIX")
   params:set("mix", 1)
@@ -654,6 +655,28 @@ else
   params:set("scene_morph_amt", 0)
   run_ticks(2)
   params:set("scene_slot_a", 0)
+  -- a pass over a silent source: TAPE says so while it runs, and says that
+  -- nothing was recorded when it closes
+  do
+    goto_page("TAPE")
+    local keep = SCENARIO
+    SCENARIO = function(t)
+      keep(t)
+      push("amp_in_l", 0); push("amp_in_r", 0)
+      push("amp_out_l", 0); push("amp_out_r", 0)
+    end
+    run_ticks(1)    -- the frame reads what the tick before it pushed
+    params:set("tape_rec", 1)
+    run_ticks(40)
+    redraw()
+    export(pfx("TAPE", "_NO_SOUND"))
+    params:set("tape_rec", 0)
+    run_ticks(2)
+    redraw()
+    export(pfx("TAPE", "_NOTHING"))
+    SCENARIO = keep
+    run_ticks(60)   -- the message leaves before the next shot
+  end
   -- the header with every flag lit on a long title: the words that do not
   -- fit shrink to dots and pips, and none of them drops off. Shot in the
   -- blink's lit phase, so the write letters show. The sequencer's and the

@@ -4722,3 +4722,34 @@ a bit too like bland now".
   sound in OFF.
 - The stock FLANGE (no plugin) is a bare comb, and its peak is far over the phrase:
   1.19 where the phrase peaks at 0.35 (1.75 before). It is a KNOWN row of check_dsp.sh.
+
+four, forty-sixth change: **the tape records what four plays, and says when a pass
+hears nothing (Lua and test tools; on the device 2026-11-17)**. The user, the same day:
+"I think the tape is not working. Like, I don't know how can I record the tape."
+- Found on the device: the tape recorded. Its source `cut_source` started at DRY, the
+  line input alone. With a tone at the input a pass came back at -17 dB. With a track
+  playing and a silent input, the pass held -93 dB, and the page said `EMPTY - K2 REC`
+  again. The knob for the source is K1+E3, and nothing on the page named it.
+  doc/ux-feedback.md, item 25, is the user's own wish of July 2026: the tape captures
+  the output of the effect chain, not the raw input.
+- `cut_source` now starts at 1 (WET): a pass records the engine's output, which is the
+  tracks with their effects and the input as far as DRY/WET lets it through. A saved
+  PSET or scene keeps its own value.
+- TAPE names the source at every setting: `SRC WET` dim, `SRC DRY` or a blend bright.
+- A pass says what it did. After a second of silence at the source the page says
+  `NO SOUND - K1+E3 SOURCE` while the tape records. A pass that heard nothing closes
+  with `NO SOUND RECORDED` for two seconds, and prints a line to the log.
+- test_control (the default, both ends of the knob, the four cases of a pass) and
+  test_screen (the flag, both messages, when each leaves) hold it. Each new test fails
+  when its behaviour is taken out. The render suite has TAPE_DRY, TAPE_NO_SOUND and
+  TAPE_NOTHING, and doc/ui/tape.png shows the flag.
+- On the device, the new gate row 19.31: a fresh script reads `cut_source` 1. Track 2
+  plays, the input is silent. The WET pass comes back at -17.2 dB. The DRY pass holds
+  -92.6 dB, counts 47 silent frames and says `NO SOUND RECORDED`. The four screens are
+  in doc/measurements/2026-11-17/screens/.
+- Found by that row's first run, and open: the tape's head runs on over the 60 s of
+  tape, and a pass that crosses the tape's end keeps the whole 60 s as its loop (the
+  tape's law). A pass of 8 s does that one time in seven. The README lists it.
+- The norns had booted on a stale clock, and the time sync then moved it by 11 hours.
+  sclang and matron each took a whole core (98% and 108%), as on 2026-11-06. A restart
+  of the services cleared it before any of this was measured.

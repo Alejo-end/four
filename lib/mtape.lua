@@ -117,15 +117,15 @@ end
 -- reverb). the two router sends SUM at the shared softcut input, so a blend
 -- prints part raw + part processed and the tape becomes a resample / print
 -- stage. NO runaway: the engine reads only the ADC bus (context.in_b), never
--- softcut, so eng -> cut is a one-way edge. default 0 = the classic parallel
--- tap, so the tape behaves exactly as before until you reach for this.
+-- softcut, so eng -> cut is a one-way edge. The default is 1 (WET): a pass
+-- records what four plays. At 0 it records the line input alone.
 function M.set_source(v)
   audio.level_adc_cut(1 - v)   -- dry input tap
   audio.level_eng_cut(v)       -- processed engine output
 end
 
 function M.init_tape()
-  M.set_source(pget("cut_source", 0))   -- dry/processed record source (was 1/0)
+  M.set_source(pget("cut_source", 1))   -- dry/processed record source
   audio.level_cut(1)       -- softcut master out: persists across scripts, force up
   sc.buffer_clear_region(0, TAPE_LEN)
   for v = 1, 2 do

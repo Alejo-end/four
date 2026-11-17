@@ -24,10 +24,10 @@ through the track's own chain:
 - Two effect slots: chorus, flanger, wobble, resonator, ring modulator or echo.
 - Sends to the other tracks, to a shared bucket brigade delay and to a shared room reverb.
 
-Under the tracks runs a tape loop that records the input or four's own output. PADS cuts
-the loop into eight slices, and a step sequencer can play them. SCENE keeps whole sounds in
-eight slots and crossfades between two of them. MOTION loops your knob moves, and four
-modulators move the sound around where you left the knobs.
+Under the tracks runs a tape loop that records what four plays, or the input alone. PADS
+cuts the loop into eight slices, and a step sequencer can play them. SCENE keeps whole
+sounds in eight slots and crossfades between two of them. MOTION loops your knob moves,
+and four modulators move the sound around where you left the knobs.
 
 Everything sits on the three keys and three encoders of the norns. A grid is optional, and
 every parameter maps to MIDI.
@@ -117,6 +117,9 @@ Known issues in this beta:
 - Changing an effect's type gives a short dip in the sound.
 - A take that runs past the end of its 60-second buffer becomes a full 60-second loop,
   with silence in it. Move its start and end on TAKE with E2 and E3.
+- The tape's head runs on when the tape is empty. A tape pass that runs over the end of
+  the 60-second tape keeps the whole tape as its loop. Erase the tape (K1 plus K3 on
+  TAPE) and record the pass again.
 - The densest set tried so far went past the CPU limit.
 
 If something does not work, please open an

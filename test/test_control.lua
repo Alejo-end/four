@@ -998,16 +998,64 @@ do
   local adc, eng
   audio.level_adc_cut = function(v) adc = v end
   audio.level_eng_cut = function(v) eng = v end
+  -- a pass records what four plays unless the knob says otherwise: at DRY,
+  -- REC over four playing tracks gave an empty tape (the forty-sixth change)
+  near(params:lookup_param("cut_source").controlspec.default, 1, 1e-9,
+    "the tape's source starts at WET: a pass records what four plays")
+  near(params:get("cut_source"), 1, 1e-9, "...and a fresh script holds that value")
   params:set("cut_source", 0.5)   -- move it so the set back to 0 fires
   near(eng or -1, 0.5, 1e-6, "cut_source at half sends half of the engine output")
   near(adc or -1, 0.5, 1e-6, "...and half of the input tap")
   params:set("cut_source", 0)     -- (an equal set is equality-guarded)
-  near(eng or -1, 0, 1e-6, "at rest the tape records the input (knob DRY)")
+  near(eng or -1, 0, 1e-6, "at DRY the tape records the input alone")
   near(adc or -1, 1, 1e-6, "...through the full input tap")
   params:set("tape_rec", 1)
   near(eng or -1, 0, 1e-6, "arming the tape leaves the source alone")
   params:set("tape_rec", 0)
+  params:set("cut_source", 1)
+  near(eng or -1, 1, 1e-6, "at WET the tape records the engine's output")
+  near(adc or -1, 0, 1e-6, "...and the input tap is closed (the engine carries the input)")
   audio.level_adc_cut, audio.level_eng_cut = nil, nil   -- back to the env nop
+
+  -- a pass says what it did, the silent case too. The meter is the source's:
+  -- the output at WET, the input at DRY
+  local function pass(in_amp, out_amp, ticks)
+    _h.push("amp_in_l", in_amp); _h.push("amp_in_r", in_amp)
+    _h.push("amp_out_l", out_amp); _h.push("amp_out_r", out_amp)
+    params:set("tape_rec", 1)
+    _h.run_ticks(ticks)
+    local quiet = CTX.tape_quiet
+    params:set("tape_rec", 0)
+    return quiet
+  end
+  local keep_any = CTX.twave_any
+  CTX.tape_msg = nil
+  local q = pass(0.5, 0, 30)
+  ok(CTX.tape_msg == "NO SOUND RECORDED",
+    "a WET pass with a loud input and a silent output says NO SOUND RECORDED")
+  ok(q >= 29, "...and it counted the silent frames while it ran (got " .. tostring(q) .. ")")
+  CTX.tape_msg = nil
+  q = pass(0, 0.5, 30)
+  ok(CTX.tape_msg == nil, "a WET pass that heard the output says nothing")
+  ok(q == 0, "...and its silence count is 0")
+  params:set("cut_source", 0)
+  CTX.tape_msg = nil
+  pass(0, 0.5, 30)
+  ok(CTX.tape_msg == "NO SOUND RECORDED",
+    "a DRY pass with a silent input says NO SOUND RECORDED, whatever plays")
+  CTX.tape_msg = nil
+  pass(0.5, 0, 30)
+  ok(CTX.tape_msg == nil, "a DRY pass that heard the input says nothing")
+  _h.run_ticks(2)
+  ok(CTX.tape_quiet == 0, "the silence count rests at 0 when the tape does not record")
+  -- leave the tape as it was: empty, whole, WET
+  params:set("cut_source", 1)
+  params:set("loop_start", 0); params:set("loop_end", 1)
+  CTX.clear_twave()
+  CTX.twave_any = keep_any
+  CTX.tape_msg = nil
+  _h.push("amp_in_l", 0); _h.push("amp_in_r", 0)
+  _h.push("amp_out_l", 0); _h.push("amp_out_r", 0)
 
   -- FX capture scope: an FX slot carries the wet path and NOTHING else, so
   -- recalling it moves the effects and leaves the material/voice alone
