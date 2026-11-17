@@ -31,8 +31,10 @@ The checks run with `lua test/check.lua`. The offline DSP check runs with
 
 These are partly built. Each one says at its top what is built.
 
-- [idea-relay.md](idea-relay.md): a proposal for making track-to-track resampling a
-  single, safe performance gesture. No code changes are implied.
+- [signature-workflow.md](signature-workflow.md): the plan for one loop of play: record
+  four parts, bend them, keep the sound and fade back to it. Changes C1 to C13, in phases.
+- [idea-relay.md](idea-relay.md): a proposal. One gesture captures a track's processed
+  sound as another track's new take. Nothing of it is built.
 - [space-plan.md](space-plan.md): the delay, the room, the sends and their screens.
 - [dsp-plan.md](dsp-plan.md): the voices and the effects, worked out from the math.
 - [engine-map.md](engine-map.md): why the engine has its shape. It was written for the

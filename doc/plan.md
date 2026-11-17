@@ -9,6 +9,11 @@ The user performs with this instrument. Their words: "don't make me think, I
 barely know what I'm doing, so it has to be really polished." Every change is
 judged by that: can a tired player on a dark stage read it at once?
 
+Since 2026-11-17 a second plan sits beside this one: doc/signature-workflow.md, for one
+loop of play (record four parts, bend them, keep the sound, fade back to it). It owns
+gate rows 19.12 and 19.27 (its changes C1 and C5), and it uses Phase 2 and Phase 4 below
+as its gates. This plan stays the order of work for everything else.
+
 ## Where the project stands
 
 The STATUS block of CLAUDE.md is the one record of the device: what is on it, the

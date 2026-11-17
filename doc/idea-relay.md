@@ -1,58 +1,52 @@
-# Four Relay
+# Relay: one track's sound becomes another track's take
+
+> Status: a proposal, written 2026-11-17. Nothing of it is built.
+> doc/signature-workflow.md adapts it as its change C13, in Phase D.
 
 ## The idea
 
-**Turn four from four places to play loops into four places a sound can travel.**
+A player records a sound on one track and changes it. Then they capture the result on
+another track, and the source does not stop. The new take is a part of its own. Do it
+again, and one recording goes through a chain of changes. Each stage stays where it is,
+to compare with or to pass on.
 
-A player records a sound on one track, transforms it, then captures that result on
-another track without stopping the source. The new take becomes a fresh instrument
-voice. Repeat the move and a simple recording can travel through a chain of
-transformations, with each stage still available for comparison or another pass.
-
-The musical promise is simple: **keep the source; catch what it became.**
+The source stays. The new take holds what the source became.
 
 ## Why this fits four
 
-Four already has much of the foundation: four independent takes, track-to-track
-routing, a processed tape source, a full-mix PRINT action, and take undo. Those are
-useful ways to move audio around, but the player still has to understand several
-separate mechanisms to turn one track into a new take on another.
+four already has most of the parts: four takes, routing from track to track, a processed
+tape source, PRINT of the full mix, and the take UNDO. Each one moves audio. But to turn
+one track into a new take on another, the player must know several of them.
 
-Relay would give that behavior one clear performance action. It would capture a
-selected track into a selected destination, leave the source playing, and make the
-result immediately playable on the destination. The idea is not to add another
-general-purpose recorder. It is to make resampling between tracks feel like part of
-playing the instrument.
+Relay makes that one action. It captures a chosen track into a chosen destination, leaves
+the source playing, and the result plays on the destination at once. It is not one more
+recorder. It makes resampling between tracks a part of playing.
 
 ## A short performance
 
-1. Record a voice or instrument onto track 1.
-2. Make track 1 grainy, pitch-shifted, filtered, or echoed.
+1. Record a voice or an instrument onto track 1.
+2. Make track 1 grainy, pitch-shifted, filtered or echoed.
 3. Choose track 2 as the destination and pass track 1 into it.
-4. Track 1 keeps playing. Track 2 captures the transformed sound and begins looping
-   the new take.
+4. Track 1 plays on. Track 2 captures the changed sound and loops the new take.
 5. Change track 2, pass it to track 3, and play the original beside the result.
 
-The result should feel like making a copy of a sound by performing it through the
-instrument. No file browser, export step, or stop-and-restart sequence should break
-the phrase.
+The player copies a sound by playing it through the instrument. No file browser, no
+export and no stop and restart breaks the phrase.
 
 ## The core gesture
 
-Relay needs only three decisions: **source, destination, and when to capture**.
+Relay needs three decisions: the source, the destination and the moment of capture.
 
-- **Source:** one track's audible output. The first version should use a single,
-  clearly named tap point in the signal path. Prefer the sound after that track's
-  voice and processing, so the captured take matches what the player hears.
-- **Destination:** one other track. The destination's current take is protected
-  until the capture finishes successfully.
-- **Timing:** capture immediately or begin at the next loop boundary. A later
-  version could add a bar-length capture, but the first version should not need a
-  timing setup to work.
+- The source is one track's output, as the player hears it. The first version uses one
+  named tap in the signal path, after the track's voice and processing, so the take
+  matches what the player hears.
+- The destination is one other track. Its take is protected until the capture ends well.
+- The timing is at once, or from the next loop boundary. A length in bars can come
+  later. The first version needs no timing setup.
 
-At completion, Relay puts the new take on the destination and starts it in the same
-way as an ordinary take. The source remains unchanged and keeps playing. The player
-can then audition the two, undo the new take, or pass the result onward.
+At the end, Relay puts the new take on the destination and starts it like any take. The
+source does not change and plays on. The player can then compare the two, undo the new
+take, or pass the result on.
 
 ```text
 track 1: original take -> voice -> filter / colour / effects -----> keeps playing
@@ -62,86 +56,79 @@ track 1: original take -> voice -> filter / colour / effects -----> keeps playin
 track 2: previous take (protected) ---------------------------> new take -> loops
 ```
 
-The route should be a tap, not a feedback loop. A track cannot relay into itself,
-and the capture must not include its own destination output. The source and
-destination should be visible before recording starts.
+The route is a tap, not a feedback loop. A track cannot relay into itself, and the
+capture must not hold its own destination's output. The screen shows the source and the
+destination before the recording starts.
 
-## What makes it feel different
+## What is different
 
-The novelty is in the **musical handoff**. The player does not merely print the
-master mix or route one track into another while it plays. They deliberately
-transform a phrase, capture that transformation as a new take, and keep both
-generations available as playable parts.
+Resampling is not new. Relay adds speed and safety: a player does it on four with no
+grid and no computer, while the source plays on. The player changes a phrase, captures
+the change as a new take, and keeps both as parts to play.
 
-That creates a natural way to build an arrangement from one performance:
+One performance can grow into an arrangement:
 
 ```text
 one phrase -> a stretched loop -> a granular texture -> a printed rhythm
 ```
 
-The stages can drift apart, use different loop windows, or feed the shared space
-effects. Four becomes a small performance ecology: each track is both a voice and a
-place to develop a sound.
-
-This is not a claim that resampling itself is new. The distinction would be how
-quickly and safely the player can do it on four, without a Grid or a computer, while
-the source continues to sound.
+The stages can drift apart, use different loop windows, and feed the shared delay and
+reverb. Each track is a voice, and also a place to work on a sound.
 
 ## The trust contract
 
-Relay is only useful in performance if it is predictable. These rules are part of
-the idea, not polish to postpone:
+On stage, a player must be able to predict Relay. These rules are part of the idea.
+They are not polish for later.
 
-1. **Never destroy the source.** The source track's audio and settings do not change.
-2. **Protect the destination until success.** A failed or cancelled pass leaves its
-   previous take intact.
-3. **Undo returns the old destination take.** The new take is one reversible action.
-4. **Keep the phrase intact.** The default capture begins and ends without clicks;
-   optional quantization uses a boundary the player can see or hear.
-5. **Prevent accidental feedback.** No self-capture, and no hidden capture of the
+1. The source is never destroyed. Its audio and its settings do not change.
+2. The destination is protected until success. A failed or cancelled pass leaves its
+   take as it was.
+3. UNDO brings back the destination's old take. The new take is one action, and it can
+   be undone.
+4. The phrase stays whole. The capture starts and ends without clicks. A quantized
+   start uses a boundary that the player can see or hear.
+5. No feedback by accident. No track captures itself, and no capture holds the
    destination's own return.
-6. **Make state obvious.** The screen names the source and destination and shows
-   whether Relay is armed, recording, finishing, or ready to play.
-7. **Respect the device.** A relay pass must not cause audio dropouts in a dense but
-   supported setup. If the device cannot complete it, fail safely and say why.
+6. The state is plain. The screen names the source and the destination. It says if
+   Relay is armed, recording, finishing or ready to play.
+7. The device is respected. A pass causes no dropout in a dense supported set. If the
+   device cannot finish a pass, the pass fails safely and says why.
 
 ## A small first version
 
-Start with one-way, post-processing capture from one track to another:
+One way only, after the processing, from one track to another:
 
 - Select a source track and a different destination track.
-- Start and stop a pass by hand, with optional start-at-loop-boundary behavior.
-- Capture the audible stereo output of the source only.
-- On success, install the captured audio as the destination take and start playback.
-- Keep the source running and make the destination's previous take undoable.
-- Refuse self-capture, a busy destination, or a second overlapping pass with a clear
-  on-screen message.
+- Start and stop a pass by hand. A start at the loop boundary is an option.
+- Capture the stereo output of the source only, as it is heard.
+- On success, the captured audio becomes the destination's take and plays.
+- The source runs on, and the destination's old take can be undone.
+- Refuse self-capture, a busy destination and a second pass over the first. Each
+  refusal says why on the screen.
 
-Leave crossfades between multiple sources, automatic chains, tempo-based pass
-lengths, per-step routing, and automatic feedback out of the first version. They add
-choices before the basic handoff has proved itself.
+Left out of the first version: crossfades between several sources, automatic chains,
+pass lengths in tempo, routing by step and automatic feedback. They add choices before
+the basic handoff is proven.
 
 ## How to tell if it works
 
-The test is a short device walkthrough, not a feature checklist:
+The test is a short walkthrough on the device, not a feature list:
 
-1. Record a recognizable sound on track 1.
-2. Add an audible effect to track 1 and relay it to track 2.
-3. Confirm track 1 continues unchanged while track 2 records and then loops.
-4. Compare the two tracks, then undo track 2 and hear its previous take return.
-5. Repeat with a short loop boundary and a long pass.
-6. Try STOP, a cancellation, a full destination, and an attempted self-capture.
-7. Repeat the densest supported setup and confirm no new xruns or clicks.
+1. Record a sound that is easy to recognize on track 1.
+2. Add an effect that is easy to hear to track 1, and relay it to track 2.
+3. Make sure that track 1 plays on unchanged while track 2 records and then loops.
+4. Compare the two tracks. Then undo track 2 and hear its old take come back.
+5. Repeat with a short loop boundary and with a long pass.
+6. Try STOP, a cancelled pass, a full destination and a self-capture.
+7. Repeat on the densest supported set. There must be no new xruns and no clicks.
 
-Relay earns its place if a first-time player can do the basic pass without help,
-understands which take will be replaced, and immediately wants to pass the result
-again. If it needs a page of setup or makes people fear losing a take, it is not the
-right signature interaction.
+A first-time player must do the basic pass without help and know which take will be
+replaced. If they then want to pass the result on, Relay stays. If Relay needs a page of
+setup, or if players fear for a take, it is not the right gesture.
 
 ## Recommendation
 
-Treat Relay as a design proposal, not a release commitment. First finish four's
-existing sound and usability checks. Then prototype the smallest handoff on the
-norns and listen to it in an actual performance. Keep it only if the source-to-new-
-take transition feels faster and more musical than using the current PRINT and
-track-routing tools separately.
+Relay is a proposal, not a promise for a release. First finish four's open sound and
+usability checks. Then build the smallest handoff on the norns and listen to it in a
+real performance. If it is not faster and more musical than PRINT and the track routing
+used apart, drop it.

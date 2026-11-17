@@ -1,9 +1,11 @@
 # Record four parts, bend them while they play, keep the sound, and fade back to it
 
-> Status: a plan, written 2026-11-17. The STATUS block of CLAUDE.md and doc/changelog.md
-> (from the forty-second change on) say which of its changes are built. doc/plan.md stays
-> the order of work for everything else. It uses doc/idea-relay.md (Relay) in an adapted
-> form, in Phase D. File references: E is lib/Engine_Four.sc, F is four.lua.
+> Status: a plan, written 2026-11-17 and checked against the code the same day. The
+> STATUS block of CLAUDE.md and doc/changelog.md (from the forty-second change on) say
+> which of its changes are built. doc/plan.md stays the order of work for everything else.
+> It uses doc/idea-relay.md (Relay) in an adapted form, in Phase D. File references: E is
+> lib/Engine_Four.sc, F is four.lua. The line numbers are those of commit 3565d9f (the
+> fortieth change). Later changes move them.
 
 ## 1. The workflow
 
@@ -12,9 +14,9 @@ a voice, a filter, an effect, a send. The player keeps the sound they found in o
 Then they fade away from it and back to it, many times, and nothing they made is lost on
 the way. Three keys and three encoders, no grid.
 
-The thesis: if this loop feels easy and safe on stage, people reach for four. Every
-part of it exists today. This plan does not add a page. It removes the places where the
-loop clicks, forgets the player's work, or hides the next move.
+The reason for this plan: the loop must feel easy and safe on stage. Every part of it
+exists today. This plan does not add a page. It removes the places where the loop
+clicks, forgets the player's work, or hides the next move.
 
 Two anchors make the loop teachable. E1 stops at both ends (F:3311), and the two ends are
 the two ends of the workflow: spin E1 left for TAKE, spin it right for SCENE.
@@ -30,17 +32,17 @@ encoder gestures.
 | 1. Part 1 | TAKE | K2, play, K2 (2) | `EMPTY - K2 REC`, then REC, TRACK 1, the input bar, the seconds. Cell 1 blinks. On stop the strip loops in PLAY | A first press held past 0.33 s is a punch: the pass stops at the release (F:438, 3439). The loop length is free (`win_beats` FREE, F:2572) |
 | 2. Parts 2 to 4 | TAKE | K1+E1, release K1, K2, play, K2 (5 each, 15) | The page pops `2 TAKE`. TAKE 2 is empty. REC turns the OFF track to PLAY (F:2455) | All tracks share one write head. After about 60 s of takes in all, a take crosses the end and loops the whole 60 s, silence included (F:2486). K2 pressed before K1 is up is STOP (F:950) |
 | 3. A voice | VOICE | E1, K3 per mode (2 to 5) | The voice's own picture. The footer names the face knobs | Each K3 tap swaps the voice synth, and WARP and PV open a hole. CLOUD is four taps from PLAY, through WARP and PV. A K3 press between 0.33 s and 1 s does nothing |
-| 4. A filter | FILTER | E1 x2, E2, E3 (4) | The response curve | Clean: TYPE is a 20 ms crossfade (row 19.8) |
-| 5. An effect | EFFECT | E1, K2, K3, E2 (4) | The effect's picture | Each TYPE step broke the sound on the device: three breaks in six steps (row 19.12). The second slot's type is in PARAMS only |
-| 6. A send | TRACKS, DELAY | E1 x3, hold K1, E2 x3, E3, then E1 x4, E2 (about 6 gestures, two pages) | TRACKS with K1 shows the send grid | With WET at 0 the send is silent, and TRACKS says nothing. The hint is only on DELAY and REVERB (mpages.lua:1646, 1264) |
-| 7. Keep the sound | SCENE | spin E1 right, K3 (2) | `EMPTY - K3 CAP`, then `SAVED 1` | Clean. The scene is control state for all four tracks, never audio (mscenes.lua:19) |
+| 4. A filter | FILTER | E1 x3, E2, E3 (3) | The response curve | Clean: TYPE is a 20 ms crossfade (row 19.8) |
+| 5. An effect | EFFECT | E1, K2, K3, E2 (4) | The effect's picture | Four of six TYPE steps broke the sound on the device (row 19.12, read on both channels). The second slot's type is in PARAMS only |
+| 6. A send | TRACKS, DELAY | E1 x3, hold K1, E2 x3, E3, then E1 x4, E2 (about 6 gestures, two pages) | TRACKS with K1 shows the send grid | With WET at 0 the send is silent, and no page says so. `NO SEND - TRACKS K1` covers only the other case, WET up and no send (mpages.lua:1646, 1653) |
+| 7. Keep the sound | SCENE | spin E1 right, K3 (2) | `SLOT 1 EMPTY - K3 CAP`, then `SAVED 1` | Clean. The scene is control state for all four tracks, never audio (mscenes.lua:19) |
 | 8. Bend further | any | as in 3 to 6 | | |
 | 9. Fade to it and back | SCENE | spin E1 right, hold K1, turn E3 (2) | The rail `A LIVE ----o---- 1 B`. FADE shows in the footer only while K1 is held | Section 3, items 1, 3, 4, 7 and 8 |
 | 10. Land it | SCENE | K2 (1) | At the end of the rail, `K2 TO LAND THE REST` | The player still holds K1 from the fade, so K2 is STOP (mpages.lua:2276, F:950). Landing swaps the voices whose mode differs |
 
-The first pass through steps 1 to 10 costs about 45 moves on seven pages. Most of the
-moves are in steps 2 and 6, and both are fine once learned. The losses are not in the
-move count. They are in section 3.
+The first pass through steps 1 to 10 costs about 45 moves on seven pages, with six
+moves for step 8. Most of the moves are in steps 2 and 6, and both are fine once
+learned. The losses are not in the move count. They are in section 3.
 
 ## 3. The friction, ranked
 
@@ -58,10 +60,12 @@ wrong reading, then a slow move.
    where the last one stopped (F:2460). Four parts of 15 s fill the buffer, and the take
    that crosses its end gets the whole 60 s as its window (F:2486).
 3. **Coming home undoes the player's own moves.** The fade snapshots the live sound when
-   it leaves 0 and forces it back at 0 (mscenes.lua:888, 896, 929). Nothing tells it that
-   a hand moved a param in between. A cutoff turned on FILTER while the fade was up goes
-   back to the origin. The rec stop sets a new take's window (F:2479). The way home puts
-   the old window back, and the new take plays the wrong region or silence.
+   it leaves 0 and forces it back at 0 (mscenes.lua:888, 896, 929). For a param that
+   differs between the two ends, nothing tells it that a hand moved the param in between.
+   A cutoff turned on FILTER while the fade was up goes back to the origin. The rec stop
+   sets a new take's window (F:2479). The way home puts the old window back, and the new
+   take plays the wrong region or silence. A param that both ends agree on already stays
+   with the hand (mscenes.lua:797).
 4. **The fade's chord sits on three destructive gestures.** On SCENE the fade is K1+E3.
    With K1 held, a K3 tap is DRY (F:937, 2309). DRY turns every effect off and frees the
    delay and reverb at once, a click under a tail (E:370, 391). It has no way back but a
@@ -70,14 +74,18 @@ wrong reading, then a slow move.
    and the sound stays between the two ends with no way home. K2 is STOP, and the land
    cue asks for K2 while K1 is still down.
 5. **A voice change opens a hole.** The old drone gets a 20 ms release and the new one is
-   spawned in a separate message (E:345-356, 676). Offline, the change into WARP dips
+   spawned in a separate message (E:345-356 for track 1, E:320-336 for tracks 2 to 4,
+   E:676). Offline, the change into WARP dips
    28.6 dB for 149 ms, into PV 27.8 dB for 34 ms (doc/measurements/2026-11-15/README.md).
    CLOUD starts with empty buffers and is not measured. The new head restarts at the
    window start (E:655), so the loop loses its place.
-6. **The CPU budget is already over.** The dense set took 64.1% of the scsynth thread
-   against 60% (row 19.27). Four CLOUD in SPECTRAL take 38.7%, four PV at pitch 2 56.6%.
-   A recall that changes four modes runs eight drones for 20 ms. ECHO allocates 512 KB in
-   the audio thread (ugen/FourStretch.cpp:147-155). No screen says the load is high.
+6. **The CPU budget is already over.** Row 19.27's dense set took 64.1% of the scsynth
+   thread against 60%, and its four PV at pitch 2 took 56.6%. Both sets carry eight
+   effect slots, drive, both sends, the delay, the reverb and shimmer, and the row reads
+   the worst 5 s of a minute. Four CLOUD in SPECTRAL take 38.7% of the JACK cycle, with
+   three takes empty. A recall that changes four modes runs eight drones for 20 ms. ECHO
+   allocates 512 KB in the audio thread (ugen/FourStretch.cpp:147-155). No screen says
+   the load is high.
 7. **The fade moves in steps.** It writes at 15 fps, and the engine's lags of 20 to 50 ms
    are shorter than the 67 ms frame. The staircase probe found the value still 61 to 74%
    of the time (doc/dsp-plan.md:402). CLOUD's density gain (14 dB), the clouds knobs,
@@ -104,8 +112,8 @@ wrong reading, then a slow move.
 
 What is already clean: REC's punch-in and punch-out (10 ms ramps, E:1442-1471). The loop
 seam (a 5 ms fade, E:678-680). The filter type, and drive and crush crossing 0
-(E:236-274). `delay_time` (a 0.2 s glide) and STOP (a 50 ms fade, E:1415). The last three
-have no device measurement yet.
+(E:236-274). `delay_time` (a 0.2 s glide) and STOP (a 50 ms fade, E:1415). Drive and
+crush crossing 0, `delay_time` and STOP have no device measurement yet.
 
 ## 4. The changes
 
@@ -126,14 +134,16 @@ before the next one is written. Each one runs `test/dsp/check_dsp.sh` first.
   at the shared delay's input (E:1521), where gate row 10.4 found the same break. No
   new synth, no new command. The dry dips under 0.5 dB for 10 ms.
 - Must not break: "only what is heard exists" (rows 19.7, 19.10). OFF stays a bypass.
-- Proof: a check_dsp probe steps TYPE over a tone on both channels and fails on a gap.
-  gate.py learns to score both channels. Today it reads the left only
-  (test/device/gate.py:2688) and missed RESON's breaks. Then row 19.12 on the device.
+- Proof: a check_dsp probe steps TYPE over a tone on both channels and fails on a step.
+  It cannot fail on a gap (section 8, question 10). gate.py learns to score both
+  channels: at the fortieth change it read the left only (test/device/gate.py:2688) and
+  missed RESON's breaks. Then rows 19.12 and 19.29 on the device.
 
 **C2. A voice change keeps its sound and its place.**
 - Player: K3 MODE and a landed scene change the voice with no hole, and the loop goes on
   from where it was.
-- Cost: engine. Send the release and the spawn as one bundle (E:345-356). Hold the old
+- Cost: engine. Send the release and the spawn as one bundle, in `setMode` (E:345-356)
+  and in `setModeN` for tracks 2 to 4 (E:320-336). Hold the old
   drone until the new one sounds: about 150 ms into WARP, 40 ms into PV, and CLOUD after
   a measurement. Start the new head at the old head's phase, read from the phase bus the
   polls already use (E:655). CPU: two drones for up to 150 ms. In Lua, a recall that
@@ -146,7 +156,7 @@ before the next one is written. Each one runs `test/dsp/check_dsp.sh` first.
 **C3. The delay and reverb leave without a click.**
 - Player: DRY, a scene or a fade that takes WET to 0 makes no click under a tail.
 - Cost: engine. About 0.1 s after the mix reaches 0, look again. Still 0: free the
-  synth, as `laneColour` does (E:264-274). The CPU win stays.
+  synth, as `laneColour` does after 0.3 s (E:264-274). The CPU win stays.
 - Must not break: the deliberate decision that a mix of 0 frees the synth and cuts its
   tail. It still does, 0.1 s later.
 - Proof: a check_dsp probe takes `rev_mix` to 0 under a tail. On the device: DRY under a
@@ -167,11 +177,15 @@ before the next one is written. Each one runs `test/dsp/check_dsp.sh` first.
 
 **C5. The loop stays inside the CPU budget, and says so.**
 - Player: the supported set never xruns. Near the limit, the header shows `CPU`.
-- Cost: a measurement first. Find which part grew from 57.3% (2026-11-13) to 64.1%
-  (2026-11-16) on the same dense set. Then write the supported set in the README. An
-  example: four tracks, at most two of them PV or CLOUD, both sends, delay and reverb.
+- Cost: a measurement first, done on 2026-11-17 (doc/measurements/2026-11-17/). Nothing
+  grew. The 57.3% of 2026-11-13 was the four dense voices inside preset 1, read once
+  over 6 s. The 64.1% of 2026-11-16 is row 19.27's set: the same voices with eight effect
+  slots, drive, both sends, the delay, the reverb and shimmer, and the worst 5 s of a
+  minute. The four voices alone take 42.0%. Then write the supported set in the README.
+  An example: four tracks, at most two of them PV or CLOUD, both sends, delay and reverb.
   The header word reads a norns CPU poll. That poll is the whole JACK cycle, not the
-  scsynth thread (CLAUDE.md, the lessons), so first measure how far the two differ.
+  scsynth thread (CLAUDE.md, the lessons). Measured: it reads 5 to 7 points above the
+  thread at every load.
 - Must not break: one blink only (the flag is steady). The redraw allocates nothing.
 - Proof: row 19.27 passes with the supported set. A uisim render with a high stub value.
 
@@ -198,7 +212,9 @@ before the next one is written. Each one runs `test/dsp/check_dsp.sh` first.
   tests). `morph(1)` is still not `recall(B)`. A pass allocates nothing.
 - Proof: test_control. Fade to 0.5, turn `t2_cutoff`, fade to 0: `t2_cutoff` keeps the
   hand's value and every other id is back on the origin. Record on track 2 during a fade
-  and fade home: the window is the new take's. Revert the fix and see both fail.
+  and fade home: the window is the new take's. The scene must hold another `t2_cutoff`
+  and another window than the origin, or both pass before the fix (mscenes.lua:797).
+  Revert the fix and see both fail.
 
 **C8. An option crosses the midpoint once.**
 - Player: a fade rocked around the middle does not switch an effect or a filter type on
@@ -276,10 +292,12 @@ new choice: WHERE the take records from.
   change keeps `count: 198`, the ritual still applies, and REC and a relay pass cannot
   run together. Route (a), a relay synth after io, moves the count to 199 and costs under
   0.5% (an estimate). The destination is protected by the take UNDO, which holds the
-  take before the pass (F:1738). A scratch buffer pair (about 23 MB) with a swap waits:
+  take before the pass (F:1738). C13 must mark the destination's take first: a take that
+  a PSET restored on an unfocused track has no mark (F:1688-1692, 1854), and UNDO then
+  has nothing to go back to. A scratch buffer pair (about 23 MB) with a swap waits:
   the engine assumes its buffer numbers never change (E:1804-1805).
 - UI: SOURCE takes TAKE's K1+E3, now JITTER (`pos_jitter`), which VOICE's GRAIN face also
-  reaches as SPRAY. The user decides (section 8).
+  reaches on K1+E2. The user decides (section 8).
 - Must not break: REC writes only the focused track (row 19.4). SOURCE skips the focused
   track, so no track records itself. A source that hears the destination through a send
   (`send_<dest>_<src>` above 0) refuses with `T2 FEEDS T1 - SEND OFF` (91 px).
@@ -313,9 +331,12 @@ Save only to PSET slot 90. One person observes and writes, and explains nothing 
 task ends.
 
 **Phase A's rows.** Each one is recorded on both channels and scanned offline. A gap is a
-5 ms stretch more than 10 dB under the 100 ms around it, outside the loop seams.
+5 ms stretch more than 10 dB under the 100 ms around it, outside the loop seams. A step
+is a click by the law of test/device/audio.py.
 
-- A1. Six TYPE taps over a tone, then a fade rocked across 0.5 between two types: no gap.
+- A1. Six TYPE taps over a tone, then a fade rocked across 0.5 between two types: no
+  step on either channel (rows 19.12 and 19.29). The gap law cannot score an effect row
+  (section 8, question 10).
 - A2. Four parts of 20 s: each window starts at 0 of its track, and none loops 60 s.
 - A3. PLAY to each voice and back over a tone: no gap, and the loop keeps its place.
 - A4. DRY under a ringing reverb tail: no click.
@@ -372,8 +393,9 @@ doc/device-gate.md):
    heard? A click where its loop wraps?
 
 **The verdict.** Part 1 and Part 2 pass, and items 1 to 6 of the script are clean. Only
-then is the loop the signature. If a first-time player needs help with the fade or loses a
-take, fix that first. More features do not come before it.
+then does four lead with this loop, in the README and in the example presets. If a
+first-time player needs help with the fade or loses a take, fix that first. More features
+do not come before it.
 
 ## 7. What not to build
 
@@ -408,3 +430,9 @@ take, fix that first. More features do not come before it.
    once C2 makes a change clean? Each switch runs two drones for up to 150 ms.
 8. **The supported set (C5).** Which four voices must play together in a show?
 9. **The first-time player.** Who plays Part 1 of section 6?
+10. **The dip at a type change (row A1).** A change into WOBBLE, CHORUS or FLANGE
+    crossfades the sound with a late copy of itself. For 10 to 20 ms the two cancel in
+    part, 11 to 17 dB deep in one 5 ms window, and no crossfade avoids that. CHORUS and
+    FLANGE make the same holes on a steady tone with no change near them. So the gate
+    scores steps and lists the holes (doc/measurements/2026-11-17/). Listen to
+    `19.12_type_steps.wav` and `19.29_fade_rock.wav`: is the dip fine as it is?

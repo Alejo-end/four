@@ -4575,10 +4575,15 @@ nothing rang on through the delay or the reverb from track 2.
   check also reads `|a, b|` arguments and NamedControls and drops block comments; and
   doc/controls.md's SCENE prose says E2 picks A, E3 picks B and K1+E3 fades.
 
-four, forty-first change: **a design brief for Relay (documents only)**. The brief
-proposes a safe, one-gesture way to capture one track's processed sound as another
-track's new take while the source keeps playing. It distinguishes the proposal from
-the existing track routing, tape source and full-mix PRINT, and defines a small first
-version, its safety rules and a device walkthrough. No code or release behavior
-changes.
+four, forty-first change: **two design documents: the Relay proposal and the plan for
+one loop of play (documents only)**.
+- doc/idea-relay.md proposes one gesture that captures a track's processed sound as
+  another track's new take, while the source plays on. It says how that differs from the
+  track routing, the tape source and PRINT. It gives a small first version, its safety
+  rules and a walkthrough on the device.
+- doc/signature-workflow.md is the plan for one loop: record four parts, bend them while
+  they play, keep the sound, and fade back to it. It walks the loop on the code of that
+  day, ranks what breaks it, and lists the changes C1 to C13 in five phases. Relay is its
+  Phase D, in an adapted form.
+- doc/README.md lists both, and doc/plan.md points to the new plan. No code changes.
 
