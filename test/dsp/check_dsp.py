@@ -27,16 +27,16 @@ def say(status, build, text):
     print(f"{status:5s} {build:6s} {text}", flush=True)
 
 # a target: value must be at most (or at least) the limit
-def target(build, name, v, limit, unit, low=True):
+def target(build, name, v, limit, unit, low=True, fmt='.1f'):
     ok = v <= limit if low else v >= limit
-    say('PASS' if ok else 'FAIL', build, f"{name}: {v:.1f} {unit} (limit {'<=' if low else '>='} {limit:g} {unit})")
+    say('PASS' if ok else 'FAIL', build, f"{name}: {v:{fmt}} {unit} (limit {'<=' if low else '>='} {limit:g} {unit})")
 
 # a known failure: fails only when it is worse than known by more than margin
-def known(build, name, v, known_v, margin, unit, worse_up=True):
+def known(build, name, v, known_v, margin, unit, worse_up=True, fmt='.2f'):
     edge = known_v + margin if worse_up else known_v - margin
     bad = v > edge if worse_up else v < edge
     say('FAIL' if bad else 'KNOWN', build,
-        f"{name}: {v:.2f} {unit} (known {known_v:g}, fails {'above' if worse_up else 'below'} {edge:g})")
+        f"{name}: {v:{fmt}} {unit} (known {known_v:g}, fails {'above' if worse_up else 'below'} {edge:g})")
 
 def num(pattern, text, group=1):
     m = re.search(pattern, text, re.M)
@@ -55,9 +55,10 @@ def buffers():
         for s in ['mkbuf.py', os.path.join('review', 'mkbuf_review.py')]:
             subprocess.run([PY, os.path.join(DSP, s)], cwd=WORK, check=True)
 
-# One build: the four probes and engine.scd in parallel, each in its own folder
+# One build: the five probes and engine.scd in parallel, each in its own folder
 # (run_probe.sh and run_engine.sh write conf.yaml and their log into it).
-JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'), ('eng', None)]
+JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'),
+        ('p6', 'probe6.scd'), ('eng', None)]
 
 def render(build):
     env = dict(os.environ)
@@ -128,6 +129,30 @@ def check(build):
         v = num(rf'window {p}-[\d.]+ \(\s*([\d.]+) s in\).*off-tone\s+([-\d.]+) dB', a2, 2)
         sec = num(rf'window {p}-[\d.]+ \(\s*([\d.]+) s in\)', a2)
         target(build, f"fix: erosion noise under the tone, window {sec:g} s in (was {was} dB, floor -141)", v, -130, 'dB')
+
+    # THE EFFECT SLOT AT A CHANGE OF TYPE (the forty-second change, probe6): a new
+    # effect synth and the shared delay fill their lines from silence. Gate row
+    # 19.12 is the same six taps on the device. Clicks are test/device/audio.py's
+    # law, on both channels. The tone is near its peak when each change lands.
+    a6 = analyse(os.path.join(REV, 'an_probe6.py'), runs['p6'][0], 'p6')
+    target(build, "fix: the six TYPE taps of gate row 19.12 over a tone, clicks on both channels (were 2 to 11)",
+           num(r'^WALK clicks (\d+)', a6), 0, '', fmt='.0f')
+    target(build, "fix: every change of an effect's type (42 of them), clicks on both channels (were 54 to 73)",
+           num(r'^PAIRS clicks (\d+)', a6), 0, '', fmt='.0f')
+    target(build, "fix: the largest step after a change of type (was 0.098; the tone alone has 0.0004)",
+           num(r'^LARGEST step after a change ([\d.]+)', a6), 0.002, '', fmt='.4f')
+    target(build, "fix: the shared delay born under a tone, largest step (was 0.239 without the plugin)",
+           num(r'^DELAY born under the tone: largest step ([\d.]+)', a6), 0.002, '', fmt='.4f')
+    # A change into a delay (WOBBLE, CHORUS, FLANGE) crossfades the tone with a
+    # late copy of itself, and for 10 to 20 ms the two comb. The wow of WOBBLE is
+    # random, so the depth moves from run to run: -11 to -17 dB over six runs.
+    known(build, "a change of type dips while the old and the new sound comb: deepest 5 ms against the quieter side",
+          num(r'^DEEPEST series ([-\d.]+) dB', a6), -15, 6, 'dB', worse_up=False, fmt='.1f')
+    # scsynth 3.14 frees a released synth one control step short of 0. The
+    # filter's 20 ms straight fade ends 1/15 above 0. The device recording of
+    # gate row 19.8 (2026-11-16) shows no step there: look again on the device.
+    known(build, "a filter family swap ends on a step offline: LP to HP at 400 Hz under the tone",
+          num(r'^FILTER LP to HP at 400 Hz: largest step ([\d.]+)', a6), 0.013, 0.004, '', fmt='.4f')
 
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')

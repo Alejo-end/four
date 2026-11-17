@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-16)
+## STATUS (2026-11-17)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -89,9 +89,9 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-16 it runs the fortieth change at `count: 198`, with the plugin
-  built there that day (`ignore/plugins/armv7l/`), which four's startup install put in
-  Extensions. The plugin of 2026-11-13 is kept in
+- Since 2026-11-17 it runs the forty-second change at `count: 198`, with the plugin
+  built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
+  in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
   (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
@@ -134,6 +134,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 38th: the album preset set leaves the repo | nothing on the device changes | |
 | 39th: CLAUDE_PLAN.md deleted, this file moves to .claude/ | documents only | |
 | 40th: tracks 2 to 4 reach the delay and the reverb (io's `t_dly` was a trigger control) (engine) | yes, `count: 198`, measured | no |
+| 41st: the Relay brief and the plan doc/signature-workflow.md | documents only | |
+| 42nd: an effect synth and the shared delay fill their lines from silence (C1 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: rows 19.12, 19.29 and 10.4 with no break. Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -152,10 +154,17 @@ xruns past about 60%.
   20 s after the sound stops it costs less than with sound. A silent CLOUD track costs
   3.9% against 2.5% for one that sounds: Clouds in silence is not free. No xruns.
 
+**Phase A of doc/signature-workflow.md is under way** (C1, C3, C4, then C2 and C6, with
+C5 measured). The user's rule, 2026-11-17: push nothing and merge nothing of it until
+the user has tested it. C1 is the forty-second change: it passes offline and on the
+device (doc/measurements/2026-11-17/). The user has not listened to it. The dip at a
+change into WOBBLE, CHORUS or FLANGE is question 10 of the plan, for their ears, and the
+README keeps its known issue until then. Next: C3.
+
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
-19 and the frame clock are done (doc/measurements/2026-11-16/). Stage 19 still fails
-19.12 (breaks when TYPE steps) and 19.27 (the dense set takes 64.1% of the scsynth
-thread, over 60%, with no xruns). Open too: the user's look at REVERB's squares (the
+19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
+TYPE steps) has no break since the forty-second change. Stage 19 still fails 19.27 (the
+dense set takes 64.5% of the scsynth thread, over 60%, with no xruns). Open too: the user's look at REVERB's squares (the
 screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
 more than one that sounds.
 
@@ -212,6 +221,9 @@ Current. Keep these true to the code:
 - doc/octatrack-midi.md, data/README.md, ugen/README.md, visuals/README.md.
 
 Design references. Partly built, and each one says what is built:
+- doc/signature-workflow.md (the loop: record four parts, bend them, keep the sound,
+  fade back to it. Changes C1 to C13 in phases A to E) and doc/idea-relay.md (Relay, its
+  Phase D).
 - doc/space-plan.md (SPACE: the delay, the room, the sends, the screen).
 - doc/dsp-plan.md (the voices and the effects, by the math).
 - doc/engine-map.md (why the engine is shaped as it is, written for mangler's engine).
@@ -390,6 +402,17 @@ Each line was learned the hard way; the change log has the story.
   after one block, `a_` an audio-rate control, `i_` a fixed one. io's bus arguments
   `t_dly` and `t_rev` read bus 0 after the first block, so tracks 2 to 4 never reached
   the delay or the reverb until the fortieth change. test_control rejects the prefixes.
+- A delay line born under a playing sound fills from silence: fade its INPUT in (10 ms).
+  An empty line catches the sound mid-wave, and the edge comes out one line length later
+  as a step (the forty-second change). Score both channels: an effect's sides differ.
+- The two scsynths differ: 3.14.1 on the Mac, 3.13.0-dev on the norns. The norns holds
+  `Line.kr`'s first step for its whole first block (a fade of 10 ms starts with a jump
+  of 14%), and the Mac starts it at 0. Fade with `EnvGen` or `Line.ar`. The Mac frees a
+  released synth one control step short of 0 (a straight 20 ms fade ends 6.7% up, a
+  50 ms S curve 0.05%), and the norns runs the release to its end.
+- The offline check on the Mac is not the device's scsynth. `test/device/norns_nrt.sh`
+  renders a probe's scores with the norns's own scsynth, offline, in seconds. Run it
+  before the RESTART for any change that the first block of a synth can decide.
 - A guard added to one of two sibling paths makes the other one a bug with a witness.
   When a fix names a limitation in ANOTHER module, that is an unfixed bug, not a note.
 - A release belongs to whatever took the press: `key_state` routes a key release to the
@@ -501,6 +524,11 @@ ugen/build_mac.sh <plugin folder>
 # says how, and why one SSH session must stay open)
 python3 test/device/gate.py 2 4:4.10,4.14
 python3 test/device/measure.py states voices
+
+# on a connected device: render an offline probe's scores with the norns's OWN scsynth
+# (3.13, where the Mac has 3.14: they differ), then score the files as usual
+test/device/norns_nrt.sh <probe folder> <out folder> p6 walk:2 pairs:100 more:4
+python3 test/dsp/review/an_probe6.py <out folder> p6
 
 # deploy (the repo IS the script; --delete kills stale engine copies). Keep
 # --exclude='.claude': agent worktrees live in .claude/worktrees, each with its own

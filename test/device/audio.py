@@ -62,6 +62,49 @@ def clicks(xs, rate, ratio=12.0, floor=0.006):
     return found
 
 
+def breaks(chans, rate):
+    """clicks() on every channel: the times found on any of them, in order.
+
+    The left channel alone missed breaks: an effect's two sides differ (gate
+    row 19.12, where RESON rang with a step on the right only).
+    """
+    found = []
+    for t in sorted(t for c in chans for t in clicks(c, rate)):
+        if not found or t - found[-1] > 0.02:
+            found.append(t)
+    return found
+
+
+def step(chans):
+    """The largest second difference on any channel: the size of the worst
+    jump in the samples. A steady sound has a small one of its own (the gate's
+    tone at -19 dB has about 0.0006), so read it against that."""
+    return round(max(abs(c[i] - 2 * c[i - 1] + c[i - 2]) for c in chans for i in range(2, len(c))), 4)
+
+
+def gaps(xs, rate, depth=10.0, floor=0.001):
+    """Times of holes (seconds): 5 ms more than `depth` dB under the 50 ms on BOTH sides.
+
+    A level that steps down and stays down is not a hole. A loop seam is one
+    (PLAY fades 5 ms out and 5 ms in there), and so is the notch of a chorus
+    or a flanger passing over a steady tone: read the times before you blame
+    a change. Quieter than `floor` (-60 dBFS) on a side is silence, not a hole.
+    """
+    w5, w50, hop = int(rate * 0.005), int(rate * 0.05), max(rate // 1000, 1)
+    acc = [0.0]
+    for s in xs:
+        acc.append(acc[-1] + s * s)
+    found = []
+    ratio = 10 ** (-depth / 10)
+    for i in range(w50, len(xs) - w5 - w50, hop):
+        mid = (acc[i + w5] - acc[i]) / w5
+        side = min(acc[i] - acc[i - w50], acc[i + w5 + w50] - acc[i + w5]) / w50
+        if side > floor * floor and mid < side * ratio:
+            if not found or i / rate - found[-1] > 0.05:
+                found.append(round(i / rate, 3))
+    return found
+
+
 def envelope(xs, rate, step=0.1):
     """RMS in dB for each `step` seconds."""
     n = int(rate * step)
@@ -104,7 +147,8 @@ def report(path):
     out = {"seconds": round(len(chans[0]) / rate, 2)}
     for i, c in enumerate(chans):
         out[f"ch{i + 1}"] = stats(c)
-    out["clicks"] = clicks(chans[0], rate)[:20]
+    out["clicks"] = breaks(chans, rate)[:20]
+    out["gaps"] = sorted(t for c in chans for t in gaps(c, rate))[:20]
     if len(chans) > 1:
         out["lr_corr"] = correlate(chans[0], chans[1])
     return out

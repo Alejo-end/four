@@ -1163,15 +1163,28 @@ Engine_Four : CroneEngine {
         // no synth and costs nothing.
         // The three effect synths. Each reads the lane's bus, and XOut puts
         // its sound back over a 50ms fade (in at the start, out at the
-        // release), so a type change is the same crossfade as before.
+        // release), so a type change is a crossfade. The fade is an S curve
+        // (\sin), flat at both ends. The Mac's scsynth (3.14) frees a released
+        // synth one control step short of 0: on a straight line that step was
+        // 1.4% of the effect, and the S curve leaves 0.05%. The norns's (3.13)
+        // runs the release to its end.
         //   \four_fx_mod    CHORUS, FLANGE, WOBBLE (type 1 to 3): one comb
         //                   pair, so a change between them glides for 100ms
         //   \four_fx_reson  RESON     \four_fx_ring  RING
+        // A NEW SYNTH'S LINES FILL FROM SILENCE: it reads the bus through a
+        // 10ms fade-in. A line is born empty under a playing sound. Without
+        // the fade it caught the sound mid-wave, and that edge came out one
+        // line length later as a step: 12ms after a tap into WOBBLE, 15ms
+        // into CHORUS, 190ms into ECHO, and RESON rang with it for 200ms
+        // (gate row 19.12 on the device, test/dsp/review/probe6.scd offline).
+        // The fade is an AUDIO RATE envelope, and not Line.kr: the norns's
+        // scsynth (3.13) holds Line.kr's first step for its whole first
+        // block, so the line still caught 14% of the edge (gate row 19.29).
         fxSlot = { arg name, func;
             SynthDef(name, {
                 arg pbus, type = 1, amt = 0.5, rate = 0.5, gate = 1;
-                var env = EnvGen.kr(Env.asr(0.05, 1, 0.05, \lin), gate, doneAction: 2);
-                var sig = In.ar(pbus, 2);
+                var env = EnvGen.kr(Env.asr(0.05, 1, 0.05, \sin), gate, doneAction: 2);
+                var sig = In.ar(pbus, 2) * EnvGen.ar(Env([0, 1], [0.01], \sin));
                 XOut.ar(pbus, env, func.value(sig, type,
                     amt.clip(0, 1).lag(0.05), rate.clip(0, 1).lag(0.05)));
             }).add;
@@ -1518,7 +1531,10 @@ Engine_Four : CroneEngine {
         SynthDef(\four_delay, {
             arg in_bus, out_bus, delay_time = 0.3, delay_fb = 0.3, delay_mix = 0;
             var sig, fbIn, dIn, dOut;
-            sig = In.ar(in_bus, 2);
+            // the line fills from silence, like an effect slot's (fxSlot):
+            // the synth is born under a playing send, and the first echo
+            // came back with a step at its head (gate row 10.4)
+            sig = In.ar(in_bus, 2) * EnvGen.ar(Env([0, 1], [0.01], \sin));
             delay_fb = delay_fb.lag(0.03);   // CC steps zipper without this
             // With the plugin the delay is THE BUCKET BRIGADE (FourBBD,
             // doc/space-plan.md): a chain of 8192 cells and a clock. TIME

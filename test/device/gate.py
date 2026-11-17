@@ -501,7 +501,7 @@ def stage4():
                 time.sleep(0.05)
 
         rate, chans = during(sweep, "4.1_sweep", 6)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         n.set("cutoff", 20000)
         ok = levels[120] < levels[20000] - 3 and not hits
         return verdict(ok, f"dB by cutoff {levels}. Sweep clicks {hits[:6]}. Character: listen to 4.1_sweep.wav", "measured")
@@ -595,7 +595,7 @@ def stage4():
         n.set("pos_end", s + 1.0 / 60)
         time.sleep(1)
         rate, chans = engine_rec("4.8_seam", 8)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         n.set("pos_end", e)
         return verdict(not hits, f"a 1s window of tone over 8s (about 8 seams): detected clicks {hits[:8]}")
 
@@ -678,7 +678,7 @@ def stage4():
                 time.sleep(0.05)
 
         rate, chans = during(ride, "4.14_ride", 5)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         return verdict(not hits, f"50 encoder steps on pos_start during playback: clicks {hits[:8]}", "measured")
 
     for cid, fn in (("4.1", c41), ("4.2", c42), ("4.3", c43), ("4.4", c44), ("4.5", c45), ("4.6", c46),
@@ -1488,7 +1488,7 @@ def stage10():
             n.set("delay_mix", 0.4)
 
         rate, chans = during(rise, "10.4_spawn_jump", 3)
-        jump = audio.clicks(chans[0], rate)
+        jump = audio.breaks(chans, rate)
         n.set("delay_mix", 0)
         time.sleep(1)
 
@@ -1499,7 +1499,7 @@ def stage10():
                 time.sleep(0.05)
 
         rate, chans = during(knob, "10.4_spawn_knob", 3)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         n.set("delay_mix", 0)
         sends(dly=0)
         return verdict(len(hits) <= 1, f"raised with E2: breaks {hits[:6]}. Jumped from 0 to 0.4 by a param set, as MIDI or a scene can: breaks {jump[:6]}. Listen to 10.4_spawn_knob.wav", "measured")
@@ -1917,7 +1917,7 @@ def stage14():
         n.set("erode", 0)
         time.sleep(0.5)
         rate, chans = engine_rec("14.3_after_switching", 6)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         return ("measured", f"erode 1 turns the tone to a noisy texture, so a break count cannot judge this ({len(hits)} found). Listen to 14.3_after_switching.wav")
 
     def c144():
@@ -2271,7 +2271,7 @@ def stage17():
             n.set("beat_repeat", 0)
 
         rate, chans = during(hold, "17.3_repeat_tone", 5)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         return verdict(not hits, f"a 1/8 repeat over a tone: breaks {hits[:8]}. Listen to 17.3_repeat_tone.wav", "measured")
 
     def c174():
@@ -2285,7 +2285,7 @@ def stage17():
             opt("repeat_div", "1/8")
 
         rate, chans = during(roll, "17.4_roll", 5)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         return ("measured", f"a roll through 1/8, 1/16, 1/32: breaks {hits[:8]}. Smear: listen to 17.4_roll.wav")
 
     def c175():
@@ -2624,7 +2624,7 @@ def stage19():
                 time.sleep(0.3)
 
         rate, chans = during(step, "19.8_filter_swap", 7)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
         # "no click" holds on silence too, so the track must sound
         loud = audio.stats(chans[0])["rms_db"]
         n.set("t2_cutoff", 20000)
@@ -2685,9 +2685,16 @@ def stage19():
                 time.sleep(0.6)
 
         rate, chans = during(steps, "19.12_type_steps", 6)
-        hits = audio.clicks(chans[0], rate)
+        hits = audio.breaks(chans, rate)
+        # Holes are measured, not scored: on a steady tone the notch of
+        # CHORUS or FLANGE is a hole by this law with no tap near it, and so
+        # is the seam of the 4 s loop (test/dsp/review/probe6.scd).
+        holes = [audio.gaps(c, rate) for c in chans]
         n.set("t2_effect", 1)
-        return verdict(not hits, f"six TYPE taps over a tone: breaks {hits[:8]}. Listen to 19.12_type_steps.wav", "measured")
+        return verdict(not hits, f"six TYPE taps over a tone, both channels: breaks {hits[:8]}; "
+                                 f"largest step {audio.step(chans)} (the tone alone has about 0.0006); "
+                                 f"holes (5 ms, 10 dB) left {holes[0][:6]} right {holes[1][:6]}. "
+                                 "Listen to 19.12_type_steps.wav", "measured")
 
     def c1913():
         n.set("t2_effect", 2)
@@ -2972,6 +2979,49 @@ def stage19():
                        f"what rings on after each track stops, by its one send: {out}")
 
     check("19.28", c1928)
+
+    # A fade flips an option at its midpoint (morph_value in lib/mscenes.lua),
+    # so a hand that rocks the fade there changes the effect's type at every
+    # crossing. ECHO and CHORUS are two synths: each crossing swaps the slot's.
+    def c1929():
+        modes("OFF", "PLAY", "OFF", "OFF")
+        n.set("track_sel", 2)
+        n.set("scene_morph_amt", 0)
+        n.set("scene_slot_a", 0)
+        n.set("t2_effect", 7)
+        time.sleep(0.5)
+        n.set("scene_slot", 8)
+        n.goto("SCENE")
+        n.tap(3, 0.08)
+        time.sleep(0.3)
+        n.set("t2_effect", 2)
+        time.sleep(1.5)
+        path = (0.3, 0.45, 0.49, 0.51, 0.49, 0.51, 0.49, 0.51, 0.75, 1, 0.75, 0.51, 0.49, 0.3, 0)
+        seen = []
+
+        def rock():
+            for v in path:
+                n.set("scene_morph_amt", v)
+                time.sleep(0.35)
+                seen.append(int(n.get("t2_effect")))
+
+        rate, chans = during(rock, "19.29_fade_rock", 9)
+        hits = audio.breaks(chans, rate)
+        holes = [audio.gaps(c, rate) for c in chans]
+        loud = audio.stats(chans[0])["rms_db"]
+        n.set("scene_morph_amt", 0)
+        time.sleep(0.3)
+        n.set("t2_effect", 1)
+        n.lua("__ctx.scene.clear(8)")
+        want = [7 if v >= 0.5 else 2 for v in path]
+        ok = not hits and loud > -40 and seen == want
+        return verdict(ok, f"a fade from CHORUS to ECHO rocked across the middle, both channels: "
+                           f"breaks {hits[:8]}; largest step {audio.step(chans)} (the tone alone has "
+                           f"about 0.0006); the type after each step {seen} (2 CHORUS, 7 ECHO); "
+                           f"level {loud} dB; holes (5 ms, 10 dB) left {holes[0][:6]} right {holes[1][:6]}. "
+                           "Listen to 19.29_fade_rock.wav", "measured")
+
+    check("19.29", c1929)
 
 
 def cleanup():

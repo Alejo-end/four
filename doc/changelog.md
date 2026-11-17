@@ -4587,3 +4587,52 @@ one loop of play (documents only)**.
   Phase D, in an adapted form.
 - doc/README.md lists both, and doc/plan.md points to the new plan. No code changes.
 
+four, forty-second change: **an effect that changes type fills its lines from silence
+(engine and test tools; the count stays 198; on the device 2026-11-17, not heard)**. This
+is C1 of doc/signature-workflow.md. Gate row 19.12 broke on the device: six TYPE taps
+over a tone gave breaks at 1.1, 3.4 and 3.9 s.
+- The cause, read from that recording and measured offline: an effect synth is born with
+  empty delay lines under a playing sound. The line catches the sound mid-wave, and that
+  edge comes out one line length later as a step: 12 ms after a tap into WOBBLE, 15 to
+  17 ms into CHORUS, 190 ms into ECHO. RESON's comb rings with the edge for 200 ms.
+- The second suspect was the crossover: the old and the new synth are in series on the
+  lane's bus, and both write with XOut. The probe builds the same two synths side by side
+  from three renders. Every step is the same size or larger side by side, and it sits at
+  the line length in both. The series path makes no step. It moves the level of the
+  crossover by up to 10 dB for a few ms, up or down, by the pair.
+- The fix: a new effect synth reads its bus through a 10 ms fade-in, so its lines fill
+  from silence. The shared delay does the same (gate row 10.4). The slot's 50 ms fade is
+  now an S curve.
+- The fade-in is `EnvGen.ar(Env([0, 1], [0.01], \sin))`. The first version was
+  `Line.kr(0, 1, 0.01)`. It passed offline on the Mac, and on the norns the new row
+  19.29 found a step of 0.0083 at the head of ECHO's first echo. The norns's scsynth
+  (3.13.0-dev) holds `Line.kr`'s first step, 0.1429, for its whole first block. The Mac's
+  (3.14.1) starts it at 0. So the line still caught 14% of the edge there.
+- The two scsynths differ the other way too: the Mac's frees a released synth one
+  control step short of 0 (a straight 20 ms fade ends 6.7% up), and the norns's runs the
+  release to its end. The step of 0.013 at a filter family swap is the Mac's alone.
+- Offline on the Mac, both builds: the six taps go from 2 to 11 clicks to 0, the 42
+  changes of type from 54 to 73 clicks to 0, and the largest step after a change from
+  0.098 to 0.0005 with the plugin and 0.0009 without it (the tone alone has 0.0004). The
+  shared delay without the plugin: 0.239 to 0.0004. The same scores rendered by the
+  norns's scsynth: 0 clicks, 0.0005 and 0.0009.
+- On the device, `count: 198`: rows 19.12 and 19.29 have no break in four runs each, and
+  the largest step is 0.0008 where the tone alone has about 0.0006 (2026-11-16: seven
+  breaks, 0.0215). Rows 10.4, 19.7, 19.8 and 19.10 pass. Row 19.27 reads 56.6% and 64.5%,
+  and 56.2% and 64.0% with the engine of the fortieth change in the same hour.
+- What stays: a change into WOBBLE, CHORUS or FLANGE crossfades the tone with a late
+  copy of itself. For 10 to 20 ms the two comb, and one 5 ms window can lie 11 to 17 dB
+  under the tone. No crossfade can avoid that. On a steady tone CHORUS and FLANGE make
+  such holes with no change near them. So "no gap" (row A1 of the plan) cannot be scored
+  on effect rows by the 5 ms law. The gate scores steps and lists holes, and the dip is
+  question 10 of the plan, for the user's ears.
+- New: test/dsp/review/probe6.scd and an_probe6.py, which check_dsp.sh runs (four
+  targets and two known rows). test/device/norns_nrt.sh renders a probe's scores with
+  the norns's own scsynth. Gate row 19.29 is the fade rocked across the middle.
+  test/device/audio.py has `breaks` (clicks on every channel), `gaps` and `step`, and
+  gate.py scores both channels wherever it scanned the left alone. On the recording of
+  2026-11-16 the right channel shows RESON's ring, which the left missed.
+  doc/measurements/2026-11-17/ has the numbers.
+- The README keeps "Changing an effect's type gives a short dip" until the user has
+  listened: the break is gone, and the comb dip is theirs to judge.
+

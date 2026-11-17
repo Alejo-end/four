@@ -49,8 +49,9 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 5. (The album presets left the repo in the thirty-eighth change.)
 6. DONE 2026-11-16: stage 19 ran on four for the first time (doc/measurements/2026-11-16/).
    It found that tracks 2 to 4 never reached the delay or the reverb, and the fortieth
-   change fixed that. Open: 19.12, breaks when TYPE steps over a tone, and 19.27, the
-   dense set at 64.1% of the scsynth thread. To run it again:
+   change fixed that. Row 19.12 (breaks when TYPE steps over a tone) has no break since
+   the forty-second change. Open: 19.27, the dense set at 64.5% of the scsynth thread
+   (doc/signature-workflow.md, C5). To run it again:
    `python3 test/device/gate.py 19`.
 7. DONE 2026-11-16: the frame period, logged for 60 s while four played. 901 frames in
    60.00 s, p95 67.6 ms, none late, redraw p95 11.5 ms, and the sum of `frame_dt` is
