@@ -66,10 +66,10 @@ Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8
 low resonant low-pass for 2 minutes. Measure the reverb's cost. Force a real-time memory
 failure and look for its message in maiden.
 
-Proposal B is dropped and kept on `proposal-b-ramp`. Its successor is a glide that
-adapts to the frame clock, or 60 Hz modulator sends from Lua. Measure either one on the
-device before it ships. Capture the latency of OPEN, KILL and DRY. Listen to an LFO on
-the cutoff with resonance 0.7. Try a morph and a preset load. Read the CPU in `top -H`.
+Proposal B is dropped and kept on `proposal-b-ramp`. Its successor is built: the
+fifty-third change, a glide whose time follows the pace of the writes (row 19.34 on
+the device). Still to do there: capture the latency of OPEN, KILL and DRY, listen to an
+LFO on the cutoff with resonance 0.7, and try a morph and a preset load.
 
 ## Phase 1: the show checks (needs the user at the hardware)
 

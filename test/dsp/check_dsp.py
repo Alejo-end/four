@@ -266,9 +266,11 @@ def check(build):
     target(build, "after a change the new drone is in step with the old one, over the phrase: frames out of step",
            num(r'^OUT OF STEP after a change, over the phrase, at most: (\d+)', a9), 1 if build == 'plugin' else 32,
            'frames', fmt='.0f')
-    # each drone has five UGens more: they put its head where the old one is
+    # each drone has five UGens more: they put its head where the old one is.
+    # (four_clouds has two more since the fifty-third change: its density and
+    # its feedback glide, and they had no lag before.)
     for name, limit in ((('four_grain', 104), ('four_warp', 47), ('four_pv', 48), ('four_play', 60),
-                         ('four_clouds', 115)) if build == 'plugin' else
+                         ('four_clouds', 117)) if build == 'plugin' else
                         (('four_grain', 107), ('four_warp', 42), ('four_pv', 104), ('four_play', 97))):
         target(build, f"the UGens of {name} (five more than before, for the head's start)",
                num(rf'^UGENS {name} (\d+)', runs['p9'][3].replace('\r', '')), limit, '', fmt='.0f')
@@ -307,22 +309,40 @@ def check(build):
           -num(r'the take 1\.05-1\.25 s:.*image ([-+\d.]+) dB', a1), 2.78, 1, 'dB')
     # No step from a moved knob (probe4 s, an_stair.py): a 0.25 Hz sine sent once
     # a frame into track 2's level and a lane filter's cutoff, on two frame
-    # clocks, at random phase. Today's lags take each step in 10 to 17 ms and
-    # then stand still. Both paths hold no plugin UGen, so the rows run once,
-    # in the stock build. A smoother that draws lines between the frames should
-    # reach still <= 1%, longest <= 10 ms and ripple <= -45 dB: then these
-    # become target rows. (Measured offline, an adaptive glide in a scratch copy
-    # of the engine: 0%, 0 ms, -53 to -60 dB. Ramp.kr at 1/15 s: 3 to 4%, 65 ms.)
+    # clocks, at random phase. Before the fifty-third change each knob had a
+    # lag of 20 to 50 ms: it took each step in 10 to 17 ms and then stood
+    # still, 61 to 74% of the time, in stands of 47 to 60 ms, with a ripple of
+    # -34 to -35 dB above 5 Hz. A knob now glides for a little more than the
+    # frame its value took (the engine's glideLaw), so it draws lines between
+    # the frames. Both paths hold no plugin UGen, so the rows run once, in the
+    # stock build. (Ramp.kr at 1/15 s, an earlier try: 3 to 4%, 65 ms.)
     if build == 'stock':
         a_s = analyse(os.path.join(REV, 'an_stair.py'), runs['p4'][0], 'p4')
-        for clock, hz, kv in [('deadline', '14.9 Hz deadline clock', {'level': (72.0, 56.0, -35.0), 'cutoff': (60.8, 46.7, -34.0)}),
-                              ('drift', '13.8 Hz old clock', {'level': (73.9, 60.0, -35.2), 'cutoff': (62.2, 50.7, -33.6)})]:
-            for path, (k_still, k_long, k_rip) in kv.items():
+        for clock, hz, before in [('deadline', '14.9 Hz deadline clock', {'level': (72.0, 56.0, -35.0), 'cutoff': (60.8, 46.7, -34.0)}),
+                                  ('drift', '13.8 Hz old clock', {'level': (73.9, 60.0, -35.2), 'cutoff': (62.2, 50.7, -33.6)})]:
+            for path, was in before.items():
                 line = rf'^s\. {clock} clock, {path}: still ([\d.]+)% of the time, longest ([\d.]+) ms, ripple above 5 Hz ([-\d.]+) dB'
-                known(build, f"a modulated {path} stands still, {hz}: share of the time",
-                      num(line, a_s, 1), k_still, 5, '%')
-                known(build, f"a modulated {path} stands still, {hz}: longest", num(line, a_s, 2), k_long, 15, 'ms')
-                known(build, f"a modulated {path} steps, {hz}: ripple above 5 Hz", num(line, a_s, 3), k_rip, 3, 'dB')
+                target(build, f"a modulated {path} does not stand still, {hz}: share of the time (was {was[0]:g}%)",
+                       num(line, a_s, 1), 1, '%')
+                target(build, f"a modulated {path} does not stand still, {hz}: longest stand (was {was[1]:g} ms)",
+                       num(line, a_s, 2), 10, 'ms')
+                target(build, f"a modulated {path} does not step, {hz}: ripple above 5 Hz (was {was[2]:g} dB)",
+                       num(line, a_s, 3), -45, 'dB')
+    # A hand on a knob: one write after a rest lands as soon as it did (the old
+    # lag was within 1% after 20 ms), though a stream of frames went before it.
+    if build == 'stock':
+        target(build, "one write of a level after a rest lands (was 20.1 ms)",
+               num(r'^t\. a hand: one write after a rest lands after ([\d.]+) ms', a_s), 22, 'ms')
+    # A knob's glide is one UGen where its lag was one (VarLag for Lag), so
+    # the lane's parts and the delay are as they were. The reverb has two
+    # more with the plugin and three more without: its decay, its damping and
+    # its shimmer had no lag at all. (The Mac has no DFM1 and no JPverb: the
+    # filter and the reverb count their stock paths here.)
+    for name, limit in (('four_lane_in', 28), ('four_filt_lo', 26), ('four_filt_hi', 14), ('four_colour', 40),
+                        ('four_lane_out', 15), ('four_delay', 17 if build == 'plugin' else 21),
+                        ('four_reverb', 38 if build == 'plugin' else 33)):
+        target(build, f"the UGens of {name} (a glide must not grow a def)",
+               num(rf'^UGENS {name} (\d+)', runs['p4'][3].replace('\r', '')), limit, '', fmt='.0f')
     v = num(r'minus B \(left alone\): ([-\d.]+) dBFS', a1)
     say('KNOWN', build, f"the reverb's 9 knobs on a running synth change nothing: difference {v:.1f} dBFS "
         "(known -300, it cannot get worse; a change shows they act)")

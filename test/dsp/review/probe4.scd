@@ -58,11 +58,24 @@ Engine_Four.new(ctx, { arg eng;
             [0.004, [\s_new, \copy, 1002, 1, 0, \from, 46, \to, 2]]]
             ++ ts.collect({ |tk, k|
                 var ph = 2pi * 0.25 * (k + 1) / 15;
-                [[tk, [\n_set, 1000, \level, 0.5 + (0.3 * ph.sin)]],
-                 [tk, [\n_set, 1001, \cutoff, 3000 * (2 ** (1.5 * (ph + 1).sin))]]] }).flatten(1);
+                // what the engine's gset sends with a value: the glide time,
+                // from the time since the same command last came (glideLaw).
+                // KEEP THIS IN STEP WITH gset. An engine from before the
+                // fifty-third change has no glide, and gets the value alone.
+                var dt = (k > 0).if({ tk - ts[k - 1] }, { 10 });
+                var gt = { |name| eng.respondsTo(\glideLaw).if({ [name, eng.glideLaw(dt)] }, { [] }) };
+                [[tk, [\n_set, 1000, \level, 0.5 + (0.3 * ph.sin)] ++ gt.(\level_t)],
+                 [tk, [\n_set, 1001, \cutoff, 3000 * (2 ** (1.5 * (ph + 1).sin))] ++ gt.(\cutoff_t)]] }).flatten(1);
         [name, 12.0, 4, [], msgs]
     };
     ("COMMANDS " ++ eng.cmdNames.size).postln;
+    // what the lane's parts, the delay and the reverb cost in UGens: on the
+    // norns every one of them counts, and a knob's glide must not grow a def
+    // (check_dsp.py holds the counts)
+    [\four_lane_in, \four_filt_lo, \four_filt_hi, \four_colour, \four_lane_out,
+        \four_delay, \four_reverb].do({ |k|
+        ("UGENS " ++ k ++ " " ++ SynthDescLib.global[k].def.children.size).postln;
+    });
     "FOUR_PLUGIN_DIR".getenv.notNil.if({
         opts.ugenPluginsPath = [Platform.resourceDir +/+ "plugins", "FOUR_PLUGIN_DIR".getenv];
     });
@@ -128,7 +141,21 @@ Engine_Four.new(ctx, { arg eng;
              [1.0, [\n_set, 1000, \delay_time, 0.1]]]],
         // s. the modulated knob, on the two frame clocks (see modJob above)
         modJob.(\mod15, \deadline, 1511),
-        modJob.(\mod138, \drift, 1138)
+        modJob.(\mod138, \drift, 1138),
+        // t. A HAND ON A KNOB: one write after a rest, and it must land at
+        // once. Track 2's level goes from 0.5 to 0.8 over DC 0.5 (channel 0),
+        // 0.3 s after a stream of frames ended, so the knob's last glide was
+        // a frame long. The engine sends 20 ms with a write that comes alone.
+        [\hand, 3.0, 2, [],
+            [[0.0, [\d_recv, def.(\four_lane_out)]],
+             [0.001, [\s_new, \dc, 900, 0, 0, \out, 40, \amp, 0.5, \dur, 20]],
+             [0.002, [\s_new, \four_lane_out, 1000, 1, 0, \pbus, 40, \out_bus, 0, \own_out, 90,
+                \dly_out, 92, \rev_out, 94, \level, 0.5]]]
+            ++ (0..9).collect({ |k|
+                var gt = eng.respondsTo(\glideLaw).if({ [\level_t, eng.glideLaw((k > 0).if({ 1 / 15 }, { 10 }))] }, { [] });
+                [1.0 + (k / 15), [\n_set, 1000, \level, 0.5 + (0.01 * k)] ++ gt] })
+            ++ [[2.0, [\n_set, 1000, \level, 0.8]
+                ++ eng.respondsTo(\glideLaw).if({ [\level_t, eng.glideLaw(2.0 - (1.0 + (9 / 15)))] }, { [] })]]]
     ];
     run = { |i|
         if (i >= jobs.size) { "PROBE_DONE".postln; 0.exit } {

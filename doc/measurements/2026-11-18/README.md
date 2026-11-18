@@ -267,3 +267,68 @@ not built. doc/plan.md, Phase 0, item 8.
 The five UGens that each drone gained cost nothing that the row can read. JACK logged
 one xrun in this run, from the softcut client, 40 s after the script load and before
 row 19.27. The rows that count xruns counted none.
+
+## A knob that moves once a frame (the fifty-third change, C6 of the plan)
+
+A modulator, a motion lane and the fade write a value once a frame. Each knob had a lag
+of 20 to 50 ms, shorter than the 67 ms frame, so it stood still for most of each frame.
+Each knob now glides in a straight line, for a little more than the frame its value took.
+
+### Offline
+
+`test/dsp/review/probe4.scd`, job s, read by `an_stair.py`: a 0.25 Hz sine sent once a
+frame, at random phase, into track 2's level and into a lane filter's cutoff.
+
+| Path, frame clock | Still, before | Still | Longest stand, before | Longest | Ripple above 5 Hz, before | Ripple |
+|---|---|---|---|---|---|---|
+| level, 14.9 Hz deadline | 72.0% | 0.0% | 56.0 ms | 0 ms | -35.0 dB | -53.7 dB |
+| cutoff, 14.9 Hz deadline | 60.8% | 0.0% | 46.7 ms | 0 ms | -34.0 dB | -50.9 dB |
+| level, 13.8 Hz old loop | 73.9% | 0.0% | 60.0 ms | 0 ms | -35.2 dB | -57.8 dB |
+| cutoff, 13.8 Hz old loop | 62.2% | 0.0% | 50.7 ms | 0 ms | -33.6 dB | -52.6 dB |
+
+The norns's own scsynth renders the same numbers.
+
+A lone write (job t: one write of the level, 0.3 s after a stream of frames):
+
+| | Before | Now |
+|---|---|---|
+| Within 1% of its place after | 20.1 ms | 19.8 ms |
+| Of the way after 10 ms | 90% | 46% |
+
+What VarLag does when its time changes, the same on both scsynths: a value at rest does
+not move when the time alone changes, and neither when the same value comes again with
+another time. A change of the time in the middle of a line stretches what is left of it.
+
+UGens: `four_lane_in` 28, `four_filt_lo` 26, `four_filt_hi` 14, `four_colour` 40,
+`four_lane_out` 15, `four_delay` 17 and 21, `four_io` 107, the effects and four drones
+as before. `four_clouds` 117 (115) and `four_reverb` 38 with the plugin (36), 33 without
+(30): their knobs had no lag.
+
+### On the device (row 19.34)
+
+`count: 198`. Track 1 plays a 220 Hz tone, and modulator 1 moves its cutoff with a FREE
+sine of 0.5 Hz, so the level swings by 14 dB. `test/device/an_fade.py` reads the level
+of the engine's output.
+
+| | The fifty-first change | This build, first run | Second run |
+|---|---|---|---|
+| Still, of the time the level is meant to move fast | 45.9% | 0.8% | 0.0% |
+| Longest stand | 32.0 ms | 20.0 ms | 0.0 ms |
+| The line at the frame rate, against the swing | -31.0 dB | -47.2 dB | -42.5 dB |
+| Ripple above 5 Hz | -28.8 dB | -31.7 dB | -25.7 dB |
+
+- sclang received the cutoff commands 66 to 67 ms apart: 90 of 90 intervals inside the
+  window of 55 to 90 ms.
+- The ripple above 5 Hz holds more than the frames: it did not follow the frames' line,
+  and what it holds was not looked into.
+- The recordings: `../four-device-recordings/2026-11-18/19.34_cutoff.wav`, and the
+  earlier engine's in `before_51/19.34_cutoff_before53.wav`.
+- Not heard by the user. The latency of OPEN, KILL and DRY was not captured.
+
+The other rows with this build: 19.1, 19.4, 19.5, 19.7, 19.8, 19.10, 19.12, 19.14,
+19.16, 19.20, 19.29, 19.30, 19.32, 19.33, 10.4 and 10.8 read as before. Row 19.33:
+WARP -0.4 dB, PV -1.0 dB, CLOUD -2.1 dB, the four tracks after 50, 198, 362 and 531 ms.
+Row 19.27: four PV at pitch 2 56.8%, the dense set 64.7% of the scsynth thread, no xrun
+(56.6% and 64.3% with the fifty-first change). Row 19.11 fails by its limit: CHORUS
+changes the sound by 1.0 dB against OFF and the row asks for more than 1 (1.1 before).
+The levels against OFF are the same as before, to 0.1 dB.

@@ -53,3 +53,17 @@ for clock, job in [('deadline', 'mod15'), ('drift', 'mod138')]:
         st, lg, rp = stairs(y)
         print(f"s. {clock} clock, {name}: still {st:.1f}% of the time, longest {lg:.1f} ms, "
               f"ripple above 5 Hz {rp:.1f} dB")
+
+# t. a hand on a knob: one write of the level, 0.5 to 0.8 (the DC is 0.5, so
+# the output goes from 0.295 to 0.4), 0.3 s after a stream of frames. When is
+# it there (within 1% of the step), and where is it after 10 ms?
+import os
+if os.path.exists(f'{d}/{tag}_hand.wav'):
+    x, _ = sf.read(f'{d}/{tag}_hand.wav')
+    y = np.abs(x[:, 0])
+    i0 = int(2.0 * SR)
+    a, b = y[i0 - 480], y[i0 + int(0.4 * SR)]
+    done = np.nonzero(np.abs(y[i0:] - b) <= 0.01 * abs(b - a))[0]
+    at10 = (y[i0 + 480] - a) / (b - a)
+    print(f"t. a hand: one write after a rest lands after {done[0] / SR * 1000:.1f} ms, "
+          f"and is {100 * at10:.0f}% of the way after 10 ms (from {a:.3f} to {b:.3f})")

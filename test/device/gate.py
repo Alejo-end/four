@@ -3339,6 +3339,47 @@ def stage19():
 
     check("19.33", c1933)
 
+    # A knob that a modulator moves does not stand still (C6 of the plan, the
+    # fifty-third change). A modulator writes once a frame, 67 ms apart, and
+    # each knob had a lag of 20 to 50 ms, so the value stood still for most
+    # of each frame. Track 1 plays a tone, and a FREE sine of 0.5 Hz moves its
+    # cutoff across the tone. an_fade.py reads the level of the recording.
+    def c1934():
+        import subprocess
+        modes("OFF", "OFF", "OFF", "OFF")
+        n.set("track_sel", 1)
+        n.set("dry_wet", 1)
+        record_take(6, "tone")
+        modes("PLAY", "OFF", "OFF", "OFF")
+        n.set("resonance", 0)
+        n.set("cutoff", 300)
+        opt("lfo1_target", n.lua('print(params:lookup_param("cutoff").name)'))
+        opt("lfo1_shape", "SINE")
+        opt("lfo1_period", "FREE")
+        n.set("lfo1_rate", 0.5)
+        n.set("lfo1_depth", 0.3)
+        time.sleep(1.5)
+        x0 = n.now()
+        engine_rec("19.34_cutoff", 9)
+        xr = n.xruns_since(x0)
+        n.set("lfo1_depth", 0)
+        opt("lfo1_target", "OFF")
+        n.set("cutoff", 20000)
+        out = subprocess.run(["uv", "run", "-q", "--with", "numpy", "--with", "scipy", "--with", "soundfile", "python",
+                              os.path.join(os.path.dirname(__file__), "an_fade.py"),
+                              os.path.join(WAVS, "19.34_cutoff.wav")], capture_output=True, text=True).stdout
+        got = re.search(r"swing ([\d.]+) dB: still ([\d.]+)% of the time, longest ([\d.]+) ms, "
+                        r"ripple above 5 Hz ([-\d.]+) dB, the frames' line ([-\d.]+) dB", out)
+        if not got:
+            return verdict(False, f"no reading: {out[-200:]}")
+        swing, still, longest, ripple, line = (float(v) for v in got.groups())
+        return verdict(swing > 3 and still < 20 and line < -40 and xr == 0,
+                       f"a 0.5 Hz sine on the cutoff under a tone, the level swings {swing} dB: it stands still "
+                       f"{still}% of the time, longest {longest} ms, ripple above 5 Hz {ripple} dB, the line at the "
+                       f"frame rate {line} dB under the swing, xruns {xr}. Listen to 19.34_cutoff.wav", "measured")
+
+    check("19.34", c1934)
+
 
 def cleanup():
     n.signal_quit()

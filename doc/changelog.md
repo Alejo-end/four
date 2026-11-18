@@ -4922,3 +4922,46 @@ doc/signature-workflow.md.
   26 ms over a tone. Nothing in this change touches the loop's wrap, and the old engine
   was not read at a seam. It is open (doc/plan.md, Phase 0, item 8). Row 19.33 reads its
   levels away from the seam.
+
+four, fifty-third change: **a knob that moves once a frame draws lines, not steps (engine
+and test tools; the count stays 198; on the device 2026-11-18, not heard)**. This is C6
+of doc/signature-workflow.md.
+- Before: a modulator, a motion lane and the fade write a value once a frame, 67 ms
+  apart. Each knob in the engine had a lag of 20 to 50 ms, so the value moved for a
+  third of each frame and stood still for the rest. The staircase probe read it still 61
+  to 74% of the time, in stands of 47 to 60 ms.
+- Each knob's lag is now a glide: a straight line to the new value over a time (`gl` in
+  the defs, VarLag). The time is a control of its own, `<name>_t`, and every write of the
+  value sends it (`gset`). The engine works the time out from when the same command last
+  came (`glideT`, `glideLaw`). A value that comes 55 to 90 ms after the last one glides
+  for 1.2 times that, 75 ms at least: it is still on its way when the next one comes. Any
+  other write lands in 20 ms.
+- A hand and a key answer as fast as before: a lone write of a level landed (within 1%)
+  after 20.1 ms and lands after 19.8 ms. The line is at 46% after 10 ms, where the lag
+  was at 75 to 90%. The latency of OPEN, KILL and DRY on the device was not captured.
+- The knobs that glide: level, the sends (`fx_dly`, `fx_rev`, `dly_rev`, `send_*`),
+  `dry_wet`, `delay_mix`, `rev_mix`, `grain_level`, cutoff, resonance, drive, crush, an
+  effect's amount and rate, `delay_fb`, and a drone's scan, pitch and pan. Four had no
+  lag at all and glide now: CLOUD's density (its level law spans 14 dB) and feedback,
+  and the reverb's decay, damping and shimmer. `delay_time` keeps its 0.2 s glide.
+- The head of a stopped track stops on the same line as the level (`run_t`), so a fade
+  to silence ends before the head holds a sample.
+- No new command. A glide is one UGen where a lag was one, so no def grew, but two:
+  `four_clouds` has two more (117) and `four_reverb` two more with the plugin (38).
+  check_dsp.py holds the counts of every def that was touched.
+- The plan had "a glide that follows the frame clock". The engine reads the pace from
+  the writes themselves, so it needs no clock and no word from the script.
+- Offline (probe4 job s, an_stair.py): still 0.0% of the time on both paths and both
+  clocks, longest stand 0 ms, ripple above 5 Hz -51 to -58 dB (-34 dB before). The
+  twelve KNOWN rows are target rows now. The norns's own scsynth renders the same.
+  VarLag does nothing to a value at rest when its time alone changes, on both scsynths.
+- On the device (`count: 198`, doc/measurements/2026-11-18/): the new row 19.34, a
+  0.5 Hz sine from a modulator on track 1's cutoff under a tone. The level stood still
+  45.9% of the time and stands still 0.8% and 0.0% (two runs). The line at the frame
+  rate fell from 31.0 dB under the swing to 47.2 and 42.5 dB. sclang got the cutoff
+  commands 66 to 67 ms apart, 90 of 90 inside the window.
+- The other rows read as before: 19.4, 19.5, 19.7, 19.8, 19.10, 19.12, 19.14, 19.16,
+  19.20, 19.29, 19.30, 19.32, 19.33, 10.4 and 10.8. Row 19.27 reads 56.8% and 64.7% of
+  the scsynth thread (56.6% and 64.3% before): inside what the row moves from run to
+  run. Row 19.11 fails by its own limit: CHORUS changes the sound by 1.0 dB, and the
+  row asks for more than 1 (it read 1.1). Its levels against OFF are the same.

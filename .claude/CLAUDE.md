@@ -97,7 +97,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-18 it runs the fifty-first change at `count: 198`, with the plugin
+- Since 2026-11-18 it runs the fifty-third change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -152,6 +152,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
 | 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
 | 51st: a voice change keeps its sound and its place: the old drone holds and fades under the new one, and the new head starts where the old one is (C2 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.33, WARP -0.4 dB, PV -0.9 dB, CLOUD -1.3 dB (-26.4, -70.6 and -71.2 before). Not pushed | no |
+| 53rd: a knob that moves once a frame draws lines: each knob's lag is a glide whose time follows the pace of the writes (C6 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.34, still 0.8% of the time (45.9% before). Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -197,14 +198,19 @@ run after it found row 10.8 failing (a clear with regen running left 6.7 ms of s
 and the fiftieth change is its fix. C2 is the fifty-first change, on the device, not
 heard: a voice change has no hole and the loop keeps its place (row 19.33). Four voices
 changed in one frame now change one after another, over 0.55 s into WARP. Row 19.27 did
-not grow (64.3%). Next: C6.
+not grow (64.3%). C6 is the fifty-third change, on the device, not heard: a knob that
+a modulator, a motion lane or the fade moves glides from frame to frame (row 19.34), and
+a lone write lands in 20 ms. That ends Phase A's engine changes. Open in Phase A: the
+rest of C5 (the supported set needs the user's answer to question 8, the `CPU` word in
+the header, row 19.27 at 64.7%), and the user's ears on the forty-fifth to the
+fifty-third change.
 The work is on the local branch `phase-a`. Another session shares this checkout (the
 forty-seventh change, an Exquis driver): stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
 TYPE steps) has no break since the forty-second change. Stage 19 still fails 19.27 (the
-dense set takes 64.3% of the scsynth thread, over 60%, with no xruns). WARP and PV dip
+dense set takes 64.7% of the scsynth thread, over 60%, with no xruns). WARP and PV dip
 by about 27 dB at their own loop seam (doc/plan.md, Phase 0, item 8). Open too: the user's look at REVERB's squares (the
 screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
 more than one that sounds.
@@ -493,6 +499,13 @@ Each line was learned the hard way; the change log has the story.
   step on a straight line, where a late block is 7%: +0.5 and +1.2 dB.
 - WARP and PV dip at their own loop seam (found with row 19.33 on a take of 4 s). A
   device row that reads a level waits until the head is past the seam (`after_seam`).
+- A knob in a SynthDef is `gl.(value, value_t)`, never a bare `.lag`: every write sends
+  the glide time with the value (`gset`). A new knob joins `glideKeys` in the engine,
+  and its def must not grow (VarLag with warp 1 is one UGen: without the warp it is an
+  EnvGen and two more). A lag shorter than a frame makes a modulated knob stand still.
+- A level read off a recording has a fine ripple that a render has not. Low-pass it
+  (40 Hz in an_fade.py) before a measure that counts stands: row 19.34 read 26% still
+  on a knob that was moving, and 0.8% after.
 - The engine's write head is polled once a frame. A poll that left before the head was
   reset can arrive after it. The head moves at one second a second, so for three frames
   a poll further than the time since the reset allows is not believed (`ctx.head_poll`).

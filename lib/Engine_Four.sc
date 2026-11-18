@@ -67,6 +67,9 @@ Engine_Four : CroneEngine {
     // ...and, for whenFree: when the hold in progress ends, and a count for
     // each track that lets its last request win.
     var swapUntil = 0, modeGen;
+    // A KNOB'S GLIDE (gset): when each command last came, and for each
+    // control that glides the name of its time control.
+    var glideAt, glideKeys;
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
@@ -313,23 +316,24 @@ Engine_Four : CroneEngine {
         });
     }
 
-    // one value of a lane, by its command name
-    laneSet { arg i, name, v;
+    // one value of a lane, by its command name. `t` is the glide time of
+    // the write (glideT).
+    laneSet { arg i, name, v, t;
         var lane = lanes[i];
         lane[\p][name] = v;
         name.switch(
             \filt_type, { lane[\gFilt].set(name, v); this.laneFilter(lane) },
-            \drive, { this.laneColour(lane); lane[\gCol].set(name, v) },
-            \crush, { this.laneColour(lane); lane[\gCol].set(name, v) },
+            \drive, { this.laneColour(lane); this.gset(lane[\gCol], name, v, t) },
+            \crush, { this.laneColour(lane); this.gset(lane[\gCol], name, v, t) },
             \effect, { this.laneFx(lane, 0) },
-            \effect_amt, { lane[\gFx][0].set(\amt, v) },
-            \effect_rate, { lane[\gFx][0].set(\rate, v) },
+            \effect_amt, { this.gset(lane[\gFx][0], \amt, v, t) },
+            \effect_rate, { this.gset(lane[\gFx][0], \rate, v, t) },
             \effect2, { this.laneFx(lane, 1) },
-            \effect2_amt, { lane[\gFx][1].set(\amt, v) },
-            \effect2_rate, { lane[\gFx][1].set(\rate, v) },
-            \grain_level, { lane[\in].set(\pre_gain, v) },
+            \effect2_amt, { this.gset(lane[\gFx][1], \amt, v, t) },
+            \effect2_rate, { this.gset(lane[\gFx][1], \rate, v, t) },
+            \grain_level, { this.gset(lane[\in], \pre_gain, v, t) },
             // cutoff, resonance, and the out synth's level, fx_dly, fx_rev
-            { lane[\group].set(name, v) }
+            { this.gset(lane[\group], name, v, t) }
         );
     }
 
@@ -358,6 +362,38 @@ Engine_Four : CroneEngine {
             ] ++ playParams.getPairs, playParams, bufL);
             this.updateErode;
         });
+    }
+
+    // A KNOB'S GLIDE (C6 of doc/signature-workflow.md, the fifty-third
+    // change). The time a value takes to its new place, from the time `dt`
+    // since the same command last came.
+    // A modulator, a motion lane and the fade write once a frame, 67ms
+    // apart. A value that comes at that pace glides for a little more than
+    // the frame it took, so it is still on its way when the next one comes:
+    // the knob draws lines between the frames and never stands still. Any
+    // other write lands in 20ms, in a straight line. That is when a hand's
+    // turn and a key landed before (the old lags were at 99% after 20 to
+    // 33ms), though the line is at half its way after 10ms where a lag was
+    // at 75 to 90%.
+    // The window is 55 to 90ms. The script's frames are 67ms apart, and
+    // late by a few ms at most (measured on the device, 2026-11-16).
+    glideLaw { arg dt;
+        ^((dt > 0.055) and: { dt < 0.09 }).if({ (dt * 1.2).clip(0.075, 0.11) }, { 0.02 })
+    }
+
+    // the glide time of this write of the command `cmd`
+    glideT { arg cmd;
+        var now = Main.elapsedTime, dt = now - (glideAt[cmd] ? 0);
+        glideAt[cmd] = now;
+        ^this.glideLaw(dt)
+    }
+
+    // set a control, and its glide time with it when it has one (`gl` in
+    // the defs). `t` is the write's glideT, nil for a write that no command
+    // made. A node that does not have the control ignores the pair.
+    gset { arg target, name, v, t;
+        var k = glideKeys[name];
+        k.isNil.if({ target.set(name, v) }, { target.set(name, v, k, t ? 0.02) });
     }
 
     // HOW THE DRONE THAT LEAVES GOES, by the mode that comes (0 OFF, 1 GRAIN,
@@ -658,7 +694,7 @@ Engine_Four : CroneEngine {
     alloc {
         var s = context.server;
         var allKeys;
-        var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot;
+        var winBounds, winRead, exactRd, drEnv, seam, colour, fxSlot, gl;
         var stretchOn, pvClass, warpClass, readClass, tanhClass, delayClass, grainClass, roomClass, bbdClass, th, dfmTrim;
         var grainCap, plugNow, plugLoaded, cloudDef, cloudName;
         // THE RECORD BUFFER LENGTH. The Lua side mirrors this as ctx.BUF_SECS
@@ -671,6 +707,14 @@ Engine_Four : CroneEngine {
         leaving = Array.newClear(4);
         leaveGen = Array.fill(4, 0);
         modeGen = Array.fill(4, 0);
+        glideAt = IdentityDictionary.new;
+        glideKeys = IdentityDictionary.new;
+        [\scan, \pitch, \pan, \density, \clouds_fb, \drive, \crush, \amt, \rate,
+            \pre_gain, \snd1, \snd2, \snd3, \snd4, \cutoff, \resonance,
+            \level, \fx_dly, \fx_rev, \dly_rev, \delay_mix, \rev_mix, \dry_wet,
+            \delay_fb, \rev_decay, \rev_damp, \shimmer].do({ arg k;
+            glideKeys[k] = (k ++ "_t").asSymbol;
+        });
         bufLs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufRs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufL = bufLs[0];
@@ -796,6 +840,20 @@ Engine_Four : CroneEngine {
         // write heads already follow, and like them it also engages when the
         // MIX is thrown fully to tape (level lands at exact 0 there too) —
         // a fully-thrown-away deck pauses rather than spinning unheard.
+        // gl = A KNOB'S GLIDE (C6 of doc/signature-workflow.md, the
+        // fifty-third change): a straight line from where the value is to
+        // where it goes, over the time `t`. The time is a control of its own,
+        // `<name>_t`, and every write of the value sends it too (gset): 20ms
+        // for a hand, and a little more than a frame for a value that comes
+        // once a frame (glideLaw). Before, each knob had a Lag of 20 to 50ms:
+        // a modulator, a motion lane and the fade write once a frame (67ms),
+        // so the value moved for a third of each frame and stood still for
+        // the rest. Measured (test/dsp/review/probe4.scd, job s): still 61 to
+        // 74% of the time, in stands of 47 to 60ms.
+        // VarLag with warp 1 is one UGen, as Lag was, so no def grows. It
+        // reads its time when its value changes. A change of the time alone
+        // does nothing to a value at rest (tried on both scsynths).
+        gl = { arg x, t; VarLag.kr(x, t, warp: 1) };
         // winBounds = the window's sorted, smoothed edges as [lo, span],
         // shared by winRead and the erosion head.
         winBounds = { arg pos_start, pos_end;
@@ -810,9 +868,10 @@ Engine_Four : CroneEngine {
             span = (hi - lo).max(0.001);
             [lo, span];
         };
-        // `run` goes through the SAME 50ms Lag io puts on `level`: the head
-        // stops only once io's fade is down at -60dB. On the raw level it
-        // stopped first, and the fade then played one held sample (a thump).
+        // `run` goes through the SAME glide io puts on `level` (gl, with the
+        // level's own time, `run_t`): the head stops only once io's fade is
+        // down. On the raw level it stopped first, and the fade then played
+        // one held sample (a thump).
         // `quiet` 1 (a drone fading out under the next one) stops writing
         // the phase bus, so the screen follows the new drone alone.
         // drEnv is the drone's own 10ms in, 20ms out, which frees it. A drone
@@ -848,7 +907,7 @@ Engine_Four : CroneEngine {
         // 0 in the bundle of the spawn starts it at 0, because a synth's
         // UGens are built at its first block, after the whole bundle.
         winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0,
-                hfrom = 0, hlead = 0, hspan = 1;
+                hfrom = 0, hlead = 0, hspan = 1, scan_t = 0.02, run_t = 0.02;
             var lo, span, frames, loF, spanF, rate, whole, frac, phase, winPos;
             #lo, span = winBounds.(pos_start, pos_end);
             // THE HEAD COUNTS IN FRAMES, in two parts. It was one float from
@@ -864,7 +923,7 @@ Engine_Four : CroneEngine {
             frames = BufFrames.kr(buf);
             loF = (lo * frames).round;
             spanF = (span * frames).round.max(64);
-            rate = Lag.kr(scan, 0.02) * pitchMul * (Lag.kr(run, 0.05) > 0.001)
+            rate = gl.(scan, scan_t) * pitchMul * (gl.(run, run_t) > 0.001)
                 * BufRateScale.kr(buf);
             whole = Phasor.ar(0, rate,
                 Trig.kr(((In.kr(phase_out) * hfrom) + hlead).round % hspan, 0), spanF);
@@ -976,11 +1035,13 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
+                level_t = 0.02;
             var winPos, phase, span, lo, look, bufDur, trig, dur, pch, readLen;
             var off, pos, r, wid, panL, panR, envSel, comp, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan * (1 - pv_freeze),
-                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
             lo = winPos - (phase * span);
             bufDur = BufDur.kr(buf_l);
             // while recording, read a quarter second behind the record head
@@ -1046,9 +1107,11 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
+                level_t = 0.02;
             var winPos, phase, span, idx, frac, ptr, l, r, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
             stretchOn.if({
                 // bufL, bufR, the head in frames, pitch, window in frames,
                 // overlaps, rand (positional: see the MiClouds call)
@@ -1061,7 +1124,7 @@ Engine_Four : CroneEngine {
                 l = Warp1.ar(1, buf_l, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
                 r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
             });
-            sig = Balance2.ar(l, r, pan.lag(0.03));
+            sig = Balance2.ar(l, r, gl.(pan, pan_t));
             Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
@@ -1075,13 +1138,15 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
+                level_t = 0.02;
             var winPos, phase, span, idx, frac, sigL, sigR, chainL, chainR, l, r, sig, edge;
             // with FourStretch, FRZ holds the head (GRAIN's law) and the
             // vocoder sustains what is under it; pitch is its own knob
             #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end,
                 stretchOn.if({ scan * (1 - pv_freeze) }, { scan }),
-                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             // the seam fade before the FFT: a wrap click fed to MagFreeze
@@ -1089,7 +1154,7 @@ Engine_Four : CroneEngine {
             stretchOn.if({
                 // no seam fade: the frames overlap, so the loop point is a
                 // crossfade of spectra already
-                sig = pvClass.ar(buf_l, buf_r, idx, pitch.lag(0.05));
+                sig = pvClass.ar(buf_l, buf_r, idx, gl.(pitch, pitch_t));
                 l = sig[0];
                 r = sig[1];
             }, {
@@ -1103,7 +1168,7 @@ Engine_Four : CroneEngine {
                 l = IFFT(chainL);
                 r = IFFT(chainR);
             });
-            sig = Balance2.ar(l, r, pan.lag(0.03));
+            sig = Balance2.ar(l, r, gl.(pan, pan_t));
             Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
@@ -1122,15 +1187,17 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
+                level_t = 0.02;
             var winPos, phase, span, idx, frac, sigL, sigR, edge, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover, hfrom, hlead, hspan);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, gl.(pitch, pitch_t), level, handover, hfrom, hlead, hspan, scan_t, level_t);
             stretchOn.if({
                 // a windowed sinc in place of the cubic: nothing folds above
                 // pitch 1 and the images sit below -70dB. On a whole frame
                 // (pitch 1) it is the stored sample, like exactRd.
                 sig = readClass.ar(buf_l, buf_r, idx, frac,
-                    (Lag.kr(scan, 0.02) * pitch.lag(0.05)).abs);
+                    (gl.(scan, scan_t) * gl.(pitch, pitch_t)).abs);
                 sigL = sig[0];
                 sigR = sig[1];
             }, {
@@ -1142,7 +1209,7 @@ Engine_Four : CroneEngine {
             // crossing, so the bare loop CLICKED every pass — the one blemish
             // on "the exact recorded sample". the body of the take is untouched.
             edge = seam.(phase, span, buf_l);
-            sig = Balance2.ar(sigL, sigR, pan.lag(0.03)) * edge;
+            sig = Balance2.ar(sigL, sigR, gl.(pan, pan_t)) * edge;
             Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
@@ -1211,15 +1278,19 @@ Engine_Four : CroneEngine {
                     clouds_mode = 0, clouds_lofi = 0,
                     warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                     pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
+                level_t = 0.02;
                 var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
-                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
+                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
                 // Clouds' density is silent at 0.5: below it grains are
                 // random, above it periodic. Mapping 1..200 across 0.5 made
                 // density 13 to 16 silent and the default 20 about 20 dB
                 // down. Stay on the random side (the drone's Dust law), and
                 // lift the sparse end by the level the device measured.
-                dens = density.explin(1, 200, 0.36, 0.05);
+                // (the density glides: the level law below spans 14dB, and
+                // a step of it was a step of the level)
+                dens = gl.(density, density_t).explin(1, 200, 0.36, 0.05);
                 edge = seam.(phase, span, buf_l);
                 srcL = exactRd.(buf_l, idx, frac) * edge;
                 srcR = exactRd.(buf_r, idx, frac) * edge;
@@ -1234,7 +1305,7 @@ Engine_Four : CroneEngine {
                     clouds_pos,
                     size.linlin(0.01, 0.5, 0.1, 0.9),
                     dens,
-                    clouds_tex, 1.0, 1.0, spread, 0.0, clouds_fb,
+                    clouds_tex, 1.0, 1.0, spread, 0.0, gl.(clouds_fb, clouds_fb_t),
                     pv_freeze, clouds_mode, clouds_lofi);
                 // x0.5: measured on the device, Clouds at the default
                 // density came out 6 dB above PLAY on the same take, so
@@ -1349,13 +1420,13 @@ Engine_Four : CroneEngine {
         // at the top) and rounds it to fewer bits (16 down to 4). It fades in
         // over the first tenth of the knob, so crush 0 is a true bypass and
         // the rest of the knob is all crushed.
-        colour = { arg sig, drive, crush;
+        colour = { arg sig, drive, crush, drive_t, crush_t;
             var pre, xf, rate, steps, cr;
-            drive = drive.lag(0.03);
+            drive = gl.(drive, drive_t);
             pre = 1 + (drive * 6);
             sig = LinXFade2.ar(sig, th.value(sig * pre) * pre.sqrt.reciprocal,
                 (drive * 2 - 1));
-            crush = crush.lag(0.05);
+            crush = gl.(crush, crush_t);
             rate = SampleRate.ir * (0.5 ** (crush * 5));
             steps = 2 ** (16 - (crush * 12));
             cr = (Latch.ar(sig, Impulse.ar(rate)) * steps).round / steps;
@@ -1404,11 +1475,11 @@ Engine_Four : CroneEngine {
         // block, so the line still caught 14% of the edge (gate row 19.29).
         fxSlot = { arg name, func;
             SynthDef(name, {
-                arg pbus, type = 1, amt = 0.5, rate = 0.5, gate = 1;
+                arg pbus, type = 1, amt = 0.5, rate = 0.5, gate = 1, amt_t = 0.02, rate_t = 0.02;
                 var env = EnvGen.kr(Env.asr(0.05, 1, 0.05, \sin), gate, doneAction: 2);
                 var sig = In.ar(pbus, 2) * EnvGen.ar(Env([0, 1], [0.01], \sin));
                 XOut.ar(pbus, env, func.value(sig, type,
-                    amt.clip(0, 1).lag(0.05), rate.clip(0, 1).lag(0.05)));
+                    gl.(amt.clip(0, 1), amt_t), gl.(rate.clip(0, 1), rate_t)));
             }).add;
         };
         fxSlot.value(\four_fx_mod, { arg sig, type, a, r;
@@ -1547,12 +1618,13 @@ Engine_Four : CroneEngine {
         SynthDef(\four_lane_in, {
             arg in_bus, sbus, pre_gain = 1.0,
                 snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
-                ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0;
-            var sendIn = (InFeedback.ar(ob1, 2) * snd1.lag(0.03))
-                + (InFeedback.ar(ob2, 2) * snd2.lag(0.03))
-                + (InFeedback.ar(ob3, 2) * snd3.lag(0.03))
-                + (InFeedback.ar(ob4, 2) * snd4.lag(0.03));
-            Out.ar(sbus, (In.ar(in_bus, 2) * pre_gain.lag(0.03) * 2.sqrt)
+                ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0,
+                pre_gain_t = 0.02, snd1_t = 0.02, snd2_t = 0.02, snd3_t = 0.02, snd4_t = 0.02;
+            var sendIn = (InFeedback.ar(ob1, 2) * gl.(snd1, snd1_t))
+                + (InFeedback.ar(ob2, 2) * gl.(snd2, snd2_t))
+                + (InFeedback.ar(ob3, 2) * gl.(snd3, snd3_t))
+                + (InFeedback.ar(ob4, 2) * gl.(snd4, snd4_t));
+            Out.ar(sbus, (In.ar(in_bus, 2) * gl.(pre_gain, pre_gain_t) * 2.sqrt)
                 + th.value(LeakDC.ar(sendIn)));
         }).add;
         // the filter, as two families: LO is the low-pass ladder (LP, and BP
@@ -1571,11 +1643,12 @@ Engine_Four : CroneEngine {
         // an octave, RHPF's 12. doc/measurements/2026-11-15/README.md.
         [\four_filt_lo, \four_filt_hi].do({ arg name, hi;
             SynthDef(name, {
-                arg sbus, pbus, cutoff = 20000, resonance = 0, filt_type = 0, gate = 1;
+                arg sbus, pbus, cutoff = 20000, resonance = 0, filt_type = 0, gate = 1,
+                    cutoff_t = 0.02, resonance_t = 0.02;
                 var env = EnvGen.kr(Env.asr(0.02, 1, 0.02, \lin), gate, doneAction: 2);
                 var sig = In.ar(sbus, 2);
-                var cf = cutoff.clip(20, 20000).lag(0.05);
-                var res = resonance.lag(0.05);
+                var cf = gl.(cutoff.clip(20, 20000), cutoff_t);
+                var res = gl.(resonance, resonance_t);
                 var wBp = Lag.kr(filt_type > 1.5, 0.02);
                 var dfmClass = "DFM1".asSymbol.asClass;
                 var stock = {
@@ -1601,18 +1674,18 @@ Engine_Four : CroneEngine {
         // COLOR, in place. It exists only while drive or crush is up: at 0
         // both are an exact bypass, so it comes and goes with no fade.
         SynthDef(\four_colour, {
-            arg pbus, drive = 0, crush = 0;
-            ReplaceOut.ar(pbus, colour.value(In.ar(pbus, 2), drive, crush));
+            arg pbus, drive = 0, crush = 0, drive_t = 0.02, crush_t = 0.02;
+            ReplaceOut.ar(pbus, colour.value(In.ar(pbus, 2), drive, crush, drive_t, crush_t));
         }).add;
         // out (tracks 2 to 4): the level, and where the track goes
         SynthDef(\four_lane_out, {
             arg pbus, out_bus, own_out, level = 1.0, fx_dly = 0, fx_rev = 0,
-                dly_out = 0, rev_out = 0;
-            var sig = In.ar(pbus, 2) * level.lag(0.03);
+                dly_out = 0, rev_out = 0, level_t = 0.02, fx_dly_t = 0.02, fx_rev_t = 0.02;
+            var sig = In.ar(pbus, 2) * gl.(level, level_t);
             Out.ar(own_out, sig);     // what the other tracks' sends read
             Out.ar(out_bus, sig);
-            Out.ar(dly_out, sig * fx_dly.lag(0.03));
-            Out.ar(rev_out, sig * fx_rev.lag(0.03));
+            Out.ar(dly_out, sig * gl.(fx_dly, fx_dly_t));
+            Out.ar(rev_out, sig * gl.(fx_rev, fx_rev_t));
         }).add;
 
         // ---- io: input, record head (with resample feedback), dry/wet, out
@@ -1639,7 +1712,10 @@ Engine_Four : CroneEngine {
                 // routing: the sends into track 1, and where track 1's
                 // filtered output goes for the others to read
                 snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0,
-                lane_bus = 0;
+                lane_bus = 0,
+                // the glide times of io's own knobs (gl)
+                level_t = 0.02, dry_wet_t = 0.02, delay_mix_t = 0.02, rev_mix_t = 0.02,
+                fx_dly_t = 0.02, fx_rev_t = 0.02, dly_rev_t = 0.02;
             var inL, inR, wet, dry, sig, preLim, recRun, recPhase, recL, recR;
             var cf, res, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
@@ -1662,8 +1738,8 @@ Engine_Four : CroneEngine {
             // is the level of the echoes (squared in Lua, so .sqrt makes it
             // linear in the knob), lagged so a CC step does not zipper. At
             // rest the synth is gone and the return reads 0.
-            dm = delay_mix.lag(0.03);
-            Out.ar(dly_send, (wet * fx_dly.lag(0.03)) + In.ar(lanes_dly, 2));
+            dm = gl.(delay_mix, delay_mix_t);
+            Out.ar(dly_send, (wet * gl.(fx_dly, fx_dly_t)) + In.ar(lanes_dly, 2));
             dlyRet = InFeedback.ar(dly_ret, 2) * dm.sqrt;
 
             // SPACE is two SENDS (doc/space-plan.md, section 3). A track goes
@@ -1673,21 +1749,21 @@ Engine_Four : CroneEngine {
             // as rev_mix is the level of the tail. (Before, the delay was a
             // crossfade that lowered the dry sound, and each track sent
             // everything.) dly_rev sends the echoes into the reverb.
-            revIn = (wet * fx_rev.lag(0.03)) + In.ar(lanes_rev, 2)
-                + (dlyRet * dly_rev.lag(0.03));
+            revIn = (wet * gl.(fx_rev, fx_rev_t)) + In.ar(lanes_rev, 2)
+                + (dlyRet * gl.(dly_rev, dly_rev_t));
             Out.ar(rev_send, revIn);
             wet = wet + others + dlyRet;
             rvRet = InFeedback.ar(rev_ret, 2);
             // SEND-style (OT-like): the direct sound stays at full level and
             // rev_mix only scales how much tail is ADDED. Lua squares the
             // knob, so .sqrt makes the tail gain linear in it.
-            rev_mix = rev_mix.lag(0.03);
+            rev_mix = gl.(rev_mix, rev_mix_t);
             wet = wet + (rvRet * rev_mix.sqrt);
 
             dry = [inL, inR];
-            dry_wet = dry_wet.lag(0.03);
+            dry_wet = gl.(dry_wet, dry_wet_t);
             sig = (dry * (1 - dry_wet).sqrt) + (wet * dry_wet.sqrt);
-            sig = sig * Lag.kr(level, 0.05);
+            sig = sig * gl.(level, level_t);
             // What gets RECORDED is tapped here, before the master limiter.
             // The limiter delays its output by twice its lookahead (6 ms
             // here; it was 20 ms). `resample` mixes the input with the output, so with
@@ -1803,13 +1879,13 @@ Engine_Four : CroneEngine {
         // command handler sets every delayParams key on the live synth, and
         // an unknown control name would be a server complaint per knob move.
         SynthDef(\four_delay, {
-            arg in_bus, out_bus, delay_time = 0.3, delay_fb = 0.3, delay_mix = 0;
+            arg in_bus, out_bus, delay_time = 0.3, delay_fb = 0.3, delay_mix = 0, delay_fb_t = 0.02;
             var sig, fbIn, dIn, dOut;
             // the line fills from silence, like an effect slot's (fxSlot):
             // the synth is born under a playing send, and the first echo
             // came back with a step at its head (gate row 10.4)
             sig = In.ar(in_bus, 2) * EnvGen.ar(Env([0, 1], [0.01], \sin));
-            delay_fb = delay_fb.lag(0.03);   // CC steps zipper without this
+            delay_fb = gl.(delay_fb, delay_fb_t);   // CC steps zipper without this
             // With the plugin the delay is THE BUCKET BRIGADE (FourBBD,
             // doc/space-plan.md): a chain of 8192 cells and a clock. TIME
             // moves the clock, so a turn bends the pitch as before, and a long
@@ -1865,15 +1941,21 @@ Engine_Four : CroneEngine {
                 rev_moddepth = 0.1, rev_modfreq = 2.0,
                 rev_low = 1.0, rev_mid = 1.0, rev_high = 1.0,
                 rev_lowcut = 500, rev_highcut = 2000,
-                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0;
+                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0,
+                rev_decay_t = 0.02, rev_damp_t = 0.02, shimmer_t = 0.02;
             var wet, fbIn, shimFb, revIn, rv, jpClass, ratio, pitched, shimOut;
             var roomGain;
+            // the three that a fade moves by ear glide (gl). They had no lag,
+            // so the decay, the damping and the shimmer's gain moved in steps.
+            rev_decay = gl.(rev_decay, rev_decay_t);
+            rev_damp = gl.(rev_damp, rev_damp_t);
+            shimmer = gl.(shimmer.clip(0, 0.95), shimmer_t);
             wet = In.ar(in_bus, 2);                 // io's post-delay wet send
             // shimmer feedback: the pitched tail recirculates into the reverb
             // INPUT so it climbs in octaves. shimmer=0 -> shimOut 0 -> revIn==wet.
             fbIn = LocalIn.ar(2);
             shimFb = fbIn;
-            revIn = wet + (shimFb * shimmer.clip(0, 0.95));
+            revIn = wet + (shimFb * shimmer);
             jpClass = "JPverb".asSymbol.asClass;
             // With the plugin the reverb is THE ROOM (doc/space-plan.md): four
             // unitary diffusion steps and eight late lines. It takes 4% of
@@ -1889,7 +1971,7 @@ Engine_Four : CroneEngine {
             // rose 4.9 dB over that range and JPverb 2.0 dB, so the return
             // falls gently with the decay. With this law the two are within
             // 0.7 dB of each other at all three, and a preset keeps its balance.
-            roomGain = 0.71 * (rev_decay.max(0.1) ** -0.15).lag(0.1);
+            roomGain = 0.71 * (rev_decay.max(0.1) ** -0.15);
             rv = stretchOn.if({
                 roomClass.ar(revIn[0], revIn[1], rev_decay,
                     1 - (0.85 * rev_damp.clip(0, 1)),
@@ -1976,30 +2058,30 @@ Engine_Four : CroneEngine {
             ++ delayParams.keys.asArray).asSet;
         allKeys.do({ arg name;
             this.addCommand(name, "f", { arg msg;
-                var v = msg[1];
+                var v = msg[1], t = this.glideT(name);
                 ioKeys.includes(name).if({
-                    ioSynth.set(name, v);
+                    this.gset(ioSynth, name, v, t);
                     // track 1's lane takes its own (the names io also has,
                     // level, fx_dly and fx_rev, are io's alone)
                     [\level, \fx_dly, \fx_rev].includes(name).not.if({
-                        this.laneSet(0, name, v);
+                        this.laneSet(0, name, v, t);
                     });
                 });
                 revParams.includesKey(name).if({
                     revParams[name] = v;
-                    revSynth.notNil.if({ revSynth.set(name, v) });
+                    revSynth.notNil.if({ this.gset(revSynth, name, v, t) });
                 });
                 delayParams.includesKey(name).if({
                     delayParams[name] = v;
-                    delaySynth.notNil.if({ delaySynth.set(name, v) });
+                    delaySynth.notNil.if({ this.gset(delaySynth, name, v, t) });
                 });
                 playParams.includesKey(name).if({
                     playParams[name] = v;
-                    playSynth.notNil.if({ playSynth.set(name, v) });
+                    playSynth.notNil.if({ this.gset(playSynth, name, v, t) });
                     // the three the other tracks' drones share with the take
                     [\level, \rec, \freeze].includes(name).if({
                         extra.do({ arg tr;
-                            tr[\synth].notNil.if({ tr[\synth].set(name, v) });
+                            tr[\synth].notNil.if({ this.gset(tr[\synth], name, v, t) });
                         });
                     });
                     (eroSynth.notNil and: { eroKeys.includes(name) }).if({
@@ -2044,14 +2126,17 @@ Engine_Four : CroneEngine {
         extra.do({ arg tr;
             var pre = "t" ++ tr[\n] ++ "_";
             tr[\params].keys.do({ arg k;
-                this.addCommand((pre ++ k).asSymbol, "f", { arg msg;
+                var cmd = (pre ++ k).asSymbol;
+                this.addCommand(cmd, "f", { arg msg;
+                    var t = this.glideT(cmd);
                     tr[\params][k] = msg[1];
-                    tr[\synth].notNil.if({ tr[\synth].set(k, msg[1]) });
+                    tr[\synth].notNil.if({ this.gset(tr[\synth], k, msg[1], t) });
                 });
             });
             stripKeys.do({ arg k;
-                this.addCommand((pre ++ k).asSymbol, "f", { arg msg;
-                    this.laneSet(tr[\n] - 1, k, msg[1]);
+                var cmd = (pre ++ k).asSymbol;
+                this.addCommand(cmd, "f", { arg msg;
+                    this.laneSet(tr[\n] - 1, k, msg[1], this.glideT(cmd));
                 });
             });
             this.addCommand((pre ++ "mode").asSymbol, "i", { arg msg;
@@ -2063,10 +2148,11 @@ Engine_Four : CroneEngine {
         (1..4).do({ arg from;
             (1..4).do({ arg to;
                 (from != to).if({
-                    this.addCommand(("send_" ++ from ++ "_" ++ to).asSymbol, "f", { arg msg;
+                    var cmd = ("send_" ++ from ++ "_" ++ to).asSymbol;
+                    this.addCommand(cmd, "f", { arg msg;
                         var key = ("snd" ++ from).asSymbol;
                         sendV[from - 1][to - 1] = msg[1];
-                        lanes[to - 1][\in].set(key, msg[1]);
+                        this.gset(lanes[to - 1][\in], key, msg[1], this.glideT(cmd));
                         (to > 1).if({ this.updateStrip(extra[to - 2]) });
                     });
                 });
