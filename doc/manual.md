@@ -252,7 +252,8 @@ The header shows what runs, from every page. It starts with the four track cells
 
 After the title, a T or an M with a blinking dot means that the tape or the motion loop
 records. FZ and TF are the freezes, RP is a held beat repeat, SQ is the pad sequencer and LF
-is a modulator.
+is a modulator. CPU means that the load is near the limit: turn a track OFF or take an
+effect out before the sound breaks up.
 
 ## Recording
 

@@ -235,6 +235,7 @@ local ctx = {
   rec_waiting = false,       -- armed to start on sound, none heard yet (TAKE: WAIT)
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
+  cpu_high = false,          -- the load is near the limit: the header says CPU
   tape_phase = 0,            -- softcut phase event: tape head, normalized
   tape_heard = nil,          -- an open tape pass: has it heard a sound yet (nil: no pass)
   tape_quiet = 0,            -- frames of silence at the tape's source while it records
@@ -7828,6 +7829,8 @@ end
 -- the left are the TRACKS (see draw_tracks); STOP inverts the title chip.
 -- A writer's dot carries the ONLY fast blink (its letter stays, so a flag
 -- never vanishes); holds and runs are steady. The flags, in priority order:
+-- CPU (the load is near the limit: steady, and first, so it stays a word.
+-- Its short form takes no room in the row: a line under the page's title),
 -- the writers (T the tape, M the motion looper; the take's
 -- REC is the blinking track cell), the holds (FZ, TF, RP a beat repeat),
 -- then the machines that play on their own (SQ the pad sequencer, LF a
@@ -7837,6 +7840,7 @@ end
 -- the header. Built once: draw_header refreshes `on` (and RP's `lvl`), and
 -- leaves `x` and `full` for the tests.
 local HFLAGS = {
+  { ch = "CPU", lvl = 15, under = true },
   { ch = "T", write = true },
   { ch = "M", write = true },
   { ch = "FZ", lvl = 10 }, { ch = "TF", lvl = 10 }, { ch = "RP", lvl = 12 },
@@ -7858,7 +7862,10 @@ local function hflag_w(f) return f.write and f.w + 8 or f.w + 3 end
 -- (a bar's pip is 3: the 2px bar and a 1px gap, and a writer's letter keeps
 -- a 1px gap too. They were 4 and 2, but four's thirteen page dots and its
 -- track flag left the worst case short of the dots.)
-local function hflag_pip(f) return f.write and f.w + 1 or 3 end
+local function hflag_pip(f) return f.under and 0 or (f.write and f.w + 1 or 3) end
+-- where the page's title is, for a flag whose short form is a line under it
+-- (fields of M: this file is at Lua's limit of 200 locals)
+M.TITLE_X, M.TITLE_W = 0, 0
 -- draw the lit flags from x, keeping clear of `lim` (the page dots)
 local function draw_hflags(x, lim, blink)
   local n = #HFLAGS
@@ -7886,6 +7893,10 @@ local function draw_hflags(x, lim, blink)
         end
       elseif f.full then
         ptext(f.ch, x, 1, 1, f.lvl)
+      elseif f.under then
+        screen.level(f.lvl)
+        screen.rect(M.TITLE_X, 7, M.TITLE_W, 1)
+        screen.fill()
       else
         screen.level(f.lvl)
         screen.rect(x, 1, 2, 5)      -- a bar at cap height, not a page dot
@@ -7987,6 +7998,7 @@ local function draw_header()
   local blink = (frame % 4) < 2
   draw_tracks(blink, TRACK_PAGE[PAGES[page]])
   local x0 = M.TRACKS_W + 3
+  M.TITLE_X, M.TITLE_W = x0, text_w(title, 1)
   if pget("stop_all", 0) == 1 then
     screen.level(15)
     screen.rect(x0 - 2, 0, text_w(title, 1) + 5, 8)
@@ -8007,6 +8019,7 @@ local function draw_header()
     x = x + 8
   end
   local dx0 = M.DOT_X0
+  HF.CPU.on = C.cpu_high == true
   HF.T.on = pget("tape_rec", 0) == 1
   HF.M.on = pget("motion_rec", 0) == 1
   -- FZ: the take's freeze, or ANY track's voice freeze. It read track 1's
@@ -11296,6 +11309,22 @@ function init()
   watch("amp_in_r", function(v) ctx.amp_in[2] = v end)
   watch("amp_out_l", function(v) ctx.amp_out[1] = v end)
   watch("amp_out_r", function(v) ctx.amp_out[2] = v end)
+  -- THE LOAD (C5 of doc/signature-workflow.md). The norns poll cpu_avg is the
+  -- load of the whole JACK cycle, in percent. Measured, it reads 5 to 7
+  -- points above the scsynth thread, and the thread xruns past about 60%.
+  -- So the header says CPU from 62 (the thread near 56), and stops below
+  -- 58: two marks, so the word does not flicker at the edge. Twice a
+  -- second is enough for a word.
+  do
+    local p = poll.set("cpu_avg", function(v)
+      if v >= 62 then ctx.cpu_high = true elseif v < 58 then ctx.cpu_high = false end
+    end)
+    if p then
+      p.time = 0.5
+      p:start()
+      polls[#polls + 1] = p
+    end
+  end
 
   -- one frame of the instrument
   local function frame_tick()

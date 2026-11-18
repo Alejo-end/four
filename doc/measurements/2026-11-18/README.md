@@ -332,3 +332,17 @@ Row 19.27: four PV at pitch 2 56.8%, the dense set 64.7% of the scsynth thread, 
 (56.6% and 64.3% with the fifty-first change). Row 19.11 fails by its limit: CHORUS
 changes the sound by 1.0 dB against OFF and the row asks for more than 1 (1.1 before).
 The levels against OFF are the same as before, to 0.1 dB.
+
+## The CPU word in the header (the fifty-fourth change)
+
+The header says CPU from 62% of the norns poll `cpu_avg` (the whole JACK cycle), and
+stops below 58%. Read with `Crone.server.avgCPU`, the same number:
+
+| The state | The cycle | The word |
+|---|---|---|
+| Idle, all tracks OFF | 9.9% | off |
+| Four PV at pitch 2, drive, both sends, the delay and the reverb | 58.8% | off |
+| The same with crush, shimmer and a second effect on each track | 62.9% | on, no xrun |
+| One PLAY track | 21.1% | off |
+
+The screen: `screens/cpu_word.png`.

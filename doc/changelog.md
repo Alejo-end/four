@@ -4965,3 +4965,22 @@ of doc/signature-workflow.md.
   the scsynth thread (56.6% and 64.3% before): inside what the row moves from run to
   run. Row 19.11 fails by its own limit: CHORUS changes the sound by 1.0 dB, and the
   row asks for more than 1 (it read 1.1). Its levels against OFF are the same.
+
+four, fifty-fourth change: **the header says CPU while the load is near the limit (Lua
+and a test tool; no engine change, the count stays 198; on the device 2026-11-18)**.
+This is the screen part of C5 of doc/signature-workflow.md.
+- four.lua reads the norns poll `cpu_avg` twice a second. That poll is the load of the
+  whole JACK cycle, and it reads 5 to 7 points above the scsynth thread, which xruns
+  past about 60%. `ctx.cpu_high` comes on at 62 and goes off below 58.
+- lib/mpages.lua: CPU is the first flag after the title, bright and steady. When every
+  flag is lit on the longest title it has no room: it is then a line under the page's
+  title, and takes none of the row.
+- test/test_screen.lua has five more assertions (129): the word, its line, and its two
+  marks.
+- lib/mpages.lua is at Lua's limit of 200 locals, so the title's place is two fields of
+  the module.
+- On the device: idle the cycle reads 9.9% and the word is off. Four PV at pitch 2 with
+  drive, both sends, the delay and the reverb read 58.8%: off. With crush, shimmer and
+  a second effect on each track they read 62.9%: on, with no xrun. Back at one PLAY
+  track, 21.1%: off. The screen is doc/measurements/2026-11-18/screens/cpu_word.png.
+- The supported set of C5 still waits for the user's answer to question 8.

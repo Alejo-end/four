@@ -83,6 +83,7 @@ do
   local ON = { "rec", "tape_rec", "motion_rec", "freeze",
     "tape_freeze", "beat_repeat", "step_run" }
   for _, id in ipairs(ON) do params:set(id, 1) end
+  _h.push("cpu_avg", 70)   -- the load near the limit lights CPU
   params:set("lfo1_target", 2); params:set("lfo1_depth", 0.5)
   params:set("t2_mode", 5)   -- four: track 2 sounding lights T2
   _h.run_ticks(1)
@@ -93,17 +94,35 @@ do
     ok(f.x ~= nil, "the " .. f.ch .. " flag is drawn with every flag lit")
     if f.x then
       ok(f.x > prev, "...in priority order (" .. f.ch .. ")")
-      prev = f.x
-      local w = f.full and (f.write and f.w + 5 or f.w) or (f.write and f.w or 2)
+      -- (a flag whose short form is under the title takes no room in the row)
+      prev = (f.under and not f.full) and f.x - 1 or f.x
+      local w = f.full and (f.write and f.w + 5 or f.w) or (f.write and f.w or (f.under and 0 or 2))
       last = f.x + w
       local ink = false
       for x = f.x, f.x + 1 do
         for y = 1, 5 do if px(x, y) > 0 then ink = true end end
       end
+      if f.under and not f.full then
+        -- its short form is a line under the page's title
+        ink = px(Mp.TRACKS_W + 3, 7) > 0 and px(Mp.TRACKS_W + 4, 7) > 0
+      end
       ok(ink, "...and something is drawn where it sits (" .. f.ch .. ")")
     end
   end
   ok(last <= dx0 - 2, "the last flag ends before the page dots (" .. last .. " <= " .. (dx0 - 2) .. ")")
+  -- CPU: a word while the load is near the limit, with two marks
+  ok(HF.CPU.on and not HF.CPU.full, "CPU is a line under the title when every flag is lit")
+  for _, id in ipairs(ON) do params:set(id, 0) end
+  redraw()
+  ok(HF.CPU.full, "CPU is a whole word when the row has room")
+  for _, id in ipairs(ON) do params:set(id, 1) end
+  redraw()
+  _h.push("cpu_avg", 60); redraw()
+  ok(HF.CPU.on, "CPU stays lit between its two marks (60)")
+  _h.push("cpu_avg", 57); redraw()
+  ok(not HF.CPU.on, "CPU goes below 58")
+  _h.push("cpu_avg", 60); redraw()
+  ok(not HF.CPU.on, "CPU does not come back before 62")
   -- RP names its division
   T.goto_page("TAKE")
   for _, id in ipairs(ON) do if id ~= "beat_repeat" then params:set(id, 0) end end

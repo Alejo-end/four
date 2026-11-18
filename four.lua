@@ -225,6 +225,7 @@ local ctx = {
   rec_waiting = false,       -- armed to start on sound, none heard yet (TAKE: WAIT)
   amp_in = { 0, 0 },         -- system polls: live input amplitude L/R
   amp_out = { 0, 0 },        -- system polls: output amplitude L/R
+  cpu_high = false,          -- the load is near the limit: the header says CPU
   tape_phase = 0,            -- softcut phase event: tape head, normalized
   tape_heard = nil,          -- an open tape pass: has it heard a sound yet (nil: no pass)
   tape_quiet = 0,            -- frames of silence at the tape's source while it records
@@ -3341,6 +3342,22 @@ function init()
   watch("amp_in_r", function(v) ctx.amp_in[2] = v end)
   watch("amp_out_l", function(v) ctx.amp_out[1] = v end)
   watch("amp_out_r", function(v) ctx.amp_out[2] = v end)
+  -- THE LOAD (C5 of doc/signature-workflow.md). The norns poll cpu_avg is the
+  -- load of the whole JACK cycle, in percent. Measured, it reads 5 to 7
+  -- points above the scsynth thread, and the thread xruns past about 60%.
+  -- So the header says CPU from 62 (the thread near 56), and stops below
+  -- 58: two marks, so the word does not flicker at the edge. Twice a
+  -- second is enough for a word.
+  do
+    local p = poll.set("cpu_avg", function(v)
+      if v >= 62 then ctx.cpu_high = true elseif v < 58 then ctx.cpu_high = false end
+    end)
+    if p then
+      p.time = 0.5
+      p:start()
+      polls[#polls + 1] = p
+    end
+  end
 
   -- one frame of the instrument
   local function frame_tick()

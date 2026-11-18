@@ -153,6 +153,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
 | 51st: a voice change keeps its sound and its place: the old drone holds and fades under the new one, and the new head starts where the old one is (C2 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.33, WARP -0.4 dB, PV -0.9 dB, CLOUD -1.3 dB (-26.4, -70.6 and -71.2 before). Not pushed | no |
 | 53rd: a knob that moves once a frame draws lines: each knob's lag is a glide whose time follows the pace of the writes (C6 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.34, still 0.8% of the time (45.9% before). Not pushed | no |
+| 54th: the header says CPU while the load is near the limit (the rest of C5's screen part) (Lua, test tool) | yes, 2026-11-18: on at 62.9% of the JACK cycle, off at 21.1% | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -201,9 +202,9 @@ changed in one frame now change one after another, over 0.55 s into WARP. Row 19
 not grow (64.3%). C6 is the fifty-third change, on the device, not heard: a knob that
 a modulator, a motion lane or the fade moves glides from frame to frame (row 19.34), and
 a lone write lands in 20 ms. That ends Phase A's engine changes. Open in Phase A: the
-rest of C5 (the supported set needs the user's answer to question 8, the `CPU` word in
-the header, row 19.27 at 64.7%), and the user's ears on the forty-fifth to the
-fifty-third change.
+rest of C5 (the supported set needs the user's answer to question 8, and row 19.27
+is at 64.7%), and the user's ears on the forty-fifth to the fifty-fourth change. The
+`CPU` word in the header is the fifty-fourth change, on the device.
 The work is on the local branch `phase-a`. Another session shares this checkout (the
 forty-seventh change, an Exquis driver): stage only your own hunks.
 
@@ -503,6 +504,8 @@ Each line was learned the hard way; the change log has the story.
   the glide time with the value (`gset`). A new knob joins `glideKeys` in the engine,
   and its def must not grow (VarLag with warp 1 is one UGen: without the warp it is an
   EnvGen and two more). A lag shorter than a frame makes a modulated knob stand still.
+- lib/mpages.lua is at Lua's limit of 200 locals in its main chunk. A new value there
+  is a field of `M`, not a local (the error is at load: "too many local variables").
 - A level read off a recording has a fine ripple that a render has not. Low-pass it
   (40 Hz in an_fade.py) before a measure that counts stands: row 19.34 read 26% still
   on a knob that was moving, and 0.8% after.
@@ -659,8 +662,9 @@ Lua 5.3 and 5.5, so the orbit's shot differs across them by design.
 - Brightness encodes audibility: a thing that is not sounding lies flat and dim (mode
   OFF, STOP, a deck thrown away by the MIX crossfade, a dormant FX page at mix 0).
 - An empty buffer is an invitation, always in the same voice: "EMPTY - K2 REC".
-- The header: the four track cells, the page title, the ◇ purity mark, the write flags
-  (T and M), the hold flags, and uniform page dots top-right. The cell of the track that
+- The header: the four track cells, the page title, the ◇ purity mark, CPU while the
+  load is near the limit (steady), the write flags (T and M), the hold flags, and
+  uniform page dots top-right. The cell of the track that
   records and the dots of T and M are the ONLY fast blink.
 - The footer: four quiet words, K2 K3 | E2 E3. A turning knob brightens its word and
   swells its value in a framed 2x box above the footer; selector pages (SLICE, LANE,
