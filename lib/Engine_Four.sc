@@ -61,6 +61,12 @@ Engine_Four : CroneEngine {
     // cleared it. A clear zeroes the pair again a moment later (clearWait),
     // and only if nothing else came to that pair since.
     var bufGen;
+    // A VOICE CHANGE (swapDrone): for each track, the drone that still sounds
+    // under the one that took over, and a count for the last change to win.
+    var leaving, leaveGen;
+    // ...and, for whenFree: when the hold in progress ends, and a count for
+    // each track that lets its last request win.
+    var swapUntil = 0, modeGen;
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
@@ -328,43 +334,165 @@ Engine_Four : CroneEngine {
     }
 
     setModeN { arg tr, i;
-        tr[\synth].notNil.if({
-            tr[\synth].set(\gate, 0, \handover, if(i > 0, 1, 0));
-            tr[\synth] = nil;
-        });
-        (i > 0).if({
-            tr[\synth] = Synth.new(this.droneDef(i), [
+        this.whenFree(tr[\n], tr[\synth].notNil and: { i > 0 }, {
+            tr[\synth] = this.swapDrone(tr[\n], tr[\synth], tr[\mode] ? 0, i, [
                 \buf_l, bufLs[tr[\n] - 1], \buf_r, bufRs[tr[\n] - 1],
                 \play_bus, tr[\bus], \phase_out, tr[\phase],
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
                 \level, playParams[\level], \rec, playParams[\rec],
                 \freeze, playParams[\freeze],
-            ] ++ tr[\params].getPairs, playGroup);
+            ] ++ tr[\params].getPairs, tr[\params], bufLs[tr[\n] - 1]);
+            tr[\mode] = i;
+            this.updateStrip(tr);
         });
-        tr[\mode] = i;
-        this.updateStrip(tr);
     }
 
     setMode { arg i;
-        // a RELEASE, not a free: the old drone fades out over 20ms while the
-        // new one fades in, so a mode change no longer cuts the wave mid-cycle.
-        // The two overlap for 20ms only (the one-scsynth-core budget).
-        // `handover` 1 when a new drone follows: the old one then stops
-        // writing the phase bus. Into OFF it keeps writing to the end, so
-        // the bus holds the last position, as it did before.
-        playSynth.notNil.if({
-            playSynth.set(\gate, 0, \handover, if(i > 0, 1, 0));
-            playSynth = nil;
-        });
-        modeV = i;
-        (i > 0).if({
-            playSynth = Synth.new(this.droneDef(i), [
+        this.whenFree(1, playSynth.notNil and: { i > 0 }, {
+            var from = modeV ? 0;
+            modeV = i;
+            playSynth = this.swapDrone(1, playSynth, from, i, [
                 \buf_l, bufL, \buf_r, bufR,
                 \play_bus, playBus, \phase_out, phaseBus,
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
-            ] ++ playParams.getPairs, playGroup);
+            ] ++ playParams.getPairs, playParams, bufL);
+            this.updateErode;
         });
-        this.updateErode;
+    }
+
+    // HOW THE DRONE THAT LEAVES GOES, by the mode that comes (0 OFF, 1 GRAIN,
+    // 2 WARP, 3 PV, 4 PLAY, 5 CLOUD): [hold, fade, curve]. It stays whole for
+    // `hold` seconds, then fades over `fade` on that curve (0 is a straight
+    // line). A new drone is not there at once. Measured alone, over a tone,
+    // with the plugin (test/dsp/review/probe9.scd):
+    //   GRAIN comes up over half of its first grain: 50ms at a size of 0.1s
+    //   WARP  rises in a line from 30ms to 175ms, as its windows fill
+    //   PV    is silent for 13ms and up at 35ms, its first frame
+    //   CLOUD is silent for 341ms (Clouds' own buffer), then there at once
+    //   PLAY  is there in 10ms, on the curve of every drone's own start
+    // Each row lays the old drone's fade over that rise, so the two add up to
+    // one level. Into GRAIN the fade is half of the track's grain size.
+    // Into PLAY the two cross in a straight line over 20ms: the new PLAY
+    // comes in over the same time and on the same curve (swapDrone sets its
+    // `att` and `acrv`), and the two are in step, so they add up to one
+    // sound. The line is there for this: the hold is a stage of the old
+    // drone's envelope, and with a hold of 0 the stage still takes a block,
+    // so the old drone starts to go late. On a line a block is 7%. On the
+    // 10ms start every drone has, which is fast at first, the cross read
+    // +1.6dB on the Mac's scsynth and +3.2dB on the norns's. On the line
+    // it reads +0.5 and +1.2dB.
+    // The old law was 20ms for all: a hole of 149ms into WARP, 34ms into PV
+    // and 341ms into CLOUD. Without the plugin WARP rises sooner and PV
+    // comes later.
+    modeFade { arg i, params;
+        var grain = [0.005, ((params[\size] ? 0.1) * 0.5).clip(0.03, 0.4), 0];
+        (i == 1).if({ ^grain });
+        (i == 5).if({ ^hasClouds.if({ [0.335, 0.02, 0] }, { grain }) });
+        ^hasStretch.if({
+            [[0, 0.02, -4], grain, [0.025, 0.14, 0], [0.012, 0.024, 0], [0, 0.02, 0]]
+        }, {
+            [[0, 0.02, -4], grain, [0.02, 0.12, 0], [0.033, 0.014, 0], [0, 0.02, 0]]
+        }).at(i) ? [0, 0.02, -4]
+    }
+
+    // HOW FAR A DRONE'S SOUND LIES BEHIND ITS HEAD, in seconds. PV plays what
+    // its head read 2560 frames ago with the plugin (1984 without), and
+    // Clouds what it took in 16347 frames ago. PLAY, WARP and GRAIN play what
+    // the head reads now. Measured: each drone alone against PLAY, from the
+    // same start (probe9's _steady). A new drone starts its head ahead by
+    // its own delay, and behind by the delay of the one that leaves, so what
+    // is HEARD goes on from the same place. A change from PLAY into PV over a
+    // tone then adds two sounds in step. Without this they were a third of a
+    // cycle apart at 1kHz, and cancelled for 10ms.
+    modeLat { arg i;
+        (i == 3).if({ ^hasStretch.if({ 2560 }, { 1984 }) / 48000 });
+        (i == 5).if({ ^hasClouds.if({ 16347 / 48000 }, { 0 }) });
+        ^0
+    }
+
+    // ONE HOLD AT A TIME. A change from one drone to another runs `func` when
+    // no drone still waits to leave, on any track. A scene that lands can
+    // change four voices in one frame: with a hold for each, eight drones
+    // sounded together, and the dense set has no room for that. The changes
+    // now follow one another. The last request for a track is the one that
+    // runs. A change that doubles nothing (from OFF, or into OFF) runs at once.
+    whenFree { arg n, doubles, func;
+        var gen, try;
+        modeGen[n - 1] = modeGen[n - 1] + 1;
+        gen = modeGen[n - 1];
+        try = {
+            var wait = doubles.if({ swapUntil - Main.elapsedTime }, { 0 });
+            (modeGen[n - 1] == gen).if({
+                (wait > 0.001).if({
+                    SystemClock.sched(wait, { try.value; nil });
+                }, { func.value });
+            });
+        };
+        try.value;
+    }
+
+    // what a drone that takes over needs to start where the old one is
+    // (hfrom, hlead and hspan of winRead): the buffer's frames, the frames to
+    // add, the window's frames. The bus the new drone reads holds the old
+    // head's place one block ago. Add the travel of that block and the new
+    // drone's own delay, take off the old one's delay (modeLat) and the
+    // window's start. A head moves at `scan` frames a frame, and PLAY's at
+    // `scan` times `pitch`.
+    headArgs { arg params, buf, from, to;
+        var a = params[\pos_start] ? 0, b = params[\pos_end] ? 1;
+        var frames = buf.numFrames;
+        var scan = params[\scan] ? 1, pitch = params[\pitch] ? 1;
+        var rate = { arg m; scan * (m == 4).if({ pitch }, { 1 }) };
+        var lat = { arg m; this.modeLat(m) * buf.sampleRate * rate.(m) };
+        ^[\hfrom, frames,
+            \hlead, (playGroup.server.options.blockSize * rate.(from)) - lat.(from) + lat.(to)
+                - (a.min(b) * frames),
+            \hspan, ((a - b).abs.max(0.001) * frames).round.max(64)]
+    }
+
+    // A VOICE CHANGE KEEPS ITS SOUND AND ITS PLACE (C2 of
+    // doc/signature-workflow.md, the fifty-first change). Track n's drone
+    // `old` (of mode `from`) gives way to one of mode i. The answer is the
+    // new synth, nil for OFF. All of it is ONE BUNDLE, so it happens in one
+    // block:
+    //   the old drone stops writing the phase bus (`handover`), so the
+    //   screen follows one head
+    //   ITS PLACE: the new head starts where the old one is (headArgs), and
+    //   the loop goes on from where it was. From OFF it starts at the
+    //   window's start.
+    //   ITS SOUND: the old drone is released with a hold, a fade and a curve
+    //   (modeFade), under the rise of the new one. With no hold (into PLAY)
+    //   the new drone comes in over the same time, on the same curve.
+    // Into OFF the drone is released as before: it writes the bus to its
+    // end, so the bus holds the last place. A drone that still waits to
+    // leave is sent away in 20ms (a gate under -1 does that).
+    swapDrone { arg n, old, from, i, args, params, buf;
+        var new, hold, fade, crv, gen, was = leaving[n - 1];
+        leaveGen[n - 1] = leaveGen[n - 1] + 1;
+        gen = leaveGen[n - 1];
+        (i > 0).not.if({
+            was.notNil.if({ was.set(\gate, -1.02); leaving[n - 1] = nil });
+            old.notNil.if({ old.set(\gate, 0, \handover, 0) });
+            ^nil
+        });
+        old.isNil.if({ ^Synth.new(this.droneDef(i), args, playGroup) });
+        #hold, fade, crv = this.modeFade(i, params);
+        playGroup.server.makeBundle(nil, {
+            old.set(\gate, 0, \handover, 1, \hold, hold, \rel, fade, \crv, crv);
+            new = Synth.new(this.droneDef(i),
+                args ++ this.headArgs(params, buf, from, i)
+                    ++ (hold > 0).if({ [] }, { [\att, fade, \acrv, crv] }), playGroup);
+        });
+        // (whenFree reads swapUntil: no other change doubles a drone before then)
+        swapUntil = Main.elapsedTime + hold + fade;
+        leaving[n - 1] = old;
+        // (it frees itself then. A little before, so that a change into OFF
+        // never sends a gate to a node that has just gone)
+        SystemClock.sched((hold + fade - 0.01).max(0), {
+            (leaveGen[n - 1] == gen).if({ leaving[n - 1] = nil });
+            nil
+        });
+        ^new
     }
 
     // How long the delay and the reverb live on once their mix is 0. io plays
@@ -540,6 +668,9 @@ Engine_Four : CroneEngine {
         var bufSecs = 60;
 
         bufGen = Array.fill(4, 0);
+        leaving = Array.newClear(4);
+        leaveGen = Array.fill(4, 0);
+        modeGen = Array.fill(4, 0);
         bufLs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufRs = Array.fill(4, { Buffer.alloc(s, s.sampleRate * bufSecs, 1) });
         bufL = bufLs[0];
@@ -684,8 +815,40 @@ Engine_Four : CroneEngine {
         // stopped first, and the fade then played one held sample (a thump).
         // `quiet` 1 (a drone fading out under the next one) stops writing
         // the phase bus, so the screen follows the new drone alone.
-        // drEnv is the drone's own 10ms in, 20ms out, which frees it.
-        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0;
+        // drEnv is the drone's own 10ms in, 20ms out, which frees it. A drone
+        // that leaves under a new one stays whole for `hold`, then goes over
+        // `rel` on the curve `crv` (-4 is the curve of Env.asr: fast at
+        // first). swapDrone sets the three with the release, so the wait
+        // runs on the server, in step with the new drone to the sample.
+        // `att` and `acrv` are the time and the curve in: a PLAY drone that
+        // takes over comes in as the old one goes (swapDrone).
+        // WHERE THE HEAD STARTS (C2 of doc/signature-workflow.md, the
+        // fifty-first change). A drone that takes over from another starts
+        // where that one is, to the sample: it reads the phase bus itself, at
+        // its first block. The bus holds the place the old drone wrote one
+        // block ago (0 to 1 of the buffer). `hfrom` is the buffer's frames,
+        // `hlead` what to add in frames (one block of travel, the two
+        // drones' delays, less the window's start), `hspan` the window's
+        // frames. With hfrom 0, hlead 0 and hspan 1 the head starts at 0, as
+        // a drone from OFF does. The place is rounded to a whole frame: the
+        // read below needs (whole - frac) to be a whole number, and a head
+        // that starts half a frame off flips between two frames at random.
+        // sclang cannot do this sum: a place it reads is already old when
+        // the server makes the synth, by another time at each change, and
+        // two copies of a sound that are out of step cancel while they cross.
+        // The first build sent the place as a number: offline it read fine,
+        // and on the device a change from PLAY into PV dipped by 18dB over a
+        // tone.
+        // A Phasor takes its first place from its `start` when it is built,
+        // and reads `start` again only to wrap. Trig.kr gives the place for
+        // the first block and 0 after it, so the head begins there and then
+        // loops from 0. Tried on both scsynths (the norns's 3.13 and the
+        // Mac's 3.14): a trigger-rate control and `Impulse.kr(0) * x` start
+        // the head at the wrong place on the norns, and a control set back to
+        // 0 in the bundle of the spawn starts it at 0, because a synth's
+        // UGens are built at its first block, after the whole bundle.
+        winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0,
+                hfrom = 0, hlead = 0, hspan = 1;
             var lo, span, frames, loF, spanF, rate, whole, frac, phase, winPos;
             #lo, span = winBounds.(pos_start, pos_end);
             // THE HEAD COUNTS IN FRAMES, in two parts. It was one float from
@@ -703,7 +866,8 @@ Engine_Four : CroneEngine {
             spanF = (span * frames).round.max(64);
             rate = Lag.kr(scan, 0.02) * pitchMul * (Lag.kr(run, 0.05) > 0.001)
                 * BufRateScale.kr(buf);
-            whole = Phasor.ar(0, rate, 0, spanF);
+            whole = Phasor.ar(0, rate,
+                Trig.kr(((In.kr(phase_out) * hfrom) + hlead).round % hspan, 0), spanF);
             frac = Phasor.ar(0, rate, 0, 1);
             phase = (whole / spanF).clip(0, 1);
             winPos = lo + (phase * span);
@@ -724,7 +888,9 @@ Engine_Four : CroneEngine {
             c3 = (0.5 * (y2 - ym1)) + (1.5 * (y0 - y1));
             (((((c3 * frac) + c2) * frac) + c1) * frac) + y0
         };
-        drEnv = { arg gate; EnvGen.kr(Env.asr(0.01, 1, 0.02), gate, doneAction: 2) };
+        drEnv = { arg gate, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
+            EnvGen.kr(Env([0, 1, 1, 0], [att, hold, rel], [acrv, 0, crv], 1), gate, doneAction: 2)
+        };
         // the loop seam fade PLAY has always had (~5ms, buffer-time referenced)
         seam = { arg phase, span, buf;
             (phase.min(1 - phase) * span * BufDur.kr(buf) / 0.005).clip(0, 1)
@@ -809,11 +975,12 @@ Engine_Four : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
             var winPos, phase, span, lo, look, bufDur, trig, dur, pch, readLen;
             var off, pos, r, wid, panL, panR, envSel, comp, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan * (1 - pv_freeze),
-                buf_l, phase_out, 1, level, handover);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
             lo = winPos - (phase * span);
             bufDur = BufDur.kr(buf_l);
             // while recording, read a quarter second behind the record head
@@ -866,7 +1033,7 @@ Engine_Four : CroneEngine {
                 GrainBuf.ar(2, trig, dur, buf_l, pch, pos, 4, panL, envSel, 32)
                     + GrainBuf.ar(2, trig, dur, buf_r, pch, pos, 4, panR, envSel, 32)
             }) * comp;
-            Out.ar(play_bus, sig * drEnv.(gate));
+            Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
         SynthDef(\four_warp, {
@@ -878,9 +1045,10 @@ Engine_Four : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
             var winPos, phase, span, idx, frac, ptr, l, r, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
             stretchOn.if({
                 // bufL, bufR, the head in frames, pitch, window in frames,
                 // overlaps, rand (positional: see the MiClouds call)
@@ -894,7 +1062,7 @@ Engine_Four : CroneEngine {
                 r = Warp1.ar(1, buf_r, ptr, pitch, warp_window, -1, warp_overlaps, warp_rand, 4);
             });
             sig = Balance2.ar(l, r, pan.lag(0.03));
-            Out.ar(play_bus, sig * drEnv.(gate));
+            Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
         SynthDef(\four_pv, {
@@ -906,13 +1074,14 @@ Engine_Four : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
             var winPos, phase, span, idx, frac, sigL, sigR, chainL, chainR, l, r, sig, edge;
             // with FourStretch, FRZ holds the head (GRAIN's law) and the
             // vocoder sustains what is under it; pitch is its own knob
             #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end,
                 stretchOn.if({ scan * (1 - pv_freeze) }, { scan }),
-                buf_l, phase_out, 1, level, handover);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             // the seam fade before the FFT: a wrap click fed to MagFreeze
@@ -935,7 +1104,7 @@ Engine_Four : CroneEngine {
                 r = IFFT(chainR);
             });
             sig = Balance2.ar(l, r, pan.lag(0.03));
-            Out.ar(play_bus, sig * drEnv.(gate));
+            Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
         // ---- CLEAN PLAY drone — a straight loop of the window, the EXACT
@@ -952,9 +1121,10 @@ Engine_Four : CroneEngine {
                 clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0, clouds_mode = 0,
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
-                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
             var winPos, phase, span, idx, frac, sigL, sigR, edge, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, pitch.lag(0.05), level, handover, hfrom, hlead, hspan);
             stretchOn.if({
                 // a windowed sinc in place of the cubic: nothing folds above
                 // pitch 1 and the images sit below -70dB. On a whole frame
@@ -973,7 +1143,7 @@ Engine_Four : CroneEngine {
             // on "the exact recorded sample". the body of the take is untouched.
             edge = seam.(phase, span, buf_l);
             sig = Balance2.ar(sigL, sigR, pan.lag(0.03)) * edge;
-            Out.ar(play_bus, sig * drEnv.(gate));
+            Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
         }).add;
 
         // ---- EROSION: the window rewriting itself, in its own synth
@@ -1040,9 +1210,10 @@ Engine_Four : CroneEngine {
                     clouds_pos = 0.5, clouds_tex = 0.5, clouds_fb = 0,
                     clouds_mode = 0, clouds_lofi = 0,
                     warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
-                    pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0;
+                    pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
+                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4;
                 var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
-                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover);
+                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan);
                 // Clouds' density is silent at 0.5: below it grains are
                 // random, above it periodic. Mapping 1..200 across 0.5 made
                 // density 13 to 16 silent and the default 20 about 20 dB
@@ -1069,7 +1240,7 @@ Engine_Four : CroneEngine {
                 // density came out 6 dB above PLAY on the same take, so
                 // a mode change jumped in level
                 sig = sig * (((dens - 0.05) / 0.31).squared * 14).dbamp * 0.5;
-                Out.ar(play_bus, sig * drEnv.(gate));
+                Out.ar(play_bus, sig * drEnv.(gate, hold, rel, crv, att, acrv));
             }).add;
         };
         [["FourCloud", stretchOn and: { this.class.plugHas("FourCloud") }],
@@ -2072,6 +2243,10 @@ Engine_Four : CroneEngine {
         dlyGen = dlyGen + 1;
         // (...and a clear's second zero from landing on a freed pair)
         bufGen.notNil.if({ bufGen = bufGen + 1 });
+        // (...and a drone that still waits to leave is freed here, not later)
+        leaveGen.notNil.if({ leaveGen = leaveGen + 1 });
+        modeGen.notNil.if({ modeGen = modeGen + 1 });
+        leaving.notNil.if({ leaving.do({ arg x; x.notNil.if({ x.free }) }) });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });

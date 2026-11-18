@@ -21,6 +21,8 @@ One persistent `io` synth owns input, the record head, the filter and the output
 It never dies because everything flows through it and respawning it would click.
 
 Exactly one drone voice runs at a time (OFF, GRAIN, WARP, PV, PLAY, swapped by `setMode`).
+Since four's fifty-first change two run while a voice change crosses over (`swapDrone`):
+for 0.02 s into PLAY and up to 0.36 s into CLOUD, on one track at a time.
 The Pi 4 gives scsynth one core, so two stretch algorithms at once buy nothing and cost
 xruns. This is also why a scene recall sets `mode` last: the new voice is born with the
 scene's values instead of jumping to them.

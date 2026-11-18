@@ -97,7 +97,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-18 it runs the fiftieth change at `count: 198`, with the plugin
+- Since 2026-11-18 it runs the fifty-first change at `count: 198`, with the plugin
   built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
   in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
@@ -151,6 +151,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
 | 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
 | 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
+| 51st: a voice change keeps its sound and its place: the old drone holds and fades under the new one, and the new head starts where the old one is (C2 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.33, WARP -0.4 dB, PV -0.9 dB, CLOUD -1.3 dB (-26.4, -70.6 and -71.2 before). Not pushed | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -193,14 +194,18 @@ Row 19.31 then found that a tape pass that crossed the tape's end kept the whole
 its loop, and the forty-eighth change starts a new take at the tape's start. C4 is the
 forty-ninth change, on the device (doc/measurements/2026-11-18/), not heard. The wide
 run after it found row 10.8 failing (a clear with regen running left 6.7 ms of sound),
-and the fiftieth change is its fix. Next: C2.
+and the fiftieth change is its fix. C2 is the fifty-first change, on the device, not
+heard: a voice change has no hole and the loop keeps its place (row 19.33). Four voices
+changed in one frame now change one after another, over 0.55 s into WARP. Row 19.27 did
+not grow (64.3%). Next: C6.
 The work is on the local branch `phase-a`. Another session shares this checkout (the
 forty-seventh change, an Exquis driver): stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
 TYPE steps) has no break since the forty-second change. Stage 19 still fails 19.27 (the
-dense set takes 64.5% of the scsynth thread, over 60%, with no xruns). Open too: the user's look at REVERB's squares (the
+dense set takes 64.3% of the scsynth thread, over 60%, with no xruns). WARP and PV dip
+by about 27 dB at their own loop seam (doc/plan.md, Phase 0, item 8). Open too: the user's look at REVERB's squares (the
 screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
 more than one that sounds.
 
@@ -295,8 +300,9 @@ clouds, **tape-like** varispeed/looping, a **playback window** (slice start/stop
 Architecture: softcut (a separate audio core, nearly free) does everything it can (the
 tape). scsynth does only what softcut cannot (granular, time-stretch,
 the filters, the effects, delay and reverb). Each track's voice is a **mode switch**
-(GRAIN, WARP, PV, PLAY, CLOUD): one track never runs two modes at once. A Pi 4 has one
-scsynth core, and it xruns past about 60%, so four tracks share that budget.
+(GRAIN, WARP, PV, PLAY, CLOUD): one track never runs two modes at once, except while a
+voice change crosses over (0.17 s into WARP, 0.36 s into CLOUD, one track at a time). A
+Pi 4 has one scsynth core, and it xruns past about 60%, so four tracks share that budget.
 
 ---
 
@@ -471,6 +477,22 @@ Each line was learned the hard way; the change log has the story.
 - A trigger in a SynthDef without a `t_` name: step a plain control by 1 and read the
   step with `HPZ1.kr` (io's `rec_pass`). It gives one block above 0, on both scsynths,
   and nothing at the synth's start.
+- A synth's UGens are built at its first block, after the whole bundle that made it. A
+  control set back in that bundle is never seen. For a value that holds for the first
+  block only, use `Trig.kr(value, 0)` (a head's first place in `winRead`).
+  `Impulse.kr(0) * value` and a trigger-rate control give a Phasor the wrong place on
+  the norns.
+- What sclang reads from the server is already old when the server acts on it, by
+  another time at each call (not measured). Two sounds that must add up in step are
+  placed on the server: the new drone reads the phase bus itself in its first block. A
+  score has no travel time, so the offline bench cannot see this fault. Row 19.33 found
+  it on the device: PLAY into PV dipped by 18.5 dB over a tone.
+- A stage of zero length in an EnvGen still takes a block, so a release behind it
+  starts late. A cross into PLAY on the drones' own start curve (fast at first) read
+  +1.6 dB on the Mac and +3.2 dB on the norns's scsynth. Cross two sounds that are in
+  step on a straight line, where a late block is 7%: +0.5 and +1.2 dB.
+- WARP and PV dip at their own loop seam (found with row 19.33 on a take of 4 s). A
+  device row that reads a level waits until the head is past the seam (`after_seam`).
 - The engine's write head is polled once a frame. A poll that left before the head was
   reset can arrive after it. The head moves at one second a second, so for three frames
   a poll further than the time since the reset allows is not believed (`ctx.head_poll`).

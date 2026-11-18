@@ -103,16 +103,7 @@ Engine_Four.new(ctx, { arg eng;
              [12.0, [\b_write, 2, dir +/+ tag ++ "_ero_early.wav", "wav", "float"]],
              [12.0, [\b_write, 4, dir +/+ tag ++ "_erox_late.wav", "wav", "float"]],
              [12.0, [\b_write, 6, dir +/+ tag ++ "_erox_early.wav", "wav", "float"]]]],
-        // 6. a mode change from PLAY at 1 s (setMode's bundle), on a 1 kHz take
-        [\mode, 2.0, 8, [[0, "long1k.wav"], [1, "long1k.wav"]],
-            [[0.0, [\d_recv, def.(\four_play)]], [0.0, [\d_recv, def.(\four_warp)]],
-             [0.0, [\d_recv, def.(\four_pv)]], [0.0, [\d_recv, def.(\four_grain)]]]
-            ++ [\four_warp, \four_pv, \four_grain, \four_play].collect({ |d, i|
-                var args = [\buf_l, 0, \buf_r, 1, \play_bus, i * 2, \phase_out, 10 + i,
-                    \pos_start, 0.3, \pos_end, 0.4, \level, 1];
-                [[0.001, [\s_new, \four_play, 1000 + i, 0, 0] ++ args],
-                 [1.0, [\n_set, 1000 + i, \gate, 0, \handover, 1]],
-                 [1.0, [\s_new, d, 1100 + i, 0, 0] ++ args]] }).flatten(1)],
+        // (6, a mode change, is probe9.scd since the fifty-first change)
         // 7. the effects' gain: [source bus, def, type, amt, rate]
         [\flres, 6, 16, [],
             [[0.0, [\d_recv, def.(\four_fx_flange) ? copy.asBytes]], [0.0, [\d_recv, def.(\four_fx_mod)]],

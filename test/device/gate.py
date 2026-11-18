@@ -3245,6 +3245,100 @@ def stage19():
 
     check("19.32", c1932)
 
+    # A voice change keeps its sound and its place (C2 of the plan, the
+    # fifty-first change). The old drone left in 20 ms at once, and a new
+    # WARP, PV or CLOUD drone is silent at first: a hole of 149 ms, 34 ms and
+    # 341 ms. The new head also started at the window's start. And a scene
+    # that changes four voices at once must not sound eight drones together.
+    # A LOOP'S SEAM is a hole of its own in WARP and PV: 82 ms and 26 ms wide
+    # and about 27 dB down on this row's first runs, over a take of 4 s (their
+    # seam is not built, doc/dsp-plan.md). So the row plays a take of 14 s and
+    # starts each recording just after the seam.
+    def c1933():
+        modes("OFF", "OFF", "OFF", "OFF")
+        n.set("track_sel", 2)
+        n.set("dry_wet", 1)
+        for pid, v in (("rec_end", 1), ("rec_wait", 0), ("pre_level", 0), ("regen", 0)):
+            n.set(pid, v)
+        record_take(14, "tone")
+        modes("OFF", "PLAY", "OFF", "OFF")
+        time.sleep(0.6)
+
+        def after_seam():
+            lo, hi = n.get("t2_pos_start"), n.get("t2_pos_end")
+            end = time.time() + 16
+            while time.time() < end:
+                ph = (num(n.lua("print(__ctx.play_phases[2])")) - lo) / max(hi - lo, 1e-6)
+                if 0.02 < ph < 0.15:
+                    return
+                time.sleep(0.2)
+        lat = [0.0] * 6
+        found = re.search(r"MGLAT \[ (.*) \]", n.sc(
+            '("MGLAT " ++ (Crone.engine.respondsTo(\\modeLat).if({ (1..5).collect({ arg i; Crone.engine.modeLat(i) }) }, '
+            '{ [0, 0, 0, 0, 0] }))).postln;'))
+        if found:
+            lat = [0.0] + [float(x) for x in found.group(1).split(",")]
+        win = (n.get("t2_pos_end") - n.get("t2_pos_start")) * 60
+        out = {}
+        for name, ms in (("GRAIN", 50), ("WARP", 20), ("PV", 20), ("CLOUD", 50)):
+            place = {}
+
+            def there_and_back():
+                time.sleep(0.6)
+                a, ta = num(n.lua("print(__ctx.play_phases[2])")), time.time()
+                n.set("t2_mode", MODE[name])
+                time.sleep(0.6)
+                b, tb = num(n.lua("print(__ctx.play_phases[2])")), time.time()
+                # what is heard lies behind the head by the drone's own delay
+                heard = (b - a) * 60 - lat[MODE[name] - 1] + lat[MODE["PLAY"] - 1]
+                place["into"] = round(((heard - (tb - ta) + win / 2) % win - win / 2) * 1000)
+                time.sleep(0.7)
+                n.set("t2_mode", MODE["PLAY"])
+                time.sleep(1.1)
+
+            after_seam()
+            rate, chans = during(there_and_back, f"19.33_{name}", 4.2)
+            change = audio.level_range(chans, rate, ms)
+            # the mode alone, steady: grains make holes of their own
+            n.set("t2_mode", MODE[name])
+            time.sleep(1.5)
+            after_seam()
+            rate, chans = engine_rec(f"19.33_{name}_alone", 2.5)
+            alone = audio.level_range(chans, rate, ms)
+            n.set("t2_mode", MODE["PLAY"])
+            time.sleep(0.8)
+            out[name] = {"PLAY, the mode, PLAY: deepest and highest dB": change, "the mode alone": alone,
+                         "the place heard, ms off": place.get("into"), "rms_ms": ms}
+
+        # four voices at once, as a scene that lands: the engine changes them one after another
+        modes("PLAY", "PLAY", "PLAY", "PLAY")
+        time.sleep(1.0)
+        x0 = n.now()
+        seen = []
+        t0 = time.time()
+        n.lua('for t = 1, 4 do params:set(t == 1 and "mode" or ("t" .. t .. "_mode"), 3) end')
+        while time.time() - t0 < 1.3:
+            got = re.search(r"MGMD \[ (.*) \]", n.sc(
+                '("MGMD " ++ ([Crone.engine.modeV] ++ Crone.engine.extra.collect({ arg t; t[\\mode] }))).postln;'))
+            if got:
+                state = "".join(x.strip() for x in got.group(1).split(","))
+                if not seen or seen[-1][1] != state:
+                    seen.append((round((time.time() - t0) * 1000), state))
+        xr = n.xruns_since(x0)
+        modes("OFF", "PLAY", "OFF", "OFF")
+        steady = all(v["PLAY, the mode, PLAY: deepest and highest dB"][0] > -6
+                     and v["PLAY, the mode, PLAY: deepest and highest dB"][1] < 4
+                     for k, v in out.items() if k in ("WARP", "PV"))
+        grains = all(v["PLAY, the mode, PLAY: deepest and highest dB"][0] > min(-6, v["the mode alone"][0] - 4)
+                     for k, v in out.items() if k in ("GRAIN", "CLOUD"))
+        placed = all(v["the place heard, ms off"] is not None and abs(v["the place heard, ms off"]) < 150 for v in out.values())
+        ok = steady and grains and placed and seen and seen[-1][1] == "2222" and len(seen) >= 3 and xr == 0
+        return verdict(ok, f"track 2 over the tone, PLAY to each mode and back: {out}; four tracks PLAY to WARP in one "
+                           f"moment, the engine's modes after ms: {seen} (2 is WARP, 4 PLAY), xruns {xr}. "
+                           "Listen to 19.33_*.wav", "measured")
+
+    check("19.33", c1933)
+
 
 def cleanup():
     n.signal_quit()

@@ -50,12 +50,16 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 6. DONE 2026-11-16: stage 19 ran on four for the first time (doc/measurements/2026-11-16/).
    It found that tracks 2 to 4 never reached the delay or the reverb, and the fortieth
    change fixed that. Row 19.12 (breaks when TYPE steps over a tone) has no break since
-   the forty-second change. Open: 19.27, the dense set at 64.5% of the scsynth thread
+   the forty-second change. Open: 19.27, the dense set at 64.3% of the scsynth thread
    (doc/signature-workflow.md, C5). To run it again:
    `python3 test/device/gate.py 19`.
 7. DONE 2026-11-16: the frame period, logged for 60 s while four played. 901 frames in
    60.00 s, p95 67.6 ms, none late, redraw p95 11.5 ms, and the sum of `frame_dt` is
    60.07 s, so a FREE modulator keeps its rate.
+8. Open, found 2026-11-18 with row 19.33: WARP and PV dip at their own loop seam. Over a
+   1 kHz take of 4 s the level fell by about 27 dB, for 82 ms in WARP and 26 ms in PV
+   (doc/measurements/2026-11-18/). PLAY has its seam fade. doc/dsp-plan.md names the
+   seam as not built. Row 19.33 now reads its levels away from the seam.
 
 After this phase, measure the branch `proposal-dsp-fixes` (proposal A), then merge it.
 Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8 with a

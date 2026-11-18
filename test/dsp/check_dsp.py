@@ -58,7 +58,7 @@ def buffers():
 # One build: the five probes and engine.scd in parallel, each in its own folder
 # (run_probe.sh and run_engine.sh write conf.yaml and their log into it).
 JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'),
-        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('p8', 'probe8.scd'), ('eng', None)]
+        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('p8', 'probe8.scd'), ('p9', 'probe9.scd'), ('eng', None)]
 
 def render(build):
     env = dict(os.environ)
@@ -239,6 +239,40 @@ def check(build):
     target(build, "a clear with regen running leaves nothing in the buffer: frames (were 576, 12 ms)",
            num(r'^CLEAR with regen running: frames left in the buffer (\d+)', a8), 0, '', fmt='.0f')
 
+    # A VOICE CHANGE KEEPS ITS SOUND AND ITS PLACE (C2 of the plan, the
+    # fifty-first change, probe9). The old drone left in 20 ms at once, and a new
+    # WARP, PV or CLOUD drone is silent at first: a hole. The new head also
+    # started at the window's start. Each change is read against the old and
+    # the new drone alone (an_probe9.py): 0 dB is no hole and no bump.
+    a9 = analyse(os.path.join(REV, 'an_probe9.py'), runs['p9'][0], 'p9')
+    was = {'stock': ('-85.6', '-31.1'), 'plugin': ('-28.6', '-26.9')}[build]
+    for src, i in (('tone', 0), ('phrase', 1)):
+        target(build, f"a change among PLAY, WARP and PV over a {src}: the deepest place (was {was[i]} dB)",
+               num(rf'^DEEPEST over the {src}, among PLAY, WARP and PV: ([-+\d.]+)', a9), -6, 'dB', low=False)
+        target(build, f"...and the highest (two drones must not add up to a bump)",
+               num(rf'^HIGHEST over the {src}, among PLAY, WARP and PV: ([-+\d.]+)', a9), 3, 'dB')
+        # Grains make holes of their own, so a change into them is read at the
+        # change itself. Two streams of grains never match, and this number
+        # moves from render to render: 0 to -11 dB over ten of them.
+        target(build, f"a change into GRAIN and CLOUD over a {src}: the deepest place at the change"
+               + (" (CLOUD was silent for 341 ms)" if build == 'plugin' else ""),
+               num(rf'^DEEPEST over the {src}, into GRAIN and CLOUD: ([-+\d.]+)', a9), -12, 'dB', low=False)
+        target(build, f"what is heard after a change over a {src} goes on from where it was (the loop went back to its start)",
+               num(rf'^PLACE furthest from where it was over the {src}: ([\d.]+)', a9), 2, 'ms')
+    # Two copies of a sound cancel when they are out of step: a head placed
+    # from sclang was 2 to 5 ms late on the device, and a change from PLAY into
+    # PV dipped by 18 dB over a tone. The new drone reads the old head's place
+    # itself. Without the plugin WARP is 17 to 25 frames behind its head.
+    target(build, "after a change the new drone is in step with the old one, over the phrase: frames out of step",
+           num(r'^OUT OF STEP after a change, over the phrase, at most: (\d+)', a9), 1 if build == 'plugin' else 32,
+           'frames', fmt='.0f')
+    # each drone has five UGens more: they put its head where the old one is
+    for name, limit in ((('four_grain', 104), ('four_warp', 47), ('four_pv', 48), ('four_play', 60),
+                         ('four_clouds', 115)) if build == 'plugin' else
+                        (('four_grain', 107), ('four_warp', 42), ('four_pv', 104), ('four_play', 97))):
+        target(build, f"the UGens of {name} (five more than before, for the head's start)",
+               num(rf'^UGENS {name} (\d+)', runs['p9'][3].replace('\r', '')), limit, '', fmt='.0f')
+
     # THE CHECKLIST (doc/dsp-plan.md): the targets that hold
     target(build, "PLAY is the take at pitch 1: 5 kHz tone 54 s in, noise", num(r'PLAY at 54 s, pitch 1\s+tone\s+[-\d.]+ dBFS\s+noise\s+([-\d.]+)', ae), -90, 'dB')
     if build == 'plugin':
@@ -261,12 +295,8 @@ def check(build):
           num(r'LO 20k res 0 \(open\).*10k ([-\d.]+)', a1), -10.1, 1, 'dB', worse_up=False)
     known(build, "GRAIN is not flat at pitch 1: 19 kHz band re 800 Hz, noise take",
           num(r'^\s+GRAIN\s+0\.1k.*19k ([-+\d.]+)', a1), -2.4, 1, 'dB', worse_up=False)
-    for into, kv in [('WARP', {'stock': (-23.3, 208), 'plugin': (-28.6, 149)}),
-                     ('PV', {'stock': (-85.6, 46), 'plugin': (-27.8, 34)})]:
-        m = re.search(rf'to {into}\s+deepest\s+([-+\d.]+) dB at\s+\d+ ms, within 1 dB of its level after\s+(\d+) ms', a1)
-        known(build, f"a mode change from PLAY into {into} has a hole: deepest, 5 ms RMS",
-              float(m.group(1)), kv[build][0], 6, 'dB', worse_up=False)
-        known(build, f"a mode change from PLAY into {into}: back within 1 dB after", float(m.group(2)), kv[build][1], 50, 'ms')
+    # (the hole of a mode change into WARP and into PV was known here until the
+    # fifty-first change closed it: see the rows of probe9 above)
     known(build, "the drive folds in hearing: 5 kHz at -6 dBFS, full drive, not an odd harmonic below 16 kHz",
           num(r'^r\. DRIVE 1.*not an odd harmonic ([-\d.]+) dB', a4), -27.3, 3, 'dB')
     known(build, "the take is not the input: LeakDC on the record arm at 40 Hz",

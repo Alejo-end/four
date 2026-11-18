@@ -404,7 +404,7 @@ The method and every number: doc/measurements/2026-11-15/README.md.
 | The open filter is the identity | null against dry, under -90 dB | stock -10 dB at 10 kHz, DFM1 H3 -37 dB at -6 dBFS | FAIL on both paths |
 | LP, BP and HP sound alike on both paths | sweeps at 3 cutoffs and 3 resonances | HP 6 against 12 dB an octave | FAIL |
 | No step from a moved knob | probe4 s: a 0.25 Hz sine sent once a frame at random phase (14.9 and 13.8 Hz clocks) into a level and a cutoff, an_stair.py | still 61 to 74% of the time, longest 47 to 60 ms, ripple above 5 Hz -34 to -35 dB | FAIL |
-| A mode change has no hole | 1 kHz take, 5 ms RMS | WARP -28.6 dB, PV -27.8 dB | FAIL |
+| A mode change has no hole | probe9: a 1 kHz take and a phrase, against the old and the new drone alone | -1.5 dB over the tone, -0.5 dB over the phrase (WARP -28.6 dB and PV -27.8 dB before) | pass (fifty-first change) |
 | The same into GRAIN | as above | no hole | pass (twenty-second change) |
 | The drive folds nothing in hearing | 5 kHz at -6 dBFS, full drive, below 16 kHz | -27.3 dB | FAIL |
 | The take is the input | LeakDC on the record arm | -2.8 dB at 40 Hz | FAIL |

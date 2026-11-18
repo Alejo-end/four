@@ -117,7 +117,8 @@ TAKE, VOICE, FILTER and EFFECT edit the focused track. The header shows the focu
 | WARP: slow or fast at the same pitch. | PV: a phase vocoder. A held head is a freeze. |
 
 CLOUD is Mutable Instruments Clouds, for texture: `FourCloud` from the plugin, or
-MiClouds. OFF silences the track and frees its CPU.
+MiClouds. OFF silences the track and frees its CPU. A change of voice on a track that
+plays crosses over: the sound does not stop, and the loop goes on from where it is.
 
 In PLAY on track 1, hold K1 for erode and wear. Each pass of the loop then rewrites the
 take a little darker and quieter, and GEN counts the passes. K2 becomes HEAL: it parks the

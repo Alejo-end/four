@@ -4849,3 +4849,76 @@ four, fiftieth change: **a clear leaves nothing in the buffer when a write was r
 - On the device, `count: 198`: row 10.8 reads "buffer all zero". A file loaded in the
   same moment as a clear is whole, and so is a take armed in that moment. The other rows
   of stage 10 pass, and rows 19.1 and 19.4.
+
+four, fifty-first change: **a voice change keeps its sound and its place (engine and
+test tools; the count stays 198; on the device 2026-11-18, not heard)**. This is C2 of
+doc/signature-workflow.md.
+- Before: K3 MODE, or a scene that lands, released the old drone over 20 ms and started
+  the new one in the same moment. A new WARP, PV or CLOUD drone is silent at first, so
+  there was a hole: 149 ms into WARP, 34 ms into PV and 341 ms into CLOUD with the
+  plugin. The new head also started at the window's start, so the loop jumped back.
+- `swapDrone` in the engine now sends ONE bundle that does three things.
+  - Its sound: the old drone stays whole for a hold, then fades over a time and on a
+    curve that fit the rise of the new one (`modeFade`, by the mode that comes). Into
+    WARP that is 25 ms and then a straight 140 ms. Into PV 12 ms and 24 ms. Into CLOUD
+    335 ms and 20 ms. Into GRAIN 5 ms and half of the track's grain size. The hold is a
+    stage of the old drone's own envelope (`hold`, `rel`, `crv`), so it runs on the
+    server. Into PLAY there is no hold: the two cross in a straight line over 20 ms, and
+    the new PLAY drone comes in on that same line (`att`, `acrv`).
+  - Its place: the new head starts where the old one is. The new drone reads the phase
+    bus itself in its first block (`hfrom`, `hlead`, `hspan` from `headArgs`). A drone's
+    sound lies behind its head by the drone's own delay: 2560 frames for PV and 16347
+    for CLOUD (`modeLat`). The new head starts ahead by its own delay and behind by the
+    old one's, so what is heard goes on from the same place, and the two drones add up
+    in step while they cross.
+  - The old drone stops writing the phase bus in the block the new one is born in, so
+    the screen follows one head.
+- The first build read the old head's place in sclang and sent it as a number. Offline
+  that is exact. On the device a change from PLAY into PV dipped by 18.5 dB over the
+  tone: the number is already old when the server makes the drone, and two copies of a
+  tone that are out of step cancel. How old was not measured. The place is now read on
+  the server, the dip is 0.9 dB, and the probe reads how far the new drone is out of
+  step, in frames.
+- One hold at a time (`whenFree`). A scene can change four voices in one frame. With a
+  hold for each, eight drones would sound together, and the dense set has no room for
+  that. The changes now follow one another, in the engine, so a MIDI map, a motion lane
+  and the grid get it too. The plan had this in Lua, one frame apart.
+- How a head starts at a given frame, on both scsynths: `Phasor.ar(0, rate, Trig.kr(place,
+  0), end)`. A Phasor takes its first place from `start` when it is built, and a synth's
+  UGens are built at its first block. A trigger-rate control and `Impulse.kr(0) * place`
+  start the head at the wrong place on the norns's scsynth, and a control set back to 0
+  in the bundle of the spawn starts it at 0. The place is rounded to a whole frame: the
+  exact read needs that.
+- With a hold of 0 the hold stage of the envelope still takes a block, so the old drone
+  starts to go after the new one starts to come. On the 10 ms start that every drone
+  has (fast at first) a change into PLAY read +1.6 dB on the Mac and +3.2 dB on the
+  norns's scsynth. On the straight 20 ms line it reads +0.5 and +1.2 dB. Why the norns
+  reads more was not looked into.
+- Each drone def has five UGens more, at control rate (they place the head), and eight
+  controls more. No other cost while nothing changes.
+- Offline: test/dsp/review/probe9.scd, over a tone and over a phrase, read against the
+  old and the new drone alone. With the plugin, among PLAY, WARP and PV the deepest
+  place was -28.6 dB over the tone and -26.9 dB over the phrase, and is -1.5 and -0.5 dB.
+  The highest is +0.5 and +0.4 dB. Into CLOUD it was silence for 341 ms and is -1.6 dB.
+  What is heard goes on within 0.0 ms of its place (it went back by the whole second
+  the loop had run), and the new drone is 0 frames out of step. check_dsp.sh has
+  fourteen rows for it with the plugin and thirteen without, and the four KNOWN rows of
+  the hole are gone. The norns's own scsynth gives the same, with +1.2 dB at a change
+  into PLAY.
+- probe 1's section 6 sent the old law. It is removed, and probe9 takes its place.
+- On the device (2026-11-18, `count: 198`, doc/measurements/2026-11-18/): the new row
+  19.33. Track 2 plays a tone take of 14 s in PLAY, changes to each mode and back, away
+  from the loop's seam. The deepest place, with the old engine and with this one: WARP
+  -26.4 and -0.4 dB, PV -70.6 and -0.9 dB, CLOUD -71.2 and -1.3 dB, GRAIN -7.5 and
+  -7.1 dB (GRAIN alone dips by 5.8 dB). The highest is +1.3 dB. What is heard went back
+  by 1.6 to 2.1 s, and now goes on within 14 ms (the row reads the head once a frame).
+  Four tracks sent from PLAY to WARP in one moment change after 53, 193, 374 and 546 ms,
+  with no xrun. With the old engine all four changed within 52 ms.
+- The cost on the device: row 19.27 reads 56.6% of the scsynth thread for four PV at
+  pitch 2 and 64.3% for the dense set, as its largest windows (56.6% and 64.5% before),
+  with no xrun. The dense set is still over 60%, as before. Rows 19.4, 19.5, 19.7,
+  19.10, 19.14, 19.16, 19.32 and 10.8 read as before.
+- Found on the way: WARP and PV dip at their own loop seam, by about 27 dB for 82 ms and
+  26 ms over a tone. Nothing in this change touches the loop's wrap, and the old engine
+  was not read at a seam. It is open (doc/plan.md, Phase 0, item 8). Row 19.33 reads its
+  levels away from the seam.

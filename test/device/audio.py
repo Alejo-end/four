@@ -156,3 +156,23 @@ def report(path):
 
 if __name__ == "__main__":
     print(report(sys.argv[1]))
+
+
+def level_range(chans, rate, ms, skip=0.3):
+    """The deepest and the highest place of a recording's level against its
+    median, in dB: (deepest, highest). The level is the RMS over `ms`, on the
+    louder channel, and the first and last `skip` seconds are left out. A
+    steady sound reads near (0, 0). A hole of 30 ms reads far below 0.
+    """
+    c = max(chans, key=lambda x: sum(v * v for v in x[::16]))
+    w = max(1, int(rate * ms / 1000))
+    acc, run = [0.0], 0.0
+    for v in c:
+        run += v * v
+        acc.append(run)
+    a, b = int(rate * skip), len(c) - int(rate * skip) - w
+    env = sorted(math.sqrt(max(acc[i + w] - acc[i], 0.0) / w) for i in range(a, b, max(1, w // 4)))
+    if not env:
+        return 0.0, 0.0
+    mid = max(env[len(env) // 2], 1e-9)
+    return round(db(max(env[0], 1e-9)) - db(mid), 1), round(db(env[-1]) - db(mid), 1)

@@ -60,19 +60,7 @@ for n in ['ero_late', 'erox_late', 'ero_early', 'erox_early']:
     w = np.blackman(len(s)); S = np.abs(np.fft.rfft(s * w)) ** 2; f = np.fft.rfftfreq(len(s), 1 / sr)
     m = np.abs(f - 5000) > 60
     print(f"  {n:11s} off-tone {10*np.log10(S[m].sum()/S.sum()):7.1f} dB, tone {db(amp(s, 5000)):.2f} dBFS")
-# 6. mode change
-x = rd('mode')
-print("6. MODE CHANGE from PLAY at 1.0 s, 1 kHz take at -6 dBFS: 5 ms RMS")
-for k, n in enumerate(['to WARP', 'to PV', 'to GRAIN', 'to PLAY']):
-    y = x[:, 2 * k]; win = 240
-    e = np.sqrt(np.convolve(y ** 2, np.ones(win) / win, 'same'))
-    ref = np.median(e[int(0.6 * sr): int(0.95 * sr)])
-    seg = e[int(1.0 * sr): int(1.6 * sr)]
-    mn = seg.min(); tmin = seg.argmin() / sr * 1000
-    end = np.median(e[int(1.7 * sr): int(1.95 * sr)])
-    below = np.where(np.abs(20 * np.log10(np.maximum(seg, 1e-9) / end)) > 1.0)[0]
-    rec = (below.max() + 1) / sr * 1000 if len(below) else 0
-    print(f"  {n:9s} deepest {db(mn / ref):+6.1f} dB at {tmin:4.0f} ms, within 1 dB of its level after {rec:4.0f} ms, new level {db(end / ref):+5.1f} dB")
+# (6, a mode change, is an_probe9.py since the fifty-first change)
 # 7. effects' gain
 x = rd('flres'); a = 2 * sr
 print("7. EFFECT GAIN, amount 1, rate 0.5")
