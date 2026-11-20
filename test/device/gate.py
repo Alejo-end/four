@@ -3393,6 +3393,118 @@ def stage19():
     check("19.34", c1934)
 
 
+# ---- stage 20: the Exquis ------------------------------------------------------
+def stage20():
+    """The Exquis driver (lib/mgrid.lua), with one plugged into the norns.
+
+    The rows a computer can judge send the Exquis's bytes to the driver's own
+    handler on the device, through norns's own midi.to_msg. They do not press a
+    pad: 20.4 to 20.10 are for hands (test/device/exquis.py helps)."""
+    machine = ("20.1", "20.2", "20.3")
+    hands = ("20.4", "20.5", "20.6", "20.7", "20.8", "20.9", "20.10")
+    start = len(n.transcript("lua"))
+    n.load_script()
+    ex = n.exquis()
+    if not ex["name"]:
+        seen = ", ".join(ex["devices"]) or "none"
+        you(*machine, *hands, why=f"needs an Exquis. No MIDI device on the norns has 'exquis' in its name. "
+                                  f"The devices: {seen}")
+        return
+    want = "KEYS" if ex["grid"] else "PADS"
+    # every id and every count is the driver's own, read from the norns
+    p = n.exquis_proto()
+    last_enc = p["encoders"]              # it picks the track, and its push changes the mode
+    first, second = PAGES.split()[:2]     # where Redo, Undo and encoder 1 step
+    scene2 = n.exquis_pad_at(2, 1)        # the scene bank's second pad
+    held = n.exquis_pad_at(1, 6)          # TAKE's beat repeat, a pad that holds
+
+    def to_mode(mode):
+        if n.exquis()["mode"] != mode:
+            n.exquis_push(last_enc)
+        return n.exquis()["mode"] == mode
+
+    def c201():
+        line = re.search(r"four: Exquis in Developer Mode, (PADS|KEYS) \((.*?)\)", n.transcript("lua")[start:])
+        said = line.group(1) if line else None
+        return verdict(ex["mode"] == want and said == want,
+                       f"the norns calls it {ex['name']!r}. A grid with a device is "
+                       f"{'attached' if ex['grid'] else 'not attached'}, so it starts in {want}: the driver holds "
+                       f"{ex['mode']} and the log says {said}")
+
+    def c202():
+        notes, good = [], [True]
+
+        def expect(what, got, wanted):
+            if got != wanted:
+                good[0] = False
+            notes.append(f"{what} {got}" + ("" if got == wanted else f" (want {wanted})"))
+
+        def page():
+            return n.ctx("c.PAGES[c.page]")
+
+        def slot():
+            return round(n.get("scene_slot"))
+
+        n.goto(first)
+        n.exquis_press(p["redo"])
+        expect("Redo", page(), second)
+        n.exquis_press(p["undo"])
+        expect("Undo", page(), first)
+        ticks = p["enc_div"][0]
+        for _ in range(ticks - 1):
+            n.exquis_turn(1, 1)
+        expect(f"encoder 1, {ticks - 1} of {ticks} ticks", page(), first)
+        n.exquis_turn(1, 1)
+        expect("the last tick", page(), second)
+        n.exquis_turn(1, -ticks)
+        expect("as many back", page(), first)
+        n.set("scene_slot", 1)
+        n.exquis_press(p["up"])
+        expect("Up", slot(), 2)
+        n.exquis_press(p["down"])
+        expect("Down", slot(), 1)
+        n.set("track_sel", 1)
+        n.exquis_turn(last_enc, p["enc_div"][last_enc - 1])
+        expect(f"encoder {last_enc}", round(n.get("track_sel")), 2)
+        n.set("track_sel", 1)
+        other = "KEYS" if want == "PADS" else "PADS"
+        n.exquis_push(last_enc)
+        expect(f"the push of encoder {last_enc}", n.exquis()["mode"], other)
+        to_mode("PADS")
+        n.set("scene_slot", 1)
+        n.exquis_pad(scene2, True)
+        n.exquis_pad(scene2, False)
+        expect(f"pad {scene2} in PADS, scene", slot(), 2)
+        to_mode("KEYS")
+        n.set("scene_slot", 1)
+        n.exquis_pad(scene2, True)
+        n.exquis_pad(scene2, False)
+        expect(f"pad {scene2} in KEYS, scene", slot(), 1)
+        to_mode(want)
+        return verdict(good[0], "; ".join(notes))
+
+    def c203():
+        n.goto(first)
+        to_mode("PADS")
+        n.set("beat_repeat", 0)
+        n.exquis_pad(held, True)
+        on = n.get("beat_repeat")
+        n.exquis_push(last_enc)
+        after = n.get("beat_repeat")
+        n.exquis_pad(held, False)
+        late = n.get("beat_repeat")
+        to_mode(want)
+        n.set("beat_repeat", 0)
+        return verdict(on == 1 and after == 0 and late == 0,
+                       f"beat_repeat {on:.0f} with pad {held} held, {after:.0f} after the change to KEYS under it, "
+                       f"{late:.0f} after the late release")
+
+    for cid, fn in (("20.1", c201), ("20.2", c202), ("20.3", c203)):
+        check(cid, fn)
+    you(*hands, why="an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps "
+                    "(watch, sweep)")
+
+
 def cleanup():
     n.signal_quit()
     n.ssh(f"rm -f ~/dust/data/four/four-{PSET}.pset ~/dust/data/four/*-{PSET}.lua "
@@ -3401,7 +3513,7 @@ def cleanup():
 
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,
           8: stage8, 9: stage9, 10: stage10, 11: stage11, 12: stage12, 13: stage13, 14: stage14,
-          15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19}
+          15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19, 20: stage20}
 
 
 def main():

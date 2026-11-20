@@ -203,6 +203,7 @@ The tools are in `test/device/` and need only the Python standard library:
 | `audio.py` | Measures a WAV: level, clipping, breaks in the waveform, band levels, brightness |
 | `gate.py` | Runs doc/device-gate.md, stage by stage or check by check |
 | `measure.py` | Runs the cost, budget, two-server, patch and soak measurements |
+| `exquis.py` | With an Exquis on the norns: its name, a log of what it sends, a sweep of its pads (stage 20) |
 | `report.py` | Writes the dated results page |
 
 Open a session first, because the last logout deletes the JACK sockets. The control

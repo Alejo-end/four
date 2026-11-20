@@ -50,7 +50,7 @@ def main(date):
         "",
         "`pass` means that the measurement decides the check. `measured` means that the numbers are",
         "right, but a person must still listen or look. `you` needs a person or hardware that was",
-        "not connected. No grid, Launchpad, crow, MIDI gear or line source was connected: a private",
+        "not connected. No grid, Launchpad, Exquis, crow, MIDI gear or line source was connected: a private",
         "scsynth fed test signals to crone's input ports.",
         "",
         "Summary: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) + f", not run {len(missing)}.",

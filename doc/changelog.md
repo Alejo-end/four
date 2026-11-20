@@ -5261,3 +5261,84 @@ The two issues the sixty-second change left open.
   files, so the wait is tested with a stand-in clock and files the test writes.
 - Not on the device: the norns left the network during the device check.
 
+four, sixty-fourth change: **every test and harness works with an Exquis (test tools and
+documents; no change to the script or the engine, the count stays 198)**. The user asked
+for it. No Exquis has been on the norns yet, so nothing here ran on one.
+- test/uisim/env.lua holds an Exquis stand-in (`h.exquis`, `h.new_exquis()`). It speaks
+  raw bytes, as a port does, and `midi.to_msg` in the offscreen norns is now norns's own
+  parse (it returned `none` for everything). The stand-in checks every frame that the
+  driver sends against the Developer Mode specification: the head, the F7, data bytes
+  over 127, the zone mask, an LED frame that leaves the controls, a pad LED written in
+  KEYS, a frame after the unplug. It also holds its LEDs to the grid's frame (THE MIRROR):
+  a dark cell is a dark LED, a lit cell a lit one, and two cells that look the same on
+  the grid look the same on the pads and on the four strip buttons.
+- `FOUR_EXQUIS=keys` or `pads` attaches one before the script loads, in any harness or
+  render that uses the offscreen norns. In `pads` the Exquis is found before the grid has
+  a device, so the driver starts it in PADS by its own rule, and a harness's
+  `grid.key(x, y, z)` on a cell that the Exquis carries goes in as the bytes of that pad
+  or button. test/harness.lua's report fails on any fault the stand-in kept.
+- test/check.lua runs test_control, test_purity and test_screen again in both modes, and
+  renders the five variants with an Exquis attached: the screen must not change. Eighteen
+  steps, about two minutes. All pass on Lua 5.3.
+- Three faults planted in the driver, each found: two pad rows swapped (the mirror), two
+  strip buttons swapped (the mirror), an effect byte of 200 in the LED frame (the frame
+  check).
+- test/test_exquis.lua uses the shared stand-in and bytes (97 assertions, 60 before). New:
+  the Exquis alone starts in PADS and is painted and played with no grid, short and stray
+  messages do not throw, and the Lua of the device tools runs offline.
+- On the device: `Norns.exquis()` and its byte helpers in test/device/norns.py, stage 20
+  in test/device/gate.py and doc/device-gate.md (20.1 to 20.3 by the computer, through
+  the driver's handler and norns's own `midi.to_msg`; 20.4 to 20.10 by hand), and
+  test/device/exquis.py: `status` (the name the norns gives it), `watch` (what it sends,
+  and the encoders' step), `sweep` (the order of the pad ids). Those are the three things
+  that the driver guesses. The tools were not run: there is no device in this session.
+- Not found by any of it: a fault in the driver. The stand-in and the driver come from
+  the same reading of the same specification, so stage 20 on a real Exquis is still the
+  test.
+- A review of this change by its author, the same day. Fixed: the device tools read a
+  snippet's answer out of everything the REPL printed meanwhile, and the script logs
+  there too (a push of encoder 4 prints a line), so `watch` could stop on a log line and
+  a byte count could be a number from one. Each snippet now prints behind `@exq ` and
+  `Norns.exquis_ask` reads the marked line. The offscreen `midi.to_msg` was called
+  norns's own: it is written from memory of it, says so, and now turns a note-on of
+  velocity 0 into a note-off and names the clock messages. The renders are the same,
+  byte for byte, as before the sixty-fourth change.
+- The review went on with norns's own source (monome/norns, lua/core/midi.lua, commit
+  227aa04). The offscreen `midi.to_msg` is now that file's `Midi.to_msg`, copied
+  unchanged; like the real one it throws on a message cut short. The stand-in sends a
+  message down norns's road, `_norns.midi.event`: the device's handler, then the port's.
+  Before, a pad reached the driver alone, so the suite never asked whether a pad pressed
+  in PADS also played a note. It does not, in any harness. The device tools' `bytes`
+  takes the same road on the norns. Read there too, and true of the driver: `Midi.add`
+  runs after the device is listed and has its port, `Midi.remove` before it is unlisted,
+  and a script's `cleanup` runs before norns clears the handlers.
+- Known and left: in Developer Mode the Exquis's buttons and encoders are CCs 102 to 117
+  on channel 16, and they reach the port's handler too. With `fader_ch` 16 and
+  `fader_cc` between 95 and 117 an encoder would also move a mixer fader, and a PMAP
+  entry on those CCs would follow them. Neither is the default.
+
+four, sixty-fifth change: **the Exquis's numbers are written once (Lua and test tools;
+no engine change, the count stays 198)**. The user asked: avoid hardcoded values. The
+sixty-fourth change had the Exquis's ids, masks and counts in five places: the driver,
+the stand-in, test_exquis.lua, gate.py and exquis.py.
+- lib/mgrid.lua names every number of the protocol and of the layout once (the name,
+  channel 16, 61 pads, the frames' heads, the zone masks, each button, the encoders, 64,
+  the lit range) and hands them out as `M.EX`, with the fold. The driver's own literals
+  (60, 113, 16, 0xF7, `+ 4`) are those names now. It behaves as before: the renders are
+  the same byte for byte, and every harness passes.
+- The stand-in (test/uisim/env.lua) holds none: it loads the driver's table from
+  lib/mgrid.lua in a world of its own. It takes the first device id that is free.
+- test/test_exquis.lua (120 assertions) pins the table to the specification in one
+  section, the only place where those numbers are written out. After it, the harness
+  names a pad by the grid cell it carries, a button by its name, an encoder by its
+  place, a frame by its mode.
+- The device tools ask the driver on the norns: a `proto` snippet prints `grid.EX`, and
+  `Norns.exquis_proto()` parses it. gate.py stage 20 and exquis.py use it for every id,
+  the channel, the pad count and the encoders' ticks; the pages come from gate.py's
+  `PAGES`. exquis.py's timings have names. So the tools test the build that is
+  deployed: an older script without `grid.EX` is refused with words.
+- test/check.lua finds the harnesses that take an Exquis by reading them (those that
+  load the script in the offscreen norns), not from a second list.
+- Left as written, on purpose: MIDI's own status bytes (named constants in each file),
+  the grid cells that a test presses (four's layout), the gate's row ids, and the
+  numbers in doc/device-gate.md's prose where a reader needs them.
