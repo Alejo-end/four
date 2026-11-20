@@ -29,7 +29,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(__file__))
-from norns import EXQUIS_LUA, Norns  # noqa: E402
+from norns import Norns  # noqa: E402
 
 # what the driver expects of each control (lib/mgrid.lua)
 NAMES = {102: "Record", 103: "Loop", 104: "Clips", 105: "Play/Stop", 106: "Down", 107: "Up",
@@ -107,7 +107,7 @@ def status(n):
 def watch(n, seconds):
     if not status(n):
         return
-    if n.lua(EXQUIS_LUA["tap_on"]) != "true":
+    if n.exquis_ask("tap_on") != "true":
         print("could not listen in")
         return
     print(f"Listening for {seconds:.0f} s. Press, turn, push.")
@@ -116,13 +116,13 @@ def watch(n, seconds):
         end = time.time() + seconds
         while time.time() < end:
             time.sleep(0.25)
-            got = n.lua(EXQUIS_LUA["tap_read"])
+            got = n.exquis_ask("tap_read")
             for row in (r for r in got.split(";") if r.strip()):
                 msg = [int(b, 16) for b in row.split()]
                 msgs.append(msg)
                 print(f"  {row:24} {describe(msg)}", flush=True)
     finally:
-        n.lua(EXQUIS_LUA["tap_off"])
+        n.exquis_ask("tap_off")
     print("\n".join(summary(msgs)))
 
 
@@ -136,11 +136,11 @@ def sweep(n, step=0.15):
           "rows of 6 and 5 in turn.")
     try:
         for pad in range(61):
-            n.lua(f"local ID = {pad} " + EXQUIS_LUA["sweep"])
+            n.exquis_ask("sweep", f"local ID = {pad} ")
             time.sleep(step)
     finally:
         n.exquis_surface(was == "PADS")
-        n.lua(EXQUIS_LUA["repaint"])
+        n.exquis_ask("repaint")
     print(f"Done. The driver is back in {was} and paints again.")
 
 

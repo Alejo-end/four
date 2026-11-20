@@ -5276,3 +5276,11 @@ for it. No Exquis has been on the norns yet, so nothing here ran on one.
 - Not found by any of it: a fault in the driver. The stand-in and the driver come from
   the same reading of the same specification, so stage 20 on a real Exquis is still the
   test.
+- A review of this change by its author, the same day. Fixed: the device tools read a
+  snippet's answer out of everything the REPL printed meanwhile, and the script logs
+  there too (a push of encoder 4 prints a line), so `watch` could stop on a log line and
+  a byte count could be a number from one. Each snippet now prints behind `@exq ` and
+  `Norns.exquis_ask` reads the marked line. The offscreen `midi.to_msg` was called
+  norns's own: it is written from memory of it, says so, and now turns a note-on of
+  velocity 0 into a note-off and names the clock messages. The renders are the same,
+  byte for byte, as before the sixty-third change.

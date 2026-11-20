@@ -333,12 +333,23 @@ do
   local real_print = print
   local function repl(code)
     local out
-    print = function(v) out = tostring(v) end
+    -- the script logs through the same print: only the marked line is the
+    -- answer, as in norns.py's exquis_ask
+    print = function(v)
+      local a = tostring(v):match("^@exq (.*)$")
+      if a then out = a end
+    end
     local fn, err = load(code)
     local okr, e2 = pcall(fn or error, err)
     print = real_print
     assert(fn and okr, "a device snippet does not run: " .. tostring(err or e2))
+    assert(out, "a device snippet printed no marked answer")
     return out
+  end
+  do
+    local marks = 0
+    for _ in block:gmatch('print%("@exq ') do marks = marks + 1 end
+    ok(marks == 8, "every snippet prints its answer behind the mark (" .. marks .. ")")
   end
   for name, code in pairs(LUA) do
     ok(not code:find("%-%-"), "the snippet `" .. name .. "` holds no comment (a REPL line is one line)")

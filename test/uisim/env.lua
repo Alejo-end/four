@@ -210,22 +210,30 @@ function M.install(opts)
   midi = { vports = {}, devices = {} }
   for i = 1, 16 do midi.vports[i] = { name = "none", device = nil } end
   function midi.connect(i) return midi.vports[i or 1] end
-  -- norns's own parse of raw bytes (lua/core/midi.lua), so a harness can feed a
-  -- handler what a port delivers. A harness that hands over a message it built
-  -- itself (a table with a type) gets it back.
+  -- the parse of raw bytes, after norns's lua/core/midi.lua, so a harness can
+  -- feed a handler what a port delivers. WRITTEN FROM MEMORY of that file, not
+  -- copied from a norns: a note-on of velocity 0 is a note-off there. On the
+  -- device the real one is in the path (gate stage 20). A harness that hands
+  -- over a message it built itself (a table with a type) gets it back.
   function midi.to_msg(d)
     if type(d) ~= "table" then return { type = "none" } end
     if d.type then return d end
     local st = d[1]
     if type(st) ~= "number" then return { type = "none" } end
     local hi, ch = st & 0xF0, (st & 0x0F) + 1
-    if hi == 0x90 then return { type = "note_on", note = d[2], vel = d[3], ch = ch } end
+    if hi == 0x90 then
+      return { type = (d[3] or 0) > 0 and "note_on" or "note_off", note = d[2], vel = d[3], ch = ch }
+    end
     if hi == 0x80 then return { type = "note_off", note = d[2], vel = d[3], ch = ch } end
     if hi == 0xB0 then return { type = "cc", cc = d[2], val = d[3], ch = ch } end
     if hi == 0xE0 then return { type = "pitchbend", val = d[2] + (d[3] << 7), ch = ch } end
     if hi == 0xA0 then return { type = "key_pressure", note = d[2], val = d[3], ch = ch } end
     if hi == 0xD0 then return { type = "channel_pressure", val = d[2], ch = ch } end
     if hi == 0xC0 then return { type = "program_change", val = d[2], ch = ch } end
+    if st == 0xF8 then return { type = "clock" } end
+    if st == 0xFA then return { type = "start" } end
+    if st == 0xFB then return { type = "continue" } end
+    if st == 0xFC then return { type = "stop" } end
     if st == 0xF0 then return { type = "sysex", raw = d } end
     return { type = "other" }
   end

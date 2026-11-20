@@ -573,7 +573,9 @@ Each line was learned the hard way; the change log has the story.
   fold), not that an Exquis agrees. Only stage 20 on the device can say that.
 - Lua that a device tool sends to the REPL lives in one table in test/device/norns.py
   (`EXQUIS_LUA`), and test_exquis.lua runs it in the offscreen script. A REPL line is
-  one line: no comment in it.
+  one line: no comment in it. The script logs to the same REPL, so a tool's answer is
+  printed behind a mark (`@exq `) and read from the marked line only: `num()` takes the
+  first number in the text, which can be a log line's.
 
 **Deliberate decisions: do not "fix" these unasked**
 - The tape keeps its own loop-pedal law; folding it onto `Mdeck.arm_loop`/`close_loop`
@@ -664,7 +666,9 @@ python3 test/device/measure.py states voices
 # with an Exquis on the norns: stage 20, and the three things the driver guesses
 # (its name, its encoders' step, the order of its pad ids)
 python3 test/device/gate.py 20
-python3 test/device/exquis.py status | watch 30 | sweep
+python3 test/device/exquis.py status
+python3 test/device/exquis.py sweep
+python3 test/device/exquis.py watch 30
 
 # on a connected device: render an offline probe's scores with the norns's OWN scsynth
 # (3.13, where the Mac has 3.14: they differ), then score the files as usual
