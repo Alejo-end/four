@@ -1215,6 +1215,13 @@ for r = 1, 4 do
   RID[r][6] = r == 1 and "fx_rev" or ("t" .. r .. "_fx_rev")
 end
 for v = 0, 100 do PCT[v] = v .. "%" end
+-- A SEND INTO A SILENT EFFECT (C11 of doc/signature-workflow.md): with the
+-- delay's or the reverb's WET at 0 a send into it makes no sound, so its
+-- cell is drawn hollow, and opening one says why for a second. (Fields of
+-- M: this file is at Lua's limit of 200 locals.)
+M.RT_WET = { [5] = "delay_mix", [6] = "rev_mix" }
+M.RT_MSG = { [5] = "DELAY WET IS 0", [6] = "REVERB WET IS 0" }
+M.rt_prev, M.rt_prev_id, M.rt_msg, M.rt_msg_at = 0, nil, nil, nil
 local function track_sounds(n)
   if n == 1 then return pget("mode", 5) ~= 1 end
   return track_live(n)
@@ -1222,9 +1229,24 @@ end
 local function route_grid(frame)
   local audible = (C.mix_gains()) > 0.001
   local cur = C.route_cur and C.route_cur()
-  ptext("TO", 6, 12, 1, 3)       -- columns: where a send goes
-  for c = 1, 6 do
-    ptext_c(RT_COL[c], RT_X0 + (c - 1) * RT_CW + RT_CELL / 2, 12, 1, c > 4 and 7 or 5)
+  -- a send the cursor just opened into an effect whose WET is 0
+  if cur and M.RT_WET[cur.to] then
+    local v = pget(cur.id, 0)
+    if v > 0.001 and M.rt_prev <= 0.001 and M.rt_prev_id == cur.id
+        and pget(M.RT_WET[cur.to], 0) <= 0.001 then
+      M.rt_msg, M.rt_msg_at = cur.to, frame
+    end
+    M.rt_prev, M.rt_prev_id = v, cur.id
+  else
+    M.rt_prev_id = nil
+  end
+  if M.rt_msg_at and frame - M.rt_msg_at < FPS then
+    ptext_c(M.RT_MSG[M.rt_msg], 64, 12, 1, 12)
+  else
+    ptext("TO", 6, 12, 1, 3)       -- columns: where a send goes
+    for c = 1, 6 do
+      ptext_c(RT_COL[c], RT_X0 + (c - 1) * RT_CW + RT_CELL / 2, 12, 1, c > 4 and 7 or 5)
+    end
   end
   -- the line between the tracks and the FX
   screen.level(1)
@@ -1246,8 +1268,17 @@ local function route_grid(frame)
         screen.rect(x, y, RT_CELL, 6)
         screen.stroke()
         if v > 0.001 then
+          local w = max(1, floor(v * (RT_CELL - 2) + 0.5))
           screen.level(audible and 11 or 4)
-          screen.rect(x + 1, y + 1, max(1, floor(v * (RT_CELL - 2) + 0.5)), 4)
+          if M.RT_WET[c] and pget(M.RT_WET[c], 0) <= 0.001 then
+            -- hollow: the effect's WET is 0, so this send makes no sound
+            screen.rect(x + 1, y + 1, w, 1)
+            screen.rect(x + 1, y + 4, w, 1)
+            screen.rect(x + 1, y + 2, 1, 2)
+            screen.rect(x + w, y + 2, 1, 2)
+          else
+            screen.rect(x + 1, y + 1, w, 4)
+          end
           screen.fill()
         end
         if cur and cur.from == r and cur.to == c then
@@ -2308,6 +2339,10 @@ local function body_SCENE(frame)
     -- K1 held makes K2 the STOP (C9 of the plan): the cue says so
     ptext_c(C.alt and "LET GO OF K1 THEN K2" or "K2 TO LAND THE REST", 64, 13, 1, 5)
   else
+    -- at rest with B filled, the row says how to fade (C12 of the plan)
+    if amt <= 0.001 and sel >= 1 and sc.slots[sel] then
+      ptext_c("K1+E3 FADES", 64, 13, 1, 5)
+    end
     ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
   end
   -- the orbit lives here now (its knobs are this page's alt pair): a steady
@@ -2400,6 +2435,9 @@ local function body_SCENE(frame)
   -- widest labels, A LIVE (x 4..28) and n B (x 112..123)
   ptext(SLOT_STR.a[a_end] or SLOT_STR.a[0], 4, 43, 1, amt < 0.5 and 11 or 4)
   ptext_r(SLOT_STR.b[sel], 124, 43, 1, amt >= 0.5 and 11 or 4)
+  -- part of B is out of the fade's reach (a voice mode, a hold): a dim +K2
+  -- under the B end for the whole fade (C12)
+  if amt > 0.001 and sc.unlanded(sel) then ptext_r("+K2", 124, 50, 1, 4) end
   local x0, x1 = 34, 106
   screen.level(3)
   screen.move(x0, 45.5) screen.line(x1, 45.5)

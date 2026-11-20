@@ -595,6 +595,13 @@ do
   params:set("scene_slot", 4); T.pulse("scene_capture")
   params:set("freeze", 0)
   _h.run_ticks(25)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2); redraw()
+  local rest = "K1+E3 FADES"
+  ok(reads(rest, math.floor(64 - Mf.text_w(rest, 1) / 2 + 0.5), 13),
+    "at rest with B filled, the status row reads K1+E3 FADES (C12)")
+  ok(lmax(112, 50, 124, 54) == 0, "...and no +K2 while the fade rests")
+  params:set("scene_morph_amt", 0.3); _h.run_ticks(2); redraw()
+  ok(reads("+K2", 124 - Mf.text_w("+K2", 1), 50), "part of B out of the fade's reach: +K2 under the B end mid-fade")
   params:set("scene_morph_amt", 1); _h.run_ticks(2); redraw()
   local cue = "K2 TO LAND THE REST"
   local cw = Mf.text_w(cue, 1)
@@ -707,6 +714,48 @@ do
   params:set("loop_start", 0); params:set("loop_end", 1)
   CTX.clear_twave(); CTX.tape_msg = nil
   _h.run_ticks(1)
+end
+
+-- ============================================================================
+-- C11 · TRACKS with K1: a send into an effect whose WET is 0 is hollow, and
+-- opening one says so for a second
+-- ============================================================================
+do
+  local Mf = CTX.font
+  local function mask(x, y, w)
+    local t = {}
+    for yy = y, y + 4 do
+      for xx = x, x + w - 1 do t[#t + 1] = px(xx, yy) > 0 and "1" or "0" end
+    end
+    return table.concat(t)
+  end
+  local function reads(str, x, y)
+    local w = Mf.text_w(str, 1)
+    local drawn = mask(x, y, w)
+    screen.clear()
+    Mf.ptext(str, x, y, 1, 15)
+    local want = mask(x, y, w)
+    redraw()
+    return drawn == want
+  end
+  T.goto_page("TRACKS")
+  params:set("track_sel", 1); params:set("route_sel", 5)      -- T1 > R
+  local rm = params:get("rev_mix")
+  params:set("rev_mix", 0); params:set("fx_rev", 0)
+  key(1, 1); _h.run_ticks(2)
+  params:set("fx_rev", 0.5); _h.run_ticks(1); redraw()
+  local msg = "REVERB WET IS 0"
+  ok(reads(msg, math.floor(64 - Mf.text_w(msg, 1) / 2 + 0.5), 12),
+    "opening a send into the reverb at WET 0 says REVERB WET IS 0")
+  local x, y = 20 + 5 * 14, 19                  -- the T1 > R cell
+  ok(px(x + 1, y + 1) > 0 and px(x + 3, y + 2) == 0 and px(x + 3, y + 3) == 0,
+    "...and its cell is hollow")
+  _h.run_ticks(16); redraw()
+  ok(reads("TO", 6, 12), "after a second the column names come back")
+  params:set("rev_mix", 0.5); redraw()
+  ok(px(x + 3, y + 2) > 0 and px(x + 3, y + 3) > 0, "with the reverb's WET up the cell is filled")
+  params:set("fx_rev", 0); params:set("rev_mix", rm)
+  key(1, 0); _h.run_ticks(1)
 end
 
 T.report("screen harness OK")

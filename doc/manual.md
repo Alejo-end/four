@@ -135,6 +135,9 @@ decay. Recording is never affected.
 
 The sends grid has a column for each track, D for the delay and R for the reverb. Every
 send starts at zero. The echoes and the tail are added to the dry sound, which never ducks.
+A send into the delay or the reverb while that effect's WET is 0 makes no sound, so its
+cell is drawn hollow. When you open one, the top row says `DELAY WET IS 0` or
+`REVERB WET IS 0` for a second.
 
 ### FILTER and EFFECT
 
@@ -224,7 +227,9 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
 - SCENE is a crossfader with two ends, and each end has its own encoder. E2 picks A, the
   left end: LIVE or a stored slot. E3 picks B, the right end, which is also the slot that
   K2 and K3 act on. Hold K1 and turn E3 to fade. The rail names both ends, and a small A
-  sits under the cell of slot A.
+  sits under the cell of slot A. At rest, with B filled, the top row reads `K1+E3 FADES`.
+  When part of B is out of the fade's reach (a voice mode or a hold), `+K2` shows under
+  the B end for the whole fade.
 - With A on LIVE, the fade starts from the sound you have when it leaves 0. Back at 0 you
   hear that sound again.
 - With A on a slot, the fade at 0 is A and at 1 is B, both ways. A new A changes nothing

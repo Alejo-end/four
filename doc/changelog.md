@@ -5114,3 +5114,20 @@ keeps what it moves, and DRY is a round trip. It is on the local branch `phase-b
 - test/test_control.lua section 35 (36 assertions) and test/test_screen.lua (2). Each
   fix was reverted once, and its rows failed. The 97 renders of the five variants are
   byte-identical to before.
+
+four, fifty-eighth change: **Phase C of doc/signature-workflow.md, the screen says what the
+fade and the sends do: C11 and C12 (Lua; no engine change, the count stays 198)**. The
+user asked for Phase C on 2026-11-20. It is on the local branch `phase-c`, on top of
+`phase-b`.
+- C11, lib/mpages.lua `route_grid`: on TRACKS with K1, a D or R cell whose effect has WET
+  at 0 draws its send hollow, and opening such a send says `DELAY WET IS 0` (61 px) or
+  `REVERB WET IS 0` (66 px) on the top row for a second. The defaults stay: WET at 0 keeps
+  the delay and reverb synths free.
+- C12, `body_SCENE`: at rest with B filled, the status row reads `K1+E3 FADES` (50 px),
+  beside the recall mode. While the fade is up and part of B is out of its reach
+  (`unlanded`), `+K2` shows dim under the B end.
+- Not done: "a full fade takes about one turn of E3". The step of `scene_morph_amt` waits
+  for a count of the encoder's steps over one turn on the device.
+- test/test_screen.lua: 7 more assertions (138). test/uisim/render_pages.lua: a new shot,
+  `track2_03_TRACKS_SENDS_WET0`. Four SCENE shots change (the new cue); the other 93 are
+  byte-identical. doc/ui is unchanged.

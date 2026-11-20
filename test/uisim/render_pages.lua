@@ -245,6 +245,15 @@ elseif TRACK2 then
   run_ticks(3)
   redraw()
   export(pfx("TRACKS", "_SENDS"))
+  -- the same sends with both effects' WET at 0: their D and R cells are
+  -- hollow (C11 of doc/signature-workflow.md)
+  do
+    local dm, rm = params:get("delay_mix"), params:get("rev_mix")
+    params:set("delay_mix", 0); params:set("rev_mix", 0); params:set("t2_fx_dly", 0.5)
+    redraw()
+    export(pfx("TRACKS", "_SENDS_WET0"))
+    params:set("delay_mix", dm); params:set("rev_mix", rm); params:set("t2_fx_dly", 0)
+  end
   key(1, 0)
   -- MOTION with no lanes: the four modulator rows, LFO 3 on track 3
   goto_page("MOTION")
