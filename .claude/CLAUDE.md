@@ -167,6 +167,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 60th: motion without visiting MOTION (first move starts a pass, PASS in bars closes it, overdub stays armed, double-tap K1), MIDI faders as the mixer, the control page on the computer (Lua, visuals, test tools) | deployed 2026-11-20, loads; OSC in from the computer moved params. Faders and double tap not tried | no |
 | 61st: Phase E's sheets (doc/walkthrough.md) and test/device/session.py; rows 19.12 to 19.34 again on the current build (documents, test tools) | yes: the tool ran, the rows hold | no |
 | 62nd: the review's fixes: AUTOSAMPLE records IN, an overdub across the seam, the 60 s cap from the first move, DRY and the other throws, typed OSC values, the lock at a focus change, the bridge's Origin check (Lua, visuals, test tools) | deployed 2026-11-20 | no |
+| 63rd: every harness runs with an Exquis: a stand-in in the offscreen norns, three more runs each way in check.lua, stage 20 of the gate, test/device/exquis.py (test tools, documents) | not run there: no Exquis yet | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -206,7 +207,8 @@ back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of t
 only, deployed and loaded on the device but not walked. The user asked to merge them on
 2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on `main` and on the device, with the sixtieth change (motion from any page, MIDI faders, the control page). Phase E (section 6) is people: its sheets and its tool are ready (doc/walkthrough.md, test/device/session.py), and it waits for a first-time player and the user's set. The
 Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
-hardware. Another session can share this checkout: stage only your own hunks.
+hardware. The tests are ready for an Exquis (63rd): when one is on the norns, run
+`exquis.py status`, `sweep` and `watch`, then stage 20. Another session can share this checkout: stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
@@ -222,8 +224,8 @@ judgement, the first on four as a whole. The item-by-item session of doc/plan.md
 has not taken place, and the shipped presets have never been heard. The earlier judgement
 is the user's on FourStretch, above.
 
-**The walkthrough.** doc/device-gate.md, stages 0 to 19, top to bottom. Stage 19 is
-four's own work. It has not
+**The walkthrough.** doc/device-gate.md, stages 0 to 20, top to bottom. Stage 20 is the
+Exquis: it needs one on the norns and has never run. Stage 19 is four's own work. It has not
 passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 `test/device/gate.py` ran it at `count: 66` with no ears, which is NOT a pass
 (doc/measurements/2026-11-06/README.md). It has not run on four. When it passes, write
@@ -566,6 +568,12 @@ Each line was learned the hard way; the change log has the story.
   the TOP row of the 1x font (y..y+4).
 - Tests that read params over ticks must first silence the background movers (orbit,
   motion, a latched peek).
+- The Exquis stand-in and the driver come from one reading of one specification. The
+  stand-in proves that the driver is consistent (frames, the mirror of the grid, the
+  fold), not that an Exquis agrees. Only stage 20 on the device can say that.
+- Lua that a device tool sends to the REPL lives in one table in test/device/norns.py
+  (`EXQUIS_LUA`), and test_exquis.lua runs it in the offscreen script. A REPL line is
+  one line: no comment in it.
 
 **Deliberate decisions: do not "fix" these unasked**
 - The tape keeps its own loop-pedal law; folding it onto `Mdeck.arm_loop`/`close_loop`
@@ -590,7 +598,8 @@ Each line was learned the hard way; the change log has the story.
 
 ```sh
 # EVERYTHING below in one command, with one verdict: syntax, the eight harnesses,
-# and source == single-file build across all render variants. With LUA53 set to a
+# the three that load the script again with an Exquis attached (KEYS, then PADS),
+# and source == single-file build across all render variants. About two minutes. With LUA53 set to a
 # Lua 5.3 `lua` (norns' version: build lua-5.3.6 from lua.org with `make macosx`)
 # it runs on 5.3, which is the only check of what the device actually accepts.
 LUA53=/path/to/lua-5.3.6/src/lua lua test/check.lua
@@ -620,6 +629,12 @@ lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud
 lua test/test_plugin.lua    # the plugin installer (lib/mplugin.lua), over real files
 
+# any harness or render that loads the script, with an Exquis stand-in attached
+# (test/uisim/env.lua). keys: beside the grid. pads: every grid press of a cell that
+# the Exquis carries is made on its pads. The stand-in checks each frame it is sent
+# and holds its LEDs to the grid's; the harness's report fails on a fault.
+FOUR_EXQUIS=pads lua test/test_control.lua
+
 # single-file build: inlines lib/*.lua into dist/four_single.lua. GENERATED, never
 # edit it; rebuild after any Lua change (test_control fails on a stale one)
 lua test/amalgamate.lua
@@ -645,6 +660,11 @@ ugen/build_mac.sh <plugin folder>
 # says how, and why one SSH session must stay open)
 python3 test/device/gate.py 2 4:4.10,4.14
 python3 test/device/measure.py states voices
+
+# with an Exquis on the norns: stage 20, and the three things the driver guesses
+# (its name, its encoders' step, the order of its pad ids)
+python3 test/device/gate.py 20
+python3 test/device/exquis.py status | watch 30 | sweep
 
 # on a connected device: render an offline probe's scores with the norns's OWN scsynth
 # (3.13, where the Mac has 3.14: they differ), then score the files as usual

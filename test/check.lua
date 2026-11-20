@@ -6,9 +6,14 @@
 --   1. a syntax check of the script, the modules and the single-file build
 --   2. the eight harnesses (each prints its assertion count; test_control
 --      also fails on a stale single-file build)
---   3. the render suite over the source AND the single-file build, all five
+--   3. the harnesses that run the script, again, with an Exquis attached: once
+--      beside the grid (KEYS) and once in PADS, where every grid press that
+--      the Exquis carries is made on its pads. The stand-in (test/uisim/env.lua)
+--      checks every frame it is sent and holds its LEDs to the grid's.
+--   4. the render suite over the source AND the single-file build, all five
 --      variants, compared byte for byte (the build must draw what the source
---      draws)
+--      draws), and the source again with an Exquis attached (the screen must
+--      not change)
 --
 -- norns runs Lua 5.3. When a 5.3 interpreter is available it is used for all
 -- of it, because a newer luac accepts syntax 5.3 rejects. Point LUA53 at a
@@ -34,6 +39,9 @@ elseif have("lua5.3") and have("luac5.3") then
   LUA, LUAC, is53 = "lua5.3", "luac5.3", true
 end
 
+-- a plain run has no Exquis, whatever the caller's environment says
+local PLAIN = "FOUR_EXQUIS= "
+
 local failed = {}
 local function step(name, okv)
   print(string.format("%-46s %s", name, okv and "ok" or "FAILED"))
@@ -51,21 +59,36 @@ step("syntax: script, modules, single-file build",
 for _, t in ipairs({ "test_control", "test_deck", "test_wav",
                      "test_launchpad", "test_exquis", "test_purity", "test_screen",
                      "test_plugin" }) do
-  step("harness: " .. t, sh(LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
+  step("harness: " .. t, sh(PLAIN .. LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
 end
 
--- 3. the renders: source and build, five variants each, byte-compared
+-- 3. with an Exquis attached. Only the harnesses that load the script see it.
+local EX_MODES = { "keys", "pads" }
+for _, mode in ipairs(EX_MODES) do
+  for _, t in ipairs({ "test_control", "test_purity", "test_screen" }) do
+    step("harness: " .. t .. ", Exquis in " .. mode:upper(),
+      sh("FOUR_EXQUIS=" .. mode .. " " .. LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
+  end
+end
+
+-- 4. the renders: source and build, five variants each, byte-compared
 local tmp = os.tmpname()
 os.remove(tmp)
 local src_dir, dist_dir = tmp .. "-src", tmp .. "-dist"
 sh("mkdir -p " .. src_dir .. " " .. dist_dir)
-local rendered = true
+for _, mode in ipairs(EX_MODES) do sh("mkdir -p " .. tmp .. "-" .. mode) end
+local rendered, rendered_ex = true, true
 for _, v in ipairs({ "base", "empty", "grain", "filter", "track2" }) do
   rendered = rendered
-    and sh(LUA .. " test/uisim/render_pages.lua four.lua " .. src_dir .. " "
+    and sh(PLAIN .. LUA .. " test/uisim/render_pages.lua four.lua " .. src_dir .. " "
       .. v .. " " .. v .. " >/dev/null 2>&1")
-    and sh(LUA .. " test/uisim/render_pages.lua dist/four_single.lua "
+    and sh(PLAIN .. LUA .. " test/uisim/render_pages.lua dist/four_single.lua "
       .. dist_dir .. " " .. v .. " " .. v .. " >/dev/null 2>&1")
+  for _, mode in ipairs(EX_MODES) do
+    rendered_ex = rendered_ex
+      and sh("FOUR_EXQUIS=" .. mode .. " " .. LUA .. " test/uisim/render_pages.lua four.lua "
+        .. tmp .. "-" .. mode .. " " .. v .. " " .. v .. " >/dev/null 2>&1")
+  end
 end
 step("render suite runs (source and build)", rendered)
 local same = rendered and sh("diff -rq " .. src_dir .. " " .. dist_dir .. " >/dev/null")
@@ -73,7 +96,13 @@ local p = io.popen("ls " .. src_dir .. " | grep -c pgm")
 local shots = p and tonumber(p:read("a")) or 0
 if p then p:close() end
 step(string.format("the build draws what the source draws (%d shots)", shots), same)
+local same_ex = rendered and rendered_ex
+for _, mode in ipairs(EX_MODES) do
+  same_ex = same_ex and sh("diff -rq " .. src_dir .. " " .. tmp .. "-" .. mode .. " >/dev/null")
+end
+step("an attached Exquis leaves the screen as it is", same_ex)
 sh("rm -rf " .. src_dir .. " " .. dist_dir)
+for _, mode in ipairs(EX_MODES) do sh("rm -rf " .. tmp .. "-" .. mode) end
 
 print("")
 if #failed > 0 then

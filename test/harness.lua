@@ -80,6 +80,21 @@ end
 
 -- the summary: the count, every failure by name, and a non-zero exit on any
 function H.report(done_msg)
+  -- an Exquis stand-in was attached (test/uisim/env.lua): whatever the harness
+  -- did, every frame the driver sent it must be one the hardware accepts
+  local X = rawget(_G, "FOUR_TEST_EXQUIS")
+  if X then
+    H.ok(#X.bad == 0, "every frame sent to the Exquis is well formed (" .. #X.bad
+      .. " of " .. X.frames .. " are not; the first: " .. tostring(X.bad[1]) .. ")")
+    if X.want then
+      H.ok(X.first == X.want, "the Exquis that was there at the load starts in "
+        .. X.want:upper() .. " (got " .. tostring(X.first) .. ")")
+      H.ok(X.mirrors > 0, "the Exquis was held to the grid's frames")
+      print("with an Exquis attached, " .. X.want:upper() .. ": " .. X.frames
+        .. " frames sent to it, held to the grid over " .. X.mirrors .. " frames"
+        .. (X.by_pad > 0 and (", " .. X.by_pad .. " grid presses made on its pads") or ""))
+    end
+  end
   print(string.format("\n%d assertions passed", H.count))
   if #H.fail > 0 then
     print(#H.fail .. " FAILED:")

@@ -453,6 +453,33 @@ of the whole JACK cycle, not the engine's. The budget is 60% of that thread.
 | 19.33 | **A voice change keeps its sound and its place** | Track 2 plays a tone take of 14 s in PLAY. Away from the loop's seam, change it to GRAIN and back, then WARP, PV and CLOUD. Then change all four tracks from PLAY to WARP in one moment | No hole and no bump at a change into WARP or PV: the level stays within 6 dB under and 4 dB over. A change into GRAIN or CLOUD is no deeper than the mode's own grains. The loop goes on from where it was, within 150 ms (the row reads the head once a frame: the offline probe reads it to the frame). The four tracks change one after another, and there is no xrun | `swapDrone`, `modeFade`, `modeLat`, `whenFree` and `headArgs` in the engine (fifty-first change) |
 | 19.34 | **A knob that a modulator moves does not stand still** | Track 1 plays a tone. A FREE sine of 0.5 Hz from modulator 1 moves its cutoff across the tone. Record the engine, and read the level with `test/device/an_fade.py` | The level stands still under 20% of the time (45.9% before the fifty-third change), and the line at the frame rate is more than 40 dB under the swing (31 dB before). No xrun | `gl` in the defs, `gset`, `glideT` and `glideLaw` in the engine (fifty-third change) |
 
+## Stage 20: the Exquis (Lua only)
+
+The Exquis driver in lib/mgrid.lua (the forty-seventh change) is written from the maker's
+Developer Mode specification and has never run on an Exquis. Plug one into the norns and
+load four. `python3 test/device/gate.py 20` runs 20.1 to 20.3: it hands the Exquis's bytes
+to the driver's own handler on the device, so norns's `midi.to_msg` and the real params
+are in the path, and no hand is needed. The other rows are for hands and eyes, and
+`python3 test/device/exquis.py` helps with them (`status`, `watch`, `sweep`). Without an
+Exquis every row reads `you`, with the names of the MIDI devices that the norns lists.
+
+Offline, `lua test/check.lua` runs the script's harnesses with a stand-in attached
+(test/uisim/env.lua). The stand-in is built from the same specification as the driver, so
+it cannot find a fault that the two share. These rows can.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 20.1 | **It is found** | Plug the Exquis in, load four | maiden says `four: Exquis in Developer Mode, PADS` with no grid attached, `KEYS` with one, and the name the norns gives it | `ex_find_device` takes a device with "exquis" in its name. `exquis.py status` lists every name |
+| 20.2 | The controls, as bytes | `gate.py 20` | Redo and Undo step the page. Encoder 1 steps it at the third tick. Up and Down step the scene slot. Encoder 4 picks the track. Its push changes the mode. Pad 50 is scene 2 in PADS and nothing in KEYS | The handler in `ex_make`, norns's `midi.to_msg` |
+| 20.3 | A held pad and a mode change | `gate.py 20` | Pad 11 held on TAKE holds the beat repeat. A change to KEYS under it lets go, and the late release does nothing | `ex:drop`, `set_surface` |
+| 20.4 | **The pads are where the driver thinks** | `exquis.py sweep` | The light runs left to right from the bottom row (6 pads) up, rows of 6 and 5 in turn, to the top right | The pad ids in `ex_cell`. A wrong order makes the whole fold wrong |
+| 20.5 | **The fold, by hand** | In PADS: press the top zigzag from the left, the bottom row, each pair between | The top zigzag is scenes 1 to 8, and the three pads at the right end of each pair stay dark and do nothing. The bottom row is the state strip's cells 1 to 6. Each pair is one row of the workspace, as on a grid | `EX_ROW_Y`, `ex_cell` |
+| 20.6 | The encoders' step | `exquis.py watch 30`, then turn each encoder one detent each way | Each detent is one message of 65 or 63. E2 and E3 move a knob by one step a detent, and encoders 1 and 4 need three | `EX_ENC_DIV`. A value further from 64 is more than one tick a message |
+| 20.7 | The buttons and the colours | Press Record, Loop, Clips, Play/Stop. Look at the pads on each page | Record is rec and lights red with pad 0. Loop is the tape's rec. Clips is DRY and Play/Stop is STOP. The colours mean what they mean on a Launchpad, and nothing flickers | `EX_BTN_CELL`, `ex_rgb`, the LED frame in `push_leds` |
+| 20.8 | **KEYS plays four** | Push encoder 4 to KEYS. Play the pads. Set a modulator's shape to PRESS and press harder | The pads show the Exquis's own layout. A key plays the take at its pitch, and its release ends it. Pressure moves the modulator's knob, and a lifted key lets it go | `is_grid_vport` in lib/minput.lua, PRESS in lib/mlfo.lua (fifty-second change) |
+| 20.9 | Hot-plug | Unplug it under a held pad. Plug it in again. Then with a grid attached | Nothing hangs, the held pad is released, and maiden shows no error. Plugged in, it is taken on the next frame, in PADS alone and in KEYS beside a grid | `Mgrid.hotplug`, `ex_release` |
+| 20.10 | It is given back | Open the Exquis's settings menu and close it. Then load another script | After the menu the pads are painted again. After four leaves, the Exquis is its own instrument again | The Refresh request, `ex:shutdown` |
+
 ## When it passes
 
 Write the date and `count: 198` into the STATUS block of `CLAUDE.md`, as the new

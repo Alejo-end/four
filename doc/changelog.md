@@ -5242,3 +5242,37 @@ agent to review everything since the fifty-fourth change. Its findings, each che
 - test/test_control.lua section 40 (14 assertions); each one failed on the code before
   its fix. visuals/test_bridge.js: 19 checks.
 
+four, sixty-third change: **every test and harness works with an Exquis (test tools and
+documents; no change to the script or the engine, the count stays 198)**. The user asked
+for it. No Exquis has been on the norns yet, so nothing here ran on one.
+- test/uisim/env.lua holds an Exquis stand-in (`h.exquis`, `h.new_exquis()`). It speaks
+  raw bytes, as a port does, and `midi.to_msg` in the offscreen norns is now norns's own
+  parse (it returned `none` for everything). The stand-in checks every frame that the
+  driver sends against the Developer Mode specification: the head, the F7, data bytes
+  over 127, the zone mask, an LED frame that leaves the controls, a pad LED written in
+  KEYS, a frame after the unplug. It also holds its LEDs to the grid's frame (THE MIRROR):
+  a dark cell is a dark LED, a lit cell a lit one, and two cells that look the same on
+  the grid look the same on the pads and on the four strip buttons.
+- `FOUR_EXQUIS=keys` or `pads` attaches one before the script loads, in any harness or
+  render that uses the offscreen norns. In `pads` the Exquis is found before the grid has
+  a device, so the driver starts it in PADS by its own rule, and a harness's
+  `grid.key(x, y, z)` on a cell that the Exquis carries goes in as the bytes of that pad
+  or button. test/harness.lua's report fails on any fault the stand-in kept.
+- test/check.lua runs test_control, test_purity and test_screen again in both modes, and
+  renders the five variants with an Exquis attached: the screen must not change. Eighteen
+  steps, about two minutes. All pass on Lua 5.3.
+- Three faults planted in the driver, each found: two pad rows swapped (the mirror), two
+  strip buttons swapped (the mirror), an effect byte of 200 in the LED frame (the frame
+  check).
+- test/test_exquis.lua uses the shared stand-in and bytes (97 assertions, 60 before). New:
+  the Exquis alone starts in PADS and is painted and played with no grid, short and stray
+  messages do not throw, and the Lua of the device tools runs offline.
+- On the device: `Norns.exquis()` and its byte helpers in test/device/norns.py, stage 20
+  in test/device/gate.py and doc/device-gate.md (20.1 to 20.3 by the computer, through
+  the driver's handler and norns's own `midi.to_msg`; 20.4 to 20.10 by hand), and
+  test/device/exquis.py: `status` (the name the norns gives it), `watch` (what it sends,
+  and the encoders' step), `sweep` (the order of the pad ids). Those are the three things
+  that the driver guesses. The tools were not run: there is no device in this session.
+- Not found by any of it: a fault in the driver. The stand-in and the driver come from
+  the same reading of the same specification, so stage 20 on a real Exquis is still the
+  test.

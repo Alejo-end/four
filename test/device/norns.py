@@ -39,6 +39,92 @@ CTX_HELPER = (
     "__ctx = __find_ctx()"
 )
 
+# The Exquis (lib/mgrid.lua's Developer Mode driver). Each entry is Lua for the
+# matron REPL, with no comment in it (a REPL line is one line). test_exquis.lua
+# lifts these out of this file and runs them in the offscreen script, so a
+# typing fault here is found before a device is.
+EXQUIS_LUA = {
+    # every MIDI device's name, then what four made of the Exquis
+    "status": """
+local names, found = {}, nil
+for _, d in pairs(midi.devices) do
+  if type(d) == "table" and type(d.name) == "string" then
+    names[#names + 1] = d.name
+    if d.name:lower():find("exquis", 1, true) then found = d.name end
+  end
+end
+table.sort(names)
+local g = __ctx.grid
+local ex = g.ex
+print(table.concat(names, ";") .. "|" .. tostring(found) .. "|"
+  .. (ex and (ex.surface and "PADS" or "KEYS") or "none") .. "|"
+  .. tostring(g.gg ~= nil and g.gg.device ~= nil))
+""",
+    # bytes to the driver's handler, as the port delivers them: BYTES is a list
+    # of byte tables
+    "bytes": """
+local ex = __ctx.grid.ex
+local n = 0
+if ex and ex.device.event then
+  for _, m in ipairs(BYTES) do ex.device.event(m); n = n + 1 end
+end
+print(n)
+""",
+    # log every message the Exquis sends, in front of the driver
+    "tap_on": """
+local ex = __ctx.grid.ex
+if ex and not (__exq_tap and __exq_tap.dev == ex.device and ex.device.event == __exq_tap.fn) then
+  local dev, real = ex.device, ex.device.event
+  local tap = { dev = dev, real = real, log = {} }
+  tap.fn = function(data)
+    local t = {}
+    for i = 1, #data do t[i] = string.format("%02X", data[i]) end
+    tap.log[#tap.log + 1] = table.concat(t, " ")
+    if real then real(data) end
+  end
+  dev.event = tap.fn
+  __exq_tap = tap
+end
+print(__exq_tap ~= nil)
+""",
+    "tap_read": """
+local tap = __exq_tap
+local out = tap and table.concat(tap.log, ";") or ""
+if tap then tap.log = {} end
+print(out)
+""",
+    "tap_off": """
+local tap = __exq_tap
+if tap and tap.dev.event == tap.fn then tap.dev.event = tap.real end
+__exq_tap = nil
+print("off")
+""",
+    # the driver's mode, set without the push: WANT is true for PADS
+    "surface": """
+local ex = __ctx.grid.ex
+if ex then ex:set_surface(WANT) end
+print(ex and (ex.surface and "PADS" or "KEYS") or "none")
+""",
+    # one pad white and the one before it dark, past the driver: ID is the pad
+    "sweep": """
+local ex = __ctx.grid.ex
+if ex then
+  if ID > 0 then
+    ex.device:send({ 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04, ID - 1, 0, 0, 0, 0, 127, 127, 127, 0, 0xF7 })
+  else
+    ex.device:send({ 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04, 0, 127, 127, 127, 0, 0xF7 })
+  end
+end
+print(ex ~= nil)
+""",
+    # the driver paints every LED again on its next frame
+    "repaint": """
+local ex = __ctx.grid.ex
+if ex then ex:invalidate() end
+print(ex ~= nil)
+""",
+}
+
 
 class Socket:
     """One WebSocket to a maiden REPL. A thread appends all it receives to self.text."""
@@ -207,6 +293,41 @@ class Norns:
     def page_index(self, name):
         return int(self.lua(
             f'for i, p in ipairs(__ctx.PAGES) do if p == "{name}" then print(i) end end'))
+
+    # ---- the Exquis --------------------------------------------------------
+    def exquis(self):
+        """What the norns and four know of an Exquis.
+
+        devices: every MIDI device's name. name: the one four's driver would
+        take (None without one). mode: PADS or KEYS (None when the driver holds
+        none). grid: whether a grid with a device is attached.
+        """
+        names, found, mode, grid = self.lua(EXQUIS_LUA["status"]).rsplit("|", 3)
+        return {"devices": [x for x in names.split(";") if x],
+                "name": None if found == "nil" else found,
+                "mode": None if mode == "none" else mode,
+                "grid": grid == "true"}
+
+    def exquis_bytes(self, *msgs):
+        """Hand raw MIDI messages to the driver's handler, as its port would.
+
+        Returns how many were delivered (0 when four holds no Exquis)."""
+        rows = ", ".join("{" + ", ".join(str(int(b)) for b in m) + "}" for m in msgs)
+        return int(num(self.lua(f"local BYTES = {{{rows}}} " + EXQUIS_LUA["bytes"])))
+
+    def exquis_pad(self, pad, down):
+        return self.exquis_bytes((0x9F, pad, 127) if down else (0x8F, pad, 0))
+
+    def exquis_cc(self, cc, val):
+        return self.exquis_bytes((0xBF, cc, val))
+
+    def exquis_press(self, cc):
+        """A button or an encoder's push: down, then up."""
+        return self.exquis_bytes((0xBF, cc, 127), (0xBF, cc, 0))
+
+    def exquis_surface(self, pads):
+        """Set the driver's mode without the push. Returns the mode."""
+        return self.lua(f"local WANT = {'true' if pads else 'false'} " + EXQUIS_LUA["surface"])
 
     def screenshot(self, name):
         """Save the OLED as a PNG. Returns the path on the device."""
