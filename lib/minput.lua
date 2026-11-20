@@ -22,10 +22,16 @@ local pget, ptoggle, FPS
 local function is_grid_vport(i)
   local G = C.grid
   local gg = G.gg
-  if not ((G.midigrid_loaded or G.have_launchpad) and gg and gg.device) then return false end
   local vp = midi.vports[i]
   local dev = vp and vp.device
   if not dev then return false end
+  -- an Exquis whose pads are the surface (PADS): its notes are pads. In KEYS
+  -- its notes are notes, and they pass.
+  local ex = G.ex
+  if ex and ex.surface and (dev == ex.device or dev.name == ex.device.name) then
+    return true
+  end
+  if not ((G.midigrid_loaded or G.have_launchpad) and gg and gg.device) then return false end
   return dev == gg.device or dev.name == gg.device.name
 end
 
@@ -37,6 +43,17 @@ local function midi_event(data, vport)
   -- a mapped CC is a hand on the instrument too (idle dim); notes count
   -- through route_note. clock and other system messages do not.
   if msg.type == "cc" then C.touch_input() end
+  -- pressure is a modulation source (the PRESS shape, lib/mlfo.lua): channel
+  -- pressure for an MPE keyboard, which plays one note a channel, and key
+  -- pressure for the others. Never gated: it moves nothing until a modulator
+  -- listens, and a gated zero would leave a knob held open.
+  if msg.type == "channel_pressure" then
+    C.lfo.press_in((msg.ch or 1) * 256 + 128, (msg.val or 0) / 127)
+    return
+  elseif msg.type == "key_pressure" then
+    C.lfo.press_in((msg.ch or 1) * 256 + (msg.note or 0), (msg.val or 0) / 127)
+    return
+  end
   -- both edges: note-on gates a voice / retunes the drone, note-off releases
   -- a voice (the drone is last-note, so it ignores the release)
   local z, note
@@ -46,6 +63,11 @@ local function midi_event(data, vport)
     z, note = 0, msg.note
   else
     return
+  end
+  -- a key that came up presses no more, whatever its last pressure message said
+  if z == 0 then
+    C.lfo.press_in((msg.ch or 1) * 256 + 128, 0)
+    C.lfo.press_in((msg.ch or 1) * 256 + note, 0)
   end
   -- the gates apply to PRESSES only: a release belongs to the press that
   -- opened it, so keys_enable going off (or the channel changing) mid-hold
@@ -141,6 +163,7 @@ end
 function M.cleanup()
   for _, d in ipairs(midi_devices) do d.event = nil end
   keyboard.code = nil
+  C.lfo.press_clear()
   kb_held = {}   -- the voices themselves are released by ctx.pads_all_off()
 end
 

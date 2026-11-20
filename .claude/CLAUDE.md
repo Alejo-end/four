@@ -151,12 +151,14 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | the user, 2026-11-17, on the build as a whole: "I think it sounds good" |
 | 45th: the effects are stronger at the same knob, and none is quieter than the dry sound (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.11's levels, 19.12 and 19.29 with no break. Not pushed | no. The user asked for it: the effects were "a bit too bland" |
 | 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
+| 47th: an Exquis driver in lib/mgrid.lua, PADS and KEYS (Lua, test tool) | no. Never run on an Exquis: no device yet | |
 | 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
 | 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
 | 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
 | 51st: a voice change keeps its sound and its place: the old drone holds and fades under the new one, and the new head starts where the old one is (C2 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.33, WARP -0.4 dB, PV -0.9 dB, CLOUD -1.3 dB (-26.4, -70.6 and -71.2 before). Not pushed | no |
 | 53rd: a knob that moves once a frame draws lines: each knob's lag is a glide whose time follows the pace of the writes (C6 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.34, still 0.8% of the time (45.9% before). Not pushed | no |
 | 54th: the header says CPU while the load is near the limit (the rest of C5's screen part) (Lua, test tool) | yes, 2026-11-18: on at 62.9% of the JACK cycle, off at 21.1% | |
+| 52nd: PRESS, a seventh modulator shape: keyboard pressure moves a knob (Lua, test tool) | no. Never run with a pressure keyboard | |
 | 55th: AUTOSAMPLE: four plays a MIDI note range out, records it into one take, and a keyboard plays it as a multisample (Lua, test tool) | deployed 2026-11-20 and loads; never run with gear. The TRS jack is norns port 3, `virtual` (ttymidi on /dev/ttyAMA0, client `shieldXL`) | no |
 | 56th: WOBBLE and plugin FLANGE glide their delay in and out; the supported set (engine, test tools, documents) | yes, 2026-11-20, `count: 198`: row 19.12 no break and no hole, 19.27 passes on the supported set | no |
 
@@ -599,6 +601,7 @@ lua test/test_control.lua   # encoders, keys, grid, STOP, the erase arc, scenes,
 lua test/test_deck.lua      # the softcut loop decks and the tape's delegated mechanics
 lua test/test_wav.lua       # the wav layer: resampling, headers, transients, onsets
 lua test/test_launchpad.lua # the Mini MK3 driver: geometry, palette, SysEx
+lua test/test_exquis.lua    # the Exquis driver: the fold onto hexagons, SysEx, modes
 lua test/test_purity.lua    # the ◇ mark: every source, hold and writer kills it
 lua test/test_screen.lua    # the screen's promises, read off the pixels: header
                              # flags, the erase arc's room, the GRAIN cloud

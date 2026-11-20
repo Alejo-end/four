@@ -4674,6 +4674,32 @@ doc/signature-workflow.md.
   second later. Rows 10.1 to 10.4, 19.7, 19.12, 19.21, 19.28 and 19.29 pass.
   doc/measurements/2026-11-17/ has the numbers.
 
+four, forty-seventh change: **an Exquis driver (Lua; no engine change, the count stays
+198; never run on an Exquis)**. The numbers 45 and 46 belong to changes in progress in
+doc/device-gate.md.
+- lib/mgrid.lua drives an Intuitive Instruments Exquis in its Developer Mode, from the
+  maker's "Developer Mode MIDI specification" of 2025-03-10. The driver lives beside the
+  grid (`Mgrid.ex`), so a grid and an Exquis work together, and an Exquis works alone.
+- Two modes, changed by the push of encoder 4. PADS: the pads are the grid surface. A
+  taken pad sends no velocity, pressure or tilt: that is the protocol. KEYS: the pads are
+  the Exquis's own keyboard, and its notes reach four as any MIDI keyboard's do. PADS is
+  the start when no grid is attached, KEYS when one is.
+- The fold of the surface onto 61 hexagons: a strip of eight zigzags along two pad rows
+  from the left edge. The top pair is the scenes, the next four pairs are the workspace
+  rows 3 to 6, and the bottom row is the state strip's cells 1 to 6. The piano rows are
+  not on the pads. Record and Loop are rec and tape rec, Clips is DRY, Play/Stop is STOP,
+  Undo and Redo step the page, Down and Up the scene slot. Encoders 1 to 3 are E1 to E3
+  and their pushes K1 to K3. Encoder 4 picks the track. Settings, Sound and the slider
+  stay the Exquis's own.
+- A held pad is released when the mode changes or the Exquis is unplugged. The Exquis's
+  Refresh request (after its settings menu) repaints everything. Cleanup leaves Developer
+  Mode. lib/minput.lua drops the Exquis's notes only in PADS.
+- test/test_exquis.lua (51 assertions) is in test/check.lua. It holds the fold, the SysEx
+  frames, the modes and the releases against a stand-in device.
+- Not known until a device is here: the ALSA name (the driver looks for "exquis"), the
+  encoder step (`EX_ENC_DIV`), how the colours look, and whether norns hands a SysEx to
+  the script whole. four reads no pressure or tilt (MPE) yet.
+
 four, forty-fifth change: **the effects are stronger at the same knob, and none is
 quieter than the dry sound (engine and test tools; the count stays 198; on the device
 2026-11-17, not heard)**. The user tested the forty-fourth change on the device and
@@ -4922,6 +4948,23 @@ doc/signature-workflow.md.
   26 ms over a tone. Nothing in this change touches the loop's wrap, and the old engine
   was not read at a seam. It is open (doc/plan.md, Phase 0, item 8). Row 19.33 reads its
   levels away from the seam.
+
+four, fifty-second change: **pressure moves a knob: PRESS, a seventh modulator shape (Lua;
+no engine change, the count stays 198; never run with a pressure keyboard)**. The number
+51 belongs to a change in progress in this working tree.
+- A modulator's shape can be PRESS: the pressure of a MIDI keyboard, 0 to 1, in place of
+  a wave. It works like ENV: the target, the depth (negative inverts) and the track are
+  the modulator's own, and the knob itself never moves. No new param: `lfoN_shape` has a
+  seventh option, appended, so a PSET keeps its shapes.
+- lib/minput.lua reads channel pressure (an MPE keyboard, one note a channel: an Exquis in
+  KEYS) and key pressure (poly aftertouch). The hardest-pressed key counts. A note-off
+  ends its key's pressure, with or without a last zero from the keyboard. Pressure is not
+  gated by `keys_enable` or `midi_channel`.
+- lib/mlfo.lua smooths the pressure over the frames (15 a second), so a knob follows a
+  finger in steps of 67 ms. MOTION draws PRESS as a bar, like ENV.
+- A change of the Exquis to PADS, its unplug and four's cleanup let go of the pressure.
+- test/test_exquis.lua has nine more assertions (60).
+- Not read yet: tilt (the pitch bend and CC 74 of MPE) and velocity.
 
 four, fifty-third change: **a knob that moves once a frame draws lines, not steps (engine
 and test tools; the count stays 198; on the device 2026-11-18, not heard)**. This is C6

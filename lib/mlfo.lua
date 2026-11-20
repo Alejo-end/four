@@ -21,7 +21,9 @@
 -- Pages draw the knob, not the swing; the header's LF says a modulator runs.
 --
 -- Shapes: SINE, TRI, SQUARE, RAMP, RANDOM (a new level each cycle), and ENV,
--- the input's envelope. Depth is -1..1; negative inverts, so ENV with a
+-- the input's envelope, and PRESS, the pressure of a MIDI keyboard (channel or
+-- key aftertouch: an Exquis in KEYS, any MPE controller). The hardest-pressed
+-- key counts. Depth is -1..1; negative inverts, so ENV with a
 -- negative depth ducks. A period other than FREE locks the phase to the
 -- clock's beat count, so a modulator stays on the bar through a tempo change.
 --
@@ -60,8 +62,9 @@ local ALIAS = { grain_level = "level" }
 local NTRACKS = 4
 -- kept above 0 while modulated: the engine frees these synths at 0
 local FLOOR = { delay_mix = 0.001, rev_mix = 0.001 }
-local SHAPES = { "SINE", "TRI", "SQUARE", "RAMP", "RANDOM", "ENV" }
-local ENV_SHAPE = 6
+-- APPEND-ONLY too: a PSET stores a shape by its index
+local SHAPES = { "SINE", "TRI", "SQUARE", "RAMP", "RANDOM", "ENV", "PRESS" }
+local ENV_SHAPE, PRESS_SHAPE = 6, 7
 -- beats per cycle, matching the lfoN_period option names (false = FREE)
 local PERIODS = { false, 1, 2, 4, 8, 16, 32 }
 local PERIOD_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
@@ -70,12 +73,25 @@ local N = 4
 local M = {
   TARGETS = TARGETS, SHAPES = SHAPES, PERIOD_NAMES = PERIOD_NAMES, N = N,
   env = 0,        -- the input envelope, 0..1, shared by every ENV modulator
+  press = 0,      -- the keyboard pressure, 0..1, shared by every PRESS modulator
   mods = {},      -- mods[i] = { id, phase, cycle, held, out (0..1) }
 }
 for i = 1, N do
   M.mods[i] = { id = nil, phase = 0, cycle = -1, held = 0, out = 0.5 }
 end
 local sum = {}    -- this frame's swing per target id (reused, never rebuilt)
+
+-- the pressure of each pressed key, 0..1. A key is a number the caller makes
+-- from the channel and the note (lib/minput.lua). nil ends a key.
+local pressed = {}
+function M.press_in(k, v)
+  pressed[k] = (v and v > 0) and min(v, 1) or nil
+end
+-- every key up at once: the keyboard left, or four is closing
+function M.press_clear()
+  for k in pairs(pressed) do pressed[k] = nil end
+  M.press = 0
+end
 
 -- the param ids, built once (the redraw path asks active() every frame)
 local PID = {}
@@ -153,6 +169,11 @@ function M.tick(amp)
   -- source still moves the knob
   local a = math.sqrt(min(max(amp or 0, 0), 1))
   M.env = M.env + (a - M.env) * (a > M.env and 0.6 or 0.15)
+  -- the pressure: the hardest key, smoothed over the frames like the envelope
+  local p = 0
+  for _, v in pairs(pressed) do if v > p then p = v end end
+  M.press = M.press + (p - M.press) * (p > M.press and 0.7 or 0.4)
+  if p == 0 and M.press < 0.001 then M.press = 0 end
   for id in pairs(sum) do sum[id] = nil end
   for i = 1, N do
     local m = M.mods[i]
@@ -190,10 +211,13 @@ function M.tick(amp)
       if ph >= 1 and rnd then m.held = math.random() * 2 - 1 end
       m.phase = ph - floor(ph)
     end
-    local w = shape == ENV_SHAPE and M.env or wave(shape, m.phase, m)
-    m.out = shape == ENV_SHAPE and w or (w + 1) * 0.5
+    -- ENV and PRESS are levels, 0..1; the waves swing -1..1
+    local level = shape == ENV_SHAPE or shape == PRESS_SHAPE
+    local w = shape == ENV_SHAPE and M.env or shape == PRESS_SHAPE and M.press
+      or wave(shape, m.phase, m)
+    m.out = level and w or (w + 1) * 0.5
     if id then
-      local off = shape == ENV_SHAPE and depth * w or depth * 0.5 * w
+      local off = level and depth * w or depth * 0.5 * w
       sum[id] = (sum[id] or 0) + off
     end
   end

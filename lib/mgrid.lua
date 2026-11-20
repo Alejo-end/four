@@ -34,13 +34,18 @@
 --
 -- On a Launchpad Mini MK3 the arrows step the page (left/right, like E1) and
 -- the scene selector (up/down), and the pad is picked up on hot-plug.
+--
+-- An Exquis works beside any of these, or alone: its pads show rows 1 to 6
+-- folded onto the hexagons, or play as its own keyboard. See the Exquis
+-- section below for the layout.
 
 local floor, min, max, log = math.floor, math.min, math.max, math.log
 -- the visuals look names (lib/mosc.lua owns the list; kept in step by test_control)
 local Mosc_LOOKS = { "AUTO", "BARS", "FILTER", "SHAPES", "RINGS", "MOSAIC", "TUNNEL", "WAVES", "FACETS" }
 
 local M = { gg = nil, have_launchpad = false, midigrid_loaded = false,
-            reconnect_due = false }
+            reconnect_due = false,
+            ex = nil, ex_due = false }   -- an Exquis, beside the grid (see below)
 
 local grid_mod = grid
 local no_monome = false    -- true when no native monome grid holds grid vport 1
@@ -523,6 +528,301 @@ local function grid_key(x, y, z)
   return main_ws_key(x, y, z)
 end
 
+-- ============================================================================
+-- Exquis (Intuitive Instruments): Developer Mode driver (optional)
+-- ============================================================================
+-- The Exquis has 61 hexagonal pads in 11 rows (6 and 5 pads in turn), four
+-- encoders with a push, and ten buttons. In Developer Mode it hands chosen
+-- ZONES to the host: a zone taken over sends plain events on MIDI channel 16
+-- and shows the colours the host sends. The protocol is from the maker's
+-- "Developer Mode MIDI specification" (2025-03-10). NOT YET RUN ON A DEVICE:
+-- the ALSA name ("exquis"), the encoder step size and the colours are untested.
+--
+-- The driver is not a grid backend. It lives beside the grid (M.ex), so a
+-- monome grid and an Exquis work together. It has two modes, and the push of
+-- encoder 4 changes between them:
+--   PADS  the pads are the grid surface, drawn by the same code as the grid.
+--         A taken pad sends no velocity, pressure or tilt (the protocol).
+--   KEYS  the pads go back to the Exquis: its own layout, velocity and MPE.
+--         Its notes reach four as any MIDI keyboard's do (lib/minput.lua).
+-- PADS is the start when no grid is attached, KEYS when one is.
+--
+-- The 8x8 surface on the hexagons: a strip of eight zigzags along two rows,
+-- from the left edge (odd cells on the row of 6, even cells on the row of 5
+-- below it). The three pads at the right end of each pair stay dark.
+--   rows 10+9 (top)  grid row 1, the scenes
+--   rows 8+7 .. 2+1  grid rows 3 to 6, the workspace
+--   row 0 (bottom)   grid row 2, the state strip, cells 1 to 6
+-- The piano rows 7 and 8 are not on the pads: KEYS is the keyboard.
+--   Record, Loop     rec, tape rec (strip cells 1, 2)
+--   Clips, Play/Stop DRY, STOP (strip cells 7, 8)
+--   Undo, Redo       the page, back and next       Down, Up  the scene slot
+--   encoders 1 to 3  E1 to E3, their pushes K1 to K3
+--   encoder 4        the track (as K1+E1), its push PADS or KEYS
+-- Settings, Sound and the slider stay the Exquis's own.
+
+local EX_SETUP = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x00 }   -- then the zone mask
+local EX_LED   = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04 }   -- then start id, (r g b fx)...
+-- the Exquis asks for a repaint with this (after its settings menu closes)
+local EX_REFRESH = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x03 }
+-- zone masks: pads 01, encoders 02, Up/Down 08, the other buttons 20
+local EX_ZONES_PADS, EX_ZONES_KEYS = 0x2B, 0x2A
+local EX_ROW_Y = { 6, 5, 4, 3, 1 }       -- pad row pair, from the bottom -> grid row
+-- buttons that are cells of the state strip, as (y-1)*8+x
+local EX_BTN_CELL = { [102] = 9, [103] = 10, [104] = 15, [105] = 16 }
+local EX_DOWN, EX_UP, EX_UNDO, EX_REDO = 106, 107, 108, 109
+local EX_ENC, EX_PUSH = 110, 114         -- four encoders, then their four pushes
+-- encoder ticks for one step. E1 and the track pick step through short lists.
+local EX_ENC_DIV = { 3, 1, 1, 3 }
+local EX_NAV_KEY, EX_ENC_KEY = 5, 3      -- the fixed controls: a dim plain light
+
+-- pad id (0 = bottom left .. 60 = top right, row by row) -> grid x, y, or nil
+local function ex_cell(id)
+  if id < 0 or id > 60 then return nil end
+  local k, rem = floor(id / 11), id % 11
+  local row, col = 2 * k, rem                      -- a row of 6
+  if rem >= 6 then row, col = 2 * k + 1, rem - 6 end   -- a row of 5
+  if row == 0 then return col + 1, 2 end
+  local x = 2 * col + (row % 2 == 1 and 2 or 1)
+  if x > 8 then return nil end
+  return x, EX_ROW_Y[floor((row + 1) / 2)]
+end
+
+local EX_CELL = {}                        -- pad id -> (y-1)*8+x
+for id = 0, 60 do
+  local x, y = ex_cell(id)
+  if x then EX_CELL[id] = (y - 1) * 8 + x end
+end
+
+-- `gone`: a device being unplugged, still listed (see lp_find_device)
+local function ex_find_device(gone)
+  if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
+  for _, dev in pairs(midi.devices) do
+    if dev ~= gone and type(dev) == "table" and type(dev.name) == "string"
+        and dev.name:lower():find("exquis", 1, true) then
+      return dev
+    end
+  end
+  return nil
+end
+
+-- a led key (level + hue * 16) -> r, g, b in the Launchpad's colour language
+local function ex_rgb(key)
+  local lvl, hue = key % 16, floor(key / 16)
+  if hue > 0 then
+    if lvl == 0 then return 0, 0, 0 end
+    local b, s = LP_HUE[hue], 0.4 + 0.6 * lvl / 15
+    return floor(b[1] * s), floor(b[2] * s), floor(b[3] * s)
+  end
+  local c = LP_RGB[lvl] or LP_RGB[0]
+  return c[1], c[2], c[3]
+end
+
+-- the Exquis as a draw target (led, all, refresh, like a grid) and an event
+-- source (key, turn, push, nav: set by the caller). nil when it cannot be set up.
+local function ex_make(dev, pads)
+  local ex = { device = dev, surface = pads and true or false }
+  local buf, sent, held = {}, {}, {}
+  local msg, acc, rpos = {}, { 0, 0, 0, 0 }, 0
+  local function send_msg() dev:send(msg) end
+  local function setup(mask)
+    return pcall(function()
+      dev:send({ EX_SETUP[1], EX_SETUP[2], EX_SETUP[3], EX_SETUP[4], EX_SETUP[5],
+                 EX_SETUP[6], mask, 0xF7 })
+    end)
+  end
+  if not setup(ex.surface and EX_ZONES_PADS or EX_ZONES_KEYS) then return nil end
+
+  function ex:led(x, y, z, color)
+    if x >= 1 and x <= 8 and y >= 1 and y <= 8 then
+      buf[(y - 1) * 8 + x] = max(0, min(15, floor((z or 0) + 0.5)))
+        + (color and LP_HUE_ID[color] or 0) * 16
+    end
+  end
+  function ex:all(z)
+    local lvl = max(0, min(15, floor((z or 0) + 0.5)))
+    for i = 1, 64 do buf[i] = lvl end
+  end
+  -- what the LED of control `id` shows this frame, as a led key
+  local function want(id)
+    local c
+    if id <= 60 then c = EX_CELL[id] else c = EX_BTN_CELL[id] end
+    if c then return buf[c] or 0 end
+    if id >= EX_DOWN and id <= EX_REDO then return EX_NAV_KEY end
+    if id >= EX_ENC and id < EX_PUSH then return EX_ENC_KEY end
+    return 0
+  end
+  -- one SysEx from the first changed LED of lo..hi to the last
+  local function push_leds(lo, hi)
+    local first, last
+    for id = lo, hi do
+      if sent[id] ~= want(id) then
+        first = first or id
+        last = id
+      end
+    end
+    if not first then return end
+    local m, n = msg, #EX_LED
+    for i = 1, n do m[i] = EX_LED[i] end
+    n = n + 1; m[n] = first
+    for id = first, last do
+      local k = want(id)
+      sent[id] = k
+      m[n + 1], m[n + 2], m[n + 3] = ex_rgb(k)
+      m[n + 4] = 0                         -- no effect
+      n = n + 4
+    end
+    n = n + 1; m[n] = 0xF7
+    for i = #m, n + 1, -1 do m[i] = nil end   -- drop a longer frame's tail
+    pcall(send_msg)
+  end
+  function ex:refresh()
+    if self.surface then push_leds(0, 60) end
+    push_leds(102, 113)
+  end
+  function ex:invalidate()
+    for id = 0, 113 do sent[id] = nil end
+  end
+  -- end every held cell: after a mode change or an unplug its release never comes
+  function ex:drop()
+    for id, c in pairs(held) do
+      held[id] = nil
+      if self.key then self.key((c - 1) % 8 + 1, floor((c - 1) / 8) + 1, 0) end
+    end
+  end
+  function ex:set_surface(on)
+    on = on and true or false
+    if on == self.surface then return end
+    self:drop()
+    if C.lfo and C.lfo.press_clear then C.lfo.press_clear() end
+    self.surface = on
+    setup(on and EX_ZONES_PADS or EX_ZONES_KEYS)
+    for id = 0, 60 do sent[id] = nil end
+  end
+  function ex:shutdown()
+    self:drop()
+    setup(0x00)                            -- leave Developer Mode
+  end
+
+  -- a press or a release of a control that is a grid cell. A release goes to
+  -- the cell its press took, whatever the mode is by then.
+  local function cell_event(id, c, down)
+    if down then
+      if not c then return end
+      held[id] = c
+    else
+      c = held[id]
+      if not c then return end
+      held[id] = nil
+    end
+    if ex.key then ex.key((c - 1) % 8 + 1, floor((c - 1) / 8) + 1, down and 1 or 0) end
+  end
+
+  dev.event = function(data)
+    -- the Refresh request, whole or in pieces
+    if type(data) == "table" then
+      for i = 1, #data do
+        local b = data[i]
+        if b == EX_REFRESH[rpos + 1] then
+          rpos = rpos + 1
+          if rpos == #EX_REFRESH then rpos = 0; ex:invalidate() end
+        else
+          rpos = (b == 0xF0) and 1 or 0
+        end
+      end
+    end
+    local ok, m = pcall(midi.to_msg, data)
+    if not ok or type(m) ~= "table" or m.ch ~= 16 then return end
+    if m.type == "note_on" or m.type == "note_off" then
+      local down = m.type == "note_on" and (m.vel or 0) > 0
+      local id = m.note or -1
+      -- in KEYS a note on channel 16 is a played note, not a pad
+      cell_event(id, ex.surface and EX_CELL[id] or nil, down)
+    elseif m.type == "cc" then
+      local id, v = m.cc or -1, m.val or 0
+      if id >= EX_ENC and id < EX_ENC + 4 then
+        local n = id - EX_ENC + 1
+        local a, div = acc[n] + (v - 64), EX_ENC_DIV[n]
+        local steps = a >= 0 and floor(a / div) or -floor(-a / div)
+        acc[n] = a - steps * div
+        if steps ~= 0 and ex.turn then ex.turn(n, steps) end
+      elseif id >= EX_PUSH and id < EX_PUSH + 4 then
+        if ex.push then ex.push(id - EX_PUSH + 1, v > 0 and 1 or 0) end
+      elseif EX_BTN_CELL[id] then
+        cell_event(id, EX_BTN_CELL[id], v > 0)
+      elseif v > 0 and id >= EX_DOWN and id <= EX_REDO and ex.nav then
+        ex.nav(id)
+      end
+    end
+  end
+  return ex
+end
+
+-- encoders 1 to 3 are the norns's own (the script's global enc and key);
+-- encoder 4 picks the track, as K1+E1 does
+local function ex_turn(n, d)
+  if n <= 3 then
+    if enc then enc(n, d) end
+    return
+  end
+  C.touch_input()
+  params:delta("track_sel", d)
+  C.page_flash = C.frame + floor(FPS * 0.7)
+end
+
+local function ex_push(n, z)
+  if n <= 3 then
+    if key then key(n, z) end
+    return
+  end
+  local ex = M.ex
+  if z ~= 1 or not ex then return end
+  C.touch_input()
+  ex:set_surface(not ex.surface)
+  if ex.surface then
+    C.take_say("EXQUIS PADS", "Exquis: the pads are the grid surface")
+  else
+    C.take_say("EXQUIS KEYS", "Exquis: the pads are its own keyboard")
+  end
+end
+
+local function ex_nav(id)
+  C.touch_input()
+  if id == EX_UNDO then C.step_page(-1)
+  elseif id == EX_REDO then C.step_page(1)
+  elseif id == EX_UP then params:delta("scene_slot", 1)
+  elseif id == EX_DOWN then params:delta("scene_slot", -1) end
+end
+
+-- the Exquis has left (or four is closing): end what its pads hold
+local function ex_release(leave_dev_mode)
+  local ex = M.ex
+  if not ex then return end
+  if leave_dev_mode then ex:shutdown() else ex:drop() end
+  -- a key pressed in KEYS will never send its release
+  if C.lfo and C.lfo.press_clear then C.lfo.press_clear() end
+  ex.key, ex.turn, ex.push, ex.nav = nil, nil, nil, nil
+  ex.device.event = nil
+  M.ex = nil
+end
+
+-- adopt an attached Exquis. Safe to call again: the one in use is kept.
+local function ex_connect()
+  local dev = ex_find_device()
+  if M.ex and M.ex.device == dev then return end
+  ex_release(false)
+  if not dev then return end
+  local ok, cand = pcall(ex_make, dev, not (gg and gg.device))
+  if ok and cand then
+    cand.key, cand.turn, cand.push, cand.nav = grid_key, ex_turn, ex_push, ex_nav
+    M.ex = cand
+    print("four: Exquis in Developer Mode, " .. (cand.surface and "PADS" or "KEYS")
+      .. " (" .. tostring(dev.name) .. ")")
+  else
+    print("four: Exquis found but its driver failed; it stays a MIDI keyboard")
+  end
+end
+
 function M.init(ctx)
   C = ctx
   pget, ptoggle, clamp, window_bounds =
@@ -696,24 +996,42 @@ local function draw_scene_ws()
   gg:led(8, 6, sc.safe and 10 or 2, sc.safe and "white" or nil)
 end
 
-function M.redraw()
-  -- a hot-plug asked for a fresh connect (see M.hotplug)
-  if M.reconnect_due then
-    M.reconnect_due = false
-    M.connect()
-  end
-  if not (gg and gg.device) then return end
-  local s = surface()
-  -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
-  -- SCENE page they must not linger held — otherwise a page-independent
-  -- scene-bank (row 1) tap silently captures/clears instead of recalling.
-  if s ~= "scene" then scene_mod.cap, scene_mod.clr = false, false end
+-- draw surface `s` to the target that `gg` names
+local function paint(s)
   gg:all(0)
   draw_spine()
   if s == "pads" then draw_pads_ws()
   elseif s == "scene" then draw_scene_ws()
   else draw_main_ws() end
   gg:refresh()
+end
+
+function M.redraw()
+  -- a hot-plug asked for a fresh connect (see M.hotplug)
+  if M.reconnect_due then
+    M.reconnect_due = false
+    M.connect()
+  end
+  if M.ex_due then
+    M.ex_due = false
+    ex_connect()
+  end
+  local ex = M.ex
+  if not ((gg and gg.device) or ex) then return end
+  local s = surface()
+  -- CAP/CLR are SCENE-workspace modifiers (row 6). If we've navigated off the
+  -- SCENE page they must not linger held — otherwise a page-independent
+  -- scene-bank (row 1) tap silently captures/clears instead of recalling.
+  if s ~= "scene" then scene_mod.cap, scene_mod.clr = false, false end
+  if gg and gg.device then paint(s) end
+  -- the Exquis is a second draw target for the same surface. In KEYS its pads
+  -- are its own, and the buttons still show the state strip.
+  if ex then
+    local keep = gg
+    gg = ex
+    paint(s)
+    gg = keep
+  end
 end
 
 function M.connect()
@@ -740,6 +1058,7 @@ function M.connect()
     gg.key = grid_key
     gg.button = lp_button
   end
+  ex_connect()
 end
 
 -- a MIDI device came or went. A Mini MK3 plugged in after the script loaded
@@ -751,6 +1070,11 @@ end
 -- cannot be told to skip it, would bind to the Launchpad that is leaving.
 -- A leaving Launchpad is dropped at once, so nothing draws to it meanwhile.
 function M.hotplug(gone)
+  -- the Exquis, with or without a grid. One that left is dropped at once; one
+  -- that came is adopted on the next grid frame.
+  local exd = ex_find_device(gone)
+  if M.ex and M.ex.device ~= exd then ex_release(false) end
+  if exd and not M.ex then M.ex_due = true end
   if not no_monome then return end
   local lp = lp_find_device(gone)
   local on_lp = M.have_launchpad and gg and gg.device
@@ -766,6 +1090,7 @@ function M.hotplug(gone)
 end
 
 function M.cleanup()
+  ex_release(true)                               -- Exquis: leave Developer Mode
   if gg then
     gg.key = nil
     if gg.device then

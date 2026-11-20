@@ -2010,7 +2010,8 @@ end
 -- row each, selected by the same E2 walk. The name column says which one
 -- and what it moves ("1>CUT", "2 OFF"); the row draws two cycles of its
 -- wave, as tall as its depth (upside down for a negative depth), with a dot
--- where the wave is now. ENV draws the input's envelope as a bar. A
+-- where the wave is now. ENV draws the input's envelope as a bar, and PRESS
+-- the keyboard's pressure. A
 -- modulator that also goes out to other gear says where on the right (>CC
 -- the MIDI CC, >CV crow, >OUT both). Dim and flat while it moves nothing.
 local LFO_N = 4
@@ -2066,8 +2067,9 @@ local function lfo_row(k, yb, selected, gx0)
     local a = max(1, abs(depth) * 4)
     local sg = depth < 0 and -1 or 1
     screen.level(selected and 11 or 6)
-    if shape == 6 then                        -- ENV: the envelope, as a bar
-      screen.rect(gx0, mid, max(1, floor(L.env * w)), 1)
+    local lv = shape == 6 and L.env or shape == 7 and L.press or nil
+    if lv then                                -- ENV, PRESS: a level, as a bar
+      screen.rect(gx0, mid, max(1, floor(lv * w)), 1)
     else
       for x = 0, w do
         local ph = (x / w * 2) % 1
@@ -2078,8 +2080,8 @@ local function lfo_row(k, yb, selected, gx0)
     end
     screen.fill()
     -- where it is now
-    local v = shape == 6 and (L.env * 2 - 1) or (m.out * 2 - 1)
-    local dx = shape == 6 and gx0 + L.env * w or gx0 + m.phase * w / 2
+    local v = lv and (lv * 2 - 1) or (m.out * 2 - 1)
+    local dx = lv and gx0 + lv * w or gx0 + m.phase * w / 2
     screen.level(15)
     screen.rect(floor(dx) - 1, floor(mid - v * a * sg + 0.5) - 1, 3, 3)
     screen.fill()

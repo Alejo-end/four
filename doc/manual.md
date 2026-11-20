@@ -204,9 +204,10 @@ A motion loop of about a musical length snaps to that length, so it stays on the
 
 A modulator moves what the engine hears, never the knob. The knob stays where you, a scene
 or a motion lane put it, and the sound swings around it. Each of the four modulators has a
-target, a shape, a period and a depth. The shapes are sine, triangle, square, ramp, random
-and ENV, the envelope of the input. A negative depth inverts the wave, so ENV with a
-negative depth ducks the sound while your gear plays. With a modulator selected on MOTION,
+target, a shape, a period and a depth. The shapes are sine, triangle, square, ramp,
+random, ENV and PRESS. ENV is the envelope of the input. PRESS is the pressure of a MIDI
+keyboard with aftertouch, for example an Exquis in KEYS. A negative depth inverts the
+wave, so ENV with a negative depth ducks the sound while your gear plays. With a modulator selected on MOTION,
 E3 is its depth, K1+E2 its period and K1+E3 its target.
 
 ### SCENE
@@ -325,6 +326,15 @@ Rows one and two are scenes and transport. Rows seven and eight are a piano octa
 middle rows follow the page: loop spans, slice pads or the morph bar. On a Launchpad Mini
 MK3 the colours have meanings: red records, green plays, white is the cursor and purple
 erases. `lib/mgrid.lua` has the details.
+
+An Exquis (Intuitive Instruments) works alone or beside a grid. This driver is written
+from the maker's specification and is not yet tested on an Exquis. The push of encoder 4
+changes between two modes. In PADS, the pads show grid rows one to six. Each row of eight zigzags along two rows of
+hexagons from the left edge. The scenes are at the top and the transport row is at the
+bottom. In KEYS, the pads are the Exquis's own keyboard and play four's notes. Encoders 1
+to 3 are E1 to E3 and their pushes are K1 to K3. Encoder 4 picks the track. Record
+records the take and Loop records the tape. Clips is DRY and Play/Stop is STOP. Undo and
+Redo step the page. Down and Up step the scene slot.
 
 ## Visuals
 
