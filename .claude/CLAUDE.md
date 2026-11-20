@@ -151,7 +151,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 44th: the delay and the reverb leave 0.1 s after their mix reaches 0 (C3 of the plan) (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.30 with no break. Not pushed | the user, 2026-11-17, on the build as a whole: "I think it sounds good" |
 | 45th: the effects are stronger at the same knob, and none is quieter than the dry sound (engine, test tools) | yes, 2026-11-17, `count: 198`: row 19.11's levels, 19.12 and 19.29 with no break. Not pushed | no. The user asked for it: the effects were "a bit too bland" |
 | 46th: the tape records what four plays (`cut_source` starts at WET), and TAPE says when a pass hears nothing (Lua, test tools) | yes, 2026-11-17: row 19.31. Not pushed | no. The user asked: "I don't know how can I record the tape" |
-| 47th: an Exquis driver in lib/mgrid.lua, PADS and KEYS (Lua, test tool) | no. Never run on an Exquis: no device yet | |
+| 47th: an Exquis driver in lib/mgrid.lua, PADS and KEYS (Lua, test tool) | deployed with the rest; never run on an Exquis: no device yet | |
 | 48th: a new tape take starts at the tape's start, and softcut's late report of the head is dropped (Lua, test tools) | yes, 2026-11-17: row 19.31 armed 2 s before the tape's end. Not pushed | no |
 | 49th: each part starts at the start of its own buffer: a new take puts the write head at 0 (C4 of the plan) (engine, Lua, test tools) | yes, 2026-11-18, `count: 198`: row 19.32, four parts of 20 s. Not pushed | no |
 | 50th: a clear zeroes the buffer again 60 ms later, when a write that was running has faded out (engine, test tools) | yes, 2026-11-18, `count: 198`: row 10.8 reads all zero. Not pushed | |
@@ -161,8 +161,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 52nd: PRESS, a seventh modulator shape: keyboard pressure moves a knob (Lua, test tool) | no. Never run with a pressure keyboard | |
 | 55th: AUTOSAMPLE: four plays a MIDI note range out, records it into one take, and a keyboard plays it as a multisample (Lua, test tool) | deployed 2026-11-20 and loads; never run with gear. The TRS jack is norns port 3, `virtual` (ttymidi on /dev/ttyAMA0, client `shieldXL`) | no |
 | 56th: WOBBLE and plugin FLANGE glide their delay in and out; the supported set (engine, test tools, documents) | yes, 2026-11-20, `count: 198`: row 19.12 no break and no hole, 19.27 passes on the supported set | no |
-| 57th: Phase B, the fade is safe: a hand keeps what it moves, an option crosses once, a clear of an end is refused, DRY is a round trip, each track keeps its own window (Lua, test tools). On the local branch `phase-b` | deployed 2026-11-20 and loads; not walked | no |
-| 58th: Phase C, the screen: a send into a silent effect is hollow, SCENE says K1+E3 FADES and +K2 (Lua, test tools). On the local branch `phase-c`. One turn of E3 is a whole fade (step 0.04, from the user's count) | deployed 2026-11-20, loads | no |
+| 57th: Phase B, the fade is safe: a hand keeps what it moves, an option crosses once, a clear of an end is refused, DRY is a round trip, each track keeps its own window (Lua, test tools). On `main` | deployed 2026-11-20 and loads; not walked | no |
+| 58th: Phase C, the screen: a send into a silent effect is hollow, SCENE says K1+E3 FADES and +K2 (Lua, test tools). On `main`. One turn of E3 is a whole fade (step 0.04, from the user's count) | deployed 2026-11-20, loads | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -198,11 +198,11 @@ README), and row 19.27 decides on it (53.6% to 62.2% over four runs, one run wit
 xrun; the dense set is listed, 61.6% to 69.1%). They answered question 10: fix the dip.
 The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in from 0 and
 back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of the plan
-(C7 to C10, Lua only) is the fifty-seventh change, on the local branch `phase-b`, deployed
-and loaded on the device but not walked, and not pushed until the user tests it. Phase C (C11,
-C12) is the fifty-eighth change, on the local branch `phase-c` on top of it. Another session shares this checkout (the forty-seventh
-change, an Exquis driver, and the fifty-second, PRESS, both uncommitted): stage only
-your own hunks.
+(C7 to C10) is the fifty-seventh change and Phase C (C11, C12) the fifty-eighth, both Lua
+only, deployed and loaded on the device but not walked. The user asked to merge them on
+2026-11-20, and they are on `main`. Phase D (Relay) needs the user's yes first. The
+Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
+hardware. Another session can share this checkout: stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when

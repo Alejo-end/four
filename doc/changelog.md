@@ -5093,7 +5093,7 @@ question 8 (the supported set: four PV at pitch 2 with every effect on) and ques
 four, fifty-seventh change: **Phase B of doc/signature-workflow.md, the fade is safe: C7
 to C10 (Lua; no engine change, the count stays 198; not on the device)**. The user asked
 for Phase B on 2026-11-20. The plan's own answers stand for questions 1 and 3: a hand
-keeps what it moves, and DRY is a round trip. It is on the local branch `phase-b`.
+keeps what it moves, and DRY is a round trip. Merged into `main` on 2026-11-20.
 - C7, lib/mscenes.lua: a hand keeps what it moves during a fade. The fade keeps the value
   it last wrote for each id (`fade_val`). A param that no longer holds it, or the origin
   before the first write, left the fade (`left`): the fade skips it, and home leaves it
@@ -5117,8 +5117,7 @@ keeps what it moves, and DRY is a round trip. It is on the local branch `phase-b
 
 four, fifty-eighth change: **Phase C of doc/signature-workflow.md, the screen says what the
 fade and the sends do: C11 and C12 (Lua; no engine change, the count stays 198)**. The
-user asked for Phase C on 2026-11-20. It is on the local branch `phase-c`, on top of
-`phase-b`.
+user asked for Phase C on 2026-11-20. Merged into `main` with Phase B the same day.
 - C11, lib/mpages.lua `route_grid`: on TRACKS with K1, a D or R cell whose effect has WET
   at 0 draws its send hollow, and opening such a send says `DELAY WET IS 0` (61 px) or
   `REVERB WET IS 0` (66 px) on the top row for a second. The defaults stay: WET at 0 keeps
