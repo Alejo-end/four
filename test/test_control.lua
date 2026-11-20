@@ -3624,6 +3624,9 @@ do
   -- its own, so this part lends it one.)
   local had_time, now_t = util.time, 1000
   util.time = function() return now_t end
+  -- (the offscreen norns writes no UNDO copy: the wait for it is section 41's)
+  local real_settled = CTX.undo_settled
+  CTX.undo_settled = function() return true end
   params:set("track_sel", 1)
   params:set("rec", 1); head_runs(0.1)           -- the last poll comes at now_t
   now_t = now_t + 0.040                          -- and the stop 40 ms after it
@@ -3645,6 +3648,8 @@ do
   params:set("rec", 1); now_t = now_t + 0.02; params:set("rec", 0)
   near(params:get("pos_end"), 0.6, 1e-9, "a pass of 20 ms is no take, whenever the last poll came")
   util.time = had_time
+  CTX.undo_settled = real_settled
+  CTX.arm_waiting, CTX.undo_pending = false, nil
   params:set("pos_start", 0); params:set("pos_end", 1)
   _h.run_ticks(4)                                -- past the frames a poll is checked in
 
@@ -4653,6 +4658,75 @@ do
   params:set("rec", 0)
   clock.get_tempo = nil
   params:set("cutoff", 20000); params:set("pos_jitter", 0)
+end
+
+-- ============================================================================
+-- 41 · a new take waits for the UNDO copy; a double tap on TRACKS is a peek
+-- ============================================================================
+do
+  local saved = { engine.write_take, util.time, engine.rec_track, engine.rec }
+  local stems = {}
+  engine.write_take = function(stem) stems[#stems + 1] = stem end
+  engine.rec_track = function() end
+  engine.rec = function() end
+  local now_t = 5000
+  util.time = function() return now_t end
+  params:set("orbit_on", 0); params:set("stop_all", 0); params:set("rec", 0)
+  params:set("track_sel", 1); params:set("undo_keep", 1); params:set("pre_level", 0)
+  CTX.arm_waiting, CTX.undo_pending = false, nil
+  CTX.wave_any, CTX.take_len = true, 0.01
+  local function write_copy()
+    local u = CTX.undo_pending
+    for _, side in ipairs({ "_L.wav", "_R.wav" }) do
+      local f = assert(io.open(u.stem .. side, "wb"))
+      f:write(string.rep("\0", u.bytes)); f:close()
+    end
+  end
+  -- (a) a pass, then K2 again at once: the arm waits for the copy. (The
+  -- first arm marks the take it records over, and waits for that copy too.)
+  params:set("rec", 1)
+  ok(CTX.arm_waiting, "an arm over a take with no UNDO mark waits for the mark's copy")
+  write_copy(); _h.run_ticks(1)
+  ok(params:get("rec") == 1, "...and arms when it is written")
+  head_runs(0.01); params:set("rec", 0)
+  ok(CTX.undo_pending ~= nil, "the stop of a pass starts the UNDO copy")
+  params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.arm_waiting and CTX.take_msg == "REC - KEEPING UNDO",
+    "a REC while the copy is written waits, and says so")
+  _h.run_ticks(3)
+  ok(params:get("rec") == 0, "...for as long as the files are short")
+  write_copy(); _h.run_ticks(1)
+  ok(params:get("rec") == 1 and not CTX.arm_waiting, "...and arms by itself once the copy is on the card")
+  head_runs(0.012); params:set("rec", 0)
+  -- (b) a second press while it waits calls the arm off
+  params:set("rec", 1)
+  ok(CTX.arm_waiting, "it waits again after the next pass")
+  params:set("rec", 1)
+  ok(not CTX.arm_waiting and CTX.take_msg == "REC CALLED OFF", "a second press calls it off")
+  _h.run_ticks(2)
+  ok(params:get("rec") == 0, "...and nothing arms later")
+  -- (c) a copy that never arrives does not block for good
+  params:set("rec", 1)
+  for _ = 1, CTX.FPS * 5 + 2 do _h.run_ticks(1) end
+  ok(params:get("rec") == 1, "after five seconds without the copy the pass arms anyway")
+  params:set("rec", 0)
+  write_copy()
+  for _, st in ipairs(stems) do os.remove(st .. "_L.wav"); os.remove(st .. "_R.wav") end
+  CTX.arm_waiting, CTX.undo_pending = false, nil
+  engine.write_take, util.time, engine.rec_track, engine.rec = saved[1], saved[2], saved[3], saved[4]
+
+  -- (d) two quick taps of K1 on TRACKS are two looks at the sends
+  params:set("motion_rec", 0)
+  T.goto_page("TRACKS")
+  key(1, 1); key(1, 0); _h.run_ticks(1); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 0, "a double tap of K1 on TRACKS does not arm motion")
+  T.goto_page("FILTER"); _h.run_ticks(10)
+  key(1, 1); key(1, 0); _h.run_ticks(1); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 1, "...on another page it does")
+  _h.run_ticks(10)
+  key(1, 1); key(1, 0); _h.run_ticks(1); key(1, 1); key(1, 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  while #CTX.motion.lane_ids > 0 do CTX.motion.clear_lane() end
 end
 
 T.report("control harness OK")

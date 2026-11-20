@@ -5242,3 +5242,22 @@ agent to review everything since the fifty-fourth change. Its findings, each che
 - test/test_control.lua section 40 (14 assertions); each one failed on the code before
   its fix. visuals/test_bridge.js: 19 checks.
 
+four, sixty-third change: **a new take waits for the UNDO copy, and a double tap of K1 on
+TRACKS is a look at the sends (Lua, test tools; no engine change, the count stays 198)**.
+The two issues the sixty-second change left open.
+- The UNDO copy of a take is written by the engine in the background, and a new take
+  writes the same buffer from 0. A take armed before the copy was on the card could put
+  its first moments into it. That held for any K2 to stop and K2 at once to start the
+  next take, not only for the arm over a take a PSET restored. `ctx.undo_mark` now
+  clears the slot's old pair and notes what it writes (`ctx.undo_pending`).
+  `ctx.undo_settled` is true once both files reach their size. An arm before that waits
+  (`REC - KEEPING UNDO`) and arms by itself once the copy is there. A second press calls
+  it off (`REC CALLED OFF`). A copy that never arrives is given up after five seconds,
+  so a take is never blocked for good. AUTOSAMPLE calls off such a wait and asks for
+  another press, so a plain take never starts in its place.
+- A double tap of K1 does nothing on TRACKS, where K1 shows the sends: two quick looks
+  are not a wish to record motion.
+- test/test_control.lua section 41 (12 assertions). The offscreen norns writes no
+  files, so the wait is tested with a stand-in clock and files the test writes.
+- Not on the device: the norns left the network during the device check.
+

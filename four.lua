@@ -1870,9 +1870,41 @@ function ctx.undo_mark()
     return
   end
   local k = free_slot()
-  engine.write_take(undo_stem(k), take_frames())
+  local stem = undo_stem(k)
+  -- the slot's old pair goes first, so the wait below reads the new files
+  os.remove(stem .. "_L.wav"); os.remove(stem .. "_R.wav")
+  engine.write_take(stem, take_frames())
   undo_cur = { slot = k, lo = pget(WIN[1], 0), hi = pget(WIN[2], 1),
     take_len = ctx.take_len }
+  ctx.undo_pending = { stem = stem, bytes = take_frames() * ctx.TAKE_BYTES + 44,
+    from = ctx.frame or 0 }
+end
+
+-- IS THE COPY UNDO KEEPS ON THE CARD YET (the sixty-third change)? The
+-- engine writes it from the buffer in the background, and a new take starts
+-- writing that buffer from 0: a pass armed while the copy was still being
+-- written put its own first moments into the copy. A K2 that stops a take
+-- and a K2 at once to start the next one did exactly that. The arm now
+-- waits until both files reach their size (a few frames for a short take).
+-- The offscreen norns writes no files (it has no util.time either): there the
+-- copy is always written. A copy that never arrives is given up
+-- after five seconds, so a pass can never be blocked for good.
+local function fsize(p)
+  local f = io.open(p, "rb"); if not f then return nil end
+  local n = f:seek("end"); f:close(); return n
+end
+function ctx.undo_settled()
+  local u = ctx.undo_pending
+  if not u then return true end
+  if not util.time then ctx.undo_pending = nil; return true end
+  local l, r = fsize(u.stem .. "_L.wav"), fsize(u.stem .. "_R.wav")
+  local full = l and r and l >= u.bytes and r >= u.bytes
+  if full or (ctx.frame or 0) - u.from > FPS * 5 then
+    if not full then print("four: the UNDO copy did not arrive in 5 s; recording anyway") end
+    ctx.undo_pending = nil
+    return true
+  end
+  return false
 end
 -- a fresh session: an undo pair left on the card by the last one is not
 -- this session's take, so it is never offered, and its files go
@@ -2613,6 +2645,19 @@ local function init_params()
       -- the take before the pass is what UNDO brings back. A take that a
       -- PSET restored on another track has no mark yet: mark it now
       if undo_cur == nil and ctx.wave_any then ctx.undo_mark() end
+      -- ...and the pass waits until that copy is on the card (undo_settled)
+      if not ctx.undo_settled() then
+        if ctx.arm_waiting then
+          -- a second press while it waits: the arm is called off
+          ctx.arm_waiting = false
+          take_say("REC CALLED OFF", "REC called off while it waited for the UNDO copy")
+        else
+          ctx.arm_waiting = true
+          take_say("REC - KEEPING UNDO", "REC waits for the UNDO copy to be written")
+        end
+        params:set("rec", 0)
+        return
+      end
       -- EACH PART STARTS AT THE START OF ITS OWN BUFFER (C4 of
       -- doc/signature-workflow.md, the forty-ninth change). The write head
       -- is one for the four tracks, and it stopped where a pass ended. The
@@ -3517,6 +3562,11 @@ function init()
     sync_window_len()    -- ...and a locked window's length, on a tempo move
     tick_rec_wait()        -- a start-on-sound take begins at the sound
     tick_rec_end()         -- ONE-SHOT: a full track hands on to the next
+    -- a REC that waited for the UNDO copy arms once it is written
+    if ctx.arm_waiting and ctx.undo_settled() then
+      ctx.arm_waiting = false
+      if pget("rec", 0) == 0 then params:set("rec", 1) end
+    end
     Msample.tick()         -- AUTOSAMPLE: the next note out, or the end of the pass
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
@@ -3699,7 +3749,11 @@ function key(n, z)
     if z == 1 then
       k1_down, k1_used = ctx.frame, false
     elseif k1_down and not k1_used and ctx.frame - k1_down < TAP_FRAMES then
-      if k1_last_tap and ctx.frame - k1_last_tap <= K1_DOUBLE then
+      -- (not on TRACKS: K1 there shows the sends, and two quick looks
+      -- are not a wish to record motion)
+      if PAGES[ctx.page] == "TRACKS" then
+        k1_last_tap = nil
+      elseif k1_last_tap and ctx.frame - k1_last_tap <= K1_DOUBLE then
         k1_last_tap = nil
         ctx.motion_toggle()
       else

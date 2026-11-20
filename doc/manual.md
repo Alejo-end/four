@@ -208,8 +208,8 @@ A motion loop of about a musical length snaps to that length, so it stays on the
 Record a motion loop without coming back to this page:
 
 1. Pick the pass length with K1+E3 here: FREE, or 1, 2, 4 or 8 bars on the clock.
-2. Arm with K2, or double-tap K1 on any page. The screen pops `MOTION REC`, and the M in
-   the header blinks.
+2. Arm with K2, or double-tap K1 on any page but TRACKS (there K1 shows the sends). The
+   screen pops `MOTION REC`, and the M in the header blinks.
 3. Go to any page and move knobs. The pass starts at your first move.
 4. With a length in bars, the pass closes itself after that length and plays. With FREE,
    double-tap K1 again (or K2 here) to close it.
@@ -296,6 +296,9 @@ effect out before the sound breaks up.
   to eight bars. It locks the window of the track you are on.
 - Hold K3 on TAKE to go back to the take before the last change. Hold it again to come
   forward. A "<" at the top left means that there is a take to go back to.
+- The copy that UNDO keeps is written to the card when a take stops. A new take armed
+  before that copy is written waits for it, and TAKE says `REC - KEEPING UNDO`. That is a
+  few frames for a short take. Press K2 again to call it off.
 - Hold K1 plus K3 for a second to erase the take. The arc shows the time left.
 - Hold K1 and turn E3 on TAKE to pick the SOURCE of the next take: IN (the line input),
   a track (T1 to T4) or MIX (everything you hear). A track is its sound after its filter,

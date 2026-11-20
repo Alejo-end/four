@@ -167,6 +167,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 60th: motion without visiting MOTION (first move starts a pass, PASS in bars closes it, overdub stays armed, double-tap K1), MIDI faders as the mixer, the control page on the computer (Lua, visuals, test tools) | deployed 2026-11-20, loads; OSC in from the computer moved params. Faders and double tap not tried | no |
 | 61st: Phase E's sheets (doc/walkthrough.md) and test/device/session.py; rows 19.12 to 19.34 again on the current build (documents, test tools) | yes: the tool ran, the rows hold | no |
 | 62nd: the review's fixes: AUTOSAMPLE records IN, an overdub across the seam, the 60 s cap from the first move, DRY and the other throws, typed OSC values, the lock at a focus change, the bridge's Origin check (Lua, visuals, test tools) | deployed 2026-11-20 | no |
+| 63rd: a new take waits for the UNDO copy (`REC - KEEPING UNDO`); no double tap of K1 on TRACKS (Lua, test tool) | not checked: the norns left the network | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

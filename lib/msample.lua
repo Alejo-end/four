@@ -234,7 +234,13 @@ function M.start()
   params:set("rec_source", 1)
   params:set("rec", 1)
   if pget("rec", 0) ~= 1 then
-    -- the arm was refused; its own words stay on the screen
+    -- the arm was refused; its own words stay on the screen. One that waits
+    -- for the UNDO copy is called off: a plain take must not start later
+    -- in the autosample's place
+    if C.arm_waiting then
+      C.arm_waiting = false
+      say("AUTO: KEEPING UNDO, AGAIN", "AUTOSAMPLE: the UNDO copy is still being written, press again")
+    end
     restore({ saved = saved })
     return
   end
