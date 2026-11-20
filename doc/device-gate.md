@@ -353,6 +353,9 @@ and that the engine polls behave as the stubs assume.
 | 16.14 | Undo a clear | K1+K3 hold on TAKE (erase), then undo take | The take comes back | The `empty` state |
 | 16.15 | **CC out** | `out source` MORPH, a synth on MIDI port 1 learning the CC; run the orbit | The synth's knob follows the morph; a still morph sends nothing (a MIDI monitor) | `Mout.tick`, `midi.connect` |
 | 16.16 | crow out | A crow on USB, `out to crow 1` on, `out source` LFO 1 | Output 1 swings 0 to 5 V at the LFO's rate | `crow.output[1].volts` |
+| 16.18 | **Autosample** | A synth on MIDI port 1 and on the line input. PARAMS > take - autosample: C3 to C5, step 1, TIME, 1 s and 1 s. Press `autosample` | TAKE counts the notes, `AUTO: 25 NOTES, KEYS PLAY`. A MIDI keyboard plays each key at its own pitch, and chords | `lib/msample.lua`, `ctx.route_note` |
+| 16.19 | Autosample, DECAY | The same with DECAY, `release time` 5 s, a sound with a long release | Each note waits for the last one to die away, and no slice starts on a tail | `decayed` in lib/msample.lua, the `rec_amp` poll |
+| 16.20 | Autosample, not wired | Pull the audio cable, press `autosample`. Then set an empty port | `AUTO: NOTHING CAME BACK`, then `AUTO: NO MIDI ON PORT n` with no take | `refine`, `M.start` |
 | 16.17 | A hand on a swung knob | LFO 1 on cutoff, SINE, 1 Hz, depth 0.4; turn cutoff slowly with E2 on FILTER | A smooth sweep under the swing, no zipper or clicks | `Mlfo.swung` in the eng-control action |
 
 ## Stage 17: the beat repeat (ENGINE, a new command)

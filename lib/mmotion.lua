@@ -138,6 +138,9 @@ local MOTION_EXCLUDE = {
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
   "print_len", "pad_chop", "pad_even",
+  -- the autosampler: a pass that records, and how it plays the outboard
+  "as_go", "as_port", "as_ch", "as_low", "as_high", "as_step", "as_vel",
+  "as_hold", "as_wait", "as_tail", "as_floor",
   -- PARAMS-only discretes: no performance surface reaches them
   "grain_shape", "warp_overlaps", "tape_fade",
   "t2_grain_shape", "t2_warp_overlaps",

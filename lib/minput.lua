@@ -59,7 +59,7 @@ local function midi_event(data, vport)
   end
   -- route_note decides drone vs pad from `pad_input`; id offset by 1000 so
   -- MIDI voice ids never collide with grid/screen pad ids
-  C.route_note(1000 + note, 2 ^ ((note - pget("root_note", 60)) / 12), note, z)
+  C.route_note(1000 + note, 2 ^ ((note - pget("root_note", 60)) / 12), note, z, note)
 end
 
 -- USB typing keyboard: ableton-style musical typing. the A-row is the white

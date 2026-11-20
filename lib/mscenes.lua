@@ -253,6 +253,9 @@ local SCENE_EXCLUDE = {
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
+  -- the autosampler: a pass that records, and how it plays the outboard
+  "as_go", "as_port", "as_ch", "as_low", "as_high", "as_step", "as_vel",
+  "as_hold", "as_wait", "as_tail", "as_floor",
   -- UI cursors + the per-pad lock EDITORS (the locks themselves ride the
   -- padlock pset, not scenes)
   "seq_slice", "pad_voice", "pad_pitch",

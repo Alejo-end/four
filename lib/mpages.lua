@@ -1965,7 +1965,10 @@ local function body_PADS(frame)
       screen.fill()
     end
   end
-  if C.pad_cuts then
+  if C.pad_notes then
+    -- an autosample: its notes, which a MIDI keyboard plays
+    ptext_c(("AUTO - %d NOTES, KEYS PLAY"):format(#C.pad_notes), 64, 49, 1, 5)
+  elseif C.pad_cuts then
     local n = #C.pad_cuts - 1
     ptext_c(("CHOP - %d SLICES ON THE HITS"):format(n), 64, 49, 1, 5)
   end

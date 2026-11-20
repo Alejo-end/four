@@ -37,6 +37,9 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
   Mutable Instruments Clouds: `FourCloud` from our plugin, else an installed MiClouds,
   else the GRAIN granulator. The log says which (`four: CLOUD is FourCloud`).
 - Four modulators, each on any track.
+- AUTOSAMPLE (lib/msample.lua, PARAMS > take - autosample): every note of a range
+  goes out of a MIDI port, comes back on the line input into one take, and is cut on
+  its attack. A MIDI keyboard then plays the take as a multisample (`ctx.pad_notes`).
 - Twelve pages: TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE.
   TRACKS is the hub: E2 picks the focused track, which TAKE, VOICE, FILTER and EFFECT
   then edit. K1 held on TRACKS shows the sends.
@@ -134,6 +137,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 38th: the album preset set leaves the repo | nothing on the device changes | |
 | 39th: CLAUDE_PLAN.md deleted, this file moves to .claude/ | documents only | |
 | 40th: tracks 2 to 4 reach the delay and the reverb (io's `t_dly` was a trigger control) (engine) | yes, `count: 198`, measured | no |
+| 55th: AUTOSAMPLE: four plays a MIDI note range out, records it into one take, and a keyboard plays it as a multisample (Lua, test tool). On `main` ahead of Phase A | no. The norns was off the network on 2026-11-20 | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

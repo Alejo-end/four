@@ -4575,3 +4575,35 @@ nothing rang on through the delay or the reverb from track 2.
   check also reads `|a, b|` arguments and NamedControls and drops block comments; and
   doc/controls.md's SCENE prose says E2 picks A, E3 picks B and K1+E3 fades.
 
+
+four, fifty-fifth change: **AUTOSAMPLE: four plays other gear over MIDI and records it as
+a multisample (Lua; no engine change, the count stays 198; not run on the device)**. It went to `main`
+ahead of Phase A (the forty-first to fifty-fourth changes stay on `phase-a`), so on `main`
+a new take starts where the write head is. The
+user asked for the autosampler of other instruments: play every MIDI note in a sequence,
+with a set time or a wait for the sound to decay, sample each note at its onset, and play
+the result polyphonically.
+- lib/msample.lua (new, the fifteenth include): PARAMS > take - autosample, eleven params.
+  `autosample` starts a pass on the focused track and stops one that runs. Every note
+  from `lowest note` to `highest note`, `semitones apart`, goes out on `autosample midi
+  port` and `autosample channel`. TIME holds a note for `note length` and records
+  `release time` after it. DECAY waits until the level written (`rec_amp`) is under
+  `decay floor` for 0.15 s, at most `release time`.
+- The pass is a fresh take of the line input alone: overdub, resample and start on sound
+  go to 0 and come back after. A STOP, a take stopped by hand or a new track focus stops
+  the pass and releases the note. A port with no device, or a TIME range that does not
+  fit in 59 s, is refused with a word on TAKE. A DECAY pass that fills the track keeps the
+  notes that fit, and says so.
+- Each cut is the time its note went out, 20 ms early. The take is then dumped
+  (`ctx.scan_take`, now shared) and each cut moves onto the first sample above -48 dBFS
+  in its slice. The scan counts the notes that came back silent: `AUTO: NOTHING CAME
+  BACK` when all are.
+- four.lua: `ctx.pad_notes` holds the note of each slice. `ctx.route_note` takes the
+  MIDI note: on a multisample, a key plays the slice of the nearest note (a tie takes the
+  lower), retuned by the difference, at most 24 semitones. `ctx.pad_trigger` takes that
+  retune. A slice past the eighth pad plays as a SLICE voice. The notes go with the cuts
+  (`pads_uncut`, CHOP) and ride the padlock PSET file.
+- lib/mpages.lua: PADS says `AUTO - n NOTES, KEYS PLAY` in place of the CHOP line.
+- test/test_control.lua: section 34, 46 assertions. test/amalgamate.lua counts 15
+  includes. doc/manual.md and doc/device-gate.md (rows 16.18 to 16.20).
+- Not done: a range longer than one track (60 s), and more than one velocity layer.
