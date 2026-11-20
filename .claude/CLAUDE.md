@@ -202,7 +202,7 @@ The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in fro
 back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of the plan
 (C7 to C10) is the fifty-seventh change and Phase C (C11, C12) the fifty-eighth, both Lua
 only, deployed and loaded on the device but not walked. The user asked to merge them on
-2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on the local branch `phase-d` and on the device. The
+2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on `main` and on the device, with the sixtieth change (motion from any page, MIDI faders, the control page). Next in the plan is Phase E: the user's walkthrough of section 6. The
 Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
 hardware. Another session can share this checkout: stage only your own hunks.
 
