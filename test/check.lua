@@ -56,16 +56,28 @@ step("syntax: script, modules, single-file build",
   sh(LUAC .. " -p four.lua lib/*.lua dist/four_single.lua"))
 
 -- 2. the harnesses
-for _, t in ipairs({ "test_control", "test_deck", "test_wav",
-                     "test_launchpad", "test_exquis", "test_purity", "test_screen",
-                     "test_plugin" }) do
+local HARNESSES = { "test_control", "test_deck", "test_wav",
+                    "test_launchpad", "test_exquis", "test_purity", "test_screen",
+                    "test_plugin" }
+for _, t in ipairs(HARNESSES) do
   step("harness: " .. t, sh(PLAIN .. LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
 end
 
--- 3. with an Exquis attached. Only the harnesses that load the script see it.
+-- 3. with an Exquis attached. Only a harness that loads the script in the
+-- offscreen norns sees it, and not one that plugs in its own (`exquis = false`).
+-- Read from the harnesses themselves, so a new one joins without a list here.
 local EX_MODES = { "keys", "pads" }
+local with_exquis = {}
+for _, t in ipairs(HARNESSES) do
+  local f = assert(io.open("test/" .. t .. ".lua"))
+  local src = f:read("a")
+  f:close()
+  local call = src:match("env%.install(%b{})")
+  if call and not call:find("exquis%s*=%s*false") then with_exquis[#with_exquis + 1] = t end
+end
+step("harnesses that take an Exquis: " .. #with_exquis, #with_exquis > 0)
 for _, mode in ipairs(EX_MODES) do
-  for _, t in ipairs({ "test_control", "test_purity", "test_screen" }) do
+  for _, t in ipairs(with_exquis) do
     step("harness: " .. t .. ", Exquis in " .. mode:upper(),
       sh("FOUR_EXQUIS=" .. mode .. " " .. LUA .. " test/" .. t .. ".lua >/dev/null 2>&1"))
   end

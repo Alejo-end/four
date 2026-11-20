@@ -463,6 +463,8 @@ the port's handler, the menu's CC map), so norns's `midi.to_msg` and the real pa
 in the path, and no hand is needed. The other rows are for hands and eyes, and
 `python3 test/device/exquis.py` helps with them (`status`, `watch`, `sweep`). Without an
 Exquis every row reads `you`, with the names of the MIDI devices that the norns lists.
+The tools hold no id, channel or count of the Exquis: they ask the driver on the norns
+for its table (`grid.EX`), so they test the build that is deployed.
 
 Offline, `lua test/check.lua` runs the script's harnesses with a stand-in attached
 (test/uisim/env.lua). The stand-in is built from the same specification as the driver, so
@@ -471,11 +473,11 @@ it cannot find a fault that the two share. These rows can.
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
 | 20.1 | **It is found** | Plug the Exquis in, load four | maiden says `four: Exquis in Developer Mode, PADS` with no grid attached, `KEYS` with one, and the name the norns gives it | `ex_find_device` takes a device with "exquis" in its name. `exquis.py status` lists every name |
-| 20.2 | The controls, as bytes | `gate.py 20` | Redo and Undo step the page. Encoder 1 steps it at the third tick. Up and Down step the scene slot. Encoder 4 picks the track. Its push changes the mode. Pad 50 is scene 2 in PADS and nothing in KEYS | The handler in `ex_make`, norns's `midi.to_msg` |
-| 20.3 | A held pad and a mode change | `gate.py 20` | Pad 11 held on TAKE holds the beat repeat. A change to KEYS under it lets go, and the late release does nothing | `ex:drop`, `set_surface` |
+| 20.2 | The controls, as bytes | `gate.py 20` | Redo and Undo step the page. Encoder 1 steps it at the third tick. Up and Down step the scene slot. Encoder 4 picks the track. Its push changes the mode. The scene bank's second pad is scene 2 in PADS and nothing in KEYS | The handler in `ex_make`, norns's `midi.to_msg` |
+| 20.3 | A held pad and a mode change | `gate.py 20` | The beat repeat's pad, held on TAKE, holds the beat repeat. A change to KEYS under it lets go, and the late release does nothing | `ex:drop`, `set_surface` |
 | 20.4 | **The pads are where the driver thinks** | `exquis.py sweep` | The light runs left to right from the bottom row (6 pads) up, rows of 6 and 5 in turn, to the top right | The pad ids in `ex_cell`. A wrong order makes the whole fold wrong |
 | 20.5 | **The fold, by hand** | In PADS: press the top zigzag from the left, the bottom row, each pair between | The top zigzag is scenes 1 to 8, and the three pads at the right end of each pair stay dark and do nothing. The bottom row is the state strip's cells 1 to 6. Each pair is one row of the workspace, as on a grid | `EX_ROW_Y`, `ex_cell` |
-| 20.6 | The encoders' step | `exquis.py watch 30`, then turn each encoder one detent each way | Each detent is one message of 65 or 63. E2 and E3 move a knob by one step a detent, and encoders 1 and 4 need three | `EX_ENC_DIV`. A value further from 64 is more than one tick a message |
+| 20.6 | The encoders' step | `exquis.py watch 30`, then turn each encoder one detent each way | Each detent is one message, one above or one below the middle value (64). E2 and E3 move a knob by one step a detent, and encoders 1 and 4 need three | `EX_ENC_DIV`. A value further from 64 is more than one tick a message |
 | 20.7 | The buttons and the colours | Press Record, Loop, Clips, Play/Stop. Look at the pads on each page | Record is rec and lights red with pad 0. Loop is the tape's rec. Clips is DRY and Play/Stop is STOP. The colours mean what they mean on a Launchpad, and nothing flickers | `EX_BTN_CELL`, `ex_rgb`, the LED frame in `push_leds` |
 | 20.8 | **KEYS plays four** | Push encoder 4 to KEYS. Play the pads. Set a modulator's shape to PRESS and press harder | The pads show the Exquis's own layout. A key plays the take at its pitch, and its release ends it. Pressure moves the modulator's knob, and a lifted key lets it go | `is_grid_vport` in lib/minput.lua, PRESS in lib/mlfo.lua (fifty-second change) |
 | 20.9 | Hot-plug | Unplug it under a held pad. Plug it in again. Then with a grid attached | Nothing hangs, the held pad is released, and maiden shows no error. Plugged in, it is taken on the next frame, in PADS alone and in KEYS beside a grid | `Mgrid.hotplug`, `ex_release` |

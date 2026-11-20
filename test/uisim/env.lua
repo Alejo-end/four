@@ -393,17 +393,15 @@ function M.install(opts)
       -- instead, through the driver's fold, and comes out at the same handler.
       -- So every grid gesture of every harness is also a test of the fold.
       local real_key
-      local id_of = {}
-      for id = 0, 60 do if EXQ.cell_of[id] then id_of[EXQ.cell_of[id]] = id end end
       local function hands(x, y, z)
-        local c = (y - 1) * 8 + x
+        local c = EXQ.cell_at(x, y)
         local on = EXQ.listed and EXQ.device.event and EXQ.mode() == "pads"
-        if on and id_of[c] then
+        if on and EXQ.pad_of[c] then
           EXQ.by_pad = EXQ.by_pad + 1
-          return EXQ.pad(id_of[c], z == 1)
-        elseif on and (c == 15 or c == 16) then
+          return EXQ.pad(EXQ.pad_of[c], z == 1)
+        elseif on and EXQ.btn_of[c] then
           EXQ.by_pad = EXQ.by_pad + 1
-          return EXQ.cc(c == 15 and 104 or 105, z == 1 and 127 or 0)
+          return EXQ.btn(EXQ.btn_of[c], z == 1)
         end
         return real_key(x, y, z)
       end
@@ -608,21 +606,62 @@ end
 --
 --   local X = h.exquis or h.new_exquis()
 --   X.plug()                 -- norns's order: listed, then midi.add
---   X.pad(11, true)          -- pad id 0..60, on channel 16
---   X.cc(117, 127)           -- a button or an encoder (64 +- n is a turn)
+--   X.pad(X.pad_at(2, 1), true) -- a pad, by the grid cell it carries
+--   X.press(X.proto.redo)    -- a button, down and up
+--   X.turn(2, -1)            -- encoder 2, one tick back
 --   X.push(4)                -- an encoder's push, down and up
 --   X.raw({ 0xF0, ... })     -- anything else, as bytes
 --   X.led(0)                 -- r, g, b of the last frame that wrote that LED
 --   X.mode()                 -- "pads", "keys", "off", or nil before any setup
 --   X.unplug()               -- norns's order: midi.remove, then unlisted
-local EX_HEAD = { 0xF0, 0x00, 0x21, 0x7E, 0x7F }
-local EX_MASKS = { [0x00] = "off", [0x2A] = "keys", [0x2B] = "pads" }
+-- NOT ONE NUMBER of the protocol or of the layout is written here. They are
+-- the driver's (M.EX in lib/mgrid.lua), read from the module itself, so the
+-- stand-in cannot drift from the driver. The specification's numbers are
+-- pinned in one place, test/test_exquis.lua, which fails when the driver's
+-- table leaves them.
+local HERE = debug.getinfo(1, "S").source:match("^@(.*)test/uisim/env%.lua$") or ""
+local PROTO
+local function proto()
+  if not PROTO then
+    -- the module asks norns three things as it loads (is a grid there, is
+    -- midigrid installed). Here it is told no, in a world of its own, so
+    -- reading its table touches nothing of the harness's.
+    local world = setmetatable({
+      grid = { vports = {} },
+      util = { file_exists = function() return false end },
+      _path = { code = "" },
+    }, { __index = _G })
+    PROTO = assert(assert(loadfile(HERE .. "lib/mgrid.lua", "t", world))().EX,
+      "lib/mgrid.lua hands out no EX table")
+  end
+  return PROTO
+end
+M.exquis_proto = proto
+
+-- MIDI's own: status bytes, the largest data byte
+local NOTE_ON, NOTE_OFF, CC, MIDI_MAX = 0x90, 0x80, 0xB0, 127
+local KEY_PRESSURE, CH_PRESSURE = 0xA0, 0xD0
+-- the vport the stand-in takes. Not the first free one, as norns would give
+-- it: the harnesses play their keyboards on the first ports.
 local EX_VPORT = 3
+local LED_BYTES = 4                    -- r, g, b, effect
+local FAULTS_KEPT = 8                  -- the mirror stops adding after these
 
 function M.exquis(name)
-  local dev = { name = name or "Exquis MIDI 1" }
-  local X = { device = dev, sent = {}, bad = {}, frames = 0, by_pad = 0 }
+  local P = proto()
+  local dev = { name = name or ("E" .. P.name:sub(2) .. " MIDI 1") }
+  local X = { device = dev, sent = {}, bad = {}, frames = 0, by_pad = 0, proto = P }
   local last_mode
+  -- a frame is the head, a kind, a body and the end; the two kinds the driver sends
+  local HEAD, KIND_AT = #P.setup - 1, #P.setup
+  local SETUP, LED = P.setup[KIND_AT], P.led[KIND_AT]
+  local BODY = KIND_AT + 1               -- a setup's mask, an LED frame's first id
+  local MODE = {}
+  for mode, mask in pairs(P.zones) do MODE[mask] = mode end
+  local LAST_PAD = P.pads - 1
+  -- an LED frame's count of LEDs, and where LED number i (from 0) starts in it
+  local function led_count(m) return (#m - BODY - 1) / LED_BYTES end
+  local function led_at(i) return BODY + 1 + i * LED_BYTES end
 
   function X.hex(m)
     local t = {}
@@ -646,30 +685,36 @@ function M.exquis(name)
       if math.type(b) ~= "integer" or b < 0 or b > 255 then
         return fault("byte " .. i .. " is not a byte", {})
       end
-      if i > 1 and i < #copy and b > 127 then return fault("data byte " .. i .. " is over 127", copy) end
+      if i > 1 and i < #copy and b > MIDI_MAX then
+        return fault("data byte " .. i .. " is over " .. MIDI_MAX, copy)
+      end
     end
-    for i = 1, #EX_HEAD do
-      if copy[i] ~= EX_HEAD[i] then return fault("not a Developer Mode frame", copy) end
+    for i = 1, HEAD do
+      if copy[i] ~= P.setup[i] then return fault("not a Developer Mode frame", copy) end
     end
-    if copy[#copy] ~= 0xF7 then return fault("no F7 at the end", copy) end
-    local kind = copy[6]
-    if kind == 0x00 then
-      if #copy ~= 8 or not EX_MASKS[copy[7]] then return fault("a setup frame the driver has no name for", copy) end
+    if copy[#copy] ~= P.eox then return fault("no end of SysEx at the end", copy) end
+    local kind = copy[KIND_AT]
+    if kind == SETUP then
+      if #copy ~= BODY + 1 or not MODE[copy[BODY]] then
+        return fault("a setup frame the driver has no name for", copy)
+      end
       local first = last_mode == nil
-      last_mode = EX_MASKS[copy[7]]
+      last_mode = MODE[copy[BODY]]
       forget_leds()
       if first then
         X.first = last_mode
         if X.on_first then X.on_first() end
       end
-    elseif kind == 0x04 then
-      local count = (#copy - 8) / 4
-      local lo = copy[7]
+    elseif kind == LED then
+      local count = led_count(copy)
+      local lo = copy[BODY]
       if count < 1 or count ~= math.floor(count) then return fault("an LED frame that is not whole", copy) end
       local hi = lo + count - 1
       if last_mode ~= "pads" and last_mode ~= "keys" then fault("an LED frame outside Developer Mode", copy) end
-      if lo <= 60 and last_mode ~= "pads" then fault("a pad LED written while the pads are the Exquis's own", copy) end
-      if hi > 113 or (lo <= 60 and hi > 60) or (lo > 60 and lo < 100) then
+      if lo <= LAST_PAD and last_mode ~= "pads" then
+        fault("a pad LED written while the pads are the Exquis's own", copy)
+      end
+      if hi > P.lit_hi or (lo <= LAST_PAD and hi > LAST_PAD) or (lo > LAST_PAD and lo < P.lit_lo) then
         fault("an LED frame that leaves the controls (" .. lo .. " to " .. hi .. ")", copy)
       end
       keep_leds(copy)
@@ -688,18 +733,25 @@ function M.exquis(name)
   -- lit cell is a lit one, and two cells that look the same on the grid look
   -- the same here. Skipped until the Exquis has been painted whole since its
   -- last setup frame.
-  local CELL = {}                      -- control id -> grid cell
-  for id = 0, 60 do
-    local k, rem = id // 11, id % 11
-    local row, col = 2 * k, rem
-    if rem >= 6 then row, col = 2 * k + 1, rem - 6 end
-    if row == 0 then CELL[id] = 8 + col + 1
-    else
-      local x = 2 * col + (row % 2 == 1 and 2 or 1)
-      if x <= 8 then CELL[id] = (({ 6, 5, 4, 3, 1 })[(row + 1) // 2] - 1) * 8 + x end
+  local GRID_W = 8
+  local CELL = {}                      -- pad id -> grid cell (y-1)*8+x
+  X.pad_of, X.btn_of = {}, {}          -- grid cell -> its pad, or its button
+  for id = 0, LAST_PAD do
+    local x, y = P.cell(id)
+    if x then
+      CELL[id] = (y - 1) * GRID_W + x
+      X.pad_of[CELL[id]] = id
     end
   end
-  local BTN = { [102] = 9, [103] = 10, [104] = 15, [105] = 16 }
+  function X.cell_at(x, y) return (y - 1) * GRID_W + x end
+  -- the pad that carries grid cell x, y (an error when none does)
+  function X.pad_at(x, y)
+    return assert(X.pad_of[X.cell_at(x, y)], "no pad carries cell " .. x .. "," .. y)
+  end
+  local BTN = P.btn_cell
+  for id, c in pairs(BTN) do
+    if not X.pad_of[c] then X.btn_of[c] = id end
+  end
   X.cell_of = CELL
   local lit = {}                       -- control id -> r * 65536 + g * 256 + b
   local pads_whole, btns_whole = false, false
@@ -712,18 +764,18 @@ function M.exquis(name)
       local want, got = shown[c], lit[id]
       if not want or not got then return end
       local dark = want:sub(1, 2) == "0/"
-      if dark ~= (got == 0) and #X.bad < 8 then
+      if dark ~= (got == 0) and #X.bad < FAULTS_KEPT then
         fault(string.format("control %d shows %06X where the grid's cell %d,%d is %s",
-          id, got, (c - 1) % 8 + 1, (c - 1) // 8 + 1, want))
+          id, got, (c - 1) % GRID_W + 1, (c - 1) // GRID_W + 1, want))
       end
-      if same[want] and same[want] ~= got and #X.bad < 8 then
+      if same[want] and same[want] ~= got and #X.bad < FAULTS_KEPT then
         fault(string.format("control %d shows %06X, another %06X, for the same grid look %s",
           id, got, same[want], want))
       end
       same[want] = got
     end
     if last_mode == "pads" and pads_whole then
-      for id = 0, 60 do if CELL[id] then hold(id, CELL[id]) end end
+      for id = 0, LAST_PAD do if CELL[id] then hold(id, CELL[id]) end end
     end
     if btns_whole then
       for id, c in pairs(BTN) do hold(id, c) end
@@ -731,13 +783,16 @@ function M.exquis(name)
     X.mirrors = X.mirrors + 1
   end
   function keep_leds(m)
-    local lo, count = m[7], (#m - 8) // 4
+    local lo, count = m[BODY], led_count(m) // 1
+    local hi = lo + count - 1
     for i = 0, count - 1 do
-      local o = 8 + i * 4
+      local o = led_at(i)
       lit[lo + i] = m[o] * 65536 + m[o + 1] * 256 + m[o + 2]
     end
-    if lo == 0 and count == 61 then pads_whole = true end
-    if lo <= 102 and lo + count - 1 >= 105 then btns_whole = true end
+    if lo == 0 and count == P.pads then pads_whole = true end
+    local all = true
+    for id in pairs(BTN) do if id < lo or id > hi then all = false end end
+    if all then btns_whole = true end
     X.painted_by = X.grid_frame or 0
   end
   function forget_leds()
@@ -748,11 +803,22 @@ function M.exquis(name)
   function X.led(id)
     for i = #X.sent, 1, -1 do
       local m = X.sent[i]
-      if m[6] == 0x04 and m[7] <= id and id <= m[7] + (#m - 8) / 4 - 1 then
-        local o = 8 + (id - m[7]) * 4
+      if m[KIND_AT] == LED and m[BODY] <= id and id <= m[BODY] + led_count(m) - 1 then
+        local o = led_at(id - m[BODY])
         return m[o], m[o + 1], m[o + 2]
       end
     end
+  end
+  -- whether frame `m` is an LED frame that paints every pad at once
+  function X.paints_all(m)
+    return m[KIND_AT] == LED and m[BODY] == 0 and led_count(m) == P.pads
+  end
+  -- the setup frame for a mode ("pads", "keys", "off"), as the hex of X.hex
+  function X.setup_hex(mode)
+    local m = {}
+    for i = 1, KIND_AT do m[i] = P.setup[i] end
+    m[BODY], m[BODY + 1] = P.zones[mode], P.eox
+    return X.hex(m)
   end
 
   -- norns hands a device's bytes to the device's handler AND to its vport's
@@ -761,11 +827,28 @@ function M.exquis(name)
   function X.raw(bytes)
     if X.listed then _norns.midi.event(dev.id, bytes) end
   end
-  function X.pad(id, down)
-    X.raw(down and { 0x9F, id, 127 } or { 0x8F, id, 0 })
+  local CH = P.ch - 1                  -- the channel, as a status byte's low half
+  -- the bytes of a pad's edge and of a control's value, and their sending
+  function X.msg_pad(id, down)
+    return down and { NOTE_ON + CH, id, MIDI_MAX } or { NOTE_OFF + CH, id, 0 }
   end
-  function X.cc(id, val) X.raw({ 0xBF, id, val }) end
-  function X.push(n) X.cc(113 + n, 127); X.cc(113 + n, 0) end
+  function X.msg_cc(id, val) return { CC + CH, id, val } end
+  function X.pad(id, down) X.raw(X.msg_pad(id, down)) end
+  function X.cc(id, val) X.raw(X.msg_cc(id, val)) end
+  -- the Exquis as its own keyboard (KEYS): a note, a release, pressure on a
+  -- channel (MPE) or on a key. `v` is 0 to 1.
+  local function data(v) return math.floor(v * MIDI_MAX + 0.5) end
+  function X.note(ch, note, v) X.raw({ NOTE_ON + ch - 1, note, data(v) }) end
+  function X.note_off(ch, note) X.raw({ NOTE_OFF + ch - 1, note, 0 }) end
+  function X.pressure(ch, v) X.raw({ CH_PRESSURE + ch - 1, data(v) }) end
+  function X.key_pressure(ch, note, v) X.raw({ KEY_PRESSURE + ch - 1, note, data(v) }) end
+  X.MAX = MIDI_MAX
+  -- a button, or an encoder's push: one edge, or down and up
+  function X.btn(id, down) X.cc(id, down and MIDI_MAX or 0) end
+  function X.press(id) X.btn(id, true); X.btn(id, false) end
+  function X.push(n) X.press(P.push + n - 1) end
+  -- encoder n by `ticks` (one message, as one detent or a fast turn sends)
+  function X.turn(n, ticks) X.cc(P.enc + n - 1, P.enc_mid + ticks) end
   -- a played note or its pressure, as the Exquis's own keyboard sends it
   -- (KEYS). The same road as every other message.
   X.play = X.raw
@@ -773,8 +856,12 @@ function M.exquis(name)
   -- `quiet`: listed without the callback, as a device that was there at boot
   function X.plug(quiet)
     X.listed = true
-    midi.devices[100] = dev
-    dev.id, dev.port = 100, EX_VPORT
+    if not dev.id then                 -- the first id that no device holds
+      dev.id = 1
+      while midi.devices[dev.id] do dev.id = dev.id + 1 end
+    end
+    midi.devices[dev.id] = dev
+    dev.port = EX_VPORT
     midi.vports[EX_VPORT].device, midi.vports[EX_VPORT].name = dev, dev.name
     if not quiet and midi.add then midi.add(dev) end
   end
@@ -782,7 +869,7 @@ function M.exquis(name)
   function X.unplug()
     if midi.remove then midi.remove(dev) end
     X.listed = false
-    midi.devices[100] = nil
+    midi.devices[dev.id] = nil
     midi.vports[EX_VPORT].device, midi.vports[EX_VPORT].name = nil, "none"
   end
 

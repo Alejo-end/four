@@ -168,6 +168,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 61st: Phase E's sheets (doc/walkthrough.md) and test/device/session.py; rows 19.12 to 19.34 again on the current build (documents, test tools) | yes: the tool ran, the rows hold | no |
 | 62nd: the review's fixes: AUTOSAMPLE records IN, an overdub across the seam, the 60 s cap from the first move, DRY and the other throws, typed OSC values, the lock at a focus change, the bridge's Origin check (Lua, visuals, test tools) | deployed 2026-11-20 | no |
 | 63rd: every harness runs with an Exquis: a stand-in in the offscreen norns, three more runs each way in check.lua, stage 20 of the gate, test/device/exquis.py (test tools, documents) | not run there: no Exquis yet | |
+| 64th: the Exquis's numbers are written once: the driver names them and hands them out as `M.EX`, and the stand-in, the tests and the device tools read them (Lua, test tools) | no: deploy and reload before stage 20, whose tools need `grid.EX` | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -574,6 +575,12 @@ Each line was learned the hard way; the change log has the story.
   offscreen norns does with a message is norns's own code (`Midi.to_msg` copied, the
   road of `_norns.midi.event`): when a stub stands for a platform function, read the
   platform's source and copy it, not a memory of it.
+- A number is written once. The Exquis's ids, masks, channel and counts are named in
+  the driver and handed out as `M.EX` (lib/mgrid.lua). The stand-in loads that table,
+  the device tools ask the norns for it (`Norns.exquis_proto`), and test_exquis.lua pins
+  it to the specification in ONE section. A test names a pad by the grid cell it carries
+  (`X.pad_at(2, 1)`), not by its id. A second copy of a number is a second thing to
+  keep right, and a tool with its own copy tests its copy, not the build.
 - Lua that a device tool sends to the REPL lives in one table in test/device/norns.py
   (`EXQUIS_LUA`), and test_exquis.lua runs it in the offscreen script. A REPL line is
   one line: no comment in it. The script logs to the same REPL, so a tool's answer is

@@ -1890,24 +1890,36 @@ end
 --   encoder 4        the track (as K1+E1), its push PADS or KEYS
 -- Settings, Sound and the slider stay the Exquis's own.
 
+-- Every number of the protocol and of the layout is named here, once, and
+-- handed out as M.EX below: the stand-in of test/uisim/env.lua and the device
+-- tools (test/device) read them from there and hold none of their own.
+local EX_NAME = "exquis"                 -- in the device's name, any case
+local EX_CH = 16                         -- the channel of a zone taken over
+local EX_PADS = 61                       -- pad ids 0 .. EX_PADS - 1
+local EX_EOX = 0xF7
 local EX_SETUP = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x00 }   -- then the zone mask
 local EX_LED   = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04 }   -- then start id, (r g b fx)...
 -- the Exquis asks for a repaint with this (after its settings menu closes)
 local EX_REFRESH = { 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x03 }
 -- zone masks: pads 01, encoders 02, Up/Down 08, the other buttons 20
-local EX_ZONES_PADS, EX_ZONES_KEYS = 0x2B, 0x2A
+local EX_ZONES_PADS, EX_ZONES_KEYS, EX_ZONES_OFF = 0x2B, 0x2A, 0x00
 local EX_ROW_Y = { 6, 5, 4, 3, 1 }       -- pad row pair, from the bottom -> grid row
 -- buttons that are cells of the state strip, as (y-1)*8+x
-local EX_BTN_CELL = { [102] = 9, [103] = 10, [104] = 15, [105] = 16 }
+local EX_REC, EX_LOOP, EX_CLIPS, EX_PLAY = 102, 103, 104, 105
+local EX_BTN_CELL = { [EX_REC] = 9, [EX_LOOP] = 10, [EX_CLIPS] = 15, [EX_PLAY] = 16 }
 local EX_DOWN, EX_UP, EX_UNDO, EX_REDO = 106, 107, 108, 109
-local EX_ENC, EX_PUSH = 110, 114         -- four encoders, then their four pushes
 -- encoder ticks for one step. E1 and the track pick step through short lists.
 local EX_ENC_DIV = { 3, 1, 1, 3 }
+local EX_ENC = 110                       -- the encoders, then their pushes
+local EX_PUSH = EX_ENC + #EX_ENC_DIV
+local EX_ENC_MID = 64                    -- an encoder sends this plus its ticks
+-- the controls with a light that the driver writes: the buttons, the encoders
+local EX_LIT_LO, EX_LIT_HI = EX_REC, EX_PUSH - 1
 local EX_NAV_KEY, EX_ENC_KEY = 5, 3      -- the fixed controls: a dim plain light
 
 -- pad id (0 = bottom left .. 60 = top right, row by row) -> grid x, y, or nil
 local function ex_cell(id)
-  if id < 0 or id > 60 then return nil end
+  if id < 0 or id >= EX_PADS then return nil end
   local k, rem = floor(id / 11), id % 11
   local row, col = 2 * k, rem                      -- a row of 6
   if rem >= 6 then row, col = 2 * k + 1, rem - 6 end   -- a row of 5
@@ -1918,17 +1930,29 @@ local function ex_cell(id)
 end
 
 local EX_CELL = {}                        -- pad id -> (y-1)*8+x
-for id = 0, 60 do
+for id = 0, EX_PADS - 1 do
   local x, y = ex_cell(id)
   if x then EX_CELL[id] = (y - 1) * 8 + x end
 end
+
+-- the driver's numbers, for whatever must agree with them
+M.EX = {
+  name = EX_NAME, ch = EX_CH, pads = EX_PADS, eox = EX_EOX,
+  setup = EX_SETUP, led = EX_LED, refresh = EX_REFRESH,
+  zones = { pads = EX_ZONES_PADS, keys = EX_ZONES_KEYS, off = EX_ZONES_OFF },
+  cell = ex_cell, btn_cell = EX_BTN_CELL,
+  rec = EX_REC, loop = EX_LOOP, clips = EX_CLIPS, play = EX_PLAY,
+  down = EX_DOWN, up = EX_UP, undo = EX_UNDO, redo = EX_REDO,
+  enc = EX_ENC, push = EX_PUSH, enc_div = EX_ENC_DIV, enc_mid = EX_ENC_MID,
+  lit_lo = EX_LIT_LO, lit_hi = EX_LIT_HI,
+}
 
 -- `gone`: a device being unplugged, still listed (see lp_find_device)
 local function ex_find_device(gone)
   if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
   for _, dev in pairs(midi.devices) do
     if dev ~= gone and type(dev) == "table" and type(dev.name) == "string"
-        and dev.name:lower():find("exquis", 1, true) then
+        and dev.name:lower():find(EX_NAME, 1, true) then
       return dev
     end
   end
@@ -1957,7 +1981,7 @@ local function ex_make(dev, pads)
   local function setup(mask)
     return pcall(function()
       dev:send({ EX_SETUP[1], EX_SETUP[2], EX_SETUP[3], EX_SETUP[4], EX_SETUP[5],
-                 EX_SETUP[6], mask, 0xF7 })
+                 EX_SETUP[6], mask, EX_EOX })
     end)
   end
   if not setup(ex.surface and EX_ZONES_PADS or EX_ZONES_KEYS) then return nil end
@@ -1975,7 +1999,7 @@ local function ex_make(dev, pads)
   -- what the LED of control `id` shows this frame, as a led key
   local function want(id)
     local c
-    if id <= 60 then c = EX_CELL[id] else c = EX_BTN_CELL[id] end
+    if id < EX_PADS then c = EX_CELL[id] else c = EX_BTN_CELL[id] end
     if c then return buf[c] or 0 end
     if id >= EX_DOWN and id <= EX_REDO then return EX_NAV_KEY end
     if id >= EX_ENC and id < EX_PUSH then return EX_ENC_KEY end
@@ -2001,16 +2025,16 @@ local function ex_make(dev, pads)
       m[n + 4] = 0                         -- no effect
       n = n + 4
     end
-    n = n + 1; m[n] = 0xF7
+    n = n + 1; m[n] = EX_EOX
     for i = #m, n + 1, -1 do m[i] = nil end   -- drop a longer frame's tail
     pcall(send_msg)
   end
   function ex:refresh()
-    if self.surface then push_leds(0, 60) end
-    push_leds(102, 113)
+    if self.surface then push_leds(0, EX_PADS - 1) end
+    push_leds(EX_LIT_LO, EX_LIT_HI)
   end
   function ex:invalidate()
-    for id = 0, 113 do sent[id] = nil end
+    for id = 0, EX_LIT_HI do sent[id] = nil end
   end
   -- end every held cell: after a mode change or an unplug its release never comes
   function ex:drop()
@@ -2026,11 +2050,11 @@ local function ex_make(dev, pads)
     if C.lfo and C.lfo.press_clear then C.lfo.press_clear() end
     self.surface = on
     setup(on and EX_ZONES_PADS or EX_ZONES_KEYS)
-    for id = 0, 60 do sent[id] = nil end
+    for id = 0, EX_PADS - 1 do sent[id] = nil end
   end
   function ex:shutdown()
     self:drop()
-    setup(0x00)                            -- leave Developer Mode
+    setup(EX_ZONES_OFF)                    -- leave Developer Mode
   end
 
   -- a press or a release of a control that is a grid cell. A release goes to
@@ -2061,7 +2085,7 @@ local function ex_make(dev, pads)
       end
     end
     local ok, m = pcall(midi.to_msg, data)
-    if not ok or type(m) ~= "table" or m.ch ~= 16 then return end
+    if not ok or type(m) ~= "table" or m.ch ~= EX_CH then return end
     if m.type == "note_on" or m.type == "note_off" then
       local down = m.type == "note_on" and (m.vel or 0) > 0
       local id = m.note or -1
@@ -2069,13 +2093,13 @@ local function ex_make(dev, pads)
       cell_event(id, ex.surface and EX_CELL[id] or nil, down)
     elseif m.type == "cc" then
       local id, v = m.cc or -1, m.val or 0
-      if id >= EX_ENC and id < EX_ENC + 4 then
+      if id >= EX_ENC and id < EX_PUSH then
         local n = id - EX_ENC + 1
-        local a, div = acc[n] + (v - 64), EX_ENC_DIV[n]
+        local a, div = acc[n] + (v - EX_ENC_MID), EX_ENC_DIV[n]
         local steps = a >= 0 and floor(a / div) or -floor(-a / div)
         acc[n] = a - steps * div
         if steps ~= 0 and ex.turn then ex.turn(n, steps) end
-      elseif id >= EX_PUSH and id < EX_PUSH + 4 then
+      elseif id >= EX_PUSH and id < EX_PUSH + #EX_ENC_DIV then
         if ex.push then ex.push(id - EX_PUSH + 1, v > 0 and 1 or 0) end
       elseif EX_BTN_CELL[id] then
         cell_event(id, EX_BTN_CELL[id], v > 0)

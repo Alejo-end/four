@@ -3411,11 +3411,16 @@ def stage20():
                                   f"The devices: {seen}")
         return
     want = "KEYS" if ex["grid"] else "PADS"
-    PUSH4 = 117
+    # every id and every count is the driver's own, read from the norns
+    p = n.exquis_proto()
+    last_enc = p["encoders"]              # it picks the track, and its push changes the mode
+    first, second = PAGES.split()[:2]     # where Redo, Undo and encoder 1 step
+    scene2 = n.exquis_pad_at(2, 1)        # the scene bank's second pad
+    held = n.exquis_pad_at(1, 6)          # TAKE's beat repeat, a pad that holds
 
     def to_mode(mode):
         if n.exquis()["mode"] != mode:
-            n.exquis_press(PUSH4)
+            n.exquis_push(last_enc)
         return n.exquis()["mode"] == mode
 
     def c201():
@@ -3440,57 +3445,58 @@ def stage20():
         def slot():
             return round(n.get("scene_slot"))
 
-        n.goto("TAKE")
-        n.exquis_press(109)
-        expect("Redo", page(), "VOICE")
-        n.exquis_press(108)
-        expect("Undo", page(), "TAKE")
-        n.exquis_cc(110, 65)
-        n.exquis_cc(110, 65)
-        expect("encoder 1, two ticks", page(), "TAKE")
-        n.exquis_cc(110, 65)
-        expect("the third", page(), "VOICE")
-        n.exquis_cc(110, 61)
-        expect("three back", page(), "TAKE")
-        n.set("scene_slot", 3)
-        n.exquis_press(107)
-        expect("Up", slot(), 4)
-        n.exquis_press(106)
-        expect("Down", slot(), 3)
+        n.goto(first)
+        n.exquis_press(p["redo"])
+        expect("Redo", page(), second)
+        n.exquis_press(p["undo"])
+        expect("Undo", page(), first)
+        ticks = p["enc_div"][0]
+        for _ in range(ticks - 1):
+            n.exquis_turn(1, 1)
+        expect(f"encoder 1, {ticks - 1} of {ticks} ticks", page(), first)
+        n.exquis_turn(1, 1)
+        expect("the last tick", page(), second)
+        n.exquis_turn(1, -ticks)
+        expect("as many back", page(), first)
+        n.set("scene_slot", 1)
+        n.exquis_press(p["up"])
+        expect("Up", slot(), 2)
+        n.exquis_press(p["down"])
+        expect("Down", slot(), 1)
         n.set("track_sel", 1)
-        n.exquis_cc(113, 67)
-        expect("encoder 4", round(n.get("track_sel")), 2)
+        n.exquis_turn(last_enc, p["enc_div"][last_enc - 1])
+        expect(f"encoder {last_enc}", round(n.get("track_sel")), 2)
         n.set("track_sel", 1)
         other = "KEYS" if want == "PADS" else "PADS"
-        n.exquis_press(PUSH4)
-        expect("the push of encoder 4", n.exquis()["mode"], other)
+        n.exquis_push(last_enc)
+        expect(f"the push of encoder {last_enc}", n.exquis()["mode"], other)
         to_mode("PADS")
         n.set("scene_slot", 1)
-        n.exquis_pad(50, True)
-        n.exquis_pad(50, False)
-        expect("pad 50 in PADS, scene", slot(), 2)
+        n.exquis_pad(scene2, True)
+        n.exquis_pad(scene2, False)
+        expect(f"pad {scene2} in PADS, scene", slot(), 2)
         to_mode("KEYS")
         n.set("scene_slot", 1)
-        n.exquis_pad(50, True)
-        n.exquis_pad(50, False)
-        expect("pad 50 in KEYS, scene", slot(), 1)
+        n.exquis_pad(scene2, True)
+        n.exquis_pad(scene2, False)
+        expect(f"pad {scene2} in KEYS, scene", slot(), 1)
         to_mode(want)
         return verdict(good[0], "; ".join(notes))
 
     def c203():
-        n.goto("TAKE")
+        n.goto(first)
         to_mode("PADS")
         n.set("beat_repeat", 0)
-        n.exquis_pad(11, True)
-        held = n.get("beat_repeat")
-        n.exquis_press(PUSH4)
+        n.exquis_pad(held, True)
+        on = n.get("beat_repeat")
+        n.exquis_push(last_enc)
         after = n.get("beat_repeat")
-        n.exquis_pad(11, False)
+        n.exquis_pad(held, False)
         late = n.get("beat_repeat")
         to_mode(want)
         n.set("beat_repeat", 0)
-        return verdict(held == 1 and after == 0 and late == 0,
-                       f"beat_repeat {held:.0f} with pad 11 held, {after:.0f} after the change to KEYS under it, "
+        return verdict(on == 1 and after == 0 and late == 0,
+                       f"beat_repeat {on:.0f} with pad {held} held, {after:.0f} after the change to KEYS under it, "
                        f"{late:.0f} after the late release")
 
     for cid, fn in (("20.1", c201), ("20.2", c202), ("20.3", c203)):

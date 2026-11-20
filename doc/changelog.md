@@ -5297,3 +5297,29 @@ for it. No Exquis has been on the norns yet, so nothing here ran on one.
   on channel 16, and they reach the port's handler too. With `fader_ch` 16 and
   `fader_cc` between 95 and 117 an encoder would also move a mixer fader, and a PMAP
   entry on those CCs would follow them. Neither is the default.
+
+four, sixty-fourth change: **the Exquis's numbers are written once (Lua and test tools;
+no engine change, the count stays 198)**. The user asked: avoid hardcoded values. The
+sixty-third change had the Exquis's ids, masks and counts in five places: the driver,
+the stand-in, test_exquis.lua, gate.py and exquis.py.
+- lib/mgrid.lua names every number of the protocol and of the layout once (the name,
+  channel 16, 61 pads, the frames' heads, the zone masks, each button, the encoders, 64,
+  the lit range) and hands them out as `M.EX`, with the fold. The driver's own literals
+  (60, 113, 16, 0xF7, `+ 4`) are those names now. It behaves as before: the renders are
+  the same byte for byte, and every harness passes.
+- The stand-in (test/uisim/env.lua) holds none: it loads the driver's table from
+  lib/mgrid.lua in a world of its own. It takes the first device id that is free.
+- test/test_exquis.lua (120 assertions) pins the table to the specification in one
+  section, the only place where those numbers are written out. After it, the harness
+  names a pad by the grid cell it carries, a button by its name, an encoder by its
+  place, a frame by its mode.
+- The device tools ask the driver on the norns: a `proto` snippet prints `grid.EX`, and
+  `Norns.exquis_proto()` parses it. gate.py stage 20 and exquis.py use it for every id,
+  the channel, the pad count and the encoders' ticks; the pages come from gate.py's
+  `PAGES`. exquis.py's timings have names. So the tools test the build that is
+  deployed: an older script without `grid.EX` is refused with words.
+- test/check.lua finds the harnesses that take an Exquis by reading them (those that
+  load the script in the offscreen norns), not from a second list.
+- Left as written, on purpose: MIDI's own status bytes (named constants in each file),
+  the grid cells that a test presses (four's layout), the gate's row ids, and the
+  numbers in doc/device-gate.md's prose where a reader needs them.

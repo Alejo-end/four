@@ -39,24 +39,52 @@ CTX_HELPER = (
     "__ctx = __find_ctx()"
 )
 
-# The Exquis (lib/mgrid.lua's Developer Mode driver). Each entry is Lua for the
+# MIDI's own numbers: the status bytes and the largest data byte
+NOTE_ON, NOTE_OFF, CONTROL, MIDI_MAX = 0x90, 0x80, 0xB0, 127
+
+# The Exquis (lib/mgrid.lua's Developer Mode driver). No number of its protocol
+# or of four's layout is written in the device tools: they ask the driver that
+# runs on the norns for its own table (`proto`, M.EX in lib/mgrid.lua), so a
+# tool cannot disagree with the build it tests. Each entry is Lua for the
 # matron REPL, with no comment in it (a REPL line is one line). test_exquis.lua
 # lifts these out of this file and runs them in the offscreen script, so a
 # typing fault here is found before a device is. Each one prints its answer
 # behind the mark `@exq `: the script logs to the same REPL (a push of encoder 4
 # prints a line), and an answer must not be read out of a log line.
 EXQUIS_LUA = {
+    # the driver's numbers, as `key=value` joined by `;`. A list is joined by
+    # `,`. `cells` is every pad that carries a grid cell, as pad:x.y.
+    "proto": """
+local E = __ctx.grid.EX
+local out = {}
+if E then
+  for k, v in pairs(E) do
+    if type(v) == "number" or type(v) == "string" then out[#out + 1] = k .. "=" .. v end
+  end
+  for mode, mask in pairs(E.zones) do out[#out + 1] = "zone_" .. mode .. "=" .. mask end
+  out[#out + 1] = "enc_div=" .. table.concat(E.enc_div, ",")
+  local cells = {}
+  for id = 0, E.pads - 1 do
+    local x, y = E.cell(id)
+    if x then cells[#cells + 1] = id .. ":" .. x .. "." .. y end
+  end
+  out[#out + 1] = "cells=" .. table.concat(cells, ",")
+  table.sort(out)
+end
+print("@exq " .. table.concat(out, ";"))
+""",
     # every MIDI device's name, then what four made of the Exquis
     "status": """
 local names, found = {}, nil
+local g = __ctx.grid
+local want = g.EX and g.EX.name
 for _, d in pairs(midi.devices) do
   if type(d) == "table" and type(d.name) == "string" then
     names[#names + 1] = d.name
-    if d.name:lower():find("exquis", 1, true) then found = d.name end
+    if want and d.name:lower():find(want, 1, true) then found = d.name end
   end
 end
 table.sort(names)
-local g = __ctx.grid
 local ex = g.ex
 print("@exq " .. table.concat(names, ";") .. "|" .. tostring(found) .. "|"
   .. (ex and (ex.surface and "PADS" or "KEYS") or "none") .. "|"
@@ -107,15 +135,19 @@ local ex = __ctx.grid.ex
 if ex then ex:set_surface(WANT) end
 print("@exq " .. (ex and (ex.surface and "PADS" or "KEYS") or "none"))
 """,
-    # one pad white and the one before it dark, past the driver: ID is the pad
+    # one pad lit and the one before it dark, past the driver: ID is the pad,
+    # LEVEL its red, green and blue
     "sweep": """
-local ex = __ctx.grid.ex
+local g = __ctx.grid
+local ex, E = g.ex, g.EX
 if ex then
-  if ID > 0 then
-    ex.device:send({ 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04, ID - 1, 0, 0, 0, 0, 127, 127, 127, 0, 0xF7 })
-  else
-    ex.device:send({ 0xF0, 0x00, 0x21, 0x7E, 0x7F, 0x04, 0, 127, 127, 127, 0, 0xF7 })
-  end
+  local m = {}
+  for i = 1, #E.led do m[i] = E.led[i] end
+  local function put(r) for _, v in ipairs({ r, r, r, 0 }) do m[#m + 1] = v end end
+  if ID > 0 then m[#m + 1] = ID - 1; put(0) else m[#m + 1] = ID end
+  put(LEVEL)
+  m[#m + 1] = E.eox
+  ex.device:send(m)
 end
 print("@exq " .. tostring(ex ~= nil))
 """,
@@ -312,6 +344,7 @@ class Norns:
         take (None without one). mode: PADS or KEYS (None when the driver holds
         none). grid: whether a grid with a device is attached.
         """
+        self.exquis_proto()     # an older script has no table: say so, not "no Exquis"
         names, found, mode, grid = self.exquis_ask("status").rsplit("|", 3)
         return {"devices": [x for x in names.split(";") if x],
                 "name": None if found == "nil" else found,
@@ -325,15 +358,58 @@ class Norns:
         rows = ", ".join("{" + ", ".join(str(int(b)) for b in m) + "}" for m in msgs)
         return int(self.exquis_ask("bytes", f"local BYTES = {{{rows}}} "))
 
+    def exquis_proto(self):
+        """The numbers of the driver that runs on the norns (M.EX), once.
+
+        Numbers by name (`redo`, `push`, `ch`...), `enc_div` as a list, `zones`
+        as {mode: mask}, and `pad_of`: {(x, y) of a grid cell: pad id}.
+        """
+        if getattr(self, "_exq_proto", None):
+            return self._exq_proto
+        raw = self.exquis_ask("proto")
+        if not raw:
+            raise RuntimeError("the script on the norns hands out no Exquis table (grid.EX): deploy this build")
+        p, zones = {}, {}
+        for item in raw.split(";"):
+            key, _, val = item.partition("=")
+            if key == "cells":
+                p["pad_of"] = {tuple(int(v) for v in cell.split(".")): int(pad)
+                               for pad, cell in (pair.split(":") for pair in val.split(",") if pair)}
+            elif key == "enc_div":
+                p[key] = [int(v) for v in val.split(",")]
+            elif key.startswith("zone_"):
+                zones[key[5:]] = int(val)
+            else:
+                p[key] = int(val) if val.lstrip("-").isdigit() else val
+        p["zones"] = zones
+        p["encoders"] = len(p["enc_div"])
+        self._exq_proto = p
+        return p
+
+    def exquis_pad_at(self, x, y):
+        """The pad that carries grid cell x, y."""
+        return self.exquis_proto()["pad_of"][(x, y)]
+
     def exquis_pad(self, pad, down):
-        return self.exquis_bytes((0x9F, pad, 127) if down else (0x8F, pad, 0))
+        ch = self.exquis_proto()["ch"] - 1
+        return self.exquis_bytes((NOTE_ON + ch, pad, MIDI_MAX) if down else (NOTE_OFF + ch, pad, 0))
 
     def exquis_cc(self, cc, val):
-        return self.exquis_bytes((0xBF, cc, val))
+        return self.exquis_bytes((CONTROL + self.exquis_proto()["ch"] - 1, cc, val))
 
     def exquis_press(self, cc):
         """A button or an encoder's push: down, then up."""
-        return self.exquis_bytes((0xBF, cc, 127), (0xBF, cc, 0))
+        ch = self.exquis_proto()["ch"] - 1
+        return self.exquis_bytes((CONTROL + ch, cc, MIDI_MAX), (CONTROL + ch, cc, 0))
+
+    def exquis_turn(self, encoder, ticks):
+        """Encoder 1.. by `ticks`, in one message."""
+        p = self.exquis_proto()
+        return self.exquis_cc(p["enc"] + encoder - 1, p["enc_mid"] + ticks)
+
+    def exquis_push(self, encoder):
+        """The push of encoder 1.., down and up."""
+        return self.exquis_press(self.exquis_proto()["push"] + encoder - 1)
 
     def exquis_surface(self, pads):
         """Set the driver's mode without the push. Returns the mode."""
