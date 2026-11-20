@@ -457,9 +457,10 @@ of the whole JACK cycle, not the engine's. The budget is 60% of that thread.
 
 The Exquis driver in lib/mgrid.lua (the forty-seventh change) is written from the maker's
 Developer Mode specification and has never run on an Exquis. Plug one into the norns and
-load four. `python3 test/device/gate.py 20` runs 20.1 to 20.3: it hands the Exquis's bytes
-to the driver's own handler on the device, so norns's `midi.to_msg` and the real params
-are in the path, and no hand is needed. The other rows are for hands and eyes, and
+load four. `python3 test/device/gate.py 20` runs 20.1 to 20.3: it sends the Exquis's bytes
+down norns's own road for a device's message (`_norns.midi.event`: the driver's handler,
+the port's handler, the menu's CC map), so norns's `midi.to_msg` and the real params are
+in the path, and no hand is needed. The other rows are for hands and eyes, and
 `python3 test/device/exquis.py` helps with them (`status`, `watch`, `sweep`). Without an
 Exquis every row reads `you`, with the names of the MIDI devices that the norns lists.
 

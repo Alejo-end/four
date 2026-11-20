@@ -62,13 +62,13 @@ print("@exq " .. table.concat(names, ";") .. "|" .. tostring(found) .. "|"
   .. (ex and (ex.surface and "PADS" or "KEYS") or "none") .. "|"
   .. tostring(g.gg ~= nil and g.gg.device ~= nil))
 """,
-    # bytes to the driver's handler, as the port delivers them: BYTES is a list
-    # of byte tables
+    # bytes from the Exquis, down norns's own road for a device's message (its
+    # handler, its vport's, the menu's CC map): BYTES is a list of byte tables
     "bytes": """
 local ex = __ctx.grid.ex
 local n = 0
-if ex and ex.device.event then
-  for _, m in ipairs(BYTES) do ex.device.event(m); n = n + 1 end
+if ex and ex.device.event and ex.device.id then
+  for _, m in ipairs(BYTES) do _norns.midi.event(ex.device.id, m); n = n + 1 end
 end
 print("@exq " .. n)
 """,
@@ -319,7 +319,7 @@ class Norns:
                 "grid": grid == "true"}
 
     def exquis_bytes(self, *msgs):
-        """Hand raw MIDI messages to the driver's handler, as its port would.
+        """Send raw MIDI messages as if the Exquis had: norns's own dispatch.
 
         Returns how many were delivered (0 when four holds no Exquis)."""
         rows = ", ".join("{" + ", ".join(str(int(b)) for b in m) + "}" for m in msgs)

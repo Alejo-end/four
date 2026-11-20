@@ -570,7 +570,10 @@ Each line was learned the hard way; the change log has the story.
   motion, a latched peek).
 - The Exquis stand-in and the driver come from one reading of one specification. The
   stand-in proves that the driver is consistent (frames, the mirror of the grid, the
-  fold), not that an Exquis agrees. Only stage 20 on the device can say that.
+  fold), not that an Exquis agrees. Only stage 20 on the device can say that. What the
+  offscreen norns does with a message is norns's own code (`Midi.to_msg` copied, the
+  road of `_norns.midi.event`): when a stub stands for a platform function, read the
+  platform's source and copy it, not a memory of it.
 - Lua that a device tool sends to the REPL lives in one table in test/device/norns.py
   (`EXQUIS_LUA`), and test_exquis.lua runs it in the offscreen script. A REPL line is
   one line: no comment in it. The script logs to the same REPL, so a tool's answer is

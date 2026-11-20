@@ -5284,3 +5284,16 @@ for it. No Exquis has been on the norns yet, so nothing here ran on one.
   norns's own: it is written from memory of it, says so, and now turns a note-on of
   velocity 0 into a note-off and names the clock messages. The renders are the same,
   byte for byte, as before the sixty-third change.
+- The review went on with norns's own source (monome/norns, lua/core/midi.lua, commit
+  227aa04). The offscreen `midi.to_msg` is now that file's `Midi.to_msg`, copied
+  unchanged; like the real one it throws on a message cut short. The stand-in sends a
+  message down norns's road, `_norns.midi.event`: the device's handler, then the port's.
+  Before, a pad reached the driver alone, so the suite never asked whether a pad pressed
+  in PADS also played a note. It does not, in any harness. The device tools' `bytes`
+  takes the same road on the norns. Read there too, and true of the driver: `Midi.add`
+  runs after the device is listed and has its port, `Midi.remove` before it is unlisted,
+  and a script's `cleanup` runs before norns clears the handlers.
+- Known and left: in Developer Mode the Exquis's buttons and encoders are CCs 102 to 117
+  on channel 16, and they reach the port's handler too. With `fader_ch` 16 and
+  `fader_cc` between 95 and 117 an encoder would also move a mixer fader, and a PMAP
+  entry on those CCs would follow them. Neither is the default.

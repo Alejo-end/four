@@ -210,32 +210,126 @@ function M.install(opts)
   midi = { vports = {}, devices = {} }
   for i = 1, 16 do midi.vports[i] = { name = "none", device = nil } end
   function midi.connect(i) return midi.vports[i or 1] end
-  -- the parse of raw bytes, after norns's lua/core/midi.lua, so a harness can
-  -- feed a handler what a port delivers. WRITTEN FROM MEMORY of that file, not
-  -- copied from a norns: a note-on of velocity 0 is a note-off there. On the
-  -- device the real one is in the path (gate stage 20). A harness that hands
-  -- over a message it built itself (a table with a type) gets it back.
-  function midi.to_msg(d)
-    if type(d) ~= "table" then return { type = "none" } end
-    if d.type then return d end
-    local st = d[1]
-    if type(st) ~= "number" then return { type = "none" } end
-    local hi, ch = st & 0xF0, (st & 0x0F) + 1
-    if hi == 0x90 then
-      return { type = (d[3] or 0) > 0 and "note_on" or "note_off", note = d[2], vel = d[3], ch = ch }
+  -- norns's own parse of raw bytes: the body of Midi.to_msg, copied unchanged
+  -- from monome/norns lua/core/midi.lua (commit 227aa04, 2026-10-04, GPL v3),
+  -- so a harness can feed a handler what a port delivers. Like the real one it
+  -- THROWS on a message cut short (a nil byte in a comparison). The one line
+  -- added: a harness that hands over a message it built itself (a table with a
+  -- type) gets it back.
+  function midi.to_msg(data)
+    if type(data) == "table" and data.type then return data end
+    local msg = {}
+    -- note on
+    if data[1] & 0xf0 == 0x90 then
+      msg = {
+        note = data[2],
+        vel = data[3],
+        ch = data[1] - 0x90 + 1
+      }
+      if data[3] > 0 then
+        msg.type = "note_on"
+      elseif data[3] == 0 then -- if velocity is zero then send note off
+        msg.type = "note_off"
+      end
+    -- note off
+    elseif data[1] & 0xf0 == 0x80 then
+      msg = {
+        type = "note_off",
+        note = data[2],
+        vel = data[3],
+        ch = data[1] - 0x80 + 1
+      }
+    -- cc
+    elseif data[1] & 0xf0 == 0xb0 then
+      msg = {
+        type = "cc",
+        cc = data[2],
+        val = data[3],
+        ch = data[1] - 0xb0 + 1
+      }
+    -- pitchbend
+    elseif data[1] & 0xf0 == 0xe0 then
+      msg = {
+        type = "pitchbend",
+        val = data[2] + (data[3] << 7),
+        ch = data[1] - 0xe0 + 1
+      }
+    -- key pressure
+    elseif data[1] & 0xf0 == 0xa0 then
+      msg = {
+        type = "key_pressure",
+        note = data[2],
+        val = data[3],
+        ch = data[1] - 0xa0 + 1
+      }
+    -- channel pressure
+    elseif data[1] & 0xf0 == 0xd0 then
+      msg = {
+        type = "channel_pressure",
+        val = data[2],
+        ch = data[1] - 0xd0 + 1
+      }
+    -- program change
+    elseif data[1] & 0xf0 == 0xc0 then
+      msg = {
+        type = "program_change",
+        val = data[2],
+        ch = data[1] - 0xc0 + 1
+      }
+    -- start
+    elseif data[1] == 0xfa then
+      msg.type = "start"
+    -- stop
+    elseif data[1] == 0xfc then
+       msg.type = "stop"
+    -- continue
+    elseif data[1] == 0xfb then
+      msg.type = "continue"
+    -- clock
+    elseif data[1] == 0xf8 then
+      msg.type = "clock"
+    -- song position pointer
+    elseif data[1] == 0xf2 then
+      msg = {
+          type = "song_position",
+          lsb = data[2],
+          msb = data[3]
+      }
+    -- song select
+    elseif data[1] == 0xf3 then
+      msg = {
+          type = "song_select",
+          val = data[2]
+      }
+    -- active sensing (should probably ignore)
+    elseif data[1] == 0xfe then
+        -- do nothing
+    -- system exclusive
+    elseif data[1] == 0xf0 then
+      msg = {
+        type = "sysex",
+        raw = data,
+      }
+    -- everything else
+    else
+      msg = {
+        type = "other",
+        raw = data,
+      }
     end
-    if hi == 0x80 then return { type = "note_off", note = d[2], vel = d[3], ch = ch } end
-    if hi == 0xB0 then return { type = "cc", cc = d[2], val = d[3], ch = ch } end
-    if hi == 0xE0 then return { type = "pitchbend", val = d[2] + (d[3] << 7), ch = ch } end
-    if hi == 0xA0 then return { type = "key_pressure", note = d[2], val = d[3], ch = ch } end
-    if hi == 0xD0 then return { type = "channel_pressure", val = d[2], ch = ch } end
-    if hi == 0xC0 then return { type = "program_change", val = d[2], ch = ch } end
-    if st == 0xF8 then return { type = "clock" } end
-    if st == 0xFA then return { type = "start" } end
-    if st == 0xFB then return { type = "continue" } end
-    if st == 0xFC then return { type = "stop" } end
-    if st == 0xF0 then return { type = "sysex", raw = d } end
-    return { type = "other" }
+    return msg
+  end
+
+  -- norns's road for a message that a device sent (_norns.midi.event in the
+  -- same file): the device's handler, then its vport's. The menu's CC map,
+  -- which the real one feeds last, is not modelled.
+  _norns = rawget(_G, "_norns") or {}
+  _norns.midi = _norns.midi or {}
+  _norns.midi.event = function(id, data)
+    local d = midi.devices[id]
+    if d == nil then error("no entry for midi " .. id) end
+    if d.event ~= nil then d.event(data) end
+    if d.port and midi.vports[d.port].event then midi.vports[d.port].event(data) end
   end
 
   -- ONE grid object, handed back to every connect() and exposed on the handle.
@@ -661,24 +755,26 @@ function M.exquis(name)
     end
   end
 
-  -- norns hands a device's bytes to its handler; with none set they are dropped
-  function X.raw(bytes) if dev.event then dev.event(bytes) end end
+  -- norns hands a device's bytes to the device's handler AND to its vport's
+  -- (_norns.midi.event in lua/core/midi.lua), in that order. So a pad's note
+  -- also reaches four's note input, which must know it for a pad.
+  function X.raw(bytes)
+    if X.listed then _norns.midi.event(dev.id, bytes) end
+  end
   function X.pad(id, down)
     X.raw(down and { 0x9F, id, 127 } or { 0x8F, id, 0 })
   end
   function X.cc(id, val) X.raw({ 0xBF, id, val }) end
   function X.push(n) X.cc(113 + n, 127); X.cc(113 + n, 0) end
   -- a played note or its pressure, as the Exquis's own keyboard sends it
-  -- (KEYS): through the vport, where four's note input listens
-  function X.play(bytes)
-    local vp = midi.vports[EX_VPORT]
-    if vp.event then vp.event(bytes) end
-  end
+  -- (KEYS). The same road as every other message.
+  X.play = X.raw
 
   -- `quiet`: listed without the callback, as a device that was there at boot
   function X.plug(quiet)
     X.listed = true
     midi.devices[100] = dev
+    dev.id, dev.port = 100, EX_VPORT
     midi.vports[EX_VPORT].device, midi.vports[EX_VPORT].name = dev, dev.name
     if not quiet and midi.add then midi.add(dev) end
   end

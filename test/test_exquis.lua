@@ -306,10 +306,32 @@ do
   ok(params:get("rec") == 1, "...and they play: the first pad of the bottom row is rec")
   params:set("rec", 0)
   -- a running status or a stray byte must not throw in the handler
-  local fine = pcall(function()
-    X.raw({}); X.raw({ 0xF8 }); X.raw({ 0x9F }); X.raw({ 0xBF, 110 }); X.raw({ 0xF0, 0xF7 })
+  -- what a port can deliver beside the controls: clock, active sensing, an
+  -- empty SysEx, a SysEx in pieces. Down norns's road, to both handlers.
+  local fine, why = pcall(function()
+    X.raw({ 0xF8 }); X.raw({ 0xFE }); X.raw({ 0xF0, 0xF7 })
+    X.raw({ 0xF0, 0x00, 0x21 }); X.raw({ 0x7E, 0x7F, 0x03 }); X.raw({ 0x01, 0xF7 })
   end)
-  ok(fine, "short and stray messages do not throw in the handler")
+  ok(fine, "stray messages throw in neither handler (" .. tostring(why) .. ")")
+  -- a message cut short never comes from a port, and norns's to_msg throws on
+  -- one. The driver's own handler still must not.
+  fine, why = pcall(function()
+    exq.event({}); exq.event({ 0x9F }); exq.event({ 0xBF, 110 })
+  end)
+  ok(fine, "a message cut short does not throw in the driver (" .. tostring(why) .. ")")
+  -- the same strays in KEYS, where the note input does not turn the port away
+  X.push(4)
+  ok(G.ex.surface == false, "to KEYS, alone")
+  fine, why = pcall(function()
+    X.raw({ 0xF8 }); X.raw({ 0xFE }); X.raw({ 0xF0, 0x00, 0x21 }); X.raw({ 0x7E, 0x7F, 0x03 })
+    X.raw({ 0x01, 0xF7 })
+  end)
+  ok(fine, "...nor in KEYS (" .. tostring(why) .. ")")
+  -- a pad's note in PADS reaches the note input too, which must not play it
+  X.push(4)
+  params:set("keys_enable", 1); params:set("pitch", 1)
+  pad(44, true); pad(44, false)
+  ok(params:get("pitch") == 1, "a pad pressed in PADS is not also a played note")
   G.cleanup()
   X.unplug()
   _h.grid.device = dev
