@@ -3028,7 +3028,12 @@ def stage19():
         time.sleep(0.3)
         n.set("t2_effect", 1)
         n.lua("__ctx.scene.clear(8)")
-        want = [7 if v >= 0.5 else 2 for v in path]
+        # an option crosses once (C8, the fifty-seventh change): to B at or above
+        # 0.55, back to A at or below 0.45, and in between it keeps its side
+        want, cur = [], 2
+        for v in path:
+            cur = 7 if v >= 0.55 else (2 if v <= 0.45 else cur)
+            want.append(cur)
         ok = not hits and loud > -40 and seen == want
         return verdict(ok, f"a fade from CHORUS to ECHO rocked across the middle, both channels: "
                            f"breaks {hits[:8]}; largest step {audio.step(chans)} (the tone alone has "

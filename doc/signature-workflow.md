@@ -316,7 +316,7 @@ Each phase ends at a gate. Do not start the next phase before its gate passes.
 | B. Safe (built 2026-11-20, not on the device) | Lua only, a reload on the device | C7, C8, C9, C10 | test_control's new section, `LUA53=... lua test/check.lua`, dist rebuilt. Renders byte-identical except the new cues |
 | C. Readable (built 2026-11-20, not walked on the device) | Lua only | C11, C12 | uisim renders looked at, test_screen. Then the observed walkthrough of plan.md Phase 4, with the loop of section 6 added as task 8 |
 | D. Relay (built 2026-11-20, `count: 198`, on the device) | Engine and Lua, `count: 198` by route (b) | C13 | Starts after Phase C passes and the user says yes. The deploy ritual, then Relay's seven steps |
-| E. The decision | Device, the user, a first-time player | none | Section 6. Then the README's first minutes become this loop, and the example presets show it |
+| E. The decision (sheets and tools ready 2026-11-20: doc/walkthrough.md; waits for the people) | Device, the user, a first-time player | none | Section 6. Then the README's first minutes become this loop, and the example presets show it |
 
 Phase A also settles what plan.md Phase 3 (no glitch at a preset load) means here. The
 loop never loads a preset mid-show, so Phase 3 is not its prerequisite. It stays in

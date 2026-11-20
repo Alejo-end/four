@@ -4313,6 +4313,7 @@ local M = {
   -- exposed for the harness's classification checks
   SCENE_RECALL_IDS = SCENE_RECALL_IDS,
   SCENE_EXCLUDE = SCENE_EXCLUDE,
+  SCENE_MORPH_IDS = SCENE_MORPH_IDS,   -- what a fade moves (test/device/session.py)
 }
 
 local dirty = false      -- a morph is pending for the next tick

@@ -165,6 +165,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 58th: Phase C, the screen: a send into a silent effect is hollow, SCENE says K1+E3 FADES and +K2 (Lua, test tools). On `main`. One turn of E3 is a whole fade (step 0.04, from the user's count) | deployed 2026-11-20, loads | no |
 | 59th: RELAY, the take's SOURCE: IN, a track or the MIX, on TAKE K1+E3; `rec_track` takes it as a third argument ("iii") (engine, Lua, test tools) | yes, 2026-11-20, `count: 198`: T1, T3 and MIX relayed into another track, IN silent, the refusal | no |
 | 60th: motion without visiting MOTION (first move starts a pass, PASS in bars closes it, overdub stays armed, double-tap K1), MIDI faders as the mixer, the control page on the computer (Lua, visuals, test tools) | deployed 2026-11-20, loads; OSC in from the computer moved params. Faders and double tap not tried | no |
+| 61st: Phase E's sheets (doc/walkthrough.md) and test/device/session.py; rows 19.12 to 19.34 again on the current build (documents, test tools) | yes: the tool ran, the rows hold | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -202,7 +203,7 @@ The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in fro
 back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of the plan
 (C7 to C10) is the fifty-seventh change and Phase C (C11, C12) the fifty-eighth, both Lua
 only, deployed and loaded on the device but not walked. The user asked to merge them on
-2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on `main` and on the device, with the sixtieth change (motion from any page, MIDI faders, the control page). Next in the plan is Phase E: the user's walkthrough of section 6. The
+2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on `main` and on the device, with the sixtieth change (motion from any page, MIDI faders, the control page). Phase E (section 6) is people: its sheets and its tool are ready (doc/walkthrough.md, test/device/session.py), and it waits for a first-time player and the user's set. The
 Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
 hardware. Another session can share this checkout: stage only your own hunks.
 
@@ -265,6 +266,8 @@ Current. Keep these true to the code:
 - CLAUDE.md (this file). README.md, the short page for players, and doc/manual.md, the
   full guide with every page's pictures.
 - doc/plan.md: the next work. doc/changelog.md: every change, oldest first.
+- doc/walkthrough.md: Phase E's sheets (the card, the observer's sheet, the listening
+  script). test/device/session.py measures the session.
 - doc/device-gate.md: the walkthrough. It was written for mangler, and its top says what
   that means for four.
 - doc/controls.md: GENERATED, never edit by hand.

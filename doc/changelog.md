@@ -5183,3 +5183,23 @@ to see and play, and the mixer on MIDI faders. They chose each approach.
 - On the device (`count: 198`): the script loads; `/four/norm t2_level 0.25` and
   `/four/set t3_mode 5` sent from the computer moved the params, and `sample_file` was
   refused. The faders and the double tap need hands on the device; nobody tried them.
+
+four, sixty-first change: **Phase E's sheets and its session tool; Phase A's rows again on
+the current build (documents, test tools; nothing in the instrument changes)**. The user
+asked for Phase E on 2026-11-20. Phase E is people: a first-time player, the user's own
+set, and their ears. What a tool can do is done.
+- doc/walkthrough.md: the setup, the card for the player, the observer's sheet for Part
+  1 with its pass boxes, the sheet for Part 2, the listening script with answer columns,
+  and the verdict.
+- test/device/session.py: `prepare` (a fresh script, `count: 198`), `snap` and `home`
+  (the ids a fade moves before the first fade and after it comes home: the C7 check),
+  `takes` (each track's take, and whether it plays) and `record <minutes>` (the output,
+  the scsynth thread every 5 s at p95, xruns, and the scan for breaks). Each ran once on
+  the device. lib/mscenes.lua exports SCENE_MORPH_IDS for it.
+- test/device/gate.py row 19.29 follows C8: the type crosses once (above 0.55, back below
+  0.45), so the row expects that law. It passes the type check and has no break.
+- On the device, the build of the sixtieth change: rows 19.12 (no break), 19.29 (no
+  break), 19.30 (no break), 19.32 (four parts of 20 s, each from 0), 19.33 (WARP -0.4,
+  PV -0.9, CLOUD -1.4 dB) and 19.34 (still 0.9% of the time) read as before. Phase A's
+  rows A1 to A5 hold.
+
