@@ -206,6 +206,16 @@ local rec_start_frame = 0       -- ctx.frame when the first pass armed
 -- `motion pass` length on the clock it closes itself and plays. An overdub
 -- stays armed loop after loop. Double-tap K1 arms and disarms from any page.
 local first_at = nil            -- the offset of the first pass's first move
+-- AN OVERDUB GESTURE THAT CROSSES THE SEAM (the sixty-second change). A lane
+-- still moving at the loop's end stays in its pass: its next events go in
+-- front of the ones it already wrote this pass (`wrap_at`), in order, until
+-- the gesture reaches the place it began (`pass_from`), where a new pass of
+-- that lane begins. Without this the wrap cleared the lane at its next move
+-- and the half of the gesture before the seam was lost.
+local pass_from = {}            -- id -> the offset of its first move this pass
+local wrap_at = {}              -- id -> where its next event goes after a wrap
+local moved_at = {}             -- id -> the frame of its last captured move
+local SEAM_HOLD = 8             -- frames: a move this close to the seam is still moving
 local touched_this_pass = {}    -- ids already punched-in this pass
 local last_val = {}             -- last accounted value per param (for the poll)
 
@@ -283,6 +293,11 @@ local function capture_poll(offset)
       local lv = last_val[id]
       if lv ~= nil and v ~= lv then
         local L = M.lanes[id]
+        -- a gesture carried over the seam that comes round to where it began
+        -- starts a new pass of its lane
+        if wrap_at[id] and offset >= (pass_from[id] or 0) then
+          touched_this_pass[id], wrap_at[id] = nil, nil
+        end
         -- punch-in replace: first move this pass clears (or creates) the lane
         if not touched_this_pass[id] then
           if not L then
@@ -290,13 +305,27 @@ local function capture_poll(offset)
             M.lanes[id] = L
             M.lane_ids[#M.lane_ids + 1] = id
           else
+            -- (the arrays are cut to the count, so an insert after a seam
+            -- shifts only this pass's events)
+            for k = #L.f, 1, -1 do L.f[k], L.v[k] = nil, nil end
             L.n = 0
           end
           touched_this_pass[id] = true
+          pass_from[id] = offset
         end
-        L.n = L.n + 1
-        L.f[L.n] = offset
-        L.v[L.n] = v
+        local w = wrap_at[id]
+        if w then
+          -- after the seam: in front of this pass's earlier events, in order
+          table.insert(L.f, w, offset)
+          table.insert(L.v, w, v)
+          L.n = L.n + 1
+          wrap_at[id] = w + 1
+        else
+          L.n = L.n + 1
+          L.f[L.n] = offset
+          L.v[L.n] = v
+        end
+        moved_at[id] = C.frame
         if M.loop_len == 0 and first_at == nil then first_at = offset end
       end
       last_val[id] = v
@@ -320,6 +349,7 @@ end
 function M.set_armed(on)
   if on then
     touched_this_pass = {}
+    for k in pairs(wrap_at) do wrap_at[k] = nil end
     snapshot()                                  -- only moves AFTER arming record
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
@@ -466,7 +496,12 @@ function M.tick()
   if armed then
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
-      if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
+      -- the 60 s cap counts from the first move: an arm can wait any time
+      if offset >= 0 and (first_at == nil or offset - first_at <= MAX_LEN) then
+        capture_poll(offset)
+      elseif first_at then
+        params:set("motion_rec", 0)       -- a first pass of 60 s closes there
+      end
       -- a pass on the clock closes itself once it is long enough
       local bars = first_at and M.pass_frames()
       if bars and offset - first_at + 1 >= bars then
@@ -496,7 +531,18 @@ function M.tick()
       -- an overdub stays armed loop after loop. Each loop is a new pass: the
       -- first move of a lane in it replaces that lane, so its events stay
       -- in order
-      if armed then touched_this_pass = {} end
+      if armed then
+        local keep = {}
+        for id in pairs(touched_this_pass) do
+          if moved_at[id] and C.frame - moved_at[id] <= SEAM_HOLD then
+            keep[id] = true
+            wrap_at[id] = 1
+          else
+            wrap_at[id] = nil
+          end
+        end
+        touched_this_pass = keep
+      end
     end
     local src = src_of(M.playhead)       -- read the lanes in their own timebase
     -- motion_depth (0..1): a global "amount" for the whole loop (at_depth)

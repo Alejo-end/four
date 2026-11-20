@@ -4542,4 +4542,117 @@ do
   ok(osc == nil or type(osc.event) == "function", "the script listens for OSC")
 end
 
+-- ============================================================================
+-- 40 · the review of 2026-11-20 (the sixty-second change)
+-- ============================================================================
+do
+  local mo, pulse = CTX.motion, T.pulse
+  params:set("orbit_on", 0); params:set("stop_all", 0); params:set("rec", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  clock.get_tempo = function() return 120 end
+
+  -- (1) AUTOSAMPLE records the line input whatever RELAY left the source on
+  do
+    local calls = {}
+    local saved = { engine.rec_track, midi.connect }
+    engine.rec_track = function(...) calls[#calls + 1] = { ... } end
+    local fake = { device = {}, note_on = function() end, note_off = function() end }
+    midi.connect = function() return fake end
+    params:set("track_sel", 1); params:set("rec_source", 3)        -- T2
+    params:set("as_low", 60); params:set("as_high", 60); params:set("as_hold", 0.1)
+    params:set("as_tail", 0.1); params:set("as_wait", 1)
+    params:set("as_go", 1); params:set("as_go", 0)
+    ok(calls[#calls] and calls[#calls][3] == 0, "an autosample pass records IN, not the RELAY source")
+    for _ = 1, 30 do _h.run_ticks(1) end
+    ok(params:get("rec") == 0 and params:get("rec_source") == 3, "...and the source comes back after the pass")
+    params:set("rec_source", 1)
+    CTX.pads_uncut(); params:set("pad_input", 0)
+    engine.rec_track, midi.connect = saved[1], saved[2]
+  end
+
+  -- (2) an overdub gesture across the loop's seam keeps both halves
+  params:set("motion_bars", 2)                           -- 1 BAR = 30 frames
+  params:set("pos_jitter", 0)
+  params:set("motion_rec", 1); _h.run_ticks(2)
+  params:set("cutoff", 1200); _h.run_ticks(2)
+  for _ = 1, 40 do _h.run_ticks(1) end                   -- the pass closes and plays
+  ok(mo.loop_len == 30 and params:get("motion_rec") == 0, "a one-bar loop plays")
+  params:set("motion_rec", 1)                            -- an overdub replays from the top
+  _h.run_ticks(15)                                       -- the gesture starts mid-loop
+  local j = 0
+  for _ = 1, 30 do                                       -- frames 15..29, then 0..14
+    j = j + 0.03; params:set("pos_jitter", j); _h.run_ticks(1)
+  end
+  local L = mo.lanes.pos_jitter
+  local sorted = L ~= nil
+  for k = 2, (L and L.n or 0) do sorted = sorted and L.f[k] >= L.f[k - 1] end
+  ok(L and L.n >= 28, "a gesture across the seam keeps its events from both sides (" .. (L and L.n or 0) .. ")")
+  ok(sorted and L.f[1] <= 1 and L.f[L.n] >= 28, "...in order, from the loop's start to its end")
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+
+  -- (3) a first pass may begin more than 60 s after its arm
+  params:set("motion_bars", 1)
+  params:set("motion_rec", 1)
+  for _ = 1, 61 * 15 do _h.run_ticks(1) end
+  params:set("cutoff", 900); _h.run_ticks(5)
+  params:set("cutoff", 1500); _h.run_ticks(5)
+  params:set("motion_rec", 0)
+  ok(mo.lanes.cutoff ~= nil and mo.loop_len > 0, "a first move 61 s after the arm is recorded")
+  params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+
+  -- (4) another throw after DRY takes only its own ids
+  params:set("delay_mix", 0.4); params:set("drive", 0.5); params:set("cutoff", 900)
+  CTX.fx_dry()
+  T.goto_page("FILTER")
+  key(2, 1); key(2, 0)                                   -- OPEN (a tap latches)
+  ok(params:get("delay_mix") == 0 and params:get("drive") == 0, "OPEN after DRY leaves the wet path off")
+  key(2, 1); key(2, 0)                                   -- OPEN off
+  CTX.fx_dry()                                           -- DRY's second tap
+  near(params:get("delay_mix"), 0.4, 1e-9, "...and DRY's second tap still brings it back")
+  params:set("delay_mix", 0); params:set("drive", 0); params:set("cutoff", 20000)
+
+  -- (6) /four/set holds a value as the param's type would
+  local Mosc = CTX.osc
+  Mosc.osc_in("/four/set", { "t3_mode", 2.6 })
+  ok(params:get("t3_mode") == 3, "an option from the network is rounded (2.6 is 3)")
+  Mosc.osc_in("/four/set", { "t3_mode", 9 })
+  ok(params:get("t3_mode") == 6, "...and kept in range")
+  Mosc.osc_in("/four/set", { "track_sel", 2.4 })
+  ok(params:get("track_sel") == 2, "a number is rounded")
+  params:set("t3_mode", 1); params:set("track_sel", 1)
+
+  -- (7) the window lock does not move a track's end at a focus change
+  params:set("win_beats", 4)                             -- 1 BAR = 2 s
+  params:set("track_sel", 1)
+  params:set("pos_start", 0.5); _h.run_ticks(1)
+  local e1 = params:get("pos_end")
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", e1)   -- the same end, another start
+  params:set("track_sel", 2); _h.run_ticks(2)
+  near(params:get("t2_pos_end"), e1, 1e-9, "focusing a track with the same end and another start leaves its end")
+  params:set("win_beats", 1); params:set("track_sel", 1)
+  params:set("pos_start", 0); params:set("pos_end", 1)
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+
+  -- (12) the refusal follows the sends through another track
+  params:set("send_1_3", 0.5); params:set("send_3_2", 0.5)
+  params:set("rec_source", 3)                            -- T2, focus on track 1
+  params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.take_msg == "T1 FEEDS T2 - SEND OFF",
+    "track 1 reaching T2 through track 3 refuses the pass")
+  params:set("send_1_3", 0); params:set("send_3_2", 0); params:set("rec_source", 1)
+
+  -- (9) the source cannot change under a pass from the encoder
+  params:set("rec", 1)
+  T.goto_page("TAKE")
+  key(1, 1); enc(3, 1); key(1, 0)
+  ok(params:get("rec_source") == 1 and CTX.take_msg == "SOURCE: STOP REC FIRST",
+    "K1+E3 during a pass leaves the source, and says so")
+  params:set("rec", 0)
+  clock.get_tempo = nil
+  params:set("cutoff", 20000); params:set("pos_jitter", 0)
+end
+
 T.report("control harness OK")

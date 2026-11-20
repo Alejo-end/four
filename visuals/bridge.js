@@ -163,6 +163,18 @@ const server = net.createServer((sock) => {
       if (!head.includes("\r\n\r\n")) return;
       const m = /Sec-WebSocket-Key:\s*(.+)\r\n/i.exec(head);
       if (!m) { servePage(sock, head); return; }
+      // A web page from another site, open in the same browser, could reach
+      // this socket and play the norns. A browser names the page's site in
+      // Origin: it must be this bridge itself. And the Host must be this
+      // computer, unless LAN mode is on (a name that points here by DNS is
+      // not enough).
+      const host = (/\r\nHost:\s*(\S+)/i.exec(head) || [])[1] || "";
+      const origin = (/\r\nOrigin:\s*(\S+)/i.exec(head) || [])[1];
+      const local = /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(host);
+      if ((!LAN && !local) || (origin && origin.replace(/^https?:\/\//, "") !== host)) {
+        sock.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+        return;
+      }
       const accept = crypto.createHash("sha1").update(m[1].trim() + GUID).digest("base64");
       sock.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" +
         "Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
@@ -212,9 +224,11 @@ if (LAN) console.log("LAN mode: other computers on this network can open http://
 let count = 0, bad = 0, lastFrom = "none";
 const udp = dgram.createSocket("udp4");
 udp.on("message", (buf, rinfo) => {
-  lastFrom = rinfo.address;
   const msgs = [];
   try { parsePacket(buf, msgs); } catch (e) { bad++; return; }
+  // the norns is the host that sends four's own messages: anything else on
+  // the network cannot become the place the control page's moves go
+  if (msgs.some((x) => x.path.startsWith(PREFIX))) lastFrom = rinfo.address;
   for (const { path, args } of msgs) {
     if (path.startsWith(PREFIX + "ev/")) {        // an event (several arguments, no stored state)
       count++;

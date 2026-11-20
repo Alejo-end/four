@@ -202,10 +202,12 @@ end
 --   /four/set   <id> <value>    the param's own value (a mode, a switch)
 --   /four/norm  <id> <0..1>     a position on the knob (a fader)
 --   /four/press <id>            a momentary param: a press and a release
--- Only the ids below can be moved, so the network reaches the mixer, the
--- transports and the scenes, and never a file, a buffer or the system. A
--- move is a hand on the instrument: the motion looper records it, as it
--- records a MIDI knob.
+-- Only the ids below can be moved through /four/: the mixer, the modes, the
+-- transports (REC and UNDO write the take, as on the device) and the scenes,
+-- and never a file or the link's own settings. This is a filter for /four/,
+-- not a wall: the norns itself also takes /param/<id> from any host on the
+-- network. A move is a hand on the instrument: the motion looper records it,
+-- as it records a MIDI knob.
 local ALLOW = {}
 for _, id in ipairs({ "mode", "t2_mode", "t3_mode", "t4_mode", "track_sel",
     "grain_level", "t2_level", "t3_level", "t4_level",
@@ -226,7 +228,22 @@ function M.osc_in(path, args)
   local id = args and args[1]
   if type(id) ~= "string" or not ALLOW[id] or not params.lookup[id] then return false end
   if path == "/four/set" and ALLOW[id] == "set" and type(args[2]) == "number" then
-    params:set(id, args[2])
+    -- the value as the param's own type would hold it: the norns does not
+    -- round an option, a number or a binary, and a 2.5 there breaks a page
+    local p = params:lookup_param(id)
+    local v = args[2]
+    if v ~= v then return false end                       -- NaN
+    if p.count then
+      v = math.min(math.max(math.floor(v + 0.5), 1), p.count)
+    elseif p.controlspec then
+      local cs = p.controlspec
+      v = math.min(math.max(v, math.min(cs.minval, cs.maxval)), math.max(cs.minval, cs.maxval))
+    elseif p.min and p.max then
+      v = math.min(math.max(math.floor(v + 0.5), p.min), p.max)
+    else
+      v = v >= 0.5 and 1 or 0                              -- a binary
+    end
+    params:set(id, v)
   elseif path == "/four/norm" and ALLOW[id] == "set" and type(args[2]) == "number" then
     local cs = params:lookup_param(id).controlspec
     if not cs then return false end

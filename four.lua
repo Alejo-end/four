@@ -507,7 +507,12 @@ local function throw(label, ids, apply, key)
     lit = function() return throw_mem[key] ~= nil end,
     pon = function()
       for other, mem in pairs(throw_mem) do
-        if other ~= key then
+        if other == "DRY" and key ~= "DRY" then
+          -- DRY holds the whole wet path: another throw takes only its own
+          -- ids out of DRY's memory (they are its now), and the rest of DRY
+          -- stays as it is, and comes back on DRY's second tap
+          for k = 1, #ids do mem[ids[k]] = nil end
+        elseif other ~= key then
           for k = 1, #ids do
             if mem[ids[k]] ~= nil then throw_restore(other); break end
           end
@@ -1501,7 +1506,10 @@ end
 
 -- why a pass from this source cannot record into the focused track, or nil.
 -- A track that records itself, and a source that hears the take's track
--- through a send, would feed the pass back into itself.
+-- through a send, would feed the pass back into itself. The sends are
+-- followed through other tracks too (T2 to T3 to T1). MIX is allowed: like
+-- `resample`, it records the destination's own playback with the rest, on
+-- purpose.
 local SRC_NAMES = { "IN", "T1", "T2", "T3", "T4", "MIX" }
 ctx.SRC_NAMES = SRC_NAMES
 function ctx.relay_refusal(dest)
@@ -1510,8 +1518,17 @@ function ctx.relay_refusal(dest)
   if not ctx.relay_ok() then return "SOURCE NEEDS A RESTART" end
   if s == 5 then return nil end
   if s == dest then return "SOURCE IS THIS TRACK" end
-  if pget("send_" .. dest .. "_" .. s, 0) > 0 then
-    return "T" .. dest .. " FEEDS T" .. s .. " - SEND OFF"
+  -- does the destination reach the source through the sends?
+  local seen, todo = { [dest] = true }, { dest }
+  while #todo > 0 do
+    local a = table.remove(todo)
+    for b = 1, NTRACKS do
+      if not seen[b] and b ~= a and pget("send_" .. a .. "_" .. b, 0) > 0 then
+        if b == s then return "T" .. dest .. " FEEDS T" .. s .. " - SEND OFF" end
+        seen[b] = true
+        todo[#todo + 1] = b
+      end
+    end
   end
   return nil
 end
@@ -1927,6 +1944,8 @@ function ctx.focus_take(n)
   ctx.wave_any, ctx.take_len = u.wave_any, u.take_len
   undo_cur, undo_prev, snap_mem = u.undo_cur, u.undo_prev, u.snap_mem
   WIN[1], WIN[2] = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  -- the window lock starts from the new track's window, as it is
+  if ctx.win_resync then ctx.win_resync() end
   take_gen = take_gen + 1     -- a job for the old track's buffer must not land here
   Mpages.focus_wave(n)
   -- (the rec action below picks the buffer again, and puts the write head
@@ -1991,7 +2010,8 @@ local function tick_rec_end()
       local from = FOCUS
       params:set("track_sel", FOCUS + 1)
       params:set("rec", 1)
-      take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS)
+      -- a refused arm (the next track is the source) keeps its own words
+      if pget("rec", 0) == 1 then take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS) end
     else
       take_say("TRACK 4 FULL - REC STOPPED")
     end
@@ -2311,6 +2331,9 @@ local WIN_BEATS = { 0, 1, 2, 4, 8, 16, 32 }
 local WIN_BEAT_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
 ctx.WIN_BEAT_NAMES = WIN_BEAT_NAMES
 local win_tempo, win_lo, win_hi = 0, -1, -1   -- what the lock last saw
+-- a focus change: the lock compares the NEW track's window with itself, so a
+-- start that differs from the old track's is not read as a start that moved
+function ctx.win_resync() win_lo, win_hi = pget(WIN[1], 0), pget(WIN[2], 1) end
 local function win_lock_beats()
   return WIN_BEATS[math.floor(pget("win_beats", 1) + 0.5)] or 0
 end
@@ -2696,6 +2719,12 @@ local function init_params()
   -- RELAY: what a take records from (TAKE K1+E3). A track is that track
   -- after its filter, colour, effects and level, before its sends.
   params:add_option("rec_source", "rec source", SRC_NAMES, 1)
+  params:set_action("rec_source", function()
+    -- the engine takes the source at the arm: a change during a pass waits
+    if pget("rec", 0) == 1 then
+      take_say("SOURCE AT THE NEXT TAKE", "the take's source changes at the next arm")
+    end
+  end)
   params:add_binary("rec_wait", "start on sound", "toggle", 0)
   params:add_control("rec_thresh", "sound threshold",
     controlspec.new(0.002, 0.5, "exp", 0, 0.02, ""),
@@ -3198,6 +3227,8 @@ local function init_params()
   params:add_number("fader_ch", "fader channel", 0, 16, 0,
     function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
   params:add_number("fader_cc", "first fader cc", 0, 120, 0)
+  params:set_action("fader_ch", Minput.fader_reset)
+  params:set_action("fader_cc", Minput.fader_reset)
 
   params:add_group("grp_keys", "keys", 5)
   params:add_binary("keys_enable", "note input", "toggle", 1)
@@ -3604,6 +3635,9 @@ function enc(n, d)
       move_pair(tid("pos_start"), tid("pos_end"), d)
     elseif id == "@route_to" then
       route_step(d)
+    elseif id == "@rec_src" and pget("rec", 0) == 1 then
+      -- the source of a pass that records cannot change under it
+      take_say("SOURCE: STOP REC FIRST", "the take's source changes only between passes")
     elseif id == "@rec_src" then
       -- the take's source, one step at a time, past the focused track (a
       -- track never records itself)

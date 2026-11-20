@@ -1149,6 +1149,11 @@ local caught, last_raw, prev_x = {}, {}, {}
 local FADER_EXTRA = { "delay_mix", "rev_mix", "mix", "out_level" }
 
 -- a CC on the fader block: true when it was one of ours
+-- a new channel or first CC is another controller: every fader picks up again
+local function fader_reset()
+  for k = 1, FADERS do caught[k], last_raw[k], prev_x[k] = nil, nil, nil end
+end
+
 local function fader_cc(msg)
   local ch = pget("fader_ch", 0)
   if ch < 1 or msg.ch ~= ch then return false end
@@ -1251,6 +1256,7 @@ local kb_held = {}
 
 local M = {}
 M.fader_cc, M.fader_ids, M.caught = fader_cc, fader_ids, caught
+M.fader_reset = fader_reset
 
 function M.init(ctx)
   C = ctx
@@ -2637,6 +2643,16 @@ local rec_start_frame = 0       -- ctx.frame when the first pass armed
 -- `motion pass` length on the clock it closes itself and plays. An overdub
 -- stays armed loop after loop. Double-tap K1 arms and disarms from any page.
 local first_at = nil            -- the offset of the first pass's first move
+-- AN OVERDUB GESTURE THAT CROSSES THE SEAM (the sixty-second change). A lane
+-- still moving at the loop's end stays in its pass: its next events go in
+-- front of the ones it already wrote this pass (`wrap_at`), in order, until
+-- the gesture reaches the place it began (`pass_from`), where a new pass of
+-- that lane begins. Without this the wrap cleared the lane at its next move
+-- and the half of the gesture before the seam was lost.
+local pass_from = {}            -- id -> the offset of its first move this pass
+local wrap_at = {}              -- id -> where its next event goes after a wrap
+local moved_at = {}             -- id -> the frame of its last captured move
+local SEAM_HOLD = 8             -- frames: a move this close to the seam is still moving
 local touched_this_pass = {}    -- ids already punched-in this pass
 local last_val = {}             -- last accounted value per param (for the poll)
 
@@ -2714,6 +2730,11 @@ local function capture_poll(offset)
       local lv = last_val[id]
       if lv ~= nil and v ~= lv then
         local L = M.lanes[id]
+        -- a gesture carried over the seam that comes round to where it began
+        -- starts a new pass of its lane
+        if wrap_at[id] and offset >= (pass_from[id] or 0) then
+          touched_this_pass[id], wrap_at[id] = nil, nil
+        end
         -- punch-in replace: first move this pass clears (or creates) the lane
         if not touched_this_pass[id] then
           if not L then
@@ -2721,13 +2742,27 @@ local function capture_poll(offset)
             M.lanes[id] = L
             M.lane_ids[#M.lane_ids + 1] = id
           else
+            -- (the arrays are cut to the count, so an insert after a seam
+            -- shifts only this pass's events)
+            for k = #L.f, 1, -1 do L.f[k], L.v[k] = nil, nil end
             L.n = 0
           end
           touched_this_pass[id] = true
+          pass_from[id] = offset
         end
-        L.n = L.n + 1
-        L.f[L.n] = offset
-        L.v[L.n] = v
+        local w = wrap_at[id]
+        if w then
+          -- after the seam: in front of this pass's earlier events, in order
+          table.insert(L.f, w, offset)
+          table.insert(L.v, w, v)
+          L.n = L.n + 1
+          wrap_at[id] = w + 1
+        else
+          L.n = L.n + 1
+          L.f[L.n] = offset
+          L.v[L.n] = v
+        end
+        moved_at[id] = C.frame
         if M.loop_len == 0 and first_at == nil then first_at = offset end
       end
       last_val[id] = v
@@ -2751,6 +2786,7 @@ end
 function M.set_armed(on)
   if on then
     touched_this_pass = {}
+    for k in pairs(wrap_at) do wrap_at[k] = nil end
     snapshot()                                  -- only moves AFTER arming record
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
@@ -2897,7 +2933,12 @@ function M.tick()
   if armed then
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
-      if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
+      -- the 60 s cap counts from the first move: an arm can wait any time
+      if offset >= 0 and (first_at == nil or offset - first_at <= MAX_LEN) then
+        capture_poll(offset)
+      elseif first_at then
+        params:set("motion_rec", 0)       -- a first pass of 60 s closes there
+      end
       -- a pass on the clock closes itself once it is long enough
       local bars = first_at and M.pass_frames()
       if bars and offset - first_at + 1 >= bars then
@@ -2927,7 +2968,18 @@ function M.tick()
       -- an overdub stays armed loop after loop. Each loop is a new pass: the
       -- first move of a lane in it replaces that lane, so its events stay
       -- in order
-      if armed then touched_this_pass = {} end
+      if armed then
+        local keep = {}
+        for id in pairs(touched_this_pass) do
+          if moved_at[id] and C.frame - moved_at[id] <= SEAM_HOLD then
+            keep[id] = true
+            wrap_at[id] = 1
+          else
+            wrap_at[id] = nil
+          end
+        end
+        touched_this_pass = keep
+      end
     end
     local src = src_of(M.playhead)       -- read the lanes in their own timebase
     -- motion_depth (0..1): a global "amount" for the whole loop (at_depth)
@@ -3848,10 +3900,12 @@ end
 --   /four/set   <id> <value>    the param's own value (a mode, a switch)
 --   /four/norm  <id> <0..1>     a position on the knob (a fader)
 --   /four/press <id>            a momentary param: a press and a release
--- Only the ids below can be moved, so the network reaches the mixer, the
--- transports and the scenes, and never a file, a buffer or the system. A
--- move is a hand on the instrument: the motion looper records it, as it
--- records a MIDI knob.
+-- Only the ids below can be moved through /four/: the mixer, the modes, the
+-- transports (REC and UNDO write the take, as on the device) and the scenes,
+-- and never a file or the link's own settings. This is a filter for /four/,
+-- not a wall: the norns itself also takes /param/<id> from any host on the
+-- network. A move is a hand on the instrument: the motion looper records it,
+-- as it records a MIDI knob.
 local ALLOW = {}
 for _, id in ipairs({ "mode", "t2_mode", "t3_mode", "t4_mode", "track_sel",
     "grain_level", "t2_level", "t3_level", "t4_level",
@@ -3872,7 +3926,22 @@ function M.osc_in(path, args)
   local id = args and args[1]
   if type(id) ~= "string" or not ALLOW[id] or not params.lookup[id] then return false end
   if path == "/four/set" and ALLOW[id] == "set" and type(args[2]) == "number" then
-    params:set(id, args[2])
+    -- the value as the param's own type would hold it: the norns does not
+    -- round an option, a number or a binary, and a 2.5 there breaks a page
+    local p = params:lookup_param(id)
+    local v = args[2]
+    if v ~= v then return false end                       -- NaN
+    if p.count then
+      v = math.min(math.max(math.floor(v + 0.5), 1), p.count)
+    elseif p.controlspec then
+      local cs = p.controlspec
+      v = math.min(math.max(v, math.min(cs.minval, cs.maxval)), math.max(cs.minval, cs.maxval))
+    elseif p.min and p.max then
+      v = math.min(math.max(math.floor(v + 0.5), p.min), p.max)
+    else
+      v = v >= 0.5 and 1 or 0                              -- a binary
+    end
+    params:set(id, v)
   elseif path == "/four/norm" and ALLOW[id] == "set" and type(args[2]) == "number" then
     local cs = params:lookup_param(id).controlspec
     if not cs then return false end
@@ -8944,7 +9013,7 @@ local Msample = (function()  -- inlined lib/msample.lua
 --
 -- For the pass the take records the line input alone and starts fresh at the
 -- start of the track's buffer: overdub, resample and start on sound go to 0,
--- and come back after.
+-- the source to IN, and all four come back after.
 
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local C, pget
@@ -9011,6 +9080,7 @@ local function restore(r)
   params:set("pre_level", r.saved[1])
   params:set("resample", r.saved[2])
   params:set("rec_wait", r.saved[3])
+  params:set("rec_source", r.saved[4])
 end
 
 local function abort(msg, detail)
@@ -9139,11 +9209,20 @@ function M.start()
       .. "step or shorter notes", #notes, secs, room))
     return
   end
-  local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0) }
+  -- the gear comes back on the line input: the take's source is IN for the
+  -- pass, whatever RELAY left it on
+  local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0),
+    pget("rec_source", 1) }
   params:set("pre_level", 0)
   params:set("resample", 0)
   params:set("rec_wait", 0)
+  params:set("rec_source", 1)
   params:set("rec", 1)
+  if pget("rec", 0) ~= 1 then
+    -- the arm was refused; its own words stay on the screen
+    restore({ saved = saved })
+    return
+  end
   run = {
     dev = dev, ch = int("as_ch", 1), vel = int("as_vel", 100),
     hold = pget("as_hold", 1), tail = pget("as_tail", 1),
@@ -9499,7 +9578,12 @@ local function throw(label, ids, apply, key)
     lit = function() return throw_mem[key] ~= nil end,
     pon = function()
       for other, mem in pairs(throw_mem) do
-        if other ~= key then
+        if other == "DRY" and key ~= "DRY" then
+          -- DRY holds the whole wet path: another throw takes only its own
+          -- ids out of DRY's memory (they are its now), and the rest of DRY
+          -- stays as it is, and comes back on DRY's second tap
+          for k = 1, #ids do mem[ids[k]] = nil end
+        elseif other ~= key then
           for k = 1, #ids do
             if mem[ids[k]] ~= nil then throw_restore(other); break end
           end
@@ -10493,7 +10577,10 @@ end
 
 -- why a pass from this source cannot record into the focused track, or nil.
 -- A track that records itself, and a source that hears the take's track
--- through a send, would feed the pass back into itself.
+-- through a send, would feed the pass back into itself. The sends are
+-- followed through other tracks too (T2 to T3 to T1). MIX is allowed: like
+-- `resample`, it records the destination's own playback with the rest, on
+-- purpose.
 local SRC_NAMES = { "IN", "T1", "T2", "T3", "T4", "MIX" }
 ctx.SRC_NAMES = SRC_NAMES
 function ctx.relay_refusal(dest)
@@ -10502,8 +10589,17 @@ function ctx.relay_refusal(dest)
   if not ctx.relay_ok() then return "SOURCE NEEDS A RESTART" end
   if s == 5 then return nil end
   if s == dest then return "SOURCE IS THIS TRACK" end
-  if pget("send_" .. dest .. "_" .. s, 0) > 0 then
-    return "T" .. dest .. " FEEDS T" .. s .. " - SEND OFF"
+  -- does the destination reach the source through the sends?
+  local seen, todo = { [dest] = true }, { dest }
+  while #todo > 0 do
+    local a = table.remove(todo)
+    for b = 1, NTRACKS do
+      if not seen[b] and b ~= a and pget("send_" .. a .. "_" .. b, 0) > 0 then
+        if b == s then return "T" .. dest .. " FEEDS T" .. s .. " - SEND OFF" end
+        seen[b] = true
+        todo[#todo + 1] = b
+      end
+    end
   end
   return nil
 end
@@ -10919,6 +11015,8 @@ function ctx.focus_take(n)
   ctx.wave_any, ctx.take_len = u.wave_any, u.take_len
   undo_cur, undo_prev, snap_mem = u.undo_cur, u.undo_prev, u.snap_mem
   WIN[1], WIN[2] = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  -- the window lock starts from the new track's window, as it is
+  if ctx.win_resync then ctx.win_resync() end
   take_gen = take_gen + 1     -- a job for the old track's buffer must not land here
   Mpages.focus_wave(n)
   -- (the rec action below picks the buffer again, and puts the write head
@@ -10983,7 +11081,8 @@ local function tick_rec_end()
       local from = FOCUS
       params:set("track_sel", FOCUS + 1)
       params:set("rec", 1)
-      take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS)
+      -- a refused arm (the next track is the source) keeps its own words
+      if pget("rec", 0) == 1 then take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS) end
     else
       take_say("TRACK 4 FULL - REC STOPPED")
     end
@@ -11303,6 +11402,9 @@ local WIN_BEATS = { 0, 1, 2, 4, 8, 16, 32 }
 local WIN_BEAT_NAMES = { "FREE", "1 BEAT", "2 BEAT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
 ctx.WIN_BEAT_NAMES = WIN_BEAT_NAMES
 local win_tempo, win_lo, win_hi = 0, -1, -1   -- what the lock last saw
+-- a focus change: the lock compares the NEW track's window with itself, so a
+-- start that differs from the old track's is not read as a start that moved
+function ctx.win_resync() win_lo, win_hi = pget(WIN[1], 0), pget(WIN[2], 1) end
 local function win_lock_beats()
   return WIN_BEATS[math.floor(pget("win_beats", 1) + 0.5)] or 0
 end
@@ -11688,6 +11790,12 @@ local function init_params()
   -- RELAY: what a take records from (TAKE K1+E3). A track is that track
   -- after its filter, colour, effects and level, before its sends.
   params:add_option("rec_source", "rec source", SRC_NAMES, 1)
+  params:set_action("rec_source", function()
+    -- the engine takes the source at the arm: a change during a pass waits
+    if pget("rec", 0) == 1 then
+      take_say("SOURCE AT THE NEXT TAKE", "the take's source changes at the next arm")
+    end
+  end)
   params:add_binary("rec_wait", "start on sound", "toggle", 0)
   params:add_control("rec_thresh", "sound threshold",
     controlspec.new(0.002, 0.5, "exp", 0, 0.02, ""),
@@ -12190,6 +12298,8 @@ local function init_params()
   params:add_number("fader_ch", "fader channel", 0, 16, 0,
     function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
   params:add_number("fader_cc", "first fader cc", 0, 120, 0)
+  params:set_action("fader_ch", Minput.fader_reset)
+  params:set_action("fader_cc", Minput.fader_reset)
 
   params:add_group("grp_keys", "keys", 5)
   params:add_binary("keys_enable", "note input", "toggle", 1)
@@ -12596,6 +12706,9 @@ function enc(n, d)
       move_pair(tid("pos_start"), tid("pos_end"), d)
     elseif id == "@route_to" then
       route_step(d)
+    elseif id == "@rec_src" and pget("rec", 0) == 1 then
+      -- the source of a pass that records cannot change under it
+      take_say("SOURCE: STOP REC FIRST", "the take's source changes only between passes")
     elseif id == "@rec_src" then
       -- the take's source, one step at a time, past the focused track (a
       -- track never records itself)

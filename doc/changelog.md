@@ -5203,3 +5203,42 @@ set, and their ears. What a tool can do is done.
   PV -0.9, CLOUD -1.4 dB) and 19.34 (still 0.9% of the time) read as before. Phase A's
   rows A1 to A5 hold.
 
+four, sixty-second change: **the fixes of the review of 2026-11-20 (Lua, the visuals
+bridge, test tools; no engine change, the count stays 198)**. The user asked for an
+agent to review everything since the fifty-fourth change. Its findings, each checked:
+- AUTOSAMPLE kept the take's source. With RELAY left on T2, a pass recorded track 2
+  while the notes went to the gear. It now sets the source to IN for the pass and gives
+  it back, and a refused arm keeps its own words on the screen.
+- An overdub gesture that crossed the loop's seam lost the half before the seam: the
+  wrap began a new pass, and the next move cleared the lane. A lane that moved in the
+  last 8 frames before the seam now stays in its pass; its next events go in front of
+  this pass's earlier ones, in order, until the gesture reaches the place it began.
+- A first motion pass counted its 60 s from the arm, so a first move 60 s after a
+  double tap recorded nothing. The cap now counts from the first move.
+- After DRY, any throw that shares one of its ids (FILTER's OPEN, KILL, BLOOM) brought
+  the whole wet path back on all four tracks. Another throw now takes only its own ids
+  out of DRY's memory; DRY's second tap brings back the rest.
+- `/four/set` passed a value as it came. The norns does not round an option, a number
+  or a binary, so `mode 2.5` could break a page. Each value is now rounded and kept in
+  range by its param's type.
+- The window lock read a focus change as a start that moved when the two tracks' ends
+  were equal, and moved the new track's end. A focus change now starts the lock from
+  the new track's window (`ctx.win_resync`).
+- A ONE-SHOT hand-on that was refused (the next track is the source) said `REC ON`. It
+  now keeps the refusal's words.
+- The take's source could change during a pass: TAKE K1+E3 now says `SOURCE: STOP REC
+  FIRST`, and a change from PARAMS or the network says `SOURCE AT THE NEXT TAKE`.
+- The relay refusal follows the sends through other tracks (T1 to T3 to T2). MIX is
+  still allowed, on purpose, like `resample`: the comment says so.
+- visuals/bridge.js: the socket refuses a page from another site (Origin) and, without
+  LAN mode, a Host other than this computer. Only a host that sends `/four/` messages
+  becomes where the moves go. The documents say that ALLOW filters `/four/` and that the
+  norns's own `/param/` path stays open to the network.
+- A new fader channel or first CC lets every fader pick up again.
+- Not changed: the UNDO mark at an arm over an unmarked take (a PSET restored it on
+  another track) is written while the new pass starts; its first milliseconds may hold
+  the new pass (not seen). Two quick K1 taps on TRACKS, to peek at the sends, toggle
+  motion record. A slice past the eighth lights no pad cell.
+- test/test_control.lua section 40 (14 assertions); each one failed on the code before
+  its fix. visuals/test_bridge.js: 19 checks.
+

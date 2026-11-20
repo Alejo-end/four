@@ -48,6 +48,11 @@ local caught, last_raw, prev_x = {}, {}, {}
 local FADER_EXTRA = { "delay_mix", "rev_mix", "mix", "out_level" }
 
 -- a CC on the fader block: true when it was one of ours
+-- a new channel or first CC is another controller: every fader picks up again
+local function fader_reset()
+  for k = 1, FADERS do caught[k], last_raw[k], prev_x[k] = nil, nil, nil end
+end
+
 local function fader_cc(msg)
   local ch = pget("fader_ch", 0)
   if ch < 1 or msg.ch ~= ch then return false end
@@ -150,6 +155,7 @@ local kb_held = {}
 
 local M = {}
 M.fader_cc, M.fader_ids, M.caught = fader_cc, fader_ids, caught
+M.fader_reset = fader_reset
 
 function M.init(ctx)
   C = ctx

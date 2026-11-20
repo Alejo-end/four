@@ -34,6 +34,11 @@ instrument, so a motion loop records it. `KIOSK=0 sh visuals/start.command` star
 bridge alone; then open the address in any browser. With `LAN=1`, other computers on the
 network can open it too, and play the norns: use that only on a network you trust.
 
+The socket refuses a page from another site (its Origin must be the bridge itself) and,
+without `LAN=1`, any Host other than this computer. The moves go to the host that sends
+four's own `/four/` messages. ALLOW is a filter for `/four/`, not a wall: the norns
+itself also takes `/param/<id>` for any param from any host on the network.
+
 ## The news
 
 The picture is a live news stream. It runs all day and night, picture and sound together,

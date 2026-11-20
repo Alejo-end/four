@@ -47,12 +47,13 @@ function pageFrame(obj) {
 const udp = dgram.createSocket("udp4");
 const send = (b) => udp.send(b, OSC, "127.0.0.1");
 
-function page() {
+function page(origin) {
   return new Promise((resolve) => {
     const sock = net.connect(WS, "127.0.0.1");
     const got = [];
     let upgraded = false, buf = Buffer.alloc(0);
-    sock.on("connect", () => sock.write("GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n" +
+    sock.on("connect", () => sock.write("GET / HTTP/1.1\r\nHost: 127.0.0.1:" + WS + "\r\n" +
+      (origin ? "Origin: " + origin + "\r\n" : "") + "Upgrade: websocket\r\n" +
       "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"));
     sock.on("data", (d) => {
       buf = Buffer.concat([buf, d]);
@@ -145,6 +146,14 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(norm && Math.abs(norm.readFloatBE(norm.length - 4) - 0.5) < 1e-6, "...with its value");
   ok(parsed.some((s) => s.startsWith("/four/press") && s.includes("scene_recall")), "a button goes as /four/press <id>");
   ok(toNorns.length === 2, "a name that is not a param id is dropped (" + toNorns.length + " sent)");
+  // a page from another site cannot open the socket; this bridge's own page can
+  const evil = await page("http://evil.example");
+  await wait(200);
+  ok(evil.got[0] && evil.got[0].includes("403"), "a page from another site is refused (403)");
+  const own = await page("http://127.0.0.1:" + WS);
+  await wait(200);
+  ok(own.got[0] && own.got[0].includes("101"), "...and the bridge's own page is let in");
+  own.sock.destroy();
   ok(bridge.exitCode === null, "the bridge survived garbage and a closed page");
   p2.sock.destroy(); udp.close(); nornsIn.close(); bridge.kill();
   console.log(`bridge test: ${checks - fails}/${checks} checks passed`);

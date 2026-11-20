@@ -28,7 +28,7 @@
 --
 -- For the pass the take records the line input alone and starts fresh at the
 -- start of the track's buffer: overdub, resample and start on sound go to 0,
--- and come back after.
+-- the source to IN, and all four come back after.
 
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local C, pget
@@ -95,6 +95,7 @@ local function restore(r)
   params:set("pre_level", r.saved[1])
   params:set("resample", r.saved[2])
   params:set("rec_wait", r.saved[3])
+  params:set("rec_source", r.saved[4])
 end
 
 local function abort(msg, detail)
@@ -223,11 +224,20 @@ function M.start()
       .. "step or shorter notes", #notes, secs, room))
     return
   end
-  local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0) }
+  -- the gear comes back on the line input: the take's source is IN for the
+  -- pass, whatever RELAY left it on
+  local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0),
+    pget("rec_source", 1) }
   params:set("pre_level", 0)
   params:set("resample", 0)
   params:set("rec_wait", 0)
+  params:set("rec_source", 1)
   params:set("rec", 1)
+  if pget("rec", 0) ~= 1 then
+    -- the arm was refused; its own words stay on the screen
+    restore({ saved = saved })
+    return
+  end
   run = {
     dev = dev, ch = int("as_ch", 1), vel = int("as_vel", 100),
     hold = pget("as_hold", 1), tail = pget("as_tail", 1),
