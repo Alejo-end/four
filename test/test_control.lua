@@ -4324,4 +4324,88 @@ do
   params:set("scene_morph_amt", 0); _h.run_ticks(2)
 end
 
+-- ============================================================================
+-- 36 · RELAY (C13 of doc/signature-workflow.md): the take's source
+-- ============================================================================
+-- TAKE K1+E3 picks where a take records from: IN, a track or the MIX. The
+-- engine gets it as rec_track's third argument.
+do
+  local calls = {}
+  local saved = { engine.rec_track, engine.rec, engine.write_take, engine.commands }
+  engine.rec_track = function(...) calls[#calls + 1] = { ... } end
+  engine.rec = function() end
+  local writes = 0
+  engine.write_take = function() writes = writes + 1 end
+  engine.commands = nil
+  params:set("rec", 0); params:set("rec_wait", 0); params:set("pre_level", 0)
+  params:set("stop_all", 0); params:set("freeze", 0); params:set("regen", 0)
+  params:set("rec_end", 1); params:set("motion_play", 0); params:set("orbit_on", 0)
+  for a = 1, 4 do for b = 1, 4 do if a ~= b then params:set("send_" .. a .. "_" .. b, 0) end end end
+
+  -- the param and its reach
+  local p = params:lookup_param("rec_source")
+  ok(p and p.options[1] == "IN" and p.options[6] == "MIX" and params:get("rec_source") == 1,
+    "rec_source is IN, T1 to T4 or MIX, IN by default")
+  local excl = {}
+  for _, id in ipairs(CTX.scene.SCENE_EXCLUDE) do excl[id] = true end
+  ok(excl.rec_source, "...and no scene captures it")
+
+  -- K1+E3 on TAKE walks the sources past the focused track
+  params:set("track_sel", 2)
+  T.goto_page("TAKE")
+  key(1, 1)
+  enc(3, 1)
+  ok(params:get("rec_source") == 2, "K1+E3 on TAKE: IN to T1")
+  enc(3, 1)
+  ok(params:get("rec_source") == 4, "...then past T2, the focused track, to T3")
+  enc(3, -1)
+  ok(params:get("rec_source") == 2, "...and back past it to T1")
+  key(1, 0)
+
+  -- a pass from T1 into track 2: the source goes to the engine
+  CTX.wave_any = false
+  params:set("rec", 1)
+  local c = calls[#calls]
+  ok(c and c[1] == 1 and c[2] == 1 and c[3] == 1, "the arm sends rec_track(track 2, a new take, source T1)")
+  head_runs(0.02); params:set("rec", 0)
+
+  -- the refusals
+  params:set("rec_source", 3)                     -- T2, the focus
+  params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.take_msg == "SOURCE IS THIS TRACK", "a track never records itself")
+  params:set("rec_source", 2); params:set("send_2_1", 0.5)
+  params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.take_msg == "T2 FEEDS T1 - SEND OFF",
+    "a source that hears the take's track through a send is refused, and says so")
+  params:set("send_2_1", 0)
+  params:set("rec_source", 6)
+  params:set("rec", 1)
+  ok(params:get("rec") == 1 and calls[#calls][3] == 5, "MIX records the mix (source 5)")
+  head_runs(0.03); params:set("rec", 0)
+
+  -- UNDO after a relay pass over a take that has no mark (a PSET restored it)
+  params:set("track_sel", 3)
+  CTX.wave_any, CTX.take_len = true, 0.5
+  ok(not CTX.undo_ready(), "a restored take on another track has nothing to go back to yet")
+  local w0 = writes
+  params:set("rec_source", 2)
+  params:set("rec", 1)
+  ok(writes == w0 + 1, "the arm marks the take before the pass first")
+  head_runs(0.04); params:set("rec", 0)
+  ok(CTX.undo_ready(), "...so UNDO can bring back the take the relay replaced")
+
+  -- an engine older than RELAY: IN still records, a source refuses
+  engine.commands = { rec_track = { fmt = "ii" } }
+  params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.take_msg == "SOURCE NEEDS A RESTART", "an old engine refuses a source")
+  params:set("rec_source", 1)
+  params:set("rec", 1)
+  c = calls[#calls]
+  ok(params:get("rec") == 1 and c[3] == nil and c[2] ~= nil, "...and records IN with two arguments")
+  head_runs(0.05); params:set("rec", 0)
+
+  params:set("track_sel", 1); params:set("rec_source", 1)
+  engine.rec_track, engine.rec, engine.write_take, engine.commands = saved[1], saved[2], saved[3], saved[4]
+end
+
 T.report("control harness OK")

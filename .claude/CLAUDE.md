@@ -163,6 +163,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 56th: WOBBLE and plugin FLANGE glide their delay in and out; the supported set (engine, test tools, documents) | yes, 2026-11-20, `count: 198`: row 19.12 no break and no hole, 19.27 passes on the supported set | no |
 | 57th: Phase B, the fade is safe: a hand keeps what it moves, an option crosses once, a clear of an end is refused, DRY is a round trip, each track keeps its own window (Lua, test tools). On `main` | deployed 2026-11-20 and loads; not walked | no |
 | 58th: Phase C, the screen: a send into a silent effect is hollow, SCENE says K1+E3 FADES and +K2 (Lua, test tools). On `main`. One turn of E3 is a whole fade (step 0.04, from the user's count) | deployed 2026-11-20, loads | no |
+| 59th: RELAY, the take's SOURCE: IN, a track or the MIX, on TAKE K1+E3; `rec_track` takes it as a third argument ("iii") (engine, Lua, test tools) | yes, 2026-11-20, `count: 198`: T1, T3 and MIX relayed into another track, IN silent, the refusal | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -200,7 +201,7 @@ The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in fro
 back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of the plan
 (C7 to C10) is the fifty-seventh change and Phase C (C11, C12) the fifty-eighth, both Lua
 only, deployed and loaded on the device but not walked. The user asked to merge them on
-2026-11-20, and they are on `main`. Phase D (Relay) needs the user's yes first. The
+2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on the local branch `phase-d` and on the device. The
 Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
 hardware. Another session can share this checkout: stage only your own hunks.
 
@@ -248,8 +249,8 @@ doc/changelog.md holds that history.
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
    source no longer adds up to 198. `rec_track` took a second argument in the
-   forty-ninth change: the script reads `engine.commands.rec_track.fmt` (`ii`) and says
-   so when the engine is older.
+   forty-ninth change and a third (the take's source) in the fifty-ninth: the script
+   reads `engine.commands.rec_track.fmt` (`iii`) and says so when the engine is older.
 
 Lua-only changes skip all this: save and reload the script.
 

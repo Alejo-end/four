@@ -44,7 +44,7 @@ modes, and VOICE draws HELD dim.
 
 | Page | E2 | E3 | K1+E2 | K1+E3 | K2 | K3 | Erase |
 |---|---|---|---|---|---|---|---|
-| TAKE | START `pos_start` | END `pos_end` | MOVE `@win_move` | JITTER `pos_jitter` | REC* | SNAP, hold UNDO | yes |
+| TAKE | START `pos_start` | END `pos_end` | MOVE `@win_move` | SRC `@rec_src` | REC* | SNAP, hold UNDO | yes |
 | VOICE (PLAY) | SPEED `scan` | PITCH `pitch` | ERODE `erode` | WEAR `wear` | HEAL* | MODE, hold TRK 2 | no |
 | VOICE (GRAIN) | SIZE `size` | DENSITY `density` | JITTER `pos_jitter` | DTUN `grain_pitch_spread` | FRZ* | MODE, hold TRK 2 | no |
 | VOICE (WARP) | WINDOW `warp_window` | RANDOM `warp_rand` | SPEED `scan` | PITCH `pitch` | FRZ* | MODE, hold TRK 2 | no |

@@ -1738,6 +1738,11 @@ Engine_Four : CroneEngine {
                 // filtered output goes for the others to read
                 snd2 = 0, snd3 = 0, snd4 = 0, ob2 = 0, ob3 = 0, ob4 = 0, own_out = 0,
                 lane_bus = 0,
+                // RELAY (C13 of doc/signature-workflow.md): what a take
+                // records from. 0 the line input, 1 track 1 after its lane,
+                // 2 the bus `src_bus` (track 2, 3 or 4 after its lane), 3 the
+                // mix before the limiter. rec_track sets both.
+                rec_src = 0, src_bus = 0,
                 // the glide times of io's own knobs (gl)
                 level_t = 0.02, dry_wet_t = 0.02, delay_mix_t = 0.02, rev_mix_t = 0.02,
                 fx_dly_t = 0.02, fx_rev_t = 0.02, dly_rev_t = 0.02;
@@ -1745,12 +1750,13 @@ Engine_Four : CroneEngine {
             var cf, res, dlyRet, rvRet, dfmClass, mmFilter;
             var regenRun, runW, srcL, srcR, recLvl, preLvl, recG, regG, wLp, wHp, wBp;
             var newPass;
-            var sendIn, others, revIn, dm;
+            var sendIn, others, revIn, dm, own, tap, srcK, baseL, baseR;
             inL = In.ar(in1, 1);
             inR = In.ar(in2, 1);
             // wet is track 1 after its lane (the drone and the polyphonic
             // voices, its filter, colour and effects): see buildLane
             wet = In.ar(lane_bus, 2);
+            own = wet;                // track 1 alone, for a relay from it
             Out.ar(own_out, wet);     // track 1, filtered and coloured, for the sends
             // tracks 2 to 4 join here, after their own filter and colour
             others = In.ar(t2_ret, 2);
@@ -1842,8 +1848,16 @@ Engine_Four : CroneEngine {
             // resample is lagged because a step in THIS blend gets printed
             // permanently into the take, not just heard once.
             resample = resample.lag(0.02);
-            recL = (LeakDC.ar(inL) * (1 - resample)) + (preLim[0] * resample);
-            recR = (LeakDC.ar(inR) * (1 - resample)) + (preLim[1] * resample);
+            // the take's source (RELAY). A track's bus holds it after its
+            // filter, colour, effects and level, before its sends: the copy
+            // does not hold the shared delay and reverb. The source only
+            // changes at an arm, while the rec gate is shut.
+            tap = In.ar(src_bus, 2);
+            srcK = rec_src.round.clip(0, 3);
+            baseL = Select.ar(srcK, [LeakDC.ar(inL), own[0], tap[0], preLim[0]]);
+            baseR = Select.ar(srcK, [LeakDC.ar(inR), own[1], tap[1], preLim[1]]);
+            recL = (baseL * (1 - resample)) + (preLim[0] * resample);
+            recR = (baseR * (1 - resample)) + (preLim[1] * resample);
             srcL = (recL * (1 - regG)) + (LeakDC.ar(preLim[0]) * regG);
             srcR = (recR * (1 - regG)) + (LeakDC.ar(preLim[1]) * regG);
             // record-safety limiter: transparent below 0.99, stops a hot take
@@ -2132,8 +2146,14 @@ Engine_Four : CroneEngine {
         // is "ii" since the forty-ninth change: an arity change does not
         // move the command count, so the script reads the format to tell an
         // old engine (four.lua, head_resets).
-        this.addCommand(\rec_track, "ii", { arg msg;
+        // The third argument, since the fifty-ninth change ("iii"), is the
+        // take's SOURCE (RELAY): 0 the line input, 1 to 4 a track after its
+        // lane, 5 the mix. io's rec_src and src_bus follow it.
+        this.addCommand(\rec_track, "iii", { arg msg;
+            var src = (msg[3] ? 0).asInteger.clip(0, 5);
             recIdx = msg[1].asInteger.clip(0, 3);
+            ioSynth.set(\rec_src, [0, 1, 2, 2, 2, 3].at(src),
+                \src_bus, ((src >= 2) and: { src <= 4 }).if({ outBuses[src - 1].index }, { 0 }));
             ((msg[2] ? 0) > 0).if({
                 recPass = recPass + 1;
                 bufGen[recIdx] = bufGen[recIdx] + 1;   // a new take: see clearWait

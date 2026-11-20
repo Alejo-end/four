@@ -236,8 +236,11 @@ def check(build):
            num(r'^BUFFER past the first pass, 1\.1 to 2\.2 s: ([-\d.]+)', a8), -100, 'dB')
     target(build, "the start of a new take in the buffer has no step (a 550 Hz tone alone has 0.0013)",
            num(r'^BUFFER start, largest step in its first 50 ms: ([\d.]+)', a8), 0.002, '', fmt='.4f')
-    target(build, "the UGens of four_io (106 before, and one more for the head's trigger)",
-           num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 107, '', fmt='.0f')
+    # The fifty-ninth change (RELAY) adds the take's source: a bus read, two
+    # Selects and the round and clip of their index. One io synth: no cost a
+    # row can see.
+    target(build, "the UGens of four_io (106, one for the head's trigger, five for the take's source)",
+           num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 112, '', fmt='.0f')
     # A CLEAR WITH REGEN RUNNING (the fiftieth change, gate row 10.8, probe8's
     # _clear). The script stops regen a moment after the clear, and io's write
     # fades out over 10 ms into the pair that was just zeroed. The engine

@@ -285,6 +285,15 @@ effect out before the sound breaks up.
 - Hold K3 on TAKE to go back to the take before the last change. Hold it again to come
   forward. A "<" at the top left means that there is a take to go back to.
 - Hold K1 plus K3 for a second to erase the take. The arc shows the time left.
+- Hold K1 and turn E3 on TAKE to pick the SOURCE of the next take: IN (the line input),
+  a track (T1 to T4) or MIX (everything you hear). A track is its sound after its filter,
+  colour, effects and level, without the delay and the reverb. The track you are on is
+  skipped: a track never records itself. A source that hears your track through a send
+  refuses the take and says `T2 FEEDS T1 - SEND OFF`. Focus track 2, pick T1, and K2
+  twice: track 2 now holds track 1's sound, and UNDO brings back what it held before.
+  This also commits a heavy voice: copy a CLOUD track onto another track in PLAY, then
+  turn the CLOUD track OFF. JITTER, which was here, is on VOICE (GRAIN, K1+E2) and in
+  PARAMS.
 
 ## Samples
 

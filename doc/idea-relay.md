@@ -1,6 +1,7 @@
 # Relay: one track's sound becomes another track's take
 
-> Status: a proposal, written 2026-11-17. Nothing of it is built.
+> Status: a proposal, written 2026-11-17. Built on 2026-11-20 as the fifty-ninth change
+> (C13 of doc/signature-workflow.md): TAKE's SOURCE.
 > doc/signature-workflow.md adapts it as its change C13, in Phase D.
 
 ## The idea

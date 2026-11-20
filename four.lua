@@ -359,6 +359,7 @@ function ctx.enc_target(id)
   if id == "@route_amt" then return ctx.route_cur().id end
   if id == "@route_to" then return "route_sel" end
   if id == "@trk_level" then return ctx.LEVEL_ID[ctx.tsel()] end
+  if id == "@rec_src" then return "rec_source" end
   return id
 end
 
@@ -993,7 +994,7 @@ end
 -- which params each page's encoders address: { e2, e2_alt, e3, e3_alt }.
 -- targets starting with "@" are compound gestures resolved in enc().
 local ENC_MAP = {
-  TAKE   = { "pos_start", "@win_move", "pos_end", "pos_jitter" },
+  TAKE   = { "pos_start", "@win_move", "pos_end", "@rec_src" },
   VOICE  = { "scan", "scan", "pitch", "pitch" }, -- face is mode-contextual
   -- four: the TRACKS hub. E2 the focus, E3 its level; K1 held, its
   -- sends: K1+E2 where to, K1+E3 how much
@@ -1463,7 +1464,7 @@ local REC_PREROLL = 1 / FPS
 local warned_old_head = false
 function ctx.head_resets()
   local c = engine.commands and engine.commands.rec_track
-  if c and c.fmt ~= "ii" then
+  if c and c.fmt ~= "ii" and c.fmt ~= "iii" then
     if not warned_old_head then
       warned_old_head = true
       print("four: the engine is older than the script (rec_track) - SYSTEM > RESTART. "
@@ -1473,15 +1474,46 @@ function ctx.head_resets()
   end
   return true
 end
+-- RELAY (C13 of doc/signature-workflow.md): does this engine take a source
+-- with rec_track? Its third argument came with the fifty-ninth change.
+function ctx.relay_ok()
+  local c = engine.commands and engine.commands.rec_track
+  return not c or c.fmt == "iii"
+end
+-- the take's source as the engine numbers it: 0 the line input, 1 to 4 a
+-- track, 5 the mix (`rec_source` is 1 IN, 2 to 5 T1 to T4, 6 MIX)
+local function rec_src()
+  return math.floor(pget("rec_source", 1) + 0.5) - 1
+end
+ctx.rec_src = rec_src
 -- point io at track n's buffer pair. `fresh` opens a new take there: the
--- write head goes to the start of the pair.
+-- write head goes to the start of the pair. The source goes with it.
 local function rec_track(n, fresh)
   if not engine.rec_track then return end
-  if ctx.head_resets() then
+  if ctx.relay_ok() then
+    engine.rec_track(n - 1, fresh and 1 or 0, rec_src())
+  elseif ctx.head_resets() then
     engine.rec_track(n - 1, fresh and 1 or 0)
   else
     engine.rec_track(n - 1)
   end
+end
+
+-- why a pass from this source cannot record into the focused track, or nil.
+-- A track that records itself, and a source that hears the take's track
+-- through a send, would feed the pass back into itself.
+local SRC_NAMES = { "IN", "T1", "T2", "T3", "T4", "MIX" }
+ctx.SRC_NAMES = SRC_NAMES
+function ctx.relay_refusal(dest)
+  local s = rec_src()
+  if s == 0 then return nil end
+  if not ctx.relay_ok() then return "SOURCE NEEDS A RESTART" end
+  if s == 5 then return nil end
+  if s == dest then return "SOURCE IS THIS TRACK" end
+  if pget("send_" .. dest .. "_" .. s, 0) > 0 then
+    return "T" .. dest .. " FEEDS T" .. s .. " - SEND OFF"
+  end
+  return nil
 end
 
 -- THE WRITE HEAD'S POLL, once a frame. Just after a new take put the head at
@@ -2542,12 +2574,22 @@ local function init_params()
     if engine.rec then engine.rec(v == 1 and 0 or pget("rec", 0)) end
   end)
 
-  params:add_group("grp_rec", "take - record", 18)
+  params:add_group("grp_rec", "take - record", 19)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
   params:set_action("rec", function(v)
     if v == 1 then
+      -- a source that cannot record into this track refuses the arm
+      local why = ctx.relay_refusal(FOCUS)
+      if why then
+        take_say(why, "REC refused: " .. why)
+        params:set("rec", 0)
+        return
+      end
+      -- the take before the pass is what UNDO brings back. A take that a
+      -- PSET restored on another track has no mark yet: mark it now
+      if undo_cur == nil and ctx.wave_any then ctx.undo_mark() end
       -- EACH PART STARTS AT THE START OF ITS OWN BUFFER (C4 of
       -- doc/signature-workflow.md, the forty-ninth change). The write head
       -- is one for the four tracks, and it stopped where a pass ended. The
@@ -2651,6 +2693,9 @@ local function init_params()
   -- (four) what a pass does at the end of its track's 60s: LOOP records
   -- over the start, ONE-SHOT ends the take and records on into the next track
   params:add_option("rec_end", "rec end", { "LOOP", "ONE-SHOT" }, 1)
+  -- RELAY: what a take records from (TAKE K1+E3). A track is that track
+  -- after its filter, colour, effects and level, before its sends.
+  params:add_option("rec_source", "rec source", SRC_NAMES, 1)
   params:add_binary("rec_wait", "start on sound", "toggle", 0)
   params:add_control("rec_thresh", "sound threshold",
     controlspec.new(0.002, 0.5, "exp", 0, 0.02, ""),
@@ -3545,6 +3590,12 @@ function enc(n, d)
       move_pair(tid("pos_start"), tid("pos_end"), d)
     elseif id == "@route_to" then
       route_step(d)
+    elseif id == "@rec_src" then
+      -- the take's source, one step at a time, past the focused track (a
+      -- track never records itself)
+      local k = clamp(math.floor(pget("rec_source", 1) + 0.5) + (d > 0 and 1 or -1), 1, #SRC_NAMES)
+      if k == FOCUS + 1 then k = k + (d > 0 and 1 or -1) end
+      if k >= 1 and k <= #SRC_NAMES then params:set("rec_source", k) end
     -- these address whichever track or send is selected, so they resolve to a
     -- param id at turn time rather than being fixed in ENC_MAP
     elseif id == "@route_amt" or id == "@trk_level" then

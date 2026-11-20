@@ -5131,3 +5131,25 @@ user asked for Phase C on 2026-11-20. Merged into `main` with Phase B the same d
 - test/test_screen.lua: 7 more assertions (138), test/test_control.lua 1. test/uisim/render_pages.lua: a new shot,
   `track2_03_TRACKS_SENDS_WET0`. Four SCENE shots change (the new cue); the other 93 are
   byte-identical. doc/ui is unchanged.
+
+four, fifty-ninth change: **RELAY, Phase D of doc/signature-workflow.md: a take records
+from IN, from a track or from the MIX (engine, Lua, test tools; the count stays 198; on
+the device 2026-11-20)**. The user said yes to Phase D on 2026-11-20. Question 6 was not
+answered: SOURCE is on TAKE's K1+E3, as the plan proposed, and in PARAMS.
+- lib/Engine_Four.sc: io's take has a source (`rec_src`, `src_bus`): the line input,
+  track 1 after its lane, a track 2 to 4 bus (`outBuses`, after its filter, colour,
+  effects and level, before its sends), or the mix before the limiter. `rec_track` takes
+  it as a third argument ("iii"); the count stays 198. `resample` still blends the mix
+  over whichever source. io has 112 UGens (107); check_dsp.py holds the count.
+- four.lua: `rec_source` (IN, T1 to T4, MIX) in PARAMS > take - record, and on TAKE's
+  K1+E3 (`@rec_src`), which steps past the focused track. JITTER leaves TAKE's K1+E3: it
+  is on VOICE's GRAIN face and in PARAMS. An arm refuses `SOURCE IS THIS TRACK`, `T2
+  FEEDS T1 - SEND OFF` (a send from the take's track into the source) and, with an older
+  engine, `SOURCE NEEDS A RESTART`. An arm over a take that has no UNDO mark (a PSET
+  restored it on another track) marks it first, so UNDO brings it back.
+- test/test_control.lua section 36 (14 assertions). The offline DSP check passes.
+- On the device (`count: 198`, rec_track "iii"): a tone take on track 1 in PLAY. A pass
+  into track 2 wrote at a level of 0.33 to 0.38 from T1 and 0.16 from MIX, and 0.00003
+  from IN with nothing at the input. Track 2 alone then played it (0.32). Track 3 relayed
+  into track 4 the same way (0.36, played back at 0.33), the bus path. The refusal read
+  `SOURCE IS THIS TRACK`. Nobody listened.

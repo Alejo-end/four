@@ -290,6 +290,7 @@ local SHORT = {
   dry_wet = "D/W",
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
   ["@win_move"] = "MOV",
+  ["@rec_src"] = "SRC", rec_source = "SRC",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN",
@@ -377,6 +378,7 @@ local FULL = {
   dry_wet = "DRY/WET",
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
+  ["@rec_src"] = "SOURCE", rec_source = "SOURCE",
   density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
   cut_source = "SOURCE",
@@ -573,7 +575,7 @@ end
 local SELECTOR_IDS = {
   route_sel = true, track_sel = true, ["@route_to"] = true,
   seq_slice = true, motion_lane = true, scene_slot = true, scene_slot_a = true,
-  ["@mo_sel"] = true,
+  ["@mo_sel"] = true, ["@rec_src"] = true,
 }
 
 local FY = 58  -- the footer text row (four quiet words)

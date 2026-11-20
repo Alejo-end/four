@@ -133,7 +133,7 @@ local MOTION_EXCLUDE = {
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
-  "rec_wait", "rec_thresh", "rec_end",
+  "rec_wait", "rec_thresh", "rec_end", "rec_source",
   "take_undo", "undo_keep",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material

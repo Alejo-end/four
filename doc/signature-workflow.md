@@ -315,7 +315,7 @@ Each phase ends at a gate. Do not start the next phase before its gate passes.
 | A. Click-free and in budget (done 2026-11-20) | Engine and device. The prerequisites | C1, C3, C4, then C2 and C6. C5 measures from the start | Rows 19.12 and 19.27 pass, and the rows A1 to A5 of section 6. The user hears plan.md Phase 2, items 4, 8 and 12 |
 | B. Safe (built 2026-11-20, not on the device) | Lua only, a reload on the device | C7, C8, C9, C10 | test_control's new section, `LUA53=... lua test/check.lua`, dist rebuilt. Renders byte-identical except the new cues |
 | C. Readable (built 2026-11-20, not walked on the device) | Lua only | C11, C12 | uisim renders looked at, test_screen. Then the observed walkthrough of plan.md Phase 4, with the loop of section 6 added as task 8 |
-| D. Relay | Engine and Lua, `count: 198` by route (b) | C13 | Starts after Phase C passes and the user says yes. The deploy ritual, then Relay's seven steps |
+| D. Relay (built 2026-11-20, `count: 198`, on the device) | Engine and Lua, `count: 198` by route (b) | C13 | Starts after Phase C passes and the user says yes. The deploy ritual, then Relay's seven steps |
 | E. The decision | Device, the user, a first-time player | none | Section 6. Then the README's first minutes become this loop, and the example presets show it |
 
 Phase A also settles what plan.md Phase 3 (no glitch at a preset load) means here. The
@@ -425,7 +425,8 @@ do not come before it.
 5. **The recall.** K2 lands a scene at once (NOW). Does it glide over two beats by
    default instead (`scene_recall_mode` GLIDE)?
 6. **Relay's place (C13).** SOURCE on TAKE's K1+E3 in place of JITTER, or in PARAMS
-   first?
+   first? The user asked for Phase D on 2026-11-20 without choosing: it is on TAKE's
+   K1+E3, as the plan proposed, and in PARAMS.
 7. **The voice in the fade.** Leave voice modes to K2, or switch them at the midpoint
    once C2 makes a change clean? Each switch runs two drones for up to 150 ms.
 8. **The supported set (C5).** Which four voices must play together in a show?
