@@ -264,7 +264,9 @@ function M.tick()
     return
   end
   C.take_msg_at = C.frame   -- the progress stays on TAKE's top row
-  local t = now() - r.t0
+  -- (a hair forward: frames counted in seconds must not miss a due time
+  -- by a rounding of the division)
+  local t = now() - r.t0 + 1e-6
   local room = r.room
   if t >= room then finish(t); return end
   if r.on then

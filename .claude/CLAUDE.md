@@ -164,6 +164,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 57th: Phase B, the fade is safe: a hand keeps what it moves, an option crosses once, a clear of an end is refused, DRY is a round trip, each track keeps its own window (Lua, test tools). On `main` | deployed 2026-11-20 and loads; not walked | no |
 | 58th: Phase C, the screen: a send into a silent effect is hollow, SCENE says K1+E3 FADES and +K2 (Lua, test tools). On `main`. One turn of E3 is a whole fade (step 0.04, from the user's count) | deployed 2026-11-20, loads | no |
 | 59th: RELAY, the take's SOURCE: IN, a track or the MIX, on TAKE K1+E3; `rec_track` takes it as a third argument ("iii") (engine, Lua, test tools) | yes, 2026-11-20, `count: 198`: T1, T3 and MIX relayed into another track, IN silent, the refusal | no |
+| 60th: motion without visiting MOTION (first move starts a pass, PASS in bars closes it, overdub stays armed, double-tap K1), MIDI faders as the mixer, the control page on the computer (Lua, visuals, test tools) | deployed 2026-11-20, loads; OSC in from the computer moved params. Faders and double tap not tried | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -233,7 +234,9 @@ freely usable ambient samples instead, and none are chosen yet. A new example se
 harness that loads every pset and scene through the offscreen script.
 
 **The visuals link.** lib/mosc.lua sends the state as OSC to visuals/bridge.js, which
-feeds Hydra (visuals/hydra.js). It ran with mangler on the device (the 110th and 111th
+feeds Hydra (visuals/hydra.js). The bridge also serves a control page
+(`/control`, visuals/control.html) whose moves go back to the norns as `/four/set`,
+`/four/norm` and `/four/press` (port 10111), for the ids in mosc's ALLOW only. It ran with mangler on the device (the 110th and 111th
 changes). No run with the `/four/` addresses is on record.
 
 **Before four.** mangler went to its 114th change at `count: 66`. `full-review` was

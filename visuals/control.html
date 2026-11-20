@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>four · control</title>
+<style>
+  /* four on a computer: what the norns does, live, and its mixer, transports
+     and scenes to play from here. The state comes from the norns through
+     visuals/bridge.js; every move goes back the same way. */
+  :root { --bg:#0b0b0b; --panel:#151515; --line:#2a2a2a; --dim:#6b6b6b; --fg:#e8e8e8;
+          --hot:#ff5a36; --on:#f2f2f2; --accent:#9fd3ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:13px/1.3 ui-monospace, Menlo, Consolas, monospace; }
+  header { display:flex; align-items:center; gap:14px; padding:10px 16px;
+           border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; letter-spacing:.2em; }
+  .chip { padding:2px 8px; border:1px solid var(--line); border-radius:3px; color:var(--dim); }
+  .chip.live { color:var(--bg); background:var(--on); border-color:var(--on); }
+  .chip.warn { color:var(--bg); background:var(--hot); border-color:var(--hot); }
+  #beat { width:10px; height:10px; border-radius:50%; background:var(--line); }
+  .meter { width:90px; height:6px; background:var(--line); position:relative; }
+  .meter i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); width:0; }
+  main { display:grid; grid-template-columns: repeat(4, minmax(130px,1fr)) minmax(220px,1.3fr);
+         gap:12px; padding:14px 16px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px; }
+  section h2 { margin:0 0 8px; font-size:12px; letter-spacing:.15em; color:var(--dim); font-weight:normal; }
+  .track.focus { border-color:var(--accent); }
+  .track h2 { display:flex; justify-content:space-between; cursor:pointer; color:var(--fg); }
+  .track.silent h2 { color:var(--dim); }
+  .modes { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; margin-bottom:10px; }
+  button { background:#1d1d1d; color:var(--dim); border:1px solid var(--line); border-radius:3px;
+           font:inherit; font-size:11px; padding:5px 2px; cursor:pointer; }
+  button:hover { color:var(--fg); }
+  button.on { background:var(--on); color:var(--bg); border-color:var(--on); }
+  button.rec.on { background:var(--hot); border-color:var(--hot); color:#fff; }
+  button.filled { color:var(--fg); border-color:#555; }
+  .fader { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .fader input { writing-mode:vertical-lr; direction:rtl; height:150px; width:28px; }
+  .row { display:grid; grid-template-columns:40px 1fr 38px; align-items:center; gap:6px; margin:4px 0; }
+  .row span:last-child { text-align:right; color:var(--dim); }
+  input[type=range] { accent-color:var(--fg); }
+  .mixer { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .side { display:flex; flex-direction:column; gap:12px; grid-row: span 2; }
+  .grid8 { display:grid; grid-template-columns:repeat(8,1fr); gap:3px; }
+  .grid6 { display:grid; grid-template-columns:repeat(6,1fr); gap:3px; }
+  .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:3px; }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:8px; }
+  .label { color:var(--dim); margin:8px 0 4px; font-size:11px; letter-spacing:.1em; }
+  #offline { display:none; padding:8px 16px; background:var(--hot); color:#fff; }
+  @media (max-width: 900px) { main { grid-template-columns: repeat(2,1fr); } .side { grid-row:auto; } }
+</style>
+</head>
+<body>
+<div id="offline">No bridge: start it with visuals/start.command (KIOSK=0 starts the bridge alone).</div>
+<header>
+  <h1>FOUR</h1>
+  <span class="chip" id="page">-</span>
+  <span id="beat"></span><span id="tempo">-</span>
+  <span class="chip" id="cpu">CPU</span>
+  <span>IN</span><span class="meter"><i id="m_in"></i></span>
+  <span>OUT</span><span class="meter"><i id="m_out"></i></span>
+  <button id="stop" style="margin-left:auto;padding:5px 14px">STOP</button>
+</header>
+<main id="main"></main>
+
+<script>
+"use strict";
+// ---- the link: state in, moves out ----------------------------------------
+const S = {};                      // the last value of every field the norns sent
+const held = {};                   // key -> time: a control the hand is on (no echo)
+let ws = null;
+function connect() {
+  ws = new WebSocket("ws://" + location.host + "/");
+  ws.onopen = () => { document.getElementById("offline").style.display = "none"; };
+  ws.onclose = () => { document.getElementById("offline").style.display = "block"; setTimeout(connect, 1000); };
+  ws.onmessage = (e) => {
+    let j; try { j = JSON.parse(e.data); } catch (_) { return; }
+    if (j.state) { Object.assign(S, j.state); render(); }
+    else if (j.k !== undefined) { S[j.k] = j.v; render(j.k); }
+  };
+}
+function send(cmd, id, v) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd, id, v }));
+}
+// a fader sends at most once a frame
+const pending = {};
+function sendNorm(id, key, v) {
+  held[key] = performance.now();
+  pending[id] = v;
+  requestAnimationFrame(() => {
+    if (pending[id] === undefined) return;
+    send("norm", id, pending[id]); delete pending[id];
+  });
+}
+
+// ---- the page ----------------------------------------------------------------
+const MODES = ["OFF", "GRAIN", "WARP", "PV", "PLAY", "CLOUD"];
+const SRC = ["IN", "T1", "T2", "T3", "T4", "MIX"];
+const BARS = ["FREE", "1", "2", "4", "8"];
+const TR = [1, 2, 3, 4].map((n) => ({
+  n, mode: n === 1 ? "mode" : "t" + n + "_mode", lvl: n === 1 ? "grain_level" : "t" + n + "_level",
+  dly: n === 1 ? "fx_dly" : "t" + n + "_fx_dly", rev: n === 1 ? "fx_rev" : "t" + n + "_fx_rev",
+  kmode: n <= 2 ? (n === 1 ? "mode" : "t2_mode") : "t" + n + "_mode",
+}));
+const el = (tag, attrs = {}, kids = []) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "on") for (const [ev, f] of Object.entries(v)) e.addEventListener(ev, f);
+    else if (k === "text") e.textContent = v; else e.setAttribute(k, v);
+  }
+  for (const c of kids) e.appendChild(c);
+  return e;
+};
+const views = [];   // { key, update(v) }
+function bindRange(id, key) {
+  // (type last: a range made first and then given max 1 starts at its end)
+  const input = el("input", { min: 0, max: 1, step: 0.001, value: 0, type: "range" });
+  input.addEventListener("input", () => sendNorm(id, key, Number(input.value)));
+  views.push({ key, update: (v) => {
+    if (held[key] && performance.now() - held[key] < 400) return;
+    input.value = v ?? 0;
+  } });
+  return input;
+}
+function bindButtons(labels, key, onPick, cls) {
+  const box = el("div", { class: cls });
+  const bs = labels.map((t, i) => el("button", { text: t, on: { click: () => onPick(i) } }));
+  bs.forEach((b) => box.appendChild(b));
+  views.push({ key, update: (v) => bs.forEach((b, i) => b.classList.toggle("on", Number(v) === i + 1)) });
+  return box;
+}
+function build() {
+  const main = document.getElementById("main");
+  for (const t of TR) {
+    const lvlKey = "lvl" + t.n, dlyKey = "dly" + t.n, revKey = "rev" + t.n;
+    const sec = el("section", { class: "track", id: "trk" + t.n });
+    const h = el("h2", { on: { click: () => send("set", "track_sel", t.n) } },
+      [el("span", { text: "T" + t.n }), el("span", { text: "", id: "mname" + t.n })]);
+    sec.appendChild(h);
+    sec.appendChild(bindButtons(MODES, t.kmode, (i) => send("set", t.mode, i + 1), "modes"));
+    const f = el("div", { class: "fader" }, [bindRange(t.lvl, lvlKey), el("span", { text: "LEVEL" })]);
+    sec.appendChild(f);
+    sec.appendChild(el("div", { class: "row" }, [el("span", { text: "DLY" }), bindRange(t.dly, dlyKey), el("span", { id: "v" + dlyKey })]));
+    sec.appendChild(el("div", { class: "row" }, [el("span", { text: "REV" }), bindRange(t.rev, revKey), el("span", { id: "v" + revKey })]));
+    views.push({ key: t.kmode, update: (v) => {
+      document.getElementById("mname" + t.n).textContent = MODES[(Number(v) || 1) - 1] || "";
+      sec.classList.toggle("silent", Number(v) === 1);
+    } });
+    for (const k of [dlyKey, revKey]) views.push({ key: k, update: (v) => {
+      document.getElementById("v" + k).textContent = Math.round((v || 0) * 100) + "%";
+    } });
+    main.appendChild(sec);
+  }
+  // the side: take, motion, scenes
+  const side = el("div", { class: "side" });
+  const take = el("section", {}, [el("h2", { text: "TAKE" })]);
+  const recB = el("button", { class: "rec", text: "REC", on: { click: () => send("set", "rec", S.rec ? 0 : 1) } });
+  const undoB = el("button", { text: "UNDO", on: { click: () => send("press", "take_undo") } });
+  take.appendChild(el("div", { class: "pair" }, [recB, undoB]));
+  take.appendChild(el("div", { class: "label", text: "SOURCE" }));
+  take.appendChild(bindButtons(SRC, "src", (i) => send("set", "rec_source", i + 1), "grid6"));
+  views.push({ key: "rec", update: (v) => recB.classList.toggle("on", Number(v) === 1) });
+  side.appendChild(take);
+
+  const mo = el("section", {}, [el("h2", { text: "MOTION" })]);
+  const mrec = el("button", { class: "rec", text: "REC", on: { click: () => send("set", "motion_rec", S.mrec ? 0 : 1) } });
+  const mplay = el("button", { text: "PLAY", on: { click: () => send("set", "motion_play", S.mplay ? 0 : 1) } });
+  mo.appendChild(el("div", { class: "pair" }, [mrec, mplay]));
+  mo.appendChild(el("div", { class: "label", text: "PASS (BARS)" }));
+  mo.appendChild(bindButtons(BARS, "mbars", (i) => send("set", "motion_bars", i + 1), "grid5"));
+  views.push({ key: "mrec", update: (v) => mrec.classList.toggle("on", Number(v) === 1) });
+  views.push({ key: "mplay", update: (v) => mplay.classList.toggle("on", Number(v) === 1) });
+  side.appendChild(mo);
+
+  const sc = el("section", {}, [el("h2", { text: "SCENE" })]);
+  sc.appendChild(el("div", { class: "label", text: "B" }));
+  const bs = [];
+  const bRow = el("div", { class: "grid8" });
+  for (let i = 1; i <= 8; i++) {
+    const b = el("button", { text: String(i), on: { click: () => send("set", "scene_slot", i) } });
+    bs.push(b); bRow.appendChild(b);
+  }
+  sc.appendChild(bRow);
+  sc.appendChild(el("div", { class: "label", text: "A" }));
+  const as = [];
+  const aRow = el("div", { class: "grid8", style: "grid-template-columns:repeat(9,1fr)" });
+  for (let i = 0; i <= 8; i++) {
+    const b = el("button", { text: i === 0 ? "LIVE" : String(i), on: { click: () => send("set", "scene_slot_a", i) } });
+    as.push(b); aRow.appendChild(b);
+  }
+  sc.appendChild(aRow);
+  sc.appendChild(el("div", { class: "row", style: "grid-template-columns:40px 1fr 38px" },
+    [el("span", { text: "FADE" }), bindRange("scene_morph_amt", "morph"), el("span", { id: "vmorph" })]));
+  sc.appendChild(el("div", { class: "pair" }, [
+    el("button", { text: "RECALL", on: { click: () => send("press", "scene_recall") } }),
+    el("button", { text: "CAPTURE", on: { click: () => send("press", "scene_capture") } })]));
+  const paintSlots = () => {
+    const filled = Number(S.filled) || 0;
+    bs.forEach((b, i) => { b.classList.toggle("filled", (filled >> i) & 1); b.classList.toggle("on", Number(S.scene) === i + 1); });
+    as.forEach((b, i) => { b.classList.toggle("filled", i > 0 && ((filled >> (i - 1)) & 1)); b.classList.toggle("on", Number(S.scene_a) === i); });
+  };
+  for (const k of ["filled", "scene", "scene_a"]) views.push({ key: k, update: paintSlots });
+  views.push({ key: "morph", update: (v) => { document.getElementById("vmorph").textContent = Math.round((v || 0) * 100) + "%"; } });
+  side.appendChild(sc);
+
+  const mix = el("section", {}, [el("h2", { text: "MIX" })]);
+  const mx = el("div", { class: "mixer" });
+  for (const [id, key, word] of [["delay_mix", "delay_mix", "DLY"], ["rev_mix", "rev_mix", "REV"],
+                                 ["mix", "mix", "TAPE"], ["out_level", "out_level", "OUT"]]) {
+    mx.appendChild(el("div", { class: "fader" }, [bindRange(id, key), el("span", { text: word })]));
+  }
+  mix.appendChild(mx);
+  side.appendChild(mix);
+  main.appendChild(side);
+
+  document.getElementById("stop").addEventListener("click", () => send("set", "stop_all", S.stop ? 0 : 1));
+  views.push({ key: "stop", update: (v) => document.getElementById("stop").classList.toggle("on", Number(v) === 1) });
+  views.push({ key: "focus", update: (v) => TR.forEach((t) =>
+    document.getElementById("trk" + t.n).classList.toggle("focus", Number(v) === t.n)) });
+  views.push({ key: "page_name", update: (v) => { document.getElementById("page").textContent = v || "-"; } });
+  views.push({ key: "tempo", update: (v) => { document.getElementById("tempo").textContent = v ? Math.round(v) + " BPM" : "-"; } });
+  views.push({ key: "cpu", update: (v) => document.getElementById("cpu").classList.toggle("warn", Number(v) === 1) });
+  views.push({ key: "beat", update: (v) => {
+    document.getElementById("beat").style.background = (v || 0) < 0.15 ? "var(--fg)" : "var(--line)"; } });
+  const meter = (id, a, b) => views.push({ key: a, update: () => {
+    const x = Math.max(S[a] || 0, S[b] || 0);
+    document.getElementById(id).style.width = Math.min(100, Math.sqrt(x) * 100) + "%"; } });
+  meter("m_in", "in_l", "in_r"); meter("m_out", "out_l", "out_r");
+  views.push({ key: "in_r", update: () => views.find((x) => x.key === "in_l").update() });
+  views.push({ key: "out_r", update: () => views.find((x) => x.key === "out_l").update() });
+}
+// t2_mode reaches the page as "t2_mode", track 1's as "mode": the keys match
+function render(key) {
+  for (const v of views) if (key === undefined || v.key === key) v.update(S[v.key]);
+}
+build();
+connect();
+</script>
+</body>
+</html>

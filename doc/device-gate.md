@@ -356,6 +356,9 @@ and that the engine polls behave as the stubs assume.
 | 16.18 | **Autosample** | A synth on MIDI port 1 and on the line input. PARAMS > take - autosample: C3 to C5, step 1, TIME, 1 s and 1 s. Press `autosample` | TAKE counts the notes, `AUTO: 25 NOTES, KEYS PLAY`. A MIDI keyboard plays each key at its own pitch, and chords | `lib/msample.lua`, `ctx.route_note` |
 | 16.19 | Autosample, DECAY | The same with DECAY, `release time` 5 s, a sound with a long release | Each note waits for the last one to die away, and no slice starts on a tail | `decayed` in lib/msample.lua, the `rec_amp` poll |
 | 16.20 | Autosample, not wired | Pull the audio cable, press `autosample`. Then set an empty port | `AUTO: NOTHING CAME BACK`, then `AUTO: NO MIDI ON PORT n` with no take | `refine`, `M.start` |
+| 16.21 | **Motion from any page** | MOTION K1+E3 PASS 1 BAR. Double-tap K1 on FILTER, wait, then sweep the cutoff | `MOTION REC` pops, the pass starts at the sweep and plays by itself a bar later. Double-tap K1 during the overdub: `MOTION OFF` | `M.pass_frames`, `ctx.motion_toggle` |
+| 16.22 | **Fader block** | A controller with eight faders: `fader channel` its channel, `first fader cc` its first CC. Move fader 2 from the bottom | Track 2's level does not move until the fader passes it, then follows. A scene recall lets go of it again | `fader_cc` in lib/minput.lua |
+| 16.23 | **The control page** | `KIOSK=0 sh visuals/start.command`, open `http://127.0.0.1:8080/control`, osc out on the norns to this computer | The page shows the tracks, scenes and mixer live; a fader or a mode on the page moves the norns | visuals/control.html, `M.osc_in` in lib/mosc.lua |
 | 16.17 | A hand on a swung knob | LFO 1 on cutoff, SINE, 1 Hz, depth 0.4; turn cutoff slowly with E2 on FILTER | A smooth sweep under the swing, no zipper or clicks | `Mlfo.swung` in the eng-control action |
 
 ## Stage 17: the beat repeat (ENGINE, a new command)

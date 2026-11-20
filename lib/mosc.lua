@@ -77,6 +77,39 @@ add("t2_size", "t2_size", true)
 add("t2_density", "t2_density", true)
 add("t2_pitch", "t2_pitch", true)
 add("t2_cutoff", "t2_cutoff", true)
+-- THE CONTROL PAGE (visuals/control.html, the sixtieth change): what it
+-- shows and moves. The levels and the sends go out on their knobs (0..1),
+-- the modes and switches as they are.
+add("focus", "track_sel")
+add("t3_mode", "t3_mode")
+add("t4_mode", "t4_mode")
+add("lvl1", "grain_level", true)
+add("lvl2", "t2_level", true)
+add("lvl3", "t3_level", true)
+add("lvl4", "t4_level", true)
+add("dly1", "fx_dly", true)
+add("dly2", "t2_fx_dly", true)
+add("dly3", "t3_fx_dly", true)
+add("dly4", "t4_fx_dly", true)
+add("rev1", "fx_rev", true)
+add("rev2", "t2_fx_rev", true)
+add("rev3", "t3_fx_rev", true)
+add("rev4", "t4_fx_rev", true)
+add("mix", "mix", true)
+add("out_level", "out_level", true)
+add("stop", "stop_all")
+add("mrec", "motion_rec")
+add("mplay", "motion_play")
+add("mbars", "motion_bars")
+add("src", "rec_source")
+add("scene_a", "scene_slot_a")
+add("cpu", function() return C.cpu_high and 1 or 0 end)
+-- the filled scene slots, one bit each (slot 1 is 1, slot 8 is 128)
+add("filled", function()
+  local s, b = C.scene and C.scene.slots, 0
+  if s then for i = 1, 8 do if s[i] then b = b + (1 << (i - 1)) end end end
+  return b
+end)
 
 local M = { FIELDS = FIELDS, on = false, host = nil, port = nil, errors = 0 }
 
@@ -112,6 +145,9 @@ end
 M.resolve = resolve
 
 local dest = { "", 0 }     -- handed to osc.send; rebuilt in place on a change
+-- (declared here, above M.tick, which resets it: below, tick wrote a global
+-- and the cap of ev_send never opened again after 24 events)
+local sent_ev = 0
 local one = { 0 }          -- the argument list, reused for every message
 
 local function value(f)
@@ -161,9 +197,60 @@ function M.tick()
   end
 end
 
+-- CONTROL FROM THE COMPUTER (the sixtieth change). visuals/bridge.js sends
+-- what the control page moves to the norns's OSC port (10111):
+--   /four/set   <id> <value>    the param's own value (a mode, a switch)
+--   /four/norm  <id> <0..1>     a position on the knob (a fader)
+--   /four/press <id>            a momentary param: a press and a release
+-- Only the ids below can be moved, so the network reaches the mixer, the
+-- transports and the scenes, and never a file, a buffer or the system. A
+-- move is a hand on the instrument: the motion looper records it, as it
+-- records a MIDI knob.
+local ALLOW = {}
+for _, id in ipairs({ "mode", "t2_mode", "t3_mode", "t4_mode", "track_sel",
+    "grain_level", "t2_level", "t3_level", "t4_level",
+    "fx_dly", "t2_fx_dly", "t3_fx_dly", "t4_fx_dly",
+    "fx_rev", "t2_fx_rev", "t3_fx_rev", "t4_fx_rev",
+    "delay_mix", "rev_mix", "mix", "out_level", "dry_wet", "cutoff", "resonance",
+    "stop_all", "rec", "rec_source", "motion_rec", "motion_play", "motion_bars",
+    "scene_slot", "scene_slot_a", "scene_morph_amt", "freeze", "vis_look" }) do
+  ALLOW[id] = "set"
+end
+for _, id in ipairs({ "scene_recall", "scene_capture", "scene_next",
+    "scene_safe_restore", "take_undo", "vis_flash" }) do
+  ALLOW[id] = "press"
+end
+M.ALLOW = ALLOW
+
+function M.osc_in(path, args)
+  local id = args and args[1]
+  if type(id) ~= "string" or not ALLOW[id] or not params.lookup[id] then return false end
+  if path == "/four/set" and ALLOW[id] == "set" and type(args[2]) == "number" then
+    params:set(id, args[2])
+  elseif path == "/four/norm" and ALLOW[id] == "set" and type(args[2]) == "number" then
+    local cs = params:lookup_param(id).controlspec
+    if not cs then return false end
+    params:set(id, cs:map(math.min(math.max(args[2], 0), 1)))
+  elseif path == "/four/press" and ALLOW[id] == "press" then
+    params:set(id, 1)
+    params:set(id, 0)
+  else
+    return false
+  end
+  if C.touch_input then C.touch_input() end
+  return true
+end
+
 function M.init(ctx)
   C = ctx
   pget = ctx.pget
+  -- the norns hands a script every OSC message it does not handle itself
+  -- (its own /param/ path included); osc.cleanup takes this away again
+  if osc then
+    osc.event = function(path, args, from)
+      if type(path) == "string" and path:sub(1, 6) == "/four/" then M.osc_in(path, args) end
+    end
+  end
 end
 
 -- MIDI events for the picture (an Octatrack on the TRS MIDI input, or any
@@ -174,7 +261,6 @@ end
 -- sent again. At most EVENT_CAP events leave per frame, so a knob sweep or a
 -- busy pattern cannot flood the Wi-Fi. Clock messages are never forwarded.
 local EVENT_CAP = 24
-local sent_ev = 0
 local last_cc = {}
 local evargs = { 0, 0, 0 }
 local evrun = { 0 }

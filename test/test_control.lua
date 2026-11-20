@@ -1790,10 +1790,12 @@ do
     while #mo.lane_ids > 0 do mo.clear_lane() end
     return got
   end
-  local near_bar = take(28)                 -- 29 frames: 3% short of a bar
+  -- (a pass starts at its first move, a frame after the arm here: the
+  -- sixtieth change)
+  local near_bar = take(29)                 -- 29 frames: 3% short of a bar
   ok(near_bar.rec == 29 and near_bar.loop == 30,
     "a pass 3% short of a bar loops on the bar (" .. near_bar.rec .. " -> " .. near_bar.loop .. ")")
-  local chosen = take(25)                   -- 26 frames: between 3/4 and 1 bar
+  local chosen = take(26)                   -- 26 frames: between 3/4 and 1 bar
   ok(chosen.loop == chosen.rec, "a length clearly between musical lengths stays as played")
   clock.get_tempo = nil
   params:set("cutoff", 20000)
@@ -2494,7 +2496,7 @@ do
   params:set("motion_rec", 1)
   _h.run_ticks(10)
   ok(CTX.motion.lanes["cutoff"] == nil, "a gesture loop does not record the modulator")
-  params:set("cutoff", 3000); _h.run_ticks(2)
+  params:set("cutoff", 3000); _h.run_ticks(5)
   params:set("motion_rec", 0)
   ok(CTX.motion.lanes["cutoff"] ~= nil, "...but it does record a hand on the modulated knob")
   while #CTX.motion.lane_ids > 0 do CTX.motion.clear_lane() end
@@ -3089,6 +3091,9 @@ do
   Mosc.midi_in({ type = "note_on", ch = 1, note = 61, vel = 90 }, 1)
   ok(#sent == 0, "midi to visuals off sends no event")
   params:set("vis_midi", 1)
+  -- the link resends every field every 2 s (frame % 30): keep the window
+  -- clear of that refresh, whatever frame the run has reached
+  while (CTX.frame + 1) % 30 == 0 or (CTX.frame + 2) % 30 == 0 do _h.run_ticks(1) end
   drain(); _h.run_ticks(2)
   local param_msgs = 0
   for _, m in ipairs(sent) do
@@ -4406,6 +4411,135 @@ do
 
   params:set("track_sel", 1); params:set("rec_source", 1)
   engine.rec_track, engine.rec, engine.write_take, engine.commands = saved[1], saved[2], saved[3], saved[4]
+end
+
+-- ============================================================================
+-- 37 · motion: arm, then forget it (the sixtieth change)
+-- ============================================================================
+do
+  local mo = CTX.motion
+  local function reset()
+    params:set("motion_rec", 0); params:set("motion_play", 0)
+    while #mo.lane_ids > 0 do mo.clear_lane() end
+  end
+  params:set("orbit_on", 0); params:set("scene_morph_amt", 0)
+  clock.get_tempo = function() return 120 end   -- a bar = 2 s = 30 frames
+  reset()
+  params:set("motion_len", 0); params:set("motion_bars", 1)
+  params:set("cutoff", 1000)
+
+  -- (a) a first pass starts at its first move
+  params:set("motion_rec", 1); _h.run_ticks(20)       -- walk to another page
+  params:set("cutoff", 2000); _h.run_ticks(9)
+  params:set("cutoff", 3000); _h.run_ticks(1)
+  params:set("motion_rec", 0)
+  local L = mo.lanes.cutoff
+  ok(L and L.f[1] == 0, "the first move is the loop's start")
+  ok(mo.rec_len >= 10 and mo.rec_len <= 12, "the wait before it is not in the loop (" .. mo.rec_len .. " frames)")
+  reset()
+
+  -- (b) a pass on the clock closes itself and plays
+  params:set("motion_bars", 2)                         -- 1 BAR
+  params:set("motion_rec", 1); _h.run_ticks(7)
+  params:set("cutoff", 1500); _h.run_ticks(10)
+  params:set("cutoff", 2500); _h.run_ticks(25)
+  ok(params:get("motion_rec") == 0, "a 1 BAR pass closes itself a bar after its first move")
+  ok(mo.loop_len == 30 and params:get("motion_play") == 1, "...is exactly a bar, and plays")
+
+  -- (c) an overdub stays armed loop after loop
+  params:set("motion_rec", 1)
+  _h.run_ticks(35)
+  ok(params:get("motion_rec") == 1, "an overdub stays armed past the loop's end")
+  params:set("resonance", 0.3); _h.run_ticks(3)
+  ok(mo.lanes.resonance ~= nil, "...and records what moves in the next loop")
+  params:set("motion_rec", 0)
+  reset()
+  params:set("resonance", 0)
+
+  -- (d) double-tap K1: motion record on and off from any page
+  T.goto_page("FILTER")
+  key(1, 1); key(1, 0); _h.run_ticks(2); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 1 and CTX.pop_text == "MOTION REC", "a double tap of K1 arms motion record from FILTER")
+  _h.run_ticks(10)
+  key(1, 1); key(1, 0); _h.run_ticks(1); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 0 and CTX.pop_text == "MOTION OFF", "...and another disarms it")
+  key(1, 1); enc(2, 1); key(1, 0); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 0, "K1 used with a knob is not a tap")
+  _h.run_ticks(10)
+  key(1, 1); key(1, 0); _h.run_ticks(9); key(1, 1); key(1, 0)
+  ok(params:get("motion_rec") == 0, "two taps far apart are not a double tap")
+  reset()
+  params:set("motion_bars", 1)
+  clock.get_tempo = nil
+  params:set("cutoff", 20000)
+end
+
+-- ============================================================================
+-- 38 · the fader block: eight CCs in a row are the mixer, with pickup
+-- ============================================================================
+do
+  local real_to_msg = midi.to_msg
+  local function cc(c, v, ch)
+    midi.to_msg = function() return { type = "cc", cc = c, val = v, ch = ch or 1 } end
+    midi.vports[1].event({})
+  end
+  ok(type(midi.vports[1].event) == "function", "the vports listen")
+  params:set("fader_ch", 1); params:set("fader_cc", 20)
+  params:set("t2_level", 1.0); params:set("rev_mix", 0.5); params:set("out_level", 0.8)
+  local raw = function(id) return params:lookup_param(id).controlspec:unmap(params:get(id)) end
+  -- a fader far from its knob does not move it
+  cc(21, 0)                                          -- T2's fader at the bottom
+  near(params:get("t2_level"), 1.0, 1e-9, "a fader below its knob does not yank it (pickup)")
+  cc(21, 40)
+  near(params:get("t2_level"), 1.0, 1e-9, "...still below")
+  local at = math.floor(raw("t2_level") * 127 + 0.5)
+  cc(21, at + 3)                                     -- it passes the knob
+  near(raw("t2_level"), (at + 3) / 127, 1e-9, "a fader that passes its knob takes it over")
+  cc(21, 127)
+  near(raw("t2_level"), 1, 1e-9, "...and then moves it")
+  -- the block's other faders
+  cc(25, math.floor(0.5 * 127 + 0.5))                -- REV at its knob
+  cc(25, 0)
+  near(params:get("rev_mix"), 0, 1e-9, "fader 6 is the reverb's WET")
+  -- a knob moved by something else lets go of its fader
+  params:set("t2_level", 0.3)
+  cc(21, 120)
+  near(params:get("t2_level"), 0.3, 1e-9, "a knob a scene or a hand moved lets go of its fader")
+  -- another channel, or a CC outside the block, is not the mixer
+  cc(27, 0, 2)
+  near(params:get("out_level"), 0.8, 1e-9, "another channel is not the fader block")
+  cc(30, 0)
+  near(params:get("out_level"), 0.8, 1e-9, "...nor a CC past the eighth fader")
+  params:set("fader_ch", 0)
+  cc(25, 127)
+  near(params:get("rev_mix"), 0, 1e-9, "fader channel OFF: the block is off")
+  midi.to_msg = real_to_msg
+  params:set("t2_level", 1.0); params:set("rev_mix", 0); params:set("out_level", 0.8)
+  params:set("fader_cc", 0)
+end
+
+-- ============================================================================
+-- 39 · the control page: OSC from the computer moves the allowed params
+-- ============================================================================
+do
+  local Mosc = CTX.osc
+  params:set("t2_level", 1.0); params:set("scene_morph_amt", 0)
+  ok(Mosc.osc_in("/four/norm", { "t2_level", 0.5 }), "/four/norm moves a fader")
+  near(params:lookup_param("t2_level").controlspec:unmap(params:get("t2_level")), 0.5, 1e-9,
+    "...to that place on its knob")
+  ok(Mosc.osc_in("/four/set", { "t3_mode", 5 }) and params:get("t3_mode") == 5, "/four/set sets a mode")
+  ok(Mosc.osc_in("/four/set", { "rec_source", 2 }) and params:get("rec_source") == 2, "...and the take's source")
+  params:set("rec_source", 1); params:set("t3_mode", 1)
+  ok(not Mosc.osc_in("/four/set", { "sample_file", 1 }), "a param outside the list is refused (a file)")
+  ok(not Mosc.osc_in("/four/set", { "osc_host", 1 }), "...the link's own settings too")
+  ok(not Mosc.osc_in("/four/norm", { "t2_level", "x" }), "a value that is not a number is refused")
+  ok(not Mosc.osc_in("/four/press", { "t2_level" }), "a fader is not a button")
+  params:set("scene_slot", 7)
+  ok(Mosc.osc_in("/four/press", { "scene_capture" }) and CTX.scene.slots[7] ~= nil,
+    "/four/press presses a momentary param (CAPTURE into the selected slot)")
+  params:set("scene_slot", 7); T.pulse("scene_clear")
+  params:set("t2_level", 1.0)
+  ok(osc == nil or type(osc.event) == "function", "the script listens for OSC")
 end
 
 T.report("control harness OK")

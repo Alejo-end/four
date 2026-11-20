@@ -205,6 +205,18 @@ and `step gate` shortens them. Map `sequencer run` to a footswitch.
 
 A motion loop of about a musical length snaps to that length, so it stays on the clock.
 
+Record a motion loop without coming back to this page:
+
+1. Pick the pass length with K1+E3 here: FREE, or 1, 2, 4 or 8 bars on the clock.
+2. Arm with K2, or double-tap K1 on any page. The screen pops `MOTION REC`, and the M in
+   the header blinks.
+3. Go to any page and move knobs. The pass starts at your first move.
+4. With a length in bars, the pass closes itself after that length and plays. With FREE,
+   double-tap K1 again (or K2 here) to close it.
+
+An overdub stays armed loop after loop: each loop, a knob you move replaces its own lane.
+Double-tap K1 to stop it.
+
 A modulator moves what the engine hears, never the knob. The knob stays where you, a scene
 or a motion lane put it, and the sound swings around it. Each of the four modulators has a
 target, a shape, a period and a depth. The shapes are sine, triangle, square, ramp,
@@ -336,6 +348,13 @@ MIDI or the audio is not connected. For the pass, overdub, resample and start on
 go to 0, and they come back after. The pass turns `pad input` on. PADS shows the
 notes, and the slices ride the PSET with the take.
 
+PARAMS > mixer faders makes eight faders of a MIDI controller the mixer. Set `fader
+channel` to the controller's channel and `first fader cc` to the CC of its first fader.
+The eight faders in a row are then: track 1 to 4 levels, the delay's WET, the reverb's
+WET, eng <> tape and the master out. A fader takes its knob over only when it reaches or
+passes the knob's value, so nothing jumps (pickup). After a scene or a hand moves the
+knob, the fader picks it up again the same way.
+
 PARAMS > modulation out sends the scene morph, the input envelope or a modulator's wave to
 other gear. It goes out as a MIDI CC, and as 0 to 5 volts on crow output 1.
 
@@ -365,6 +384,13 @@ Redo step the page. Down and Up step the scene slot.
 `lib/mosc.lua` sends the state of the instrument as OSC. `visuals/` holds a bridge that
 feeds it to Hydra in a browser: see [visuals/README.md](../visuals/README.md). The visuals
 ran with mangler, four's predecessor, and are not yet tested with four.
+
+The same bridge serves a control page: open `http://127.0.0.1:8080/control` on the
+computer that runs it. It shows the four tracks (mode, level, sends), the take and its
+source, the motion loop, the scenes and the mixer, live, and every fader and button there
+plays the norns. The norns must send to that computer (PARAMS > visuals out (osc), `osc
+out` on). The page can move only the mixer, the modes, the transports and the scenes,
+never a file or a buffer.
 
 ## Signal flow
 

@@ -8,7 +8,7 @@ const dgram = require("dgram");
 const net = require("net");
 const path = require("path");
 
-const OSC = 19000, WS = 18080;
+const OSC = 19000, WS = 18080, NORNS = 19111;
 let fails = 0, checks = 0;
 function ok(c, w) { checks++; if (!c) { fails++; console.log("FAIL: " + w); } }
 
@@ -29,7 +29,21 @@ function msg3(p, a, b, c) {
 }
 
 const bridge = spawn(process.execPath,
-  [path.join(__dirname, "bridge.js"), "--osc-port", OSC, "--ws-port", WS], { stdio: "ignore" });
+  [path.join(__dirname, "bridge.js"), "--osc-port", OSC, "--ws-port", WS, "--norns-port", NORNS], { stdio: "ignore" });
+// the fake norns's own OSC port: what the control page sends arrives here
+const nornsIn = dgram.createSocket("udp4");
+const toNorns = [];
+nornsIn.on("message", (b) => toNorns.push(b));
+nornsIn.bind(NORNS, "127.0.0.1");
+// a masked text frame, as a browser sends it
+function pageFrame(obj) {
+  const rep = Buffer.from(JSON.stringify(obj));
+  const key = Buffer.from([9, 8, 7, 6]);
+  const m = Buffer.from(rep); for (let i = 0; i < m.length; i++) m[i] ^= key[i & 3];
+  const head = rep.length < 126 ? Buffer.from([0x81, 0x80 | rep.length])
+    : Buffer.from([0x81, 0x80 | 126, rep.length >> 8, rep.length & 255]);
+  return Buffer.concat([head, key, m]);
+}
 const udp = dgram.createSocket("udp4");
 const send = (b) => udp.send(b, OSC, "127.0.0.1");
 
@@ -113,8 +127,26 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   send(msg("/four/size", "f", 0.9));
   await wait(200);
   ok(p2.got.some((g) => { try { const j = JSON.parse(g); return j.k === "size" && Math.abs(j.v - 0.9) < 1e-6; } catch (e) { return false; } }), "a second page gets live messages after the first left");
+  // THE CONTROL PAGE: served at /control, and its moves reach the norns as OSC
+  const ctl = await new Promise((resolve) => {
+    const c = net.connect(WS, "127.0.0.1"); let out = "";
+    c.on("connect", () => c.write("GET /control HTTP/1.1\r\nHost: x\r\n\r\n"));
+    c.on("data", (d) => { out += d; }); c.on("close", () => resolve(out));
+  });
+  ok(ctl.includes("200 OK") && ctl.includes("four · control"), "the control page is served at /control");
+  p2.sock.write(pageFrame({ cmd: "norm", id: "t2_level", v: 0.5 }));
+  p2.sock.write(pageFrame({ cmd: "press", id: "scene_recall" }));
+  p2.sock.write(pageFrame({ cmd: "set", id: "../etc", v: 1 }));       // not an id: dropped
+  await wait(300);
+  const parsed = toNorns.map((b) => b.toString("latin1"));
+  const norm = toNorns.find((b) => b.toString("latin1").startsWith("/four/norm"));
+  ok(norm && norm.toString("latin1").includes(",sf") && norm.toString("latin1").includes("t2_level"),
+    "a fader goes to the norns as /four/norm <id> <float>");
+  ok(norm && Math.abs(norm.readFloatBE(norm.length - 4) - 0.5) < 1e-6, "...with its value");
+  ok(parsed.some((s) => s.startsWith("/four/press") && s.includes("scene_recall")), "a button goes as /four/press <id>");
+  ok(toNorns.length === 2, "a name that is not a param id is dropped (" + toNorns.length + " sent)");
   ok(bridge.exitCode === null, "the bridge survived garbage and a closed page");
-  p2.sock.destroy(); udp.close(); bridge.kill();
+  p2.sock.destroy(); udp.close(); nornsIn.close(); bridge.kill();
   console.log(`bridge test: ${checks - fails}/${checks} checks passed`);
   process.exit(fails ? 1 : 0);
 })();

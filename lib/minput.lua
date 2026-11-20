@@ -35,6 +35,51 @@ local function is_grid_vport(i)
   return dev == gg.device or dev.name == gg.device.name
 end
 
+-- THE FADER BLOCK (the sixtieth change): eight faders of a MIDI controller
+-- in a row, on `fader_ch`, from CC `fader_cc` up, are the mixer: the four
+-- track levels, the delay's and the reverb's WET, eng <> tape and the master.
+-- PICKUP: a fader takes its knob over only when it reaches or passes the
+-- knob's value, so a scene, a hand or a PSET that moved the knob is never
+-- yanked back by a fader left elsewhere. A knob moved by anything else lets
+-- go of its fader again.
+local FADERS = 8
+local fader_ids = {}           -- the eight param ids, built at the first CC
+local caught, last_raw, prev_x = {}, {}, {}
+local FADER_EXTRA = { "delay_mix", "rev_mix", "mix", "out_level" }
+
+-- a CC on the fader block: true when it was one of ours
+local function fader_cc(msg)
+  local ch = pget("fader_ch", 0)
+  if ch < 1 or msg.ch ~= ch then return false end
+  local k = (msg.cc or -1) - math.floor(pget("fader_cc", 0) + 0.5) + 1
+  if k < 1 or k > FADERS then return false end
+  if not fader_ids[1] then
+    for n = 1, 4 do fader_ids[n] = C.LEVEL_ID[n] end
+    for j = 1, 4 do fader_ids[4 + j] = FADER_EXTRA[j] end
+  end
+  local id = fader_ids[k]
+  local cs = id and params.lookup[id] and params:lookup_param(id).controlspec
+  if not cs then return true end
+  local x = (msg.val or 0) / 127
+  local cur = cs:unmap(params:get(id))
+  if caught[k] and last_raw[k] and math.abs(cur - last_raw[k]) > 0.002 then
+    caught[k] = false            -- something else moved the knob
+  end
+  if not caught[k] then
+    local px = prev_x[k]
+    if math.abs(x - cur) <= 1.5 / 127 or (px and (px - cur) * (x - cur) <= 0) then
+      caught[k] = true
+    end
+  end
+  prev_x[k] = x
+  if caught[k] then
+    params:set(id, cs:map(x))
+    last_raw[k] = cs:unmap(params:get(id))
+    C.flash_id, C.flash_until = id, C.frame + FPS
+  end
+  return true
+end
+
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
@@ -42,7 +87,10 @@ local function midi_event(data, vport)
   if C.osc and C.osc.midi_in then C.osc.midi_in(msg, vport) end
   -- a mapped CC is a hand on the instrument too (idle dim); notes count
   -- through route_note. clock and other system messages do not.
-  if msg.type == "cc" then C.touch_input() end
+  if msg.type == "cc" then
+    C.touch_input()
+    if fader_cc(msg) then return end
+  end
   -- pressure is a modulation source (the PRESS shape, lib/mlfo.lua): channel
   -- pressure for an MPE keyboard, which plays one note a channel, and key
   -- pressure for the others. Never gated: it moves nothing until a modulator
@@ -101,6 +149,7 @@ local KB_NOTES = {
 local kb_held = {}
 
 local M = {}
+M.fader_cc, M.fader_ids, M.caught = fader_cc, fader_ids, caught
 
 function M.init(ctx)
   C = ctx

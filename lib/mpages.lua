@@ -307,7 +307,7 @@ local SHORT = {
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voice_atk = "ATK", voice_rel = "REL",
-  motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
+  motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN", motion_bars = "PASS",
   ["@mo_sel"] = "LANE", mod_focus = "LANE",
   lfo1_depth = "DPT", lfo1_period = "PER", lfo1_target = "TGT",
   lfo2_depth = "DPT", lfo2_period = "PER", lfo2_target = "TGT",
@@ -387,7 +387,7 @@ local FULL = {
   delay_mix = "WET", rev_mix = "WET",
   rev_damp = "DAMP",
   voice_rel = "RELEASE",
-  motion_depth = "DEPTH", motion_len = "LENGTH",
+  motion_depth = "DEPTH", motion_len = "LENGTH", motion_bars = "PASS",
   lfo1_depth = "DEPTH", lfo1_period = "PERIOD", lfo1_target = "TARGET",
   lfo2_depth = "DEPTH", lfo2_period = "PERIOD", lfo2_target = "TARGET",
   lfo3_depth = "DEPTH", lfo3_period = "PERIOD", lfo3_target = "TARGET",
@@ -2770,6 +2770,11 @@ for _, p in ipairs({ "TAKE", "VOICE", "FILTER", "EFFECT" }) do
   for n = 1, 4 do FLASH_N[p][n] = n .. " " .. p end
 end
 local function draw_page_flash()
+  -- a word the instrument pops for a moment (double-tap K1: MOTION REC)
+  if C.pop_until and C.frame < C.pop_until and C.pop_text then
+    framed2x(C.pop_text, floor(64 - (text_w(C.pop_text, 2) + 9) / 2 + 0.5), 23)
+    return
+  end
   if not (C.page_flash and C.frame < C.page_flash) then return end
   local name = page_title()
   if FLASH_N[name] then name = FLASH_N[name][cur_track()] end

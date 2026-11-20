@@ -22,6 +22,18 @@ set the norns once: PARAMS, "visuals out (osc)", "osc host" to this computer's n
 because the norns looks the name up every minute and finds the computer again when the
 network gives it a new address. A PSET never changes these settings.
 
+## The control page
+
+`http://127.0.0.1:8080/control`, served by the same bridge. It shows four live: the four
+tracks with their modes, levels and sends, the take and its source, the motion loop, the
+scenes and the mixer. Every fader and button plays the norns: the bridge sends the move
+as OSC (`/four/norm`, `/four/set`, `/four/press`) to the norns that sends to it, on the
+norns's OSC port, 10111. The norns accepts only the params in `ALLOW` (lib/mosc.lua): the
+mixer, the modes, the transports and the scenes. A move from the page is a hand on the
+instrument, so a motion loop records it. `KIOSK=0 sh visuals/start.command` starts the
+bridge alone; then open the address in any browser. With `LAN=1`, other computers on the
+network can open it too, and play the norns: use that only on a network you trust.
+
 ## The news
 
 The picture is a live news stream. It runs all day and night, picture and sound together,

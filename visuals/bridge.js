@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-// bridge.js: UDP OSC from the norns in, JSON over a WebSocket out, for Hydra.
+// bridge.js: UDP OSC from the norns in, JSON over a WebSocket out, for Hydra
+// and for the control page (http://127.0.0.1:8080/control).
 // No packages to install. Needs Node 18 or newer.
 //
-//   node visuals/bridge.js [--osc-port 9000] [--ws-port 8080]
+//   node visuals/bridge.js [--osc-port 9000] [--ws-port 8080] [--norns-port 10111]
+//
+// The control page sends {"cmd":"set"|"norm"|"press","id":..,"v":..}. The
+// bridge passes it on as OSC (/four/set, /four/norm, /four/press) to the
+// norns that sends to it, on the norns's OSC port. The norns decides which
+// params the computer may move (lib/mosc.lua, ALLOW).
 //
 // The norns sends /four/<key> with one argument. Each message goes to every
 // connected page as {"k":"size","v":0.42}. A page that connects gets the whole
@@ -21,6 +27,7 @@ function argOf(name, dflt) {
 }
 const OSC_PORT = argOf("--osc-port", 9000);
 const WS_PORT = argOf("--ws-port", 8080);
+const NORNS_PORT = argOf("--norns-port", 10111);
 const PREFIX = "/four/";
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -65,7 +72,35 @@ function parsePacket(buf, out) {
   }
 }
 
-// ---- WebSocket server (text frames out, nothing needed in) ---------------
+// ---- OSC writing (strings and float32): the control page's moves ---------
+function oscStr(s) {
+  const b = Buffer.from(s + "\0", "utf8");
+  return Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)]);
+}
+function oscMessage(addr, args) {
+  let tags = ",";
+  const parts = [];
+  for (const a of args) {
+    if (typeof a === "string") { tags += "s"; parts.push(oscStr(a)); }
+    else { tags += "f"; const f = Buffer.alloc(4); f.writeFloatBE(Number(a)); parts.push(f); }
+  }
+  return Buffer.concat([oscStr(addr), oscStr(tags), ...parts]);
+}
+const CMDS = { set: "/four/set", norm: "/four/norm", press: "/four/press" };
+let sentToNorns = 0;
+// a move from the control page, to the norns that last sent (null: none yet)
+function toNorns(j) {
+  const addr = CMDS[j.cmd];
+  if (!addr || typeof j.id !== "string" || !/^[a-z0-9_]{1,40}$/.test(j.id)) return false;
+  if (lastFrom === "none") return false;
+  const args = j.cmd === "press" ? [j.id] : [j.id, Number(j.v)];
+  if (j.cmd !== "press" && !Number.isFinite(args[1])) return false;
+  udp.send(oscMessage(addr, args), NORNS_PORT, lastFrom);
+  sentToNorns++;
+  return true;
+}
+
+// ---- WebSocket server (text frames out, the control page's moves in) -----
 const clients = new Set();
 const state = {};
 
@@ -87,6 +122,7 @@ function broadcast(text) {
 // folder), so Hydra can run from http://127.0.0.1 and the browser asks no
 // permission to reach the bridge.
 const PAGES = { "/": ["index.html", "text/html; charset=utf-8"], "/index.html": ["index.html", "text/html; charset=utf-8"],
+  "/control": ["control.html", "text/html; charset=utf-8"],
   "/hydra.js": ["hydra.js", "text/javascript; charset=utf-8"] };
 let rate = 0;                    // messages per second
 const diags = new Map();         // page id -> its last report (each page sends its own)
@@ -104,6 +140,7 @@ function servePage(sock, head) {
   if (m && m[1] === "/status") {
     const b = bestDiag();
     const body = Buffer.from(JSON.stringify({ osc_per_s: rate, from: lastFrom, pages: clients.size,
+      to_norns: sentToNorns,
       diag: b ? b.r : null, diag_age_ms: b ? Date.now() - b.at : null, reporting_pages: diags.size }));
     sock.end(Buffer.concat([Buffer.from("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
       body.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"), body]));
@@ -153,6 +190,7 @@ const server = net.createServer((sock) => {
         try {
           const j = JSON.parse(payload.toString("utf8"));
           if (j.diag) diags.set(j.diag.id || "?", { r: j.diag, at: Date.now() });
+          if (j.cmd) toNorns(j);
           // the audio bands of the page that hears the norns, passed on to the
           // pages that cannot (a page opened over the network has no input)
           if (Array.isArray(j.fft)) broadcast(JSON.stringify({ fft: j.fft.slice(0, 4) }));

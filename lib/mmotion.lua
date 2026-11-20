@@ -155,10 +155,11 @@ local MOTION_EXCLUDE = {
   -- a clock rule, set and left (a replayed one would jump the window)
   "win_beats",
   -- config / keys
-  "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
+  "keys_enable", "midi_channel", "fader_ch", "fader_cc", "root_note", "kb_octave", "pitch_quant",
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "motion_bars",
   "mod_focus",
   "scene_slot", "scene_slot_a", "scene_recall_mode", "scene_scope", "scene_glide",
   "scene_capture",
@@ -200,6 +201,11 @@ local M = {
 
 -- purely-internal state (not read by the page)
 local rec_start_frame = 0       -- ctx.frame when the first pass armed
+-- ARM, THEN FORGET IT (the sixtieth change). A first pass starts at its first
+-- move, not at the arm, so you can arm and walk to the page you want. With a
+-- `motion pass` length on the clock it closes itself and plays. An overdub
+-- stays armed loop after loop. Double-tap K1 arms and disarms from any page.
+local first_at = nil            -- the offset of the first pass's first move
 local touched_this_pass = {}    -- ids already punched-in this pass
 local last_val = {}             -- last accounted value per param (for the poll)
 
@@ -222,6 +228,16 @@ local function wipe()
   M.loop_len = 0
   M.rec_len = 0
   M.playhead = 0
+end
+
+-- motion_bars: a first pass's length on the clock, in frames, or nil (FREE)
+local BARS = { 0, 1, 2, 4, 8 }
+M.BAR_NAMES = { "FREE", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
+function M.pass_frames()
+  local b = BARS[floor(pget("motion_bars", 1) + 0.5)] or 0
+  if b <= 0 then return nil end
+  local t = (C.tempo and C.tempo()) or 120
+  return clamp(floor(b * 4 * 60 / t * FPS + 0.5), MIN_LEN, MAX_LEN)
 end
 
 -- motion_len (seconds) -> a settable playback length in frames, or nil for
@@ -281,6 +297,7 @@ local function capture_poll(offset)
         L.n = L.n + 1
         L.f[L.n] = offset
         L.v[L.n] = v
+        if M.loop_len == 0 and first_at == nil then first_at = offset end
       end
       last_val[id] = v
     end
@@ -306,6 +323,7 @@ function M.set_armed(on)
     snapshot()                                  -- only moves AFTER arming record
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
+      first_at = nil                            -- ...which counts from the first move
     else
       -- overdub: replay the existing loop from the top while we punch in
       M.playhead = 0
@@ -317,6 +335,27 @@ function M.set_armed(on)
       -- finalize the first pass: its natural length is the EVENT timebase;
       -- motion_len (>0) sets the PLAYBACK length, 0 = AUTO (= natural).
       local elapsed = C.frame - rec_start_frame
+      -- the pass starts at its first move: the wait before it goes
+      if first_at and first_at > 0 then
+        local ids = M.lane_ids
+        for i = 1, #ids do
+          local L = M.lanes[ids[i]]
+          for k = 1, L.n do L.f[k] = L.f[k] - first_at end
+        end
+        elapsed = elapsed - first_at
+      end
+      first_at = nil
+      local bars = M.pass_frames()
+      if #M.lane_ids > 0 and bars then
+        -- a pass on the clock is exactly its length
+        M.rec_len = bars
+        M.loop_len = bars
+        M.playhead = 0
+        reset_cursors()
+        if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
+        print(string.format("four: MOTION loop of %.2fs, on the clock", bars / FPS))
+        return
+      end
       if #M.lane_ids > 0 and elapsed >= 2 then
         M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
         local fixed = len_frames(pget("motion_len", 0))
@@ -428,6 +467,11 @@ function M.tick()
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
       if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
+      -- a pass on the clock closes itself once it is long enough
+      local bars = first_at and M.pass_frames()
+      if bars and offset - first_at + 1 >= bars then
+        params:set("motion_rec", 0)
+      end
     elseif pget("motion_play", 0) == 1 then
       -- overdub: punch in at the loop position, mapped to the EVENT timebase so
       -- new events line up with the old ones even when the loop is retimed
@@ -449,8 +493,10 @@ function M.tick()
     if M.playhead >= M.loop_len then
       M.playhead = 0
       reset_cursors()
-      -- an overdub that ran a full loop auto-disarms (keeps events sorted)
-      if armed then params:set("motion_rec", 0) end
+      -- an overdub stays armed loop after loop. Each loop is a new pass: the
+      -- first move of a lane in it replaces that lane, so its events stay
+      -- in order
+      if armed then touched_this_pass = {} end
     end
     local src = src_of(M.playhead)       -- read the lanes in their own timebase
     -- motion_depth (0..1): a global "amount" for the whole loop (at_depth)

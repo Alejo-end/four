@@ -59,7 +59,7 @@ modes, and VOICE draws HELD dim.
 | REVERB | WET `rev_mix` | DECAY `rev_decay` | SIZE `rev_size` | DAMP `rev_damp` | WASH* | BLOOM* | no |
 | MIX | MIX `mix` | OUT `out_level` | INPUT `input_level` | DRY/WET `dry_wet` | ENG* | TAPE* | no |
 | PADS | SLICE `seq_slice` | PITCH `pad_pitch` | VOICE `pad_voice` | RELEASE `voice_rel` | PAD, sounds while held | ROUTE* | no |
-| MOTION (lanes) | LANE `@mo_sel` | DEPTH `motion_depth` | LENGTH `motion_len` | none | REC* | PLAY* | yes |
+| MOTION (lanes) | LANE `@mo_sel` | DEPTH `motion_depth` | LENGTH `motion_len` | PASS `motion_bars` | REC* | PLAY* | yes |
 | MOTION (LFO 1) | LANE `@mo_sel` | DEPTH `lfo1_depth` | PERIOD `lfo1_period` | TARGET `lfo1_target` | REC* | PLAY* | yes |
 | MOTION (LFO 2) | LANE `@mo_sel` | DEPTH `lfo2_depth` | PERIOD `lfo2_period` | TARGET `lfo2_target` | REC* | PLAY* | yes |
 | MOTION (LFO 3) | LANE `@mo_sel` | DEPTH `lfo3_depth` | PERIOD `lfo3_period` | TARGET `lfo3_target` | REC* | PLAY* | yes |

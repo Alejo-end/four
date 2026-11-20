@@ -1136,6 +1136,51 @@ local function is_grid_vport(i)
   return dev == gg.device or dev.name == gg.device.name
 end
 
+-- THE FADER BLOCK (the sixtieth change): eight faders of a MIDI controller
+-- in a row, on `fader_ch`, from CC `fader_cc` up, are the mixer: the four
+-- track levels, the delay's and the reverb's WET, eng <> tape and the master.
+-- PICKUP: a fader takes its knob over only when it reaches or passes the
+-- knob's value, so a scene, a hand or a PSET that moved the knob is never
+-- yanked back by a fader left elsewhere. A knob moved by anything else lets
+-- go of its fader again.
+local FADERS = 8
+local fader_ids = {}           -- the eight param ids, built at the first CC
+local caught, last_raw, prev_x = {}, {}, {}
+local FADER_EXTRA = { "delay_mix", "rev_mix", "mix", "out_level" }
+
+-- a CC on the fader block: true when it was one of ours
+local function fader_cc(msg)
+  local ch = pget("fader_ch", 0)
+  if ch < 1 or msg.ch ~= ch then return false end
+  local k = (msg.cc or -1) - math.floor(pget("fader_cc", 0) + 0.5) + 1
+  if k < 1 or k > FADERS then return false end
+  if not fader_ids[1] then
+    for n = 1, 4 do fader_ids[n] = C.LEVEL_ID[n] end
+    for j = 1, 4 do fader_ids[4 + j] = FADER_EXTRA[j] end
+  end
+  local id = fader_ids[k]
+  local cs = id and params.lookup[id] and params:lookup_param(id).controlspec
+  if not cs then return true end
+  local x = (msg.val or 0) / 127
+  local cur = cs:unmap(params:get(id))
+  if caught[k] and last_raw[k] and math.abs(cur - last_raw[k]) > 0.002 then
+    caught[k] = false            -- something else moved the knob
+  end
+  if not caught[k] then
+    local px = prev_x[k]
+    if math.abs(x - cur) <= 1.5 / 127 or (px and (px - cur) * (x - cur) <= 0) then
+      caught[k] = true
+    end
+  end
+  prev_x[k] = x
+  if caught[k] then
+    params:set(id, cs:map(x))
+    last_raw[k] = cs:unmap(params:get(id))
+    C.flash_id, C.flash_until = id, C.frame + FPS
+  end
+  return true
+end
+
 local function midi_event(data, vport)
   if is_grid_vport(vport) then return end
   local msg = midi.to_msg(data)
@@ -1143,7 +1188,10 @@ local function midi_event(data, vport)
   if C.osc and C.osc.midi_in then C.osc.midi_in(msg, vport) end
   -- a mapped CC is a hand on the instrument too (idle dim); notes count
   -- through route_note. clock and other system messages do not.
-  if msg.type == "cc" then C.touch_input() end
+  if msg.type == "cc" then
+    C.touch_input()
+    if fader_cc(msg) then return end
+  end
   -- pressure is a modulation source (the PRESS shape, lib/mlfo.lua): channel
   -- pressure for an MPE keyboard, which plays one note a channel, and key
   -- pressure for the others. Never gated: it moves nothing until a modulator
@@ -1202,6 +1250,7 @@ local KB_NOTES = {
 local kb_held = {}
 
 local M = {}
+M.fader_cc, M.fader_ids, M.caught = fader_cc, fader_ids, caught
 
 function M.init(ctx)
   C = ctx
@@ -2537,10 +2586,11 @@ local MOTION_EXCLUDE = {
   -- a clock rule, set and left (a replayed one would jump the window)
   "win_beats",
   -- config / keys
-  "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
+  "keys_enable", "midi_channel", "fader_ch", "fader_cc", "root_note", "kb_octave", "pitch_quant",
   -- motion itself, and the scene/orbit machinery (scene_morph_amt is the ONE
   -- scene param that IS recorded — the whole-sweep lane above)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
+  "motion_bars",
   "mod_focus",
   "scene_slot", "scene_slot_a", "scene_recall_mode", "scene_scope", "scene_glide",
   "scene_capture",
@@ -2582,6 +2632,11 @@ local M = {
 
 -- purely-internal state (not read by the page)
 local rec_start_frame = 0       -- ctx.frame when the first pass armed
+-- ARM, THEN FORGET IT (the sixtieth change). A first pass starts at its first
+-- move, not at the arm, so you can arm and walk to the page you want. With a
+-- `motion pass` length on the clock it closes itself and plays. An overdub
+-- stays armed loop after loop. Double-tap K1 arms and disarms from any page.
+local first_at = nil            -- the offset of the first pass's first move
 local touched_this_pass = {}    -- ids already punched-in this pass
 local last_val = {}             -- last accounted value per param (for the poll)
 
@@ -2604,6 +2659,16 @@ local function wipe()
   M.loop_len = 0
   M.rec_len = 0
   M.playhead = 0
+end
+
+-- motion_bars: a first pass's length on the clock, in frames, or nil (FREE)
+local BARS = { 0, 1, 2, 4, 8 }
+M.BAR_NAMES = { "FREE", "1 BAR", "2 BAR", "4 BAR", "8 BAR" }
+function M.pass_frames()
+  local b = BARS[floor(pget("motion_bars", 1) + 0.5)] or 0
+  if b <= 0 then return nil end
+  local t = (C.tempo and C.tempo()) or 120
+  return clamp(floor(b * 4 * 60 / t * FPS + 0.5), MIN_LEN, MAX_LEN)
 end
 
 -- motion_len (seconds) -> a settable playback length in frames, or nil for
@@ -2663,6 +2728,7 @@ local function capture_poll(offset)
         L.n = L.n + 1
         L.f[L.n] = offset
         L.v[L.n] = v
+        if M.loop_len == 0 and first_at == nil then first_at = offset end
       end
       last_val[id] = v
     end
@@ -2688,6 +2754,7 @@ function M.set_armed(on)
     snapshot()                                  -- only moves AFTER arming record
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
+      first_at = nil                            -- ...which counts from the first move
     else
       -- overdub: replay the existing loop from the top while we punch in
       M.playhead = 0
@@ -2699,6 +2766,27 @@ function M.set_armed(on)
       -- finalize the first pass: its natural length is the EVENT timebase;
       -- motion_len (>0) sets the PLAYBACK length, 0 = AUTO (= natural).
       local elapsed = C.frame - rec_start_frame
+      -- the pass starts at its first move: the wait before it goes
+      if first_at and first_at > 0 then
+        local ids = M.lane_ids
+        for i = 1, #ids do
+          local L = M.lanes[ids[i]]
+          for k = 1, L.n do L.f[k] = L.f[k] - first_at end
+        end
+        elapsed = elapsed - first_at
+      end
+      first_at = nil
+      local bars = M.pass_frames()
+      if #M.lane_ids > 0 and bars then
+        -- a pass on the clock is exactly its length
+        M.rec_len = bars
+        M.loop_len = bars
+        M.playhead = 0
+        reset_cursors()
+        if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
+        print(string.format("four: MOTION loop of %.2fs, on the clock", bars / FPS))
+        return
+      end
       if #M.lane_ids > 0 and elapsed >= 2 then
         M.rec_len = min(elapsed, MAX_LEN) + 1   -- +1 so the last frame plays
         local fixed = len_frames(pget("motion_len", 0))
@@ -2810,6 +2898,11 @@ function M.tick()
     if M.loop_len == 0 then
       local offset = C.frame - rec_start_frame
       if offset >= 0 and offset <= MAX_LEN then capture_poll(offset) end
+      -- a pass on the clock closes itself once it is long enough
+      local bars = first_at and M.pass_frames()
+      if bars and offset - first_at + 1 >= bars then
+        params:set("motion_rec", 0)
+      end
     elseif pget("motion_play", 0) == 1 then
       -- overdub: punch in at the loop position, mapped to the EVENT timebase so
       -- new events line up with the old ones even when the loop is retimed
@@ -2831,8 +2924,10 @@ function M.tick()
     if M.playhead >= M.loop_len then
       M.playhead = 0
       reset_cursors()
-      -- an overdub that ran a full loop auto-disarms (keeps events sorted)
-      if armed then params:set("motion_rec", 0) end
+      -- an overdub stays armed loop after loop. Each loop is a new pass: the
+      -- first move of a lane in it replaces that lane, so its events stay
+      -- in order
+      if armed then touched_this_pass = {} end
     end
     local src = src_of(M.playhead)       -- read the lanes in their own timebase
     -- motion_depth (0..1): a global "amount" for the whole loop (at_depth)
@@ -3628,6 +3723,39 @@ add("t2_size", "t2_size", true)
 add("t2_density", "t2_density", true)
 add("t2_pitch", "t2_pitch", true)
 add("t2_cutoff", "t2_cutoff", true)
+-- THE CONTROL PAGE (visuals/control.html, the sixtieth change): what it
+-- shows and moves. The levels and the sends go out on their knobs (0..1),
+-- the modes and switches as they are.
+add("focus", "track_sel")
+add("t3_mode", "t3_mode")
+add("t4_mode", "t4_mode")
+add("lvl1", "grain_level", true)
+add("lvl2", "t2_level", true)
+add("lvl3", "t3_level", true)
+add("lvl4", "t4_level", true)
+add("dly1", "fx_dly", true)
+add("dly2", "t2_fx_dly", true)
+add("dly3", "t3_fx_dly", true)
+add("dly4", "t4_fx_dly", true)
+add("rev1", "fx_rev", true)
+add("rev2", "t2_fx_rev", true)
+add("rev3", "t3_fx_rev", true)
+add("rev4", "t4_fx_rev", true)
+add("mix", "mix", true)
+add("out_level", "out_level", true)
+add("stop", "stop_all")
+add("mrec", "motion_rec")
+add("mplay", "motion_play")
+add("mbars", "motion_bars")
+add("src", "rec_source")
+add("scene_a", "scene_slot_a")
+add("cpu", function() return C.cpu_high and 1 or 0 end)
+-- the filled scene slots, one bit each (slot 1 is 1, slot 8 is 128)
+add("filled", function()
+  local s, b = C.scene and C.scene.slots, 0
+  if s then for i = 1, 8 do if s[i] then b = b + (1 << (i - 1)) end end end
+  return b
+end)
 
 local M = { FIELDS = FIELDS, on = false, host = nil, port = nil, errors = 0 }
 
@@ -3663,6 +3791,9 @@ end
 M.resolve = resolve
 
 local dest = { "", 0 }     -- handed to osc.send; rebuilt in place on a change
+-- (declared here, above M.tick, which resets it: below, tick wrote a global
+-- and the cap of ev_send never opened again after 24 events)
+local sent_ev = 0
 local one = { 0 }          -- the argument list, reused for every message
 
 local function value(f)
@@ -3712,9 +3843,60 @@ function M.tick()
   end
 end
 
+-- CONTROL FROM THE COMPUTER (the sixtieth change). visuals/bridge.js sends
+-- what the control page moves to the norns's OSC port (10111):
+--   /four/set   <id> <value>    the param's own value (a mode, a switch)
+--   /four/norm  <id> <0..1>     a position on the knob (a fader)
+--   /four/press <id>            a momentary param: a press and a release
+-- Only the ids below can be moved, so the network reaches the mixer, the
+-- transports and the scenes, and never a file, a buffer or the system. A
+-- move is a hand on the instrument: the motion looper records it, as it
+-- records a MIDI knob.
+local ALLOW = {}
+for _, id in ipairs({ "mode", "t2_mode", "t3_mode", "t4_mode", "track_sel",
+    "grain_level", "t2_level", "t3_level", "t4_level",
+    "fx_dly", "t2_fx_dly", "t3_fx_dly", "t4_fx_dly",
+    "fx_rev", "t2_fx_rev", "t3_fx_rev", "t4_fx_rev",
+    "delay_mix", "rev_mix", "mix", "out_level", "dry_wet", "cutoff", "resonance",
+    "stop_all", "rec", "rec_source", "motion_rec", "motion_play", "motion_bars",
+    "scene_slot", "scene_slot_a", "scene_morph_amt", "freeze", "vis_look" }) do
+  ALLOW[id] = "set"
+end
+for _, id in ipairs({ "scene_recall", "scene_capture", "scene_next",
+    "scene_safe_restore", "take_undo", "vis_flash" }) do
+  ALLOW[id] = "press"
+end
+M.ALLOW = ALLOW
+
+function M.osc_in(path, args)
+  local id = args and args[1]
+  if type(id) ~= "string" or not ALLOW[id] or not params.lookup[id] then return false end
+  if path == "/four/set" and ALLOW[id] == "set" and type(args[2]) == "number" then
+    params:set(id, args[2])
+  elseif path == "/four/norm" and ALLOW[id] == "set" and type(args[2]) == "number" then
+    local cs = params:lookup_param(id).controlspec
+    if not cs then return false end
+    params:set(id, cs:map(math.min(math.max(args[2], 0), 1)))
+  elseif path == "/four/press" and ALLOW[id] == "press" then
+    params:set(id, 1)
+    params:set(id, 0)
+  else
+    return false
+  end
+  if C.touch_input then C.touch_input() end
+  return true
+end
+
 function M.init(ctx)
   C = ctx
   pget = ctx.pget
+  -- the norns hands a script every OSC message it does not handle itself
+  -- (its own /param/ path included); osc.cleanup takes this away again
+  if osc then
+    osc.event = function(path, args, from)
+      if type(path) == "string" and path:sub(1, 6) == "/four/" then M.osc_in(path, args) end
+    end
+  end
 end
 
 -- MIDI events for the picture (an Octatrack on the TRS MIDI input, or any
@@ -3725,7 +3907,6 @@ end
 -- sent again. At most EVENT_CAP events leave per frame, so a knob sweep or a
 -- busy pattern cannot flood the Wi-Fi. Clock messages are never forwarded.
 local EVENT_CAP = 24
-local sent_ev = 0
 local last_cc = {}
 local evargs = { 0, 0, 0 }
 local evrun = { 0 }
@@ -4091,11 +4272,11 @@ local SCENE_EXCLUDE = {
   "track_sel",   -- four: which track VOICE and FILTER address
   "route_sel",   -- four: the ROUTE grid's cursor
   -- config / keys
-  "keys_enable", "midi_channel", "root_note", "kb_octave", "pitch_quant",
+  "keys_enable", "midi_channel", "fader_ch", "fader_cc", "root_note", "kb_octave", "pitch_quant",
   -- the other machines' transports, and scene's own params (NEVER capture
   -- scene_*: scene_morph_amt's action re-fires the morph)
   "motion_rec", "motion_play", "motion_lane", "motion_depth", "motion_len",
-  "mod_focus",
+  "motion_bars", "mod_focus",
   "orbit_on", "orbit_rate", "orbit_reach",
   -- the sequencer is a machine like the orbit: its run, and the pattern it
   -- generates, are left where they are by a scene
@@ -6090,7 +6271,7 @@ local SHORT = {
   rev_mid = "MID", rev_high = "HIGH", rev_lowcut = "LCUT", rev_highcut = "HCUT",
   shimmer = "SHMR", shimmer_pitch = "OCT", shimmer_tone = "AIR",
   voice_atk = "ATK", voice_rel = "REL",
-  motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN",
+  motion_lane = "LANE", motion_depth = "DPT", motion_len = "LEN", motion_bars = "PASS",
   ["@mo_sel"] = "LANE", mod_focus = "LANE",
   lfo1_depth = "DPT", lfo1_period = "PER", lfo1_target = "TGT",
   lfo2_depth = "DPT", lfo2_period = "PER", lfo2_target = "TGT",
@@ -6170,7 +6351,7 @@ local FULL = {
   delay_mix = "WET", rev_mix = "WET",
   rev_damp = "DAMP",
   voice_rel = "RELEASE",
-  motion_depth = "DEPTH", motion_len = "LENGTH",
+  motion_depth = "DEPTH", motion_len = "LENGTH", motion_bars = "PASS",
   lfo1_depth = "DEPTH", lfo1_period = "PERIOD", lfo1_target = "TARGET",
   lfo2_depth = "DEPTH", lfo2_period = "PERIOD", lfo2_target = "TARGET",
   lfo3_depth = "DEPTH", lfo3_period = "PERIOD", lfo3_target = "TARGET",
@@ -8553,6 +8734,11 @@ for _, p in ipairs({ "TAKE", "VOICE", "FILTER", "EFFECT" }) do
   for n = 1, 4 do FLASH_N[p][n] = n .. " " .. p end
 end
 local function draw_page_flash()
+  -- a word the instrument pops for a moment (double-tap K1: MOTION REC)
+  if C.pop_until and C.frame < C.pop_until and C.pop_text then
+    framed2x(C.pop_text, floor(64 - (text_w(C.pop_text, 2) + 9) / 2 + 0.5), 23)
+    return
+  end
   if not (C.page_flash and C.frame < C.page_flash) then return end
   local name = page_title()
   if FLASH_N[name] then name = FLASH_N[name][cur_track()] end
@@ -8993,7 +9179,9 @@ function M.tick()
     return
   end
   C.take_msg_at = C.frame   -- the progress stays on TAKE's top row
-  local t = now() - r.t0
+  -- (a hair forward: frames counted in seconds must not miss a due time
+  -- by a rounding of the division)
+  local t = now() - r.t0 + 1e-6
   local room = r.room
   if t >= room then finish(t); return end
   if r.on then
@@ -9812,7 +10000,7 @@ local ENC_MAP = {
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
-  MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
+  MOTION = { "@mo_sel", "motion_len", "motion_depth", "motion_bars" },
   -- the crossfader: E2 picks A (LIVE or a slot), E3 picks B (the slot K2
   -- recalls and K3 captures into), both with no shift, and K1+E3 fades
   -- between them. K1+E2 is nothing. The orbit's drift and reach, and the
@@ -11996,6 +12184,12 @@ local function init_params()
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
+  -- the fader block (lib/minput.lua): eight CCs in a row are the mixer
+  params:add_group("grp_faders", "mixer faders", 2)
+  params:add_number("fader_ch", "fader channel", 0, 16, 0,
+    function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
+  params:add_number("fader_cc", "first fader cc", 0, 120, 0)
+
   params:add_group("grp_keys", "keys", 5)
   params:add_binary("keys_enable", "note input", "toggle", 1)
   params:add_number("midi_channel", "midi channel", 0, 16, 0,
@@ -12018,7 +12212,7 @@ local function init_params()
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
-  params:add_group("grp_motion", "motion", 6)
+  params:add_group("grp_motion", "motion", 7)
   params:add_binary("motion_rec", "motion record", "toggle", 0)
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
@@ -12040,6 +12234,9 @@ local function init_params()
   params:add_control("motion_len", "motion length",
     controlspec.new(0, 60, "lin", 0.5, 0, "s"))
   params:set_action("motion_len", function(v) ctx.motion.set_len(v) end)
+  -- a first pass on the clock (K1+E3 on MOTION): it closes itself after this
+  -- many bars from its first move, and plays. FREE: it closes when you disarm
+  params:add_option("motion_bars", "motion pass", ctx.motion.BAR_NAMES, 1)
 
   -- scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
@@ -12374,8 +12571,13 @@ function ctx.step_page(d)
   ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
 end
 
+-- the double tap of K1 (see key below); declared here, where enc reads it
+local K1_DOUBLE = math.floor(FPS * 0.4)
+local k1_down, k1_used, k1_last_tap = nil, false, nil
+
 function enc(n, d)
   ctx.last_input = ctx.frame
+  if ctx.alt then k1_used = true end
   if n == 1 then
     if ctx.alt then
       -- (four) K1+E1 picks the TRACK from any page, the S-4's track
@@ -12436,10 +12638,33 @@ function enc(n, d)
   redraw()
 end
 
+-- DOUBLE-TAP K1: motion record on and off from any page (the sixtieth
+-- change). A tap is a K1 press and release with no key or encoder under it.
+-- K1 alone did nothing before, so the gesture takes nothing from a page.
+function ctx.motion_toggle()
+  local on = pget("motion_rec", 0) ~= 1
+  params:set("motion_rec", on and 1 or 0)
+  ctx.pop_text = on and "MOTION REC" or "MOTION OFF"
+  ctx.pop_until = ctx.frame + math.floor(FPS * 0.7)
+end
+
 function key(n, z)
   ctx.last_input = ctx.frame
+  if n ~= 1 and z == 1 and ctx.alt then k1_used = true end
   if n == 1 then
     ctx.alt = (z == 1)
+    if z == 1 then
+      k1_down, k1_used = ctx.frame, false
+    elseif k1_down and not k1_used and ctx.frame - k1_down < TAP_FRAMES then
+      if k1_last_tap and ctx.frame - k1_last_tap <= K1_DOUBLE then
+        k1_last_tap = nil
+        ctx.motion_toggle()
+      else
+        k1_last_tap = ctx.frame
+      end
+    else
+      k1_last_tap = nil
+    end
     -- K1 down during a tap-or-hold key (TAKE K3) aborts it: K1+K3 is the
     -- eraser's gesture, and the hold must not land under another word
     if z == 1 then

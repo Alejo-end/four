@@ -5153,3 +5153,33 @@ answered: SOURCE is on TAKE's K1+E3, as the plan proposed, and in PARAMS.
   from IN with nothing at the input. Track 2 alone then played it (0.32). Track 3 relayed
   into track 4 the same way (0.36, played back at 0.33), the bus path. The refusal read
   `SOURCE IS THIS TRACK`. Nobody listened.
+
+four, sixtieth change: **the motion loop needs no trip to MOTION, MIDI faders are the
+mixer, and a page on the computer shows and plays four (Lua, the visuals bridge, test
+tools; no engine change, the count stays 198)**. The user asked for the three on
+2026-11-20: recording motion was "very fiddly" between the pages, a computer interface
+to see and play, and the mixer on MIDI faders. They chose each approach.
+- lib/mmotion.lua: a first pass starts at its first move, not at the arm. `motion_bars`
+  (MOTION K1+E3, PASS: FREE, 1, 2, 4, 8 bars) closes a first pass on the clock by itself
+  and plays it, exactly that long. An overdub stays armed loop after loop; each loop's
+  first move of a lane replaces that lane. four.lua: a double tap of K1 (no key or knob
+  under it) arms and disarms motion record from any page, and pops `MOTION REC` or
+  `MOTION OFF`. (The encoder press offered in the question does not exist on a norns.)
+- lib/minput.lua: the fader block. `fader channel` and `first fader cc` (PARAMS > mixer
+  faders); eight CCs in a row are the four track levels, the delay's and the reverb's WET,
+  eng <> tape and the master, with pickup.
+- lib/mosc.lua: 26 more fields for the control page (the tracks' modes, levels and sends,
+  the mixer, the transports, the scenes, CPU), and `/four/set`, `/four/norm`,
+  `/four/press` in, for the ids in ALLOW only. A fix found on the way: `sent_ev` was
+  declared below M.tick, so the tick wrote a global and the event cap never opened again
+  after 24 MIDI events in a session.
+- visuals/bridge.js passes the page's moves on as OSC to the norns (port 10111) and
+  serves `/control`; visuals/control.html is the page. visuals/test_bridge.js: 17 checks.
+- lib/msample.lua: a due time counted in frames could be missed by the rounding of the
+  division (a frame late in the simulator); a hair of 1e-6 s.
+- test/test_control.lua sections 37 to 39 (10 assertions each). Two older tests
+  follow the new law: a pass's length counts from the first move. The OSC field test now
+  steps clear of the 2 s refresh.
+- On the device (`count: 198`): the script loads; `/four/norm t2_level 0.25` and
+  `/four/set t3_mode 5` sent from the computer moved the params, and `sample_file` was
+  refused. The faders and the double tap need hands on the device; nobody tried them.

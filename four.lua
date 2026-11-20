@@ -1009,7 +1009,7 @@ local ENC_MAP = {
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
-  MOTION = { "@mo_sel", "motion_len", "motion_depth", nil },
+  MOTION = { "@mo_sel", "motion_len", "motion_depth", "motion_bars" },
   -- the crossfader: E2 picks A (LIVE or a slot), E3 picks B (the slot K2
   -- recalls and K3 captures into), both with no shift, and K1+E3 fades
   -- between them. K1+E2 is nothing. The orbit's drift and reach, and the
@@ -3193,6 +3193,12 @@ local function init_params()
 
   -- chromatic note input (MIDI notes + typing keyboard): all of it drives
   -- the same `pitch` param as the encoder and any mapped CC, in lockstep
+  -- the fader block (lib/minput.lua): eight CCs in a row are the mixer
+  params:add_group("grp_faders", "mixer faders", 2)
+  params:add_number("fader_ch", "fader channel", 0, 16, 0,
+    function(p) local v = p:get(); return v == 0 and "OFF" or tostring(v) end)
+  params:add_number("fader_cc", "first fader cc", 0, 120, 0)
+
   params:add_group("grp_keys", "keys", 5)
   params:add_binary("keys_enable", "note input", "toggle", 1)
   params:add_number("midi_channel", "midi channel", 0, 16, 0,
@@ -3215,7 +3221,7 @@ local function init_params()
   -- (see lib/mmotion). rec/play are binaries so a footswitch can punch overdubs
   -- and start/stop the loop; lane/depth drive the MOTION page. all Lua-only —
   -- no engine command, so the fingerprint is unchanged.
-  params:add_group("grp_motion", "motion", 6)
+  params:add_group("grp_motion", "motion", 7)
   params:add_binary("motion_rec", "motion record", "toggle", 0)
   params:set_action("motion_rec", function(v) ctx.motion.set_armed(v == 1) end)
   params:add_binary("motion_play", "motion play", "toggle", 0)
@@ -3237,6 +3243,9 @@ local function init_params()
   params:add_control("motion_len", "motion length",
     controlspec.new(0, 60, "lin", 0.5, 0, "s"))
   params:set_action("motion_len", function(v) ctx.motion.set_len(v) end)
+  -- a first pass on the clock (K1+E3 on MOTION): it closes itself after this
+  -- many bars from its first move, and plays. FREE: it closes when you disarm
+  params:add_option("motion_bars", "motion pass", ctx.motion.BAR_NAMES, 1)
 
   -- scenes / morph / safe state (see lib/mscenes). all Lua-only — no
   -- engine command, so the fingerprint is unchanged. the ACTIONS here are
@@ -3571,8 +3580,13 @@ function ctx.step_page(d)
   ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
 end
 
+-- the double tap of K1 (see key below); declared here, where enc reads it
+local K1_DOUBLE = math.floor(FPS * 0.4)
+local k1_down, k1_used, k1_last_tap = nil, false, nil
+
 function enc(n, d)
   ctx.last_input = ctx.frame
+  if ctx.alt then k1_used = true end
   if n == 1 then
     if ctx.alt then
       -- (four) K1+E1 picks the TRACK from any page, the S-4's track
@@ -3633,10 +3647,33 @@ function enc(n, d)
   redraw()
 end
 
+-- DOUBLE-TAP K1: motion record on and off from any page (the sixtieth
+-- change). A tap is a K1 press and release with no key or encoder under it.
+-- K1 alone did nothing before, so the gesture takes nothing from a page.
+function ctx.motion_toggle()
+  local on = pget("motion_rec", 0) ~= 1
+  params:set("motion_rec", on and 1 or 0)
+  ctx.pop_text = on and "MOTION REC" or "MOTION OFF"
+  ctx.pop_until = ctx.frame + math.floor(FPS * 0.7)
+end
+
 function key(n, z)
   ctx.last_input = ctx.frame
+  if n ~= 1 and z == 1 and ctx.alt then k1_used = true end
   if n == 1 then
     ctx.alt = (z == 1)
+    if z == 1 then
+      k1_down, k1_used = ctx.frame, false
+    elseif k1_down and not k1_used and ctx.frame - k1_down < TAP_FRAMES then
+      if k1_last_tap and ctx.frame - k1_last_tap <= K1_DOUBLE then
+        k1_last_tap = nil
+        ctx.motion_toggle()
+      else
+        k1_last_tap = ctx.frame
+      end
+    else
+      k1_last_tap = nil
+    end
     -- K1 down during a tap-or-hold key (TAKE K3) aborts it: K1+K3 is the
     -- eraser's gesture, and the hold must not land under another word
     if z == 1 then
