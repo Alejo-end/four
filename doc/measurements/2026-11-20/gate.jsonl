@@ -1,0 +1,8 @@
+{"id": "0.1", "status": "pass", "note": "['/home/we/dust/code/four/lib/Engine_Four.sc']"}
+{"id": "0.2", "status": "pass", "note": "script reached init() done"}
+{"id": "0.3", "status": "pass", "note": "['Engine.register_commands; count: 198']"}
+{"id": "19.1", "status": "pass", "note": "count: 198 seen=True; log: four: FourStretch on; hasStretch=True; plugin folder ['FourStretch.so']"}
+{"id": "19.11", "status": "measured", "note": "largest change against OFF in dB {'CHORUS': 1.1, 'FLANGE': 4.3, 'WOBBLE': 19.2, 'RESON': 2.8, 'RING': 3.3, 'ECHO': 3.8}; level against OFF in dB {'CHORUS': 1.1, 'FLANGE': 1.0, 'WOBBLE': 0.0, 'RESON': -1.2, 'RING': 0.0, 'ECHO': -0.5}. Each type apart: listen to 19.11_*.wav"}
+{"id": "19.12", "status": "measured", "note": "six TYPE taps over a tone, both channels: breaks []; largest step 0.0013 (the tone alone has about 0.0006); holes (5 ms, 10 dB) left [] right []. Listen to 19.12_type_steps.wav"}
+{"id": "19.27", "status": "pass", "note": "busiest scsynth thread and xruns over 60 s: {'four PV at pitch 2': (53.6, 0), 'the dense set': (61.8, 0)}. The supported set is four PV at pitch 2; the dense set is over the limit by design. 2026-11-18: 56.8% and 64.7%"}
+{"id": "19.29", "status": "measured", "note": "a fade from CHORUS to ECHO rocked across the middle, both channels: breaks []; largest step 0.0008 (the tone alone has about 0.0006); the type after each step [2, 2, 2, 7, 2, 7, 2, 7, 7, 7, 7, 7, 2, 2, 2] (2 CHORUS, 7 ECHO); level -18.1 dB; holes (5 ms, 10 dB) left [] right [2.06]. Listen to 19.29_fade_rock.wav"}

@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-18)
+## STATUS (2026-11-20)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -41,6 +41,9 @@ Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in
   Mutable Instruments Clouds: `FourCloud` from our plugin, else an installed MiClouds,
   else the GRAIN granulator. The log says which (`four: CLOUD is FourCloud`).
 - Four modulators, each on any track.
+- AUTOSAMPLE (lib/msample.lua, PARAMS > take - autosample): every note of a range
+  goes out of a MIDI port, comes back on the line input into one take, and is cut on
+  its attack. A MIDI keyboard then plays the take as a multisample (`ctx.pad_notes`).
 - Twelve pages: TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE.
   TRACKS is the hub: E2 picks the focused track, which TAKE, VOICE, FILTER and EFFECT
   then edit. K1 held on TRACKS shows the sends.
@@ -154,6 +157,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 51st: a voice change keeps its sound and its place: the old drone holds and fades under the new one, and the new head starts where the old one is (C2 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.33, WARP -0.4 dB, PV -0.9 dB, CLOUD -1.3 dB (-26.4, -70.6 and -71.2 before). Not pushed | no |
 | 53rd: a knob that moves once a frame draws lines: each knob's lag is a glide whose time follows the pace of the writes (C6 of the plan) (engine, test tools) | yes, 2026-11-18, `count: 198`: row 19.34, still 0.8% of the time (45.9% before). Not pushed | no |
 | 54th: the header says CPU while the load is near the limit (the rest of C5's screen part) (Lua, test tool) | yes, 2026-11-18: on at 62.9% of the JACK cycle, off at 21.1% | |
+| 55th: AUTOSAMPLE: four plays a MIDI note range out, records it into one take, and a keyboard plays it as a multisample (Lua, test tool) | deployed 2026-11-20 and loads; never run with gear. The TRS jack is norns port 3, `virtual` (ttymidi on /dev/ttyAMA0, client `shieldXL`) | no |
+| 56th: WOBBLE and plugin FLANGE glide their delay in and out; the supported set (engine, test tools, documents) | yes, 2026-11-20, `count: 198`: row 19.12 no break and no hole, 19.27 passes on the supported set | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -181,37 +186,22 @@ xruns past about 60%.
   dense set 63.3%. The forty-fifth change costs nothing: four FLANGE add 4.9 points and
   four ECHO 4.0 (4.8 and 4.2 before).
 
-**Phase A of doc/signature-workflow.md is under way** (C1, C3, C4, then C2 and C6, with
-C5 measured). The user's rule, 2026-11-17: push nothing and merge nothing of it until
-the user has tested it. C1 is the forty-second change: it passes offline and on the
-device (doc/measurements/2026-11-17/). The user has not listened to it. The dip at a
-change into WOBBLE, CHORUS or FLANGE is question 10 of the plan, for their ears, and the
-README keeps its known issue until then. C5's measurement is the forty-third change:
-nothing grew, row 19.27's set is dressed with every effect. Its supported set waits for
-the user's answer to question 8. C3 is the forty-fourth change, on the device. The user
-tested that build on 2026-11-17: "I think it sounds good". Two requests came out of the
-test, and they are the forty-fifth change (stronger effects) and the forty-sixth (the
-tape records what four plays). Both are on the device, and the user has not heard them.
-Row 19.31 then found that a tape pass that crossed the tape's end kept the whole 60 s as
-its loop, and the forty-eighth change starts a new take at the tape's start. C4 is the
-forty-ninth change, on the device (doc/measurements/2026-11-18/), not heard. The wide
-run after it found row 10.8 failing (a clear with regen running left 6.7 ms of sound),
-and the fiftieth change is its fix. C2 is the fifty-first change, on the device, not
-heard: a voice change has no hole and the loop keeps its place (row 19.33). Four voices
-changed in one frame now change one after another, over 0.55 s into WARP. Row 19.27 did
-not grow (64.3%). C6 is the fifty-third change, on the device, not heard: a knob that
-a modulator, a motion lane or the fade moves glides from frame to frame (row 19.34), and
-a lone write lands in 20 ms. That ends Phase A's engine changes. Open in Phase A: the
-rest of C5 (the supported set needs the user's answer to question 8, and row 19.27
-is at 64.7%), and the user's ears on the forty-fifth to the fifty-fourth change. The
-`CPU` word in the header is the fifty-fourth change, on the device.
-The work is on the local branch `phase-a`. Another session shares this checkout (the
-forty-seventh change, an Exquis driver): stage only your own hunks.
+**Phase A of doc/signature-workflow.md is done (2026-11-20)** and merged into `main`.
+C1 to C6 are the forty-second to the fifty-fourth change. On 2026-11-20 the user said they
+had heard the forty-fifth to the fifty-fourth change and asked for the merge. They
+answered question 8: the supported set is four PV at pitch 2 with every effect on (the
+README), and row 19.27 decides on it (53.6% to 62.2% over four runs, one run with one
+xrun; the dense set is listed, 61.6% to 69.1%). They answered question 10: fix the dip.
+The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in from 0 and
+back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Next is Phase B of
+the plan (C7 to C10, Lua only). Another session shares this checkout (the forty-seventh
+change, an Exquis driver, and the fifty-second, PRESS, both uncommitted): stage only
+your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
-TYPE steps) has no break since the forty-second change. Stage 19 still fails 19.27 (the
-dense set takes 64.7% of the scsynth thread, over 60%, with no xruns). WARP and PV dip
+TYPE steps) has no break since the forty-second change. Row 19.27 passes on the supported set
+(2026-11-20); the dense set is over the limit by design. WARP and PV dip
 by about 27 dB at their own loop seam (doc/plan.md, Phase 0, item 8). Open too: the user's look at REVERB's squares (the
 screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
 more than one that sounds.

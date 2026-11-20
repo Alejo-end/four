@@ -4984,3 +4984,65 @@ This is the screen part of C5 of doc/signature-workflow.md.
   a second effect on each track they read 62.9%: on, with no xrun. Back at one PLAY
   track, 21.1%: off. The screen is doc/measurements/2026-11-18/screens/cpu_word.png.
 - The supported set of C5 still waits for the user's answer to question 8.
+
+four, fifty-fifth change: **AUTOSAMPLE: four plays other gear over MIDI and records it as
+a multisample (Lua; no engine change, the count stays 198; not run on the device)**. The
+user asked for the autosampler of other instruments: play every MIDI note in a sequence,
+with a set time or a wait for the sound to decay, sample each note at its onset, and play
+the result polyphonically.
+- lib/msample.lua (new, the fifteenth include): PARAMS > take - autosample, eleven params.
+  `autosample` starts a pass on the focused track and stops one that runs. Every note
+  from `lowest note` to `highest note`, `semitones apart`, goes out on `autosample midi
+  port` and `autosample channel`. TIME holds a note for `note length` and records
+  `release time` after it. DECAY waits until the level written (`rec_amp`) is under
+  `decay floor` for 0.15 s, at most `release time`.
+- The pass is a fresh take of the line input alone: overdub, resample and start on sound
+  go to 0 and come back after. A STOP, a take stopped by hand or a new track focus stops
+  the pass and releases the note. A port with no device, or a TIME range that does not
+  fit in 59 s, is refused with a word on TAKE. A DECAY pass that fills the track keeps the
+  notes that fit, and says so.
+- Each cut is the time its note went out, 20 ms early. The take is then dumped
+  (`ctx.scan_take`, now shared) and each cut moves onto the first sample above -48 dBFS
+  in its slice. The scan counts the notes that came back silent: `AUTO: NOTHING CAME
+  BACK` when all are.
+- four.lua: `ctx.pad_notes` holds the note of each slice. `ctx.route_note` takes the
+  MIDI note: on a multisample, a key plays the slice of the nearest note (a tie takes the
+  lower), retuned by the difference, at most 24 semitones. `ctx.pad_trigger` takes that
+  retune. A slice past the eighth pad plays as a SLICE voice. The notes go with the cuts
+  (`pads_uncut`, CHOP) and ride the padlock PSET file.
+- lib/mpages.lua: PADS says `AUTO - n NOTES, KEYS PLAY` in place of the CHOP line.
+- test/test_control.lua: section 34, 46 assertions. test/amalgamate.lua counts 15
+  includes. doc/manual.md and doc/device-gate.md (rows 16.18 to 16.20).
+- Not done: a range longer than one track (60 s), and more than one velocity layer.
+
+four, fifty-sixth change: **an effect that is a late copy glides in and out, and the
+supported CPU set (engine, test tools, documents; the count stays 198; on the device
+2026-11-20)**. This closes Phase A of doc/signature-workflow.md. The user answered
+question 8 (the supported set: four PV at pitch 2 with every effect on) and question 10
+(fix the dip), and heard the forty-fifth to the fifty-fourth change.
+- lib/Engine_Four.sc: WOBBLE is the sound 12 ms late, so a crossfade into it or out of it
+  met the sound itself and combed: OFF to WOBBLE dipped by 15.8 dB (six runs on the
+  device: 11 to 17 dB). Its delay now starts at 0 and glides to its place over 0.65 s
+  (`ramp`), and at the release glides back to 0 before the slot fades. The steepest place
+  of the glide bends the pitch by 50 cents, the wow's own reach at the knob's middle.
+  Plugin FLANGE's dry side (1.41 ms late) glides the same way over 0.2 s. `fxSlot` takes
+  a `hold`: the time the slot stays whole after its release. CHORUS and the stock FLANGE
+  keep their dry sound on time and do not glide.
+- Offline (probe6, both builds): OFF to WOBBLE -4.4 dB (was -15.8). The deepest change of
+  the 42 is now -11.5 to -12.9 dB, WOBBLE gliding out under CHORUS or FLANGE: their own
+  comb cuts a steady tone by 9.5 to 10 dB with no change near it. No clicks; the largest
+  step 0.0015 (the tone alone 0.0004). The norns's own scsynth renders the same.
+  four_fx_mod has 90 UGens (85) and four_fx_flange 33 (31); check_dsp.py holds the new
+  counts and the KNOWN row's new place (-12.5 dB).
+- On the device (`count: 198`, doc/measurements/2026-11-20/): row 19.12 has no break and
+  no hole (one before). Row 19.29 has no break and one hole, CHORUS's own. Row 19.11's
+  levels against OFF are as before.
+- THE SUPPORTED SET (question 8): four PV tracks at pitch 2, each with drive, FLANGE and
+  ECHO and both sends, with the delay, the reverb and shimmer on. The README says so, and
+  that PV above pitch 2 or GRAIN at density 200 on several tracks goes past the limit.
+  gate.py's row 19.27 now decides on that set and lists the dense set. Measured four
+  times on this engine: 62.2%, 57.6% (one xrun), 54.8% and 53.6%; the first two came
+  right after the restart and the other stage 19 rows. The engine before this change, the
+  same hour: 56.9%. The dense set read 61.6% to 69.1%, with xruns.
+- README.md: the supported set, and the effect dip is no longer a known issue. CHORUS
+  and FLANGE cutting a steady tone is listed, as the way they sound.

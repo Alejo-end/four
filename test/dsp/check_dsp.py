@@ -143,11 +143,14 @@ def check(build):
            num(r'^LARGEST step after a change ([\d.]+)', a6), 0.002, '', fmt='.4f')
     target(build, "fix: the shared delay born under a tone, largest step (was 0.239 without the plugin)",
            num(r'^DELAY born under the tone: largest step ([\d.]+)', a6), 0.002, '', fmt='.4f')
-    # A change into a delay (WOBBLE, CHORUS, FLANGE) crossfades the tone with a
-    # late copy of itself, and for 10 to 20 ms the two comb. The wow of WOBBLE is
-    # random, so the depth moves from run to run: -11 to -17 dB over six runs.
-    known(build, "a change of type dips while the old and the new sound comb: deepest 5 ms against the quieter side",
-          num(r'^DEEPEST series ([-\d.]+) dB', a6), -15, 6, 'dB', worse_up=False, fmt='.1f')
+    # A change into WOBBLE crossfaded the tone with a copy of itself 12 ms
+    # late, and the two combed: -11 to -17 dB over six runs. Since the
+    # fifty-sixth change WOBBLE's delay glides in from 0 and back out (OFF to
+    # WOBBLE -15.8 dB, now -4.4). What stays is CHORUS's and FLANGE's own
+    # comb, which cuts a steady tone by 9.5 to 10 dB with no change near it,
+    # deeper by up to 3 dB while a WOBBLE glides out under it.
+    known(build, "a change of type dips where CHORUS and FLANGE comb: deepest 5 ms against the quieter side",
+          num(r'^DEEPEST series ([-\d.]+) dB', a6), -12.5, 3, 'dB', worse_up=False, fmt='.1f')
     # The Mac's scsynth (3.14) frees a released synth one control step short of
     # 0, so the filter's 20 ms straight fade ends 1/15 above 0 here. The norns's
     # scsynth (3.13) runs the release to its end: rendered there, this step is
@@ -196,9 +199,12 @@ def check(build):
     # first version of these laws had nine more in FLANGE and four more in ECHO,
     # and the dense set of gate row 19.27 went from 62.4% to 63.5%. The limits
     # are the counts before the change. RING has one more: the sine's 2.sqrt.
-    for name, limit in (('four_fx_mod', 85), ('four_fx_reson', 41), ('four_fx_ring', 21),
+    # The fifty-sixth change grew two defs on purpose: WOBBLE's delay glide
+    # in four_fx_mod (85 to 90) and FLANGE's dry glide (31 to 33), about
+    # 0.05% of the thread for each slot that holds one.
+    for name, limit in (('four_fx_mod', 90), ('four_fx_reson', 41), ('four_fx_ring', 21),
                         ('four_fx_echo', 20 if build == 'plugin' else 28)) + \
-                       ((('four_fx_flange', 31),) if build == 'plugin' else ()):
+                       ((('four_fx_flange', 33),) if build == 'plugin' else ()):
         target(build, f"the UGens of {name} (a law must not grow its def)",
                num(rf'^UGENS {name} (\d+)', runs['p7'][3].replace('\r', '')), limit, '', fmt='.0f')
     if build == 'plugin':

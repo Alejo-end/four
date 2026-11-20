@@ -108,14 +108,20 @@ Raspberry Pi 4 and the 32-bit norns system.
   (the original norns, a shield on a Raspberry Pi 3, or a norns with a 64-bit kernel), but
   nobody tried it there yet. Where it does not fit, four plays its stock voices.
 - SuperCollider gets one processor core on a norns, and the sound drops out above about
-  60% load. Four CLOUD tracks take about 30%, or 40% in SPECTRAL mode. Four PV tracks
-  pitched up come close to the limit. A track set to OFF costs nothing, but a CLOUD track
-  keeps working in silence, so set the tracks you do not use to OFF.
+  60% load. Four CLOUD tracks take about 30%, or 40% in SPECTRAL mode. A track set to OFF
+  costs nothing, but a CLOUD track keeps working in silence, so set the tracks you do not
+  use to OFF.
+- The supported set: four PV tracks at pitch 2, each with drive, both effect slots and
+  both sends, with the delay and the reverb on. Measured on a Pi 4, it takes about 57%
+  with no dropout. PLAY, GRAIN at its default density and CLOUD outside SPECTRAL cost
+  less. PV above pitch 2, or GRAIN at density 200, on several tracks with every effect
+  on goes past the limit (about 65%). The header shows `CPU` when the load comes near
+  the limit.
 
 Known issues in this beta:
 
-- Changing an effect's type gives a short dip in the sound.
-- The densest set tried so far went past the CPU limit.
+- CHORUS and FLANGE cut a steady tone in short dips where their copy is in opposite
+  phase. That is how a chorus and a flanger sound.
 
 If something does not work, please open an
 [issue on GitHub](https://github.com/Alejo-end/four/issues).

@@ -1473,18 +1473,33 @@ Engine_Four : CroneEngine {
         // The fade is an AUDIO RATE envelope, and not Line.kr: the norns's
         // scsynth (3.13) holds Line.kr's first step for its whole first
         // block, so the line still caught 14% of the edge (gate row 19.29).
-        fxSlot = { arg name, func;
+        // A SLOT WHOSE SOUND IS A LATE COPY HOLDS ITS RELEASE (the fifty-sixth
+        // change). WOBBLE is the sound 12ms late, and plugin FLANGE's dry side
+        // 1.41ms late. A crossfade of the sound with its own late copy combs:
+        // where the two are in opposite phase they cancel, and a change into
+        // WOBBLE dipped by 11 to 17 dB for 10 to 20ms (gate row 19.12). So
+        // their delay starts at 0 and glides to its place (`ramp`, given to
+        // the effect with the gate), and at the release it glides back to 0
+        // while the slot still sounds whole. `hold` is that glide's time, a
+        // function of the type: the 50ms fade out starts after it.
+        // Without `hold` the envelope is the plain one, as before.
+        fxSlot = { arg name, func, hold;
             SynthDef(name, {
                 arg pbus, type = 1, amt = 0.5, rate = 0.5, gate = 1, amt_t = 0.02, rate_t = 0.02;
-                var env = EnvGen.kr(Env.asr(0.05, 1, 0.05, \sin), gate, doneAction: 2);
+                var env = hold.isNil.if({
+                    EnvGen.kr(Env.asr(0.05, 1, 0.05, \sin), gate, doneAction: 2)
+                }, {
+                    EnvGen.kr(Env([0, 1, 1, 0], [0.05, hold.value(type), 0.05], \sin, 1),
+                        gate, doneAction: 2)
+                });
                 var sig = In.ar(pbus, 2) * EnvGen.ar(Env([0, 1], [0.01], \sin));
                 XOut.ar(pbus, env, func.value(sig, type,
-                    gl.(amt.clip(0, 1), amt_t), gl.(rate.clip(0, 1), rate_t)));
+                    gl.(amt.clip(0, 1), amt_t), gl.(rate.clip(0, 1), rate_t), gate));
             }).add;
         };
-        fxSlot.value(\four_fx_mod, { arg sig, type, a, r;
+        fxSlot.value(\four_fx_mod, { arg sig, type, a, r, gate;
             var idx, lfoCh, lfoFl, wow, flut, flw, dt, decay, comb, dryG, wetG;
-            var chF, chD, wowF, wowD, flF, flD, p, flN;
+            var chF, chD, wowF, wowD, flF, flD, p, flN, ramp;
             idx = (type - 1).clip(0, 2);
             // THE AMOUNT KNOB RISES FAST AT FIRST (the forty-fifth change).
             // The user on the device, 2026-11-17: the effects were "a bit too
@@ -1518,11 +1533,18 @@ Engine_Four : CroneEngine {
                 + (LFNoise2.kr(0.5 * (6 ** r)) * 0.3);
             flut = SinOsc.kr(flF);
             flw = flD * flut;
+            // WOBBLE's delay glides in from 0 over 0.65s, and back out at the
+            // release (fxSlot's `hold`, below). The sine curve's steepest
+            // place bends the pitch by 50 cents, the wow's own reach at the
+            // knob's middle. CHORUS and FLANGE keep their dry sound on time,
+            // so their delay does not glide: a sweep would be a flange.
+            // A comb with no decay has no feedback at any delay, 0 included.
+            ramp = EnvGen.kr(Env([0, 1, 0], [0.65, 0.65], \sin, 1), gate);
             dt = 2.collect({ arg ch;
                 Select.kr(idx, [
                     0.015 + (chD * lfoCh[ch]),
                     0.0035 + (0.003 * lfoFl[ch]),
-                    0.012 + (wowD * wow[ch]) + flw
+                    (0.012 + (wowD * wow[ch]) + flw) * ramp
                 ]).lag(0.1)
             });
             // the stock FLANGE's level: the comb's ring adds to the sound, and
@@ -1533,7 +1555,7 @@ Engine_Four : CroneEngine {
             wetG = Select.kr(idx, [0.9 * p, p * flN, DC.kr(1)]).lag(0.05);
             comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], decay) });
             (sig * dryG) + (comb * wetG)
-        });
+        }, { arg type; (type > 2.5) * 0.65 });
         // RESON: the gain law holds a long ring near the level of a short
         // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
         // exact law for noise) music came out about 8dB under the other
@@ -1579,15 +1601,18 @@ Engine_Four : CroneEngine {
         // wet sound is at 0.71 of the dry one and the feedback at 0.64. The
         // gain holds the level: the loop's ring adds to the sound, and the
         // top came out 7 dB over a chord.
-        stretchOn.if({ fxSlot.value(\four_fx_flange, { arg sig, type, a, r;
+        // Its dry side glides from on time to 1.41ms late over 0.2s, and
+        // back at the release (fxSlot's `hold`): 19 cents at the steepest.
+        stretchOn.if({ fxSlot.value(\four_fx_flange, { arg sig, type, a, r, gate;
+            var ramp = EnvGen.kr(Env([0, 1, 0], [0.2, 0.2], \sin, 1), gate);
             var lfo = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
             var d = 0.0014142 * (5.657 ** lfo);
             var p = a.sqrt;
             var fb = p * 0.9;
             var wet = 2.collect({ arg ch;
                 delayClass.ar(sig[ch], d[ch], fb, 5000, 0.02) });
-            (DelayN.ar(sig, 0.002, 0.0014142) + (wet * p)) * (1 - (0.55 * a))
-        }) });
+            (DelayC.ar(sig, 0.002, 0.0014142 * ramp) + (wet * p)) * (1 - (0.55 * a))
+        }, 0.2) });
         // ECHO: a delay of the track's own, 30ms to 1.2s. rate is the time
         // (it glides like tape when turned), amt is the feedback and the
         // level of the echoes. The loop darkens and saturates softly. Both

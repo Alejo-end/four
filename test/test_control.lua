@@ -3965,4 +3965,191 @@ do
   sound(20000, 0.3, 0)
 end
 
+-- ============================================================================
+-- 34 · the autosampler (lib/msample.lua)
+-- ============================================================================
+-- four plays every note of a range out of a MIDI port, records what comes back
+-- into one new take, cuts each note on its attack, and a MIDI keyboard then
+-- plays the take as a multisample. The offscreen norns has no util.time, so a
+-- frame is 1/15 s here.
+do
+  local sent = {}
+  local fake = { device = {},
+    note_on = function(self, n, v, ch) sent[#sent + 1] = { "on", n, v, ch, CTX.frame } end,
+    note_off = function(self, n, v, ch) sent[#sent + 1] = { "off", n, v, ch, CTX.frame } end }
+  local real_connect = midi.connect
+  midi.connect = function() return fake end
+  local real_scan, real_onset = CTX.scan_take, CTX.wav.onset_bounds
+  local scans = {}
+  CTX.scan_take = function(tag, fn) scans[#scans + 1] = fn end
+  local real_on, real_off = engine.note_on, engine.note_off
+  local notes_on = {}
+  engine.note_on = function(id, pos, pitch, ty, amp, len)
+    notes_on[#notes_on + 1] = { id = id, pos = pos, pitch = pitch, ty = ty, len = len }
+  end
+  engine.note_off = function() end
+  params:set("orbit_on", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0); params:set("rec", 0); params:set("pad_input", 0)
+  params:set("track_sel", 1)
+  local function run_until_done(limit)
+    for _ = 1, limit do
+      _h.run_ticks(1)
+      if params:get("rec") == 0 then return true end
+    end
+    return false
+  end
+
+  -- (a) TIME: four notes, 0.2 s held and 0.2 s of release each
+  params:set("as_low", 60); params:set("as_high", 63); params:set("as_step", 1)
+  params:set("as_hold", 0.2); params:set("as_tail", 0.2); params:set("as_wait", 1)
+  params:set("as_ch", 3); params:set("as_vel", 90)
+  params:set("pre_level", 0.3); params:set("rec_wait", 1); params:set("resample", 0.2)
+  params:set("as_go", 1); params:set("as_go", 0)
+  local arm = CTX.rec_arm_phase
+  ok(params:get("rec") == 1, "AUTOSAMPLE arms a take")
+  near(params:get("pre_level"), 0, 1e-9, "...a fresh one: overdub at 0 for the pass")
+  ok(params:get("rec_wait") == 0 and params:get("resample") == 0,
+    "...on the line input alone, and not waiting for sound")
+  ok(run_until_done(200), "the pass ends by itself")
+  local ons, offs = {}, {}
+  for _, e in ipairs(sent) do
+    if e[1] == "on" then ons[#ons + 1] = e else offs[#offs + 1] = e end
+  end
+  ok(#ons == 4 and ons[1][2] == 60 and ons[4][2] == 63, "every note of the range goes out, low to high")
+  ok(ons[1][3] == 90 and ons[1][4] == 3, "...at the velocity and on the channel asked")
+  ok(#offs == 4 and offs[1][2] == 60 and offs[1][5] - ons[1][5] == 3,
+    "each note is held its length (3 frames for 0.2 s) and released")
+  ok(ons[2][5] - ons[1][5] == 6, "...and the next note waits out the release time")
+  near(params:get("pre_level"), 0.3, 1e-9, "overdub comes back after the pass")
+  ok(params:get("rec_wait") == 1, "...and start on sound")
+  near(params:get("resample"), 0.2, 1e-9, "...and resample")
+  local cuts = CTX.pad_cuts
+  ok(cuts and #cuts == 5, "four notes, four slices")
+  ok(CTX.pad_notes and #CTX.pad_notes == 4 and CTX.pad_notes[1] == 60, "...each with its note")
+  local mono = true
+  for k = 2, #cuts do mono = mono and cuts[k] > cuts[k - 1] end
+  ok(mono, "the cuts are in order")
+  near(cuts[2] - cuts[1], 6 / 15 / CTX.BUF_SECS, 1e-9, "a slice is one note's time")
+  near(cuts[1], arm + (0.2 - 0.02) / CTX.BUF_SECS, 1 / 15 / CTX.BUF_SECS,
+    "the first cut is just before the first note went out")
+  ok(params:get("pad_input") == 1, "the keyboard plays the pads after the pass")
+
+  -- (b) the keyboard plays the multisample: the nearest note, retuned
+  local function press(note, z)
+    CTX.route_note(1000 + note, 1, note, z, note)
+  end
+  press(61, 1)
+  local v = notes_on[#notes_on]
+  near(v.pos, cuts[2], 1e-9, "a sampled key plays its own slice from its start")
+  near(v.pitch, 1, 1e-9, "...at its own pitch")
+  ok(v.ty == 1, "...as a SLICE voice")
+  press(66, 1)
+  v = notes_on[#notes_on]
+  near(v.pos, cuts[4], 1e-9, "a key above the range plays the top note's slice")
+  near(v.pitch, 2 ^ (3 / 12), 1e-9, "...three semitones up")
+  press(61, 0); press(66, 0)
+  ok(next(CTX.pad_held) == nil, "the releases close both voices")
+
+  -- (c) the scan moves the cuts onto the attacks, and counts the silent notes
+  CTX.wav.onset_bounds = function(_, a, b)
+    if a > cuts[3] - 1e-9 and a < cuts[3] + 1e-9 then return nil, "silence" end
+    return a + 0.01 / CTX.BUF_SECS, b
+  end
+  ok(#scans == 1, "the pass asks for one scan of the take")
+  scans[1]("/tmp/x.wav")
+  near(CTX.pad_cuts[1], cuts[1] + 0.008 / CTX.BUF_SECS, 1e-9,
+    "a cut moves onto its attack, 2 ms before it")
+  near(CTX.pad_cuts[3], cuts[3], 1e-12, "a silent note keeps its cut")
+  ok(CTX.take_msg == "AUTO: 3 NOTES, 1 SILENT", "...and the pass says how many were silent")
+  CTX.wav.onset_bounds = function() return nil, "silence" end
+  CTX.pad_cuts = cuts
+  scans[1]("/tmp/x.wav")
+  ok(CTX.take_msg == "AUTO: NOTHING CAME BACK", "nothing on the input says so")
+  local other = { 0, 0.5, 1 }
+  CTX.pad_cuts = other
+  CTX.wav.onset_bounds = function(_, a, b) return a + 0.1, b end
+  scans[1]("/tmp/x.wav")
+  ok(CTX.pad_cuts == other, "a scan lands nothing on cuts that replaced its own")
+  CTX.pad_cuts = cuts
+
+  -- (d) the notes ride the pset with their cuts
+  CTX.padlock_pset_write(90)
+  CTX.pads_uncut()
+  ok(CTX.pad_notes == nil, "back to even slices drops the notes")
+  local real_exists = util.file_exists
+  util.file_exists = function() return true end
+  CTX.padlock_pset_read(90)
+  util.file_exists = real_exists
+  ok(CTX.pad_notes and #CTX.pad_notes == 4 and CTX.pad_notes[4] == 63,
+    "a pset brings the notes back with the cuts")
+  CTX.padlock_pset_delete(90)
+  CTX.pad_cuts = { 0, 0.5, 1 }; CTX.pad_notes = nil
+  local t5 = CTX.pad_type[5]
+  CTX.pad_type[5] = 1
+  press(61, 1)
+  v = notes_on[#notes_on]
+  near(v.pos, 0.5, 1e-9, "without notes a key plays its pad as before (61 mod 8 on two slices)")
+  press(61, 0)
+  CTX.pad_type[5] = t5
+  CTX.pads_uncut()
+
+  -- (e) DECAY: the next note waits until the level has died away
+  sent = {}
+  params:set("as_low", 60); params:set("as_high", 61); params:set("as_wait", 2)
+  params:set("as_hold", 0.2); params:set("as_tail", 3); params:set("as_floor", 0.01)
+  CTX.rec_amp = 0.5
+  params:set("as_go", 1); params:set("as_go", 0)
+  _h.run_ticks(30)
+  local n_on = 0
+  for _, e in ipairs(sent) do if e[1] == "on" then n_on = n_on + 1 end end
+  ok(n_on == 1, "DECAY: while the sound rings, the next note waits")
+  CTX.rec_amp = 0.001
+  _h.run_ticks(1)
+  local before = #sent
+  _h.run_ticks(2)
+  ok(#sent == before, "...the level must stay quiet for a moment")
+  _h.run_ticks(2)
+  ok(sent[#sent][1] == "on" and sent[#sent][2] == 61, "...then the next note goes out")
+  ok(run_until_done(200), "...and the pass ends after the last note dies away")
+  ok(#CTX.pad_notes == 2, "DECAY: two notes, two slices")
+  CTX.rec_amp = 0
+
+  -- (f) a pass that is stopped, or cannot start, says so and leaves things as they were
+  sent = {}
+  params:set("as_wait", 1); params:set("as_tail", 0.2)
+  params:set("as_go", 1); params:set("as_go", 0)
+  _h.run_ticks(5)
+  params:set("rec", 0); _h.run_ticks(1)
+  ok(CTX.take_msg == "AUTO: STOPPED", "a take stopped by hand stops the pass")
+  ok(sent[#sent][1] == "off", "...and the note that sounded is released")
+  near(params:get("pre_level"), 0.3, 1e-9, "...and overdub comes back")
+  fake.device = nil
+  params:set("as_go", 1); params:set("as_go", 0)
+  ok(params:get("rec") == 0 and CTX.take_msg == "AUTO: NO MIDI ON PORT 1",
+    "with nothing on the port it does not record, and says so")
+  fake.device = {}
+  params:set("as_low", 0); params:set("as_high", 127); params:set("as_hold", 2)
+  params:set("as_go", 1); params:set("as_go", 0)
+  ok(params:get("rec") == 0 and CTX.take_msg:find("TOO LONG"),
+    "a range that does not fit in a track is refused")
+
+  -- (g) a range that does not fit in DECAY ends early with the notes it has
+  params:set("as_low", 40); params:set("as_high", 60); params:set("as_hold", 1.5)
+  params:set("as_wait", 2); params:set("as_tail", 3)
+  CTX.rec_amp = 0.5
+  params:set("as_go", 1); params:set("as_go", 0)
+  ok(params:get("rec") == 1, "DECAY starts when the shortest pass fits")
+  ok(run_until_done(15 * 70), "...and ends before the track is full")
+  ok(#CTX.pad_notes < 21 and CTX.take_msg:find("FIT"), "...with the notes that fit, and says so")
+  ok(CTX.pad_cuts[#CTX.pad_cuts] <= 1, "...inside the buffer")
+  CTX.rec_amp = 0
+
+  CTX.pads_uncut()
+  params:set("pad_input", 0); params:set("pre_level", 0); params:set("rec_wait", 0)
+  params:set("resample", 0); params:set("as_wait", 1)
+  CTX.scan_take, CTX.wav.onset_bounds = real_scan, real_onset
+  engine.note_on, engine.note_off = real_on, real_off
+  midi.connect = real_connect
+end
+
 T.report("control harness OK")

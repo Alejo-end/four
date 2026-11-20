@@ -289,6 +289,28 @@ PARAMS > beat repeat is a stutter on the clock. Hold `beat repeat`, and the engi
 the last division of what you hear until you let go. `repeat length` runs from a half note
 to a 32nd.
 
+PARAMS > take - autosample turns other gear into a multisample. four plays every note of
+a range out of a MIDI port, records what comes back on the line input into one new take on
+the focused track, and cuts each note on its own attack. A MIDI keyboard then plays the
+take polyphonically: each key plays the nearest sampled note, retuned by the difference.
+
+1. Connect a norns MIDI port to the gear's MIDI in. The port is any device in SYSTEM >
+   DEVICES > MIDI: a synth on USB, or a USB MIDI interface with DIN or TRS jacks.
+2. Connect the gear's audio out to four's line input.
+3. Set `autosample midi port`, `autosample channel`, `lowest note`, `highest note` and
+   `semitones apart` (1 samples every note).
+4. Set `next note after`. TIME holds each note for `note length` and records
+   `release time` after it. DECAY holds each note for `note length` and waits until the
+   level falls under `decay floor`, at most `release time`.
+5. Press `autosample`. Press it again to stop the pass.
+
+A track holds 60 seconds. With TIME, a range that does not fit is refused. With DECAY,
+the pass ends when the track is full and keeps the notes that fit. TAKE shows each note
+as it goes out, and then how many notes came back. `NOTHING CAME BACK` means that the
+MIDI or the audio is not connected. For the pass, overdub, resample and start on sound
+go to 0, and they come back after. The pass turns `pad input` on. PADS shows the
+notes, and the slices ride the PSET with the take.
+
 PARAMS > modulation out sends the scene morph, the input envelope or a modulator's wave to
 other gear. It goes out as a MIDI CC, and as 0 to 5 volts on crow output 1.
 

@@ -2954,8 +2954,15 @@ def stage19():
                 n.set(tp(t, pid), v)
         for pid in ("delay_mix", "rev_mix", "shimmer"):
             n.set(pid, 0)
-        ok = all(cpu is not None and cpu < 60 and xr == 0 for cpu, xr in out.values())
-        return verdict(ok, f"busiest scsynth thread and xruns over 60 s: {out}. 2026-11-13: 53.0% and 57.3%")
+        # THE SUPPORTED SET decides (question 8 of doc/signature-workflow.md, the
+        # user's answer of 2026-11-20): four voices up to PV at pitch 2 with every
+        # effect on. The dense set is measured and listed, and the README says it
+        # is over the limit.
+        cpu, xr = out["four PV at pitch 2"]
+        ok = cpu is not None and cpu < 60 and xr == 0
+        return verdict(ok, f"busiest scsynth thread and xruns over 60 s: {out}. The supported set is "
+                           "four PV at pitch 2; the dense set is over the limit by design. "
+                           "2026-11-18: 56.8% and 64.7%")
 
     check("19.27", c1927)
 

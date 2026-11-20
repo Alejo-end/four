@@ -267,6 +267,7 @@ local Mscenes = include "lib/mscenes"
 local Mwav = include "lib/mwav"
 local Mpages = include "lib/mpages"
 local Mplugin = include "lib/mplugin"
+local Msample = include "lib/msample"
 
 ctx.font = Mfont
 ctx.wav = Mwav          -- the wav file layer; mpages paints strips through it
@@ -426,6 +427,7 @@ Mmotion.init(ctx)
 Mseq.init(ctx)
 Mlfo.init(ctx)
 Mout.init(ctx)
+Msample.init(ctx)
 Mosc.init(ctx)
 Mscenes.init(ctx)   -- sets ctx.scene (the module; its bank is ctx.scene.slots)
 Mpages.init(ctx)
@@ -1216,7 +1218,8 @@ end
 -- back to even slices. Chopped boundaries point at particular audio, so
 -- anything that replaces the buffer has to let them go — the same rule the
 -- window's SNAP memory follows.
-function ctx.pads_uncut() ctx.pad_cuts = nil end
+-- An autosample's notes (ctx.pad_notes) belong to its cuts and go with them.
+function ctx.pads_uncut() ctx.pad_cuts, ctx.pad_notes = nil, nil end
 
 -- TIGHTEN: pull the window in onto the sound. Pressing REC and then playing
 -- leaves your reaction time at the head of the take, and letting go late
@@ -1248,6 +1251,8 @@ local function scan_take(tag, scan, background)
     os.remove(tmp)
   end, background)
 end
+
+ctx.scan_take = scan_take   -- the autosampler cuts its notes on their attacks
 
 function ctx.take_tighten()
   scan_take("TIGHTEN", function(tmp, lo, hi)
@@ -1285,7 +1290,7 @@ function ctx.pad_chop()
       return
     end
     cuts[#cuts + 1] = hi            -- the last slice runs to the window end
-    ctx.pad_cuts = cuts
+    ctx.pad_cuts, ctx.pad_notes = cuts, nil
     print(string.format("four: CHOP — %d slices, on the attacks", #cuts - 1))
   end)
 end
@@ -1300,8 +1305,9 @@ end
 
 -- spawn/release a voice for pad `i` under a stable `id` (so note_off matches
 -- the note_on that started it). z=1 press, z=0 release. `auto`: a machine
--- played it (the sequencer), which is not a hand on the instrument.
-function ctx.pad_trigger(id, i, z, auto)
+-- played it (the sequencer), which is not a hand on the instrument. `semis`
+-- retunes this one note (a key on an autosample's multisample).
+function ctx.pad_trigger(id, i, z, auto, semis)
   -- playing pads counts as presence (idle dim)
   if not auto then ctx.last_input = ctx.frame end
   if z == 1 then
@@ -1309,9 +1315,11 @@ function ctx.pad_trigger(id, i, z, auto)
     if engine.note_on then
       -- per-pad SOUND-LOCK: this pad's own pitch (semitones -> rate) + voice, at
       -- the pad voice level (chord-safe default that won't slam the limiter)
-      local pt = ctx.pad_type[i] or 0
+      -- a slice past the eighth pad (an autosample's multisample) has no
+      -- lock of its own: it plays from its start, a SLICE voice
+      local pt = ctx.pad_type[i] or (i >= ctx.pad_n and 1 or 0)
       engine.note_on(id, pad_pos(i, pt > 0),
-        2 ^ ((ctx.pad_pitch[i] or 0) / 12),
+        2 ^ (((ctx.pad_pitch[i] or 0) + (semis or 0)) / 12),
         pt, pget("pad_level", 0.3), pad_len(i))
     end
     -- the engine's noteOff + noteOn above moves a re-struck id to the END of
@@ -1340,10 +1348,17 @@ end
 -- MIDI/grid note routing: in pad mode a note plays pad (note mod 8) as a
 -- polyphonic voice (note_off on release); otherwise it retunes the mono
 -- drone `pitch` exactly as before. `pitch` is the chromatic rate the caller
--- already computed for the drone path.
-function ctx.route_note(id, pitch, pad_idx, z)
+-- already computed for the drone path. `note`, a MIDI note number, comes
+-- from a MIDI key: on an autosample's multisample (ctx.pad_notes) it plays
+-- the slice of the nearest sampled note, retuned by the difference.
+function ctx.route_note(id, pitch, pad_idx, z, note)
   ctx.last_input = ctx.frame   -- MIDI/grid/typing notes count as presence
   if pget("pad_input", 0) == 1 then
+    if note and ctx.pad_notes then
+      local j, semis = Msample.slice_of(note)
+      ctx.pad_trigger(id, j, z, nil, semis)
+      return
+    end
     ctx.pad_trigger(id, pad_idx % ctx.pad_n, z)
   elseif z == 1 then
     params:set("pitch", pitch)
@@ -1960,7 +1975,7 @@ local function padlock_path(number)
 end
 
 function ctx.padlock_pset_write(number)
-  local t = { v = 1, type = {}, pitch = {}, cuts = ctx.pad_cuts }
+  local t = { v = 1, type = {}, pitch = {}, cuts = ctx.pad_cuts, notes = ctx.pad_notes }
   for i = 0, 7 do t.type[i] = ctx.pad_type[i] or 0; t.pitch[i] = ctx.pad_pitch[i] or 0 end
   -- guarded like every other pset writer here: a write failure must PRINT, not
   -- throw out of params.action_write and abort the rest of the save
@@ -1981,6 +1996,9 @@ function ctx.padlock_pset_read(number)
   -- slice boundaries come back with the audio they were cut from. (this runs
   -- AFTER take_pset_read, which drops them along with the old material.)
   ctx.pad_cuts = (type(t.cuts) == "table" and #t.cuts > 1) and t.cuts or nil
+  -- an autosample's notes, one for each slice, come back with its cuts
+  ctx.pad_notes = (ctx.pad_cuts and type(t.notes) == "table"
+    and #t.notes == #ctx.pad_cuts - 1) and t.notes or nil
   ctx.pad_edit_sync()   -- editor params -> the restored cursor pad
 end
 
@@ -3229,6 +3247,7 @@ local function init_params()
   -- and the target option can carry the targets' own names.
   Mlfo.add_params(function(id, name, n) params:add_group(id, name, n) end)
   Mout.add_params()   -- ...and the modulation out, which reads them
+  Msample.add_params()   -- ...and the autosampler (lib/msample.lua)
   Mosc.add_params()   -- ...and the visuals link (OSC), which reads the rest
 
   -- PSETs persist the audio too: PARAMS > PSET > SAVE/LOAD/DELETE round-trip
@@ -3367,6 +3386,7 @@ function init()
     sync_window_len()    -- ...and a locked window's length, on a tempo move
     tick_rec_wait()        -- a start-on-sound take begins at the sound
     tick_rec_end()         -- ONE-SHOT: a full track hands on to the next
+    Msample.tick()         -- AUTOSAMPLE: the next note out, or the end of the pass
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
@@ -3442,6 +3462,7 @@ function cleanup()
   if repeat_clock then clock.cancel(repeat_clock) end   -- ...and its clock
   Mlfo.restore_all()   -- every modulated knob's own value back to the engine
   ctx.pads_all_off()   -- release any held pad voices before teardown
+  Msample.cleanup()    -- a note an autosample left sounding on the outboard
   Minput.cleanup()
   midi.add, midi.remove = prev_midi_add, prev_midi_remove
   Mgrid.cleanup()
