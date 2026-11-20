@@ -161,6 +161,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 52nd: PRESS, a seventh modulator shape: keyboard pressure moves a knob (Lua, test tool) | no. Never run with a pressure keyboard | |
 | 55th: AUTOSAMPLE: four plays a MIDI note range out, records it into one take, and a keyboard plays it as a multisample (Lua, test tool) | deployed 2026-11-20 and loads; never run with gear. The TRS jack is norns port 3, `virtual` (ttymidi on /dev/ttyAMA0, client `shieldXL`) | no |
 | 56th: WOBBLE and plugin FLANGE glide their delay in and out; the supported set (engine, test tools, documents) | yes, 2026-11-20, `count: 198`: row 19.12 no break and no hole, 19.27 passes on the supported set | no |
+| 57th: Phase B, the fade is safe: a hand keeps what it moves, an option crosses once, a clear of an end is refused, DRY is a round trip, each track keeps its own window (Lua, test tools). On the local branch `phase-b` | deployed 2026-11-20 and loads; not walked | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -195,8 +196,9 @@ answered question 8: the supported set is four PV at pitch 2 with every effect o
 README), and row 19.27 decides on it (53.6% to 62.2% over four runs, one run with one
 xrun; the dense set is listed, 61.6% to 69.1%). They answered question 10: fix the dip.
 The fifty-sixth change glides WOBBLE's delay and plugin FLANGE's dry side in from 0 and
-back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Next is Phase B of
-the plan (C7 to C10, Lua only). Another session shares this checkout (the forty-seventh
+back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of the plan
+(C7 to C10, Lua only) is the fifty-seventh change, on the local branch `phase-b`, deployed
+and loaded on the device but not walked, and not pushed until the user tests it. Another session shares this checkout (the forty-seventh
 change, an Exquis driver, and the fifty-second, PRESS, both uncommitted): stage only
 your own hunks.
 

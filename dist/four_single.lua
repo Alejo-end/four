@@ -4032,6 +4032,9 @@ local MORPH_EXCLUDE = {
   win_beats = true,
   -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
   vis_look = true,
+  -- Clouds goes silent for a moment at a mode change: a recall lands it
+  clouds_mode = true, t2_clouds_mode = true, t3_clouds_mode = true,
+  t4_clouds_mode = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -4157,6 +4160,15 @@ local pending_clock      -- the quantized-recall coroutine (nil = none)
 local morph_from = nil
 local morph_a = nil
 local morph_a_n = 0      -- the latched A's number, for the screen (0 = LIVE)
+local morph_b_n = 0      -- the B the fade last aimed at (a clear refuses it)
+-- A HAND KEEPS WHAT IT MOVES DURING A FADE (C7 of doc/signature-workflow.md).
+-- fade_val holds the value the fade last wrote for each id. A param that no
+-- longer holds it (or, before the first write, no longer holds the origin)
+-- was moved by something else: a hand, MIDI, a motion lane, the rec stop.
+-- It LEFT the fade (`left`): the fade skips it until it comes home, and home
+-- leaves it where it was put. Capture by polling, never by wrapping `set`.
+local fade_val = {}
+local left = {}
 
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
 local GLIDE_MODE = 4              -- ...and GLIDE (scene_glide beats, then land)
@@ -4195,9 +4207,11 @@ end
 -- what a slot holds, and moves no param.
 local function reset_morph()
   for k in pairs(last_sent) do last_sent[k] = nil end
+  for k in pairs(fade_val) do fade_val[k] = nil end
+  for k in pairs(left) do left[k] = nil end
   M.engaged = false
   morph_from = nil
-  morph_a, morph_a_n = nil, 0
+  morph_a, morph_a_n, morph_b_n = nil, 0, 0
 end
 
 -- the INSTRUMENT moved (a recall, a restore, a chaos throw, a pset load):
@@ -4293,7 +4307,11 @@ M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 -- so a loop that is merely a little longer than what was
 -- played into it is left alone; and a stored loop entirely elsewhere points
 -- at something we cannot know about, and stays exactly as stored.
-local WINDOW_IDS = { pos_start = true, pos_end = true }
+-- each track's window, by its track (C10 of doc/signature-workflow.md): a
+-- track's window is clamped against that track's own take (C.take_of)
+local WINDOW_IDS = { pos_start = 1, pos_end = 1,
+  t2_pos_start = 2, t2_pos_end = 2, t3_pos_start = 3, t3_pos_end = 3,
+  t4_pos_start = 4, t4_pos_end = 4 }
 local EXTENT_OF = {
   loop_start = "tape", loop_end = "tape",
 }
@@ -4304,10 +4322,14 @@ M.PARTNER = PARTNER
 
 local function clamp_stored(id, v, tbl)
   if v == nil then return v end
-  if WINDOW_IDS[id] then
-    local tl = (C and C.wave_any and C.take_len) or 0
+  local tr = WINDOW_IDS[id]
+  if tr then
+    local any, tl
+    if C and C.take_of then any, tl = C.take_of(tr)
+    elseif C then any, tl = C.wave_any, C.take_len end
+    tl = (any and tl) or 0
     if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
-    local cap = id == "pos_end" and tl or (tl - 0.002)
+    local cap = EDGE_PAIRS[id] == nil and tl or (tl - 0.002)
     return v < cap and v or cap
   end
   local key = EXTENT_OF[id]
@@ -4542,6 +4564,13 @@ function M.clear(slot)
     return false
   end
   slot = slot_idx(slot)
+  -- an engaged fade departed from its A slot and aims at its B: clearing
+  -- either strands the way home (C9 of doc/signature-workflow.md)
+  if morph_from and (slot == morph_a_n or slot == morph_b_n) then
+    say("FADE ON " .. slot .. ": HOME FIRST", "scene " .. slot .. " is an end of the"
+      .. " fade that is up: bring the fade home (K1+E3 to 0), then clear it", slot)
+    return false
+  end
   local had = M.slots[slot] ~= nil
   M.slots[slot] = nil   -- in place: the grid and the page read this table
   if M.pending == slot or (M.glide and M.glide.slot == slot) then
@@ -4563,7 +4592,19 @@ end
 -- numbers (voices, warp_overlaps) lerp and land on integers; options and
 -- binaries can't be half-switched, so they flip at the midpoint (amt >= 0.5).
 
-local function morph_value(id, va, vb, amt)
+-- An option or a binary crosses ONCE (C8 of the plan): it goes to B above
+-- 0.55 and back to A below 0.45. Between the two it keeps `last`, what the
+-- fade last wrote, so a fade rocked about the middle does not switch an
+-- effect or a filter type on and off. The ends are exact.
+local BAND_LO, BAND_HI = 0.45, 0.55
+local function band(va, vb, amt, last)
+  if amt >= BAND_HI then return vb end
+  if amt <= BAND_LO then return va end
+  if last == va or last == vb then return last end
+  return amt < 0.5 and va or vb
+end
+
+local function morph_value(id, va, vb, amt, last)
   local p = lookup(id)
   if not p then return nil end
   local cs = p.controlspec
@@ -4572,13 +4613,13 @@ local function morph_value(id, va, vb, amt)
     -- identical in A and B, tn never moves and it never gets sent at all
     return C.warped_lerp(cs, va, vb, amt)
   end
-  if p.count then                                  -- option: midpoint switch
-    return amt < 0.5 and va or vb
+  if p.count then                                  -- option: midpoint band
+    return band(va, vb, amt, last)
   end
   if p.min and p.max then                          -- number: lerp -> integer
     return clamp(floor(va + (vb - va) * amt + 0.5), p.min, p.max)
   end
-  return amt < 0.5 and va or vb                    -- binary / unknown
+  return band(va, vb, amt, last)                   -- binary / unknown
 end
 
 -- normalized deadband: a param must move at least this much (of its full
@@ -4619,12 +4660,27 @@ end
 --                       still tracks the line. Two SLOTS that agree on a
 --                       value the live sound does not have do move it: the
 --                       fader is between those two scenes.
+-- has `id` left the fade (C7)? It has when it no longer holds what the fade
+-- last wrote, or the origin before the fade wrote it.
+local function gone(id)
+  if left[id] then return true end
+  local ref = fade_val[id]
+  if ref == nil then ref = morph_from[id] end
+  if ref ~= nil and params.lookup[id] and params:get(id) ~= ref then
+    left[id] = true
+    return true
+  end
+  return false
+end
+M.left = left   -- the harness reads it
+
 local function emit(id, va, vb)
   if va == nil or not params.lookup[id] then return end
+  if gone(id) then return end
   local live = morph_from[id]
   if vb == nil then vb = live end
   if va == vb and vb == live and last_sent[id] == nil then return end
-  local v, tn = morph_value(id, va, vb, sw_amt)
+  local v, tn = morph_value(id, va, vb, sw_amt, last_sent[id])
   if v == nil then return end
   local key = tn or v          -- continuous: compare norms; discrete: values
   local last = last_sent[id]
@@ -4634,6 +4690,7 @@ local function emit(id, va, vb)
   if fire then
     pset(id, v)
     last_sent[id] = key
+    fade_val[id] = params:get(id)   -- the resolved value: a control quantizes
   end
 end
 
@@ -4687,7 +4744,7 @@ function M.morph(slot, amt)
     -- follow: restored in bare list order a pair can cross for one write,
     -- and a crossed pair hits the 100ms loop floor and jumps the head.
     local function back(k)
-      if last_sent[k] ~= nil and params.lookup[k] then
+      if last_sent[k] ~= nil and params.lookup[k] and not gone(k) then
         local v = end_a(k)
         if v ~= nil then pset(k, v) end
       end
@@ -4700,7 +4757,10 @@ function M.morph(slot, amt)
         local va = partner and params.lookup[id] and params.lookup[partner]
           and end_a(id) or nil
         if va and end_a(partner) ~= nil then
-          if va < params:get(id) then back(id); back(partner)
+          -- a pair moves together or not at all: one edge left, both stay
+          if gone(id) or gone(partner) then
+            left[id], left[partner] = true, true
+          elseif va < params:get(id) then back(id); back(partner)
           else back(partner); back(id) end
           rdone = rdone or {}
           rdone[partner] = true
@@ -4721,6 +4781,7 @@ function M.morph(slot, amt)
     morph_a_n = a_next()
     morph_a = morph_a_n >= 1 and M.slots[morph_a_n] or nil
   end
+  morph_b_n = slot_idx(slot)
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
   sw_amt, sw_force = amt, amt <= 0 or amt >= 1
   morphing = true
@@ -4733,6 +4794,11 @@ function M.morph(slot, amt)
       local va = end_a(id)
       local vb = clamp_stored(id, B[id], B)   -- a stored loop aims at material
       if partner and params.lookup[partner] and va ~= nil
+          and morph_from[partner] ~= nil and (gone(id) or gone(partner)) then
+        -- a pair moves together or not at all: one edge left, both stay
+        left[id], left[partner] = true, true
+        pair_done[partner] = true
+      elseif partner and params.lookup[partner] and va ~= nil
           and morph_from[partner] ~= nil then
         -- a REGION's two edges move together, and the WIDENING one goes first —
         -- the same rule apply() follows, and for the same reason: written in
@@ -4761,8 +4827,10 @@ function M.morph(slot, amt)
     -- you are by then with the A selected by then, and forget what we sent
     -- so it re-asserts from scratch.
     morph_from = nil
-    morph_a, morph_a_n = nil, 0
+    morph_a, morph_a_n, morph_b_n = nil, 0, 0
     for k in pairs(last_sent) do last_sent[k] = nil end
+    for k in pairs(fade_val) do fade_val[k] = nil end
+    for k in pairs(left) do left[k] = nil end
   end
   return true
 end
@@ -8020,7 +8088,8 @@ local function body_SCENE(frame)
   if msg_live then
     chip(sc.msg, 64 - floor((text_w(sc.msg, 1) + 5) / 2), 11)
   elseif amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
-    ptext_c("K2 TO LAND THE REST", 64, 13, 1, 5)
+    -- K1 held makes K2 the STOP (C9 of the plan): the cue says so
+    ptext_c(C.alt and "LET GO OF K1 THEN K2" or "K2 TO LAND THE REST", 64, 13, 1, 5)
   else
     ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
   end
@@ -10410,6 +10479,7 @@ local function take_of(n)
   if n == FOCUS then return ctx.wave_any, ctx.take_len end
   return TAKES[n].wave_any, TAKES[n].take_len
 end
+ctx.take_of = take_of   -- a scene clamps each track's window to its own take
 local function buf_track(n) if engine.buf_track then engine.buf_track(n - 1) end end
 -- does track n hold material of its own (TRACKS draws EMPTY where not)
 function ctx.track_has(n) return (take_of(n)) and true or false end
@@ -10980,16 +11050,18 @@ local function apply_window_len()
   if b <= 0 then return end
   local t = ctx.tempo()
   win_tempo = t
-  local want = min(1, pget("pos_start", 0) + b * 60 / t / BUF_SECS)
-  if math.abs(pget("pos_end", 1) - want) >= 1e-9 then
-    params:set("pos_end", want)   -- only the end moves, outward of the start
-    if ctx.motion and ctx.motion.account then ctx.motion.account("pos_end") end
+  -- the FOCUSED track's window (C10 of doc/signature-workflow.md): WIN
+  -- holds its ids, so the lock follows the focus
+  local want = min(1, pget(WIN[1], 0) + b * 60 / t / BUF_SECS)
+  if math.abs(pget(WIN[2], 1) - want) >= 1e-9 then
+    params:set(WIN[2], want)   -- only the end moves, outward of the start
+    if ctx.motion and ctx.motion.account then ctx.motion.account(WIN[2]) end
   end
-  win_lo, win_hi = pget("pos_start", 0), pget("pos_end", 1)
+  win_lo, win_hi = pget(WIN[1], 0), pget(WIN[2], 1)
 end
 -- each frame: a tempo move, or the start moved while the end did not
 local function sync_window_len()
-  local lo, hi = pget("pos_start", 0), pget("pos_end", 1)
+  local lo, hi = pget(WIN[1], 0), pget(WIN[2], 1)
   if win_lock_beats() > 0 then
     local t = ctx.tempo()
     if math.abs(t - win_tempo) > win_tempo * 0.005
@@ -11080,26 +11152,47 @@ end
 -- clouds feedback — the one wash the REVERB page can't kill) and the
 -- filter thrown open (type-aware, same law as FILTER's OPEN key). the
 -- take itself is always recorded clean; this clears the playback path.
+-- DRY IS A THROW (C9 of doc/signature-workflow.md): a second tap brings back
+-- what the first one moved, so a slip of K3 under K1 costs nothing. It opens
+-- the filter of every track. A recall, a morph or a pset load forgets it, as
+-- it forgets every throw (ctx.throws_forget).
+local DRY_IDS = { "delay_mix", "rev_mix", "shimmer", "clouds_fb" }
+for n = 1, NTRACKS do
+  local pre = n == 1 and "" or ("t" .. n .. "_")
+  for _, id in ipairs({ "drive", "crush", "effect", "effect2", "cutoff", "resonance" }) do
+    DRY_IDS[#DRY_IDS + 1] = pre .. id
+  end
+end
+ctx.DRY_IDS = DRY_IDS
+function ctx.dry_lit() return throw_mem.DRY ~= nil end
 function ctx.fx_dry()
+  if throw_mem.DRY then
+    throw_restore("DRY")
+    print("four: DRY again: the wet path is back")
+    return
+  end
   ctx.throws_forget()   -- DRY moves the wet path wholesale: no throw's "back"
                         -- survives it (a latched WASH would restore reverb)
+  local mem = {}
+  for k = 1, #DRY_IDS do
+    local id = DRY_IDS[k]
+    if params.lookup[id] then mem[id] = params:get(id) end
+  end
+  throw_mem.DRY = mem
   params:set("delay_mix", 0)
   params:set("rev_mix", 0)
   params:set("shimmer", 0)
-  params:set("drive", 0)
-  params:set("crush", 0)
-  params:set("effect", 1)
-  params:set("effect2", 1)
-  for n = 2, NTRACKS do
-    params:set("t" .. n .. "_drive", 0)
-    params:set("t" .. n .. "_crush", 0)
-    params:set("t" .. n .. "_effect", 1)
-    params:set("t" .. n .. "_effect2", 1)
-  end
   params:set("clouds_fb", 0)
-  local ft = params:get("filt_type")
-  params:set("cutoff", filter_open_cutoff(ft))
-  params:set("resonance", 0)
+  for n = 1, NTRACKS do
+    local pre = n == 1 and "" or ("t" .. n .. "_")
+    params:set(pre .. "drive", 0)
+    params:set(pre .. "crush", 0)
+    params:set(pre .. "effect", 1)
+    params:set(pre .. "effect2", 1)
+    params:set(pre .. "cutoff", filter_open_cutoff(params:get(pre .. "filt_type")))
+    params:set(pre .. "resonance", 0)
+  end
+  print("four: DRY: the wet path is off, every filter open. K1+K3 again brings it back")
 end
 
 -- ============================================================================
@@ -11385,7 +11478,9 @@ local function init_params()
   -- once (see sync_window_len), so the engine never reads a crossed pair
   params:set_action("pos_start", function(v)
     if engine.pos_start then engine.pos_start(v) end
-    if win_lock_beats() > 0 and v >= pget("pos_end", 1) then apply_window_len() end
+    if WIN[1] == "pos_start" and win_lock_beats() > 0 and v >= pget("pos_end", 1) then
+      apply_window_len()
+    end
   end)
   add_eng_control("scan", "scan rate",
     controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
@@ -11602,6 +11697,18 @@ local function init_params()
     add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
     add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
     add_eng_control(pre .. "pos_end", lab .. "win end", fine_unit(1.0))
+    -- the lock follows the focus (C10): a start past the focused track's
+    -- locked end takes the end with it, as on track 1
+    do
+      local sid, eid = pre .. "pos_start", pre .. "pos_end"
+      params:set_action(sid, function(v)
+        local sv = Mlfo.swinging(sid) and Mlfo.swung(sid, v) or v
+        if engine[sid] then engine[sid](sv) end
+        if WIN[1] == sid and win_lock_beats() > 0 and v >= pget(eid, 1) then
+          apply_window_len()
+        end
+      end)
+    end
     add_eng_control(pre .. "scan", lab .. "scan rate", controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
     add_eng_control(pre .. "pitch", lab .. "pitch", controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
     add_eng_control(pre .. "pan", lab .. "pan", controlspec.new(-1, 1, "lin", 0, 0.0, ""))

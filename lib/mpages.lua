@@ -2305,7 +2305,8 @@ local function body_SCENE(frame)
   if msg_live then
     chip(sc.msg, 64 - floor((text_w(sc.msg, 1) + 5) / 2), 11)
   elseif amt >= 0.999 and sc.engaged and sc.unlanded(sel) then
-    ptext_c("K2 TO LAND THE REST", 64, 13, 1, 5)
+    -- K1 held makes K2 the STOP (C9 of the plan): the cue says so
+    ptext_c(C.alt and "LET GO OF K1 THEN K2" or "K2 TO LAND THE REST", 64, 13, 1, 5)
   else
     ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
   end

@@ -82,7 +82,7 @@ on only while you hold. A press on a key that is on turns it off.
 | K2, K3 | The two keys of the page. The foot of the screen names them. |
 | K1 + E1 | Pick track 1 to 4. |
 | K1 + K2 | Stop or start everything. Every head resumes in its place. |
-| K1 + K3 | Tap: all effects off. Hold for a second: erase what the page holds. |
+| K1 + K3 | Tap: all effects off and every filter open (DRY). Tap again: the effects come back. Hold for a second: erase what the page holds. |
 
 [doc/controls.md](controls.md) holds the full map of each page. It is generated from
 the code.
@@ -232,8 +232,18 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
 - If you pick another A during a fade, the fade keeps its A until it is back at 0, so the
   sound never jumps. The new A shows dim under its cell until then.
 - An empty slot as A counts as LIVE. With B empty, the fade does nothing.
+- A knob you turn during a fade stays where you put it, also on the way home. The same is
+  true of a new take's window, a MIDI knob and a motion lane. Every other knob comes home
+  exactly.
+- An effect type, a filter type or any other switch changes once: to B above 0.55, and
+  back to A below 0.45. A fade rocked around the middle does not switch it on and off.
+  Clouds' mode never changes in a fade, because Clouds goes silent for a moment at a
+  mode change. A recall changes it.
+- A scene that is an end of the fade cannot be cleared until the fade is home. The page
+  says `FADE ON 3: HOME FIRST`.
 - The fade never lands a scene. At 1 the holds, the note routing, the buffer writers and the
-  voice count are still as you left them, and K2 lands the rest of B.
+  voice count are still as you left them, and K2 lands the rest of B. While K1 is held,
+  K2 is STOP, so the cue then reads `LET GO OF K1 THEN K2`.
 - The orbit, a K2 peek and a GLIDE recall start from the sound you have, whatever A is.
 - Slot zero, the left arrow, is the way back. Every recall parks the sound before it there.
 - The orbit picks a scene, morphs part of the way, rests, and picks the next one. Start it
@@ -266,7 +276,7 @@ effect out before the sound breaks up.
 - `PARAMS > take - record > start on sound`: the take starts where the sound starts, with a
   short pre-roll that keeps the attack.
 - `PARAMS > take - window > win length`: the loop's length locks to the clock, from one beat
-  to eight bars.
+  to eight bars. It locks the window of the track you are on.
 - Hold K3 on TAKE to go back to the take before the last change. Hold it again to come
   forward. A "<" at the top left means that there is a take to go back to.
 - Hold K1 plus K3 for a second to erase the take. The arc shows the time left.

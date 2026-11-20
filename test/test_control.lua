@@ -4152,4 +4152,165 @@ do
   midi.connect = real_connect
 end
 
+-- ============================================================================
+-- 35 · Phase B of doc/signature-workflow.md: the fade is safe (C7 to C10)
+-- ============================================================================
+do
+  local pulse, sc = T.pulse, CTX.scene
+  local function amt(a) params:set("scene_morph_amt", a); _h.run_ticks(1) end
+  local function clear_bank()
+    for s = 1, 8 do params:set("scene_slot", s); pulse("scene_clear") end
+  end
+  params:set("orbit_on", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  params:set("stop_all", 0); params:set("rec", 0)
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+  params:set("scene_recall_mode", 1); params:set("scene_scope", 1)
+  params:set("scene_slot_a", 0); params:set("track_sel", 1)
+  clear_bank()
+
+  -- (C7) a hand keeps what it moves during a fade. Slot 2 holds another
+  -- t2_cutoff, another cutoff and another track 2 window than the live sound.
+  params:set("cutoff", 8000); params:set("t2_cutoff", 6000)
+  params:set("t2_pos_start", 0.2); params:set("t2_pos_end", 0.6)
+  params:set("scene_slot", 2); pulse("scene_capture")
+  params:set("cutoff", 2000); params:set("t2_cutoff", 1000)
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+  amt(0.5)
+  local mid = params:get("t2_cutoff")
+  ok(mid > 1000 and mid < 6000, "the fade moves t2_cutoff (" .. mid .. ")")
+  params:set("t2_cutoff", 300)                 -- a hand
+  amt(0.8)
+  near(params:get("t2_cutoff"), 300, 1e-9, "a knob turned during the fade stays where the hand put it")
+  ok(params:get("cutoff") > 2000, "...while the fade goes on moving the others")
+  ok(sc.left.t2_cutoff, "...and the fade knows the knob left it")
+  amt(0)
+  near(params:get("t2_cutoff"), 300, 1e-9, "...through the way home")
+  near(params:get("cutoff"), 2000, 1e-9, "every other id is back on the origin")
+  near(params:get("t2_pos_start"), 0, 1e-12, "...the window too (start)")
+  near(params:get("t2_pos_end"), 1, 1e-12, "...(end)")
+  ok(next(sc.left) == nil, "home forgets who left")
+  amt(0.5)
+  near(params:get("t2_cutoff"), 300 * (6000 / 300) ^ 0.5, 1, "the next fade departs from the hand's value")
+  amt(0)
+  near(params:get("t2_cutoff"), 300, 1e-6, "...and comes home to it")
+
+  -- a new take during a fade keeps its window through the way home
+  params:set("track_sel", 2)
+  amt(0.5)
+  local s0 = params:get("t2_pos_start")
+  ok(s0 > 0.05, "the fade moves track 2's window (" .. s0 .. ")")
+  params:set("rec", 1); head_runs(0.03)
+  params:set("rec", 0)
+  local ws, we = params:get("t2_pos_start"), params:get("t2_pos_end")
+  ok(ws < 0.001 and we > 0.02 and we < 0.05, "the rec stop puts the window on the new take ("
+    .. ws .. " to " .. we .. ")")
+  amt(0.3); amt(0)
+  near(params:get("t2_pos_start"), ws, 1e-12, "the fade home leaves the new take's window (start)")
+  near(params:get("t2_pos_end"), we, 1e-12, "...(end)")
+  params:set("track_sel", 1)
+
+  -- (C8) an option crosses the midpoint once
+  clear_bank()
+  params:set("effect", 3)                      -- FLANGE
+  params:set("scene_slot", 3); pulse("scene_capture")
+  params:set("effect", 1)
+  local switches, last = 0, params:get("effect")
+  local function step(a)
+    amt(a)
+    if params:get("effect") ~= last then switches = switches + 1; last = params:get("effect") end
+  end
+  step(0.2); step(0.6)
+  ok(switches == 1 and params:get("effect") == 3, "past 0.55 the type goes to B")
+  for _, a in ipairs({ 0.49, 0.51, 0.49, 0.51, 0.46, 0.54 }) do step(a) end
+  ok(switches == 1, "a fade rocked about the middle does not switch it again")
+  step(0.4)
+  ok(switches == 2 and params:get("effect") == 1, "below 0.45 it goes back to A")
+  step(0.49); step(0.51)
+  ok(switches == 2, "...and rocking from that side keeps A")
+  step(1)
+  ok(params:get("effect") == 3, "the end lands exactly on B")
+  step(0)
+  ok(params:get("effect") == 1, "...and home on A")
+  params:set("clouds_mode", 1)
+  params:set("scene_slot", 4); params:set("clouds_mode", 2); pulse("scene_capture")
+  params:set("clouds_mode", 1)
+  amt(1)
+  ok(params:get("clouds_mode") == 1, "a fade leaves Clouds' mode to a recall (it goes silent at a change)")
+  amt(0)
+
+  -- (C9) the chord stops destroying
+  -- 1. a clear of either end of an engaged fade is refused
+  params:set("scene_slot", 3); params:set("scene_slot_a", 4)
+  amt(0.5)
+  pulse("scene_clear")
+  ok(sc.slots[3] ~= nil and sc.msg == "FADE ON 3: HOME FIRST", "a clear of the fade's B is refused, and says so")
+  params:set("scene_slot", 4); pulse("scene_clear")
+  ok(sc.slots[4] ~= nil, "...and of its A")
+  params:set("scene_slot", 3)
+  amt(0)
+  ok(params:get("effect") == 3 or params:get("effect") == 1, "the fade still comes home")
+  params:set("scene_slot", 4); pulse("scene_clear")
+  ok(sc.slots[4] == nil, "home, the clear works")
+  params:set("scene_slot_a", 0)
+  -- 2. DRY twice gives back every id it moved, and it opens all four filters
+  local before = {}
+  params:set("delay_mix", 0.4); params:set("rev_mix", 0.3); params:set("shimmer", 0.2)
+  params:set("drive", 0.5); params:set("t2_effect", 3); params:set("t4_crush", 0.3)
+  params:set("t3_cutoff", 500); params:set("t3_resonance", 0.5)
+  params:set("t4_filt_type", 2); params:set("t4_cutoff", 900)
+  for _, id in ipairs(CTX.DRY_IDS) do before[id] = params:get(id) end
+  CTX.fx_dry()
+  ok(params:get("delay_mix") == 0 and params:get("drive") == 0 and params:get("t2_effect") == 1,
+    "DRY takes the wet path off")
+  ok(params:get("t3_cutoff") > 19999 and params:get("t3_resonance") == 0,
+    "...and opens track 3's low-pass")
+  near(params:get("t4_cutoff"), 20, 1e-6, "...and track 4's high-pass, by its own type")
+  ok(CTX.dry_lit(), "...and keeps what it moved")
+  CTX.fx_dry()
+  local same = true
+  for id, v in pairs(before) do
+    if math.abs(params:get(id) - v) > 1e-9 then same = false; print("  DRY did not give back " .. id) end
+  end
+  ok(same and not CTX.dry_lit(), "a second DRY gives back every id it moved")
+  CTX.fx_dry()
+  params:set("scene_slot", 3); pulse("scene_recall")
+  ok(not CTX.dry_lit(), "a recall forgets the DRY, like every throw")
+  CTX.fx_dry(); CTX.fx_dry()
+  params:set("t4_filt_type", 1); params:set("t4_cutoff", 20000); params:set("t3_cutoff", 20000)
+  params:set("t3_resonance", 0); params:set("t2_effect", 1); params:set("t4_crush", 0)
+  params:set("delay_mix", 0); params:set("rev_mix", 0); params:set("shimmer", 0); params:set("drive", 0)
+
+  -- (C10) each track keeps its own window. A scene captured over a whole
+  -- buffer, recalled over a short take on track 3, does not open track 3
+  -- onto silence, with the focus on track 2.
+  clear_bank()
+  params:set("t3_pos_start", 0); params:set("t3_pos_end", 1)
+  params:set("scene_slot", 5); pulse("scene_capture")
+  params:set("track_sel", 3)
+  CTX.take_len = 0                             -- track 3 starts empty
+  params:set("rec", 1); head_runs(0.06)
+  params:set("rec", 0)
+  CTX.wave_any = true                          -- (the sim draws no strip)
+  local te = params:get("t3_pos_end")
+  ok(te > 0.04 and te < 0.07, "track 3 holds a short take (" .. te .. ")")
+  params:set("track_sel", 2)
+  params:set("scene_slot", 5); pulse("scene_recall")
+  local tl = select(2, CTX.take_of(3))
+  near(params:get("t3_pos_end"), tl, 1e-9,
+    "a recalled scene clamps track 3's window to track 3's own take, focus on track 2")
+  -- the window lock follows the focus
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+  clock.get_tempo = function() return 120 end
+  params:set("win_beats", 4)                   -- 1 BAR: 2 s at 120
+  near(params:get("t2_pos_end"), 2 / CTX.BUF_SECS, 1e-9, "win length locks the focused track (track 2)")
+  params:set("t2_pos_start", 0.5); _h.run_ticks(1)
+  near(params:get("t2_pos_end"), 0.5 + 2 / CTX.BUF_SECS, 1e-9, "...and moving its start slides its end")
+  params:set("win_beats", 1)
+  clock.get_tempo = nil
+  params:set("t2_pos_start", 0); params:set("t2_pos_end", 1)
+  params:set("track_sel", 1)
+  clear_bank()
+end
+
 T.report("control harness OK")

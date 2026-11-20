@@ -5089,3 +5089,28 @@ question 8 (the supported set: four PV at pitch 2 with every effect on) and ques
   same hour: 56.9%. The dense set read 61.6% to 69.1%, with xruns.
 - README.md: the supported set, and the effect dip is no longer a known issue. CHORUS
   and FLANGE cutting a steady tone is listed, as the way they sound.
+
+four, fifty-seventh change: **Phase B of doc/signature-workflow.md, the fade is safe: C7
+to C10 (Lua; no engine change, the count stays 198; not on the device)**. The user asked
+for Phase B on 2026-11-20. The plan's own answers stand for questions 1 and 3: a hand
+keeps what it moves, and DRY is a round trip. It is on the local branch `phase-b`.
+- C7, lib/mscenes.lua: a hand keeps what it moves during a fade. The fade keeps the value
+  it last wrote for each id (`fade_val`). A param that no longer holds it, or the origin
+  before the first write, left the fade (`left`): the fade skips it, and home leaves it
+  where it was put. A window pair moves together or not at all. This covers a hand, MIDI,
+  a motion lane and the rec stop, by polling.
+- C8, lib/mscenes.lua: an option or a binary crosses once. It goes to B above 0.55, back
+  to A below 0.45, and keeps what the fade last wrote in between. The ends are exact.
+  `clouds_mode` on every track joins MORPH_EXCLUDE.
+- C9: `M.clear` refuses a slot that an engaged fade departed from or aims at, and says
+  `FADE ON 3: HOME FIRST`. DRY (K1+K3) is a throw: a second tap gives back every id it
+  moved (`ctx.DRY_IDS`). It also opens the filters of tracks 2 to 4, each by its own
+  type. A recall still forgets it. While K1 is held, SCENE's land cue reads `LET GO OF K1
+  THEN K2`.
+- C10: a stored window is clamped against its own track's take (`ctx.take_of`), so a
+  recall never opens track 2, 3 or 4 onto silence. `win length` locks the focused
+  track's window (`WIN`), and a start that passes its locked end takes the end along on
+  every track.
+- test/test_control.lua section 35 (36 assertions) and test/test_screen.lua (2). Each
+  fix was reverted once, and its rows failed. The 97 renders of the five variants are
+  byte-identical to before.

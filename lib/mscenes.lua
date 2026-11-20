@@ -206,6 +206,9 @@ local MORPH_EXCLUDE = {
   win_beats = true,
   -- a look is a choice, not a texture: it changes at a recall, never mid-sweep
   vis_look = true,
+  -- Clouds goes silent for a moment at a mode change: a recall lands it
+  clouds_mode = true, t2_clouds_mode = true, t3_clouds_mode = true,
+  t4_clouds_mode = true,
 }
 
 -- the two complementary halves of the recall list: what a morph carries, and
@@ -331,6 +334,15 @@ local pending_clock      -- the quantized-recall coroutine (nil = none)
 local morph_from = nil
 local morph_a = nil
 local morph_a_n = 0      -- the latched A's number, for the screen (0 = LIVE)
+local morph_b_n = 0      -- the B the fade last aimed at (a clear refuses it)
+-- A HAND KEEPS WHAT IT MOVES DURING A FADE (C7 of doc/signature-workflow.md).
+-- fade_val holds the value the fade last wrote for each id. A param that no
+-- longer holds it (or, before the first write, no longer holds the origin)
+-- was moved by something else: a hand, MIDI, a motion lane, the rec stop.
+-- It LEFT the fade (`left`): the fade skips it until it comes home, and home
+-- leaves it where it was put. Capture by polling, never by wrapping `set`.
+local fade_val = {}
+local left = {}
 
 local QUANT_BEATS = { 0, 1, 4 }   -- scene_recall_mode: NOW / BEAT / BAR
 local GLIDE_MODE = 4              -- ...and GLIDE (scene_glide beats, then land)
@@ -369,9 +381,11 @@ end
 -- what a slot holds, and moves no param.
 local function reset_morph()
   for k in pairs(last_sent) do last_sent[k] = nil end
+  for k in pairs(fade_val) do fade_val[k] = nil end
+  for k in pairs(left) do left[k] = nil end
   M.engaged = false
   morph_from = nil
-  morph_a, morph_a_n = nil, 0
+  morph_a, morph_a_n, morph_b_n = nil, 0, 0
 end
 
 -- the INSTRUMENT moved (a recall, a restore, a chaos throw, a pset load):
@@ -467,7 +481,11 @@ M.EDGE_PAIRS = EDGE_PAIRS   -- the harness asserts every _start/_end pair joins
 -- so a loop that is merely a little longer than what was
 -- played into it is left alone; and a stored loop entirely elsewhere points
 -- at something we cannot know about, and stays exactly as stored.
-local WINDOW_IDS = { pos_start = true, pos_end = true }
+-- each track's window, by its track (C10 of doc/signature-workflow.md): a
+-- track's window is clamped against that track's own take (C.take_of)
+local WINDOW_IDS = { pos_start = 1, pos_end = 1,
+  t2_pos_start = 2, t2_pos_end = 2, t3_pos_start = 3, t3_pos_end = 3,
+  t4_pos_start = 4, t4_pos_end = 4 }
 local EXTENT_OF = {
   loop_start = "tape", loop_end = "tape",
 }
@@ -478,10 +496,14 @@ M.PARTNER = PARTNER
 
 local function clamp_stored(id, v, tbl)
   if v == nil then return v end
-  if WINDOW_IDS[id] then
-    local tl = (C and C.wave_any and C.take_len) or 0
+  local tr = WINDOW_IDS[id]
+  if tr then
+    local any, tl
+    if C and C.take_of then any, tl = C.take_of(tr)
+    elseif C then any, tl = C.wave_any, C.take_len end
+    tl = (any and tl) or 0
     if tl <= 0.002 or tl >= 0.999 then return v end   -- no/full material: exact
-    local cap = id == "pos_end" and tl or (tl - 0.002)
+    local cap = EDGE_PAIRS[id] == nil and tl or (tl - 0.002)
     return v < cap and v or cap
   end
   local key = EXTENT_OF[id]
@@ -716,6 +738,13 @@ function M.clear(slot)
     return false
   end
   slot = slot_idx(slot)
+  -- an engaged fade departed from its A slot and aims at its B: clearing
+  -- either strands the way home (C9 of doc/signature-workflow.md)
+  if morph_from and (slot == morph_a_n or slot == morph_b_n) then
+    say("FADE ON " .. slot .. ": HOME FIRST", "scene " .. slot .. " is an end of the"
+      .. " fade that is up: bring the fade home (K1+E3 to 0), then clear it", slot)
+    return false
+  end
   local had = M.slots[slot] ~= nil
   M.slots[slot] = nil   -- in place: the grid and the page read this table
   if M.pending == slot or (M.glide and M.glide.slot == slot) then
@@ -737,7 +766,19 @@ end
 -- numbers (voices, warp_overlaps) lerp and land on integers; options and
 -- binaries can't be half-switched, so they flip at the midpoint (amt >= 0.5).
 
-local function morph_value(id, va, vb, amt)
+-- An option or a binary crosses ONCE (C8 of the plan): it goes to B above
+-- 0.55 and back to A below 0.45. Between the two it keeps `last`, what the
+-- fade last wrote, so a fade rocked about the middle does not switch an
+-- effect or a filter type on and off. The ends are exact.
+local BAND_LO, BAND_HI = 0.45, 0.55
+local function band(va, vb, amt, last)
+  if amt >= BAND_HI then return vb end
+  if amt <= BAND_LO then return va end
+  if last == va or last == vb then return last end
+  return amt < 0.5 and va or vb
+end
+
+local function morph_value(id, va, vb, amt, last)
   local p = lookup(id)
   if not p then return nil end
   local cs = p.controlspec
@@ -746,13 +787,13 @@ local function morph_value(id, va, vb, amt)
     -- identical in A and B, tn never moves and it never gets sent at all
     return C.warped_lerp(cs, va, vb, amt)
   end
-  if p.count then                                  -- option: midpoint switch
-    return amt < 0.5 and va or vb
+  if p.count then                                  -- option: midpoint band
+    return band(va, vb, amt, last)
   end
   if p.min and p.max then                          -- number: lerp -> integer
     return clamp(floor(va + (vb - va) * amt + 0.5), p.min, p.max)
   end
-  return amt < 0.5 and va or vb                    -- binary / unknown
+  return band(va, vb, amt, last)                   -- binary / unknown
 end
 
 -- normalized deadband: a param must move at least this much (of its full
@@ -793,12 +834,27 @@ end
 --                       still tracks the line. Two SLOTS that agree on a
 --                       value the live sound does not have do move it: the
 --                       fader is between those two scenes.
+-- has `id` left the fade (C7)? It has when it no longer holds what the fade
+-- last wrote, or the origin before the fade wrote it.
+local function gone(id)
+  if left[id] then return true end
+  local ref = fade_val[id]
+  if ref == nil then ref = morph_from[id] end
+  if ref ~= nil and params.lookup[id] and params:get(id) ~= ref then
+    left[id] = true
+    return true
+  end
+  return false
+end
+M.left = left   -- the harness reads it
+
 local function emit(id, va, vb)
   if va == nil or not params.lookup[id] then return end
+  if gone(id) then return end
   local live = morph_from[id]
   if vb == nil then vb = live end
   if va == vb and vb == live and last_sent[id] == nil then return end
-  local v, tn = morph_value(id, va, vb, sw_amt)
+  local v, tn = morph_value(id, va, vb, sw_amt, last_sent[id])
   if v == nil then return end
   local key = tn or v          -- continuous: compare norms; discrete: values
   local last = last_sent[id]
@@ -808,6 +864,7 @@ local function emit(id, va, vb)
   if fire then
     pset(id, v)
     last_sent[id] = key
+    fade_val[id] = params:get(id)   -- the resolved value: a control quantizes
   end
 end
 
@@ -861,7 +918,7 @@ function M.morph(slot, amt)
     -- follow: restored in bare list order a pair can cross for one write,
     -- and a crossed pair hits the 100ms loop floor and jumps the head.
     local function back(k)
-      if last_sent[k] ~= nil and params.lookup[k] then
+      if last_sent[k] ~= nil and params.lookup[k] and not gone(k) then
         local v = end_a(k)
         if v ~= nil then pset(k, v) end
       end
@@ -874,7 +931,10 @@ function M.morph(slot, amt)
         local va = partner and params.lookup[id] and params.lookup[partner]
           and end_a(id) or nil
         if va and end_a(partner) ~= nil then
-          if va < params:get(id) then back(id); back(partner)
+          -- a pair moves together or not at all: one edge left, both stay
+          if gone(id) or gone(partner) then
+            left[id], left[partner] = true, true
+          elseif va < params:get(id) then back(id); back(partner)
           else back(partner); back(id) end
           rdone = rdone or {}
           rdone[partner] = true
@@ -895,6 +955,7 @@ function M.morph(slot, amt)
     morph_a_n = a_next()
     morph_a = morph_a_n >= 1 and M.slots[morph_a_n] or nil
   end
+  morph_b_n = slot_idx(slot)
   -- at the ends, land EXACTLY on the stored values (no deadband rounding)
   sw_amt, sw_force = amt, amt <= 0 or amt >= 1
   morphing = true
@@ -907,6 +968,11 @@ function M.morph(slot, amt)
       local va = end_a(id)
       local vb = clamp_stored(id, B[id], B)   -- a stored loop aims at material
       if partner and params.lookup[partner] and va ~= nil
+          and morph_from[partner] ~= nil and (gone(id) or gone(partner)) then
+        -- a pair moves together or not at all: one edge left, both stay
+        left[id], left[partner] = true, true
+        pair_done[partner] = true
+      elseif partner and params.lookup[partner] and va ~= nil
           and morph_from[partner] ~= nil then
         -- a REGION's two edges move together, and the WIDENING one goes first —
         -- the same rule apply() follows, and for the same reason: written in
@@ -935,8 +1001,10 @@ function M.morph(slot, amt)
     -- you are by then with the A selected by then, and forget what we sent
     -- so it re-asserts from scratch.
     morph_from = nil
-    morph_a, morph_a_n = nil, 0
+    morph_a, morph_a_n, morph_b_n = nil, 0, 0
     for k in pairs(last_sent) do last_sent[k] = nil end
+    for k in pairs(fade_val) do fade_val[k] = nil end
+    for k in pairs(left) do left[k] = nil end
   end
   return true
 end

@@ -1716,6 +1716,7 @@ local function take_of(n)
   if n == FOCUS then return ctx.wave_any, ctx.take_len end
   return TAKES[n].wave_any, TAKES[n].take_len
 end
+ctx.take_of = take_of   -- a scene clamps each track's window to its own take
 local function buf_track(n) if engine.buf_track then engine.buf_track(n - 1) end end
 -- does track n hold material of its own (TRACKS draws EMPTY where not)
 function ctx.track_has(n) return (take_of(n)) and true or false end
@@ -2286,16 +2287,18 @@ local function apply_window_len()
   if b <= 0 then return end
   local t = ctx.tempo()
   win_tempo = t
-  local want = min(1, pget("pos_start", 0) + b * 60 / t / BUF_SECS)
-  if math.abs(pget("pos_end", 1) - want) >= 1e-9 then
-    params:set("pos_end", want)   -- only the end moves, outward of the start
-    if ctx.motion and ctx.motion.account then ctx.motion.account("pos_end") end
+  -- the FOCUSED track's window (C10 of doc/signature-workflow.md): WIN
+  -- holds its ids, so the lock follows the focus
+  local want = min(1, pget(WIN[1], 0) + b * 60 / t / BUF_SECS)
+  if math.abs(pget(WIN[2], 1) - want) >= 1e-9 then
+    params:set(WIN[2], want)   -- only the end moves, outward of the start
+    if ctx.motion and ctx.motion.account then ctx.motion.account(WIN[2]) end
   end
-  win_lo, win_hi = pget("pos_start", 0), pget("pos_end", 1)
+  win_lo, win_hi = pget(WIN[1], 0), pget(WIN[2], 1)
 end
 -- each frame: a tempo move, or the start moved while the end did not
 local function sync_window_len()
-  local lo, hi = pget("pos_start", 0), pget("pos_end", 1)
+  local lo, hi = pget(WIN[1], 0), pget(WIN[2], 1)
   if win_lock_beats() > 0 then
     local t = ctx.tempo()
     if math.abs(t - win_tempo) > win_tempo * 0.005
@@ -2386,26 +2389,47 @@ end
 -- clouds feedback — the one wash the REVERB page can't kill) and the
 -- filter thrown open (type-aware, same law as FILTER's OPEN key). the
 -- take itself is always recorded clean; this clears the playback path.
+-- DRY IS A THROW (C9 of doc/signature-workflow.md): a second tap brings back
+-- what the first one moved, so a slip of K3 under K1 costs nothing. It opens
+-- the filter of every track. A recall, a morph or a pset load forgets it, as
+-- it forgets every throw (ctx.throws_forget).
+local DRY_IDS = { "delay_mix", "rev_mix", "shimmer", "clouds_fb" }
+for n = 1, NTRACKS do
+  local pre = n == 1 and "" or ("t" .. n .. "_")
+  for _, id in ipairs({ "drive", "crush", "effect", "effect2", "cutoff", "resonance" }) do
+    DRY_IDS[#DRY_IDS + 1] = pre .. id
+  end
+end
+ctx.DRY_IDS = DRY_IDS
+function ctx.dry_lit() return throw_mem.DRY ~= nil end
 function ctx.fx_dry()
+  if throw_mem.DRY then
+    throw_restore("DRY")
+    print("four: DRY again: the wet path is back")
+    return
+  end
   ctx.throws_forget()   -- DRY moves the wet path wholesale: no throw's "back"
                         -- survives it (a latched WASH would restore reverb)
+  local mem = {}
+  for k = 1, #DRY_IDS do
+    local id = DRY_IDS[k]
+    if params.lookup[id] then mem[id] = params:get(id) end
+  end
+  throw_mem.DRY = mem
   params:set("delay_mix", 0)
   params:set("rev_mix", 0)
   params:set("shimmer", 0)
-  params:set("drive", 0)
-  params:set("crush", 0)
-  params:set("effect", 1)
-  params:set("effect2", 1)
-  for n = 2, NTRACKS do
-    params:set("t" .. n .. "_drive", 0)
-    params:set("t" .. n .. "_crush", 0)
-    params:set("t" .. n .. "_effect", 1)
-    params:set("t" .. n .. "_effect2", 1)
-  end
   params:set("clouds_fb", 0)
-  local ft = params:get("filt_type")
-  params:set("cutoff", filter_open_cutoff(ft))
-  params:set("resonance", 0)
+  for n = 1, NTRACKS do
+    local pre = n == 1 and "" or ("t" .. n .. "_")
+    params:set(pre .. "drive", 0)
+    params:set(pre .. "crush", 0)
+    params:set(pre .. "effect", 1)
+    params:set(pre .. "effect2", 1)
+    params:set(pre .. "cutoff", filter_open_cutoff(params:get(pre .. "filt_type")))
+    params:set(pre .. "resonance", 0)
+  end
+  print("four: DRY: the wet path is off, every filter open. K1+K3 again brings it back")
 end
 
 -- ============================================================================
@@ -2691,7 +2715,9 @@ local function init_params()
   -- once (see sync_window_len), so the engine never reads a crossed pair
   params:set_action("pos_start", function(v)
     if engine.pos_start then engine.pos_start(v) end
-    if win_lock_beats() > 0 and v >= pget("pos_end", 1) then apply_window_len() end
+    if WIN[1] == "pos_start" and win_lock_beats() > 0 and v >= pget("pos_end", 1) then
+      apply_window_len()
+    end
   end)
   add_eng_control("scan", "scan rate",
     controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
@@ -2908,6 +2934,18 @@ local function init_params()
     add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
     add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
     add_eng_control(pre .. "pos_end", lab .. "win end", fine_unit(1.0))
+    -- the lock follows the focus (C10): a start past the focused track's
+    -- locked end takes the end with it, as on track 1
+    do
+      local sid, eid = pre .. "pos_start", pre .. "pos_end"
+      params:set_action(sid, function(v)
+        local sv = Mlfo.swinging(sid) and Mlfo.swung(sid, v) or v
+        if engine[sid] then engine[sid](sv) end
+        if WIN[1] == sid and win_lock_beats() > 0 and v >= pget(eid, 1) then
+          apply_window_len()
+        end
+      end)
+    end
     add_eng_control(pre .. "scan", lab .. "scan rate", controlspec.new(-2, 2, "lin", 0, 1.0, "x"))
     add_eng_control(pre .. "pitch", lab .. "pitch", controlspec.new(0.25, 4, "exp", 0, 1.0, "x"))
     add_eng_control(pre .. "pan", lab .. "pan", controlspec.new(-1, 1, "lin", 0, 0.0, ""))

@@ -589,6 +589,23 @@ do
   ok(reads("FADE", Mp.FOOT.e3, 58), "...and K1 held names E3 FADE")
   key(1, 0); redraw()
 
+  -- at the end of a fade with something only a recall lands, the cue says
+  -- K2; while K1 is held (K2 is then STOP) it says to let go first (C9)
+  params:set("freeze", 1)
+  params:set("scene_slot", 4); T.pulse("scene_capture")
+  params:set("freeze", 0)
+  _h.run_ticks(25)
+  params:set("scene_morph_amt", 1); _h.run_ticks(2); redraw()
+  local cue = "K2 TO LAND THE REST"
+  local cw = Mf.text_w(cue, 1)
+  ok(reads(cue, math.floor(64 - cw / 2 + 0.5), 13), "the end of the fade reads K2 TO LAND THE REST")
+  key(1, 1); redraw()
+  cue = "LET GO OF K1 THEN K2"
+  cw = Mf.text_w(cue, 1)
+  ok(reads(cue, math.floor(64 - cw / 2 + 0.5), 13), "...and with K1 held, LET GO OF K1 THEN K2")
+  key(1, 0)
+  params:set("scene_morph_amt", 0.4); _h.run_ticks(2); redraw()
+
   -- A changed mid-fade: the rail keeps the A the fade left from, and the
   -- mark under the new A waits dim
   params:set("scene_slot_a", 8); _h.run_ticks(1); redraw()

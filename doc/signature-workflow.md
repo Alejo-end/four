@@ -313,7 +313,7 @@ Each phase ends at a gate. Do not start the next phase before its gate passes.
 | Phase | What | Changes | Gate |
 |---|---|---|---|
 | A. Click-free and in budget (done 2026-11-20) | Engine and device. The prerequisites | C1, C3, C4, then C2 and C6. C5 measures from the start | Rows 19.12 and 19.27 pass, and the rows A1 to A5 of section 6. The user hears plan.md Phase 2, items 4, 8 and 12 |
-| B. Safe | Lua only, a reload on the device | C7, C8, C9, C10 | test_control's new section, `LUA53=... lua test/check.lua`, dist rebuilt. Renders byte-identical except the new cues |
+| B. Safe (built 2026-11-20, not on the device) | Lua only, a reload on the device | C7, C8, C9, C10 | test_control's new section, `LUA53=... lua test/check.lua`, dist rebuilt. Renders byte-identical except the new cues |
 | C. Readable | Lua only | C11, C12 | uisim renders looked at, test_screen. Then the observed walkthrough of plan.md Phase 4, with the loop of section 6 added as task 8 |
 | D. Relay | Engine and Lua, `count: 198` by route (b) | C13 | Starts after Phase C passes and the user says yes. The deploy ritual, then Relay's seven steps |
 | E. The decision | Device, the user, a first-time player | none | Section 6. Then the README's first minutes become this loop, and the example presets show it |
