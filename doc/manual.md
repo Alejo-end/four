@@ -226,7 +226,7 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
   scene, and release to come back.
 - SCENE is a crossfader with two ends, and each end has its own encoder. E2 picks A, the
   left end: LIVE or a stored slot. E3 picks B, the right end, which is also the slot that
-  K2 and K3 act on. Hold K1 and turn E3 to fade. The rail names both ends, and a small A
+  K2 and K3 act on. Hold K1 and turn E3 to fade: one turn is the whole fade. The rail names both ends, and a small A
   sits under the cell of slot A. At rest, with B filled, the top row reads `K1+E3 FADES`.
   When part of B is out of the fade's reach (a voice mode or a hold), `+K2` shows under
   the B end for the whole fade.

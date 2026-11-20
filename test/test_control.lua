@@ -4313,4 +4313,15 @@ do
   clear_bank()
 end
 
+-- C12 · one turn of E3 is a whole fade: the device counted 25 steps a turn
+do
+  params:set("orbit_on", 0); params:set("scene_morph_amt", 0); _h.run_ticks(1)
+  T.goto_page("SCENE")
+  key(1, 1)
+  for _ = 1, 25 do enc(3, 1) end
+  key(1, 0)
+  near(params:get("scene_morph_amt"), 1, 1e-9, "25 steps of E3 under K1 take the fade from 0 to 1")
+  params:set("scene_morph_amt", 0); _h.run_ticks(2)
+end
+
 T.report("control harness OK")

@@ -3222,7 +3222,15 @@ local function init_params()
   -- (it's in MOTION_IDS — one lane replays the whole sweep). only this writes
   -- params, and only from the next frame's tick (mscenes coalesces so a fast
   -- CC can't flood the engine).
-  params:add_control("scene_morph_amt", "morph amount", unit(0.0))
+  -- ONE TURN OF E3 IS A WHOLE FADE (C12 of doc/signature-workflow.md). On
+  -- the device, with the step of 0.01, one full turn moved the fade by 25%
+  -- (the user's count, 2026-11-20), so a step is 0.04. MIDI sets the value
+  -- itself and is not stepped.
+  do
+    local spec = unit(0.0)
+    spec.quantum = 0.04
+    params:add_control("scene_morph_amt", "morph amount", spec)
+  end
   params:set_action("scene_morph_amt", function() Mscenes.touch() end)
   -- when a recall lands: NOW, on the next BEAT or BAR, or GLIDE (the morph
   -- sweeps there over `scene_glide` beats, then the scene lands)

@@ -5126,8 +5126,9 @@ user asked for Phase C on 2026-11-20. It is on the local branch `phase-c`, on to
 - C12, `body_SCENE`: at rest with B filled, the status row reads `K1+E3 FADES` (50 px),
   beside the recall mode. While the fade is up and part of B is out of its reach
   (`unlanded`), `+K2` shows dim under the B end.
-- Not done: "a full fade takes about one turn of E3". The step of `scene_morph_amt` waits
-  for a count of the encoder's steps over one turn on the device.
-- test/test_screen.lua: 7 more assertions (138). test/uisim/render_pages.lua: a new shot,
+- One turn of E3 is a whole fade. The user turned E3 once on the device: the step of 0.01
+  moved the fade by 25%. `scene_morph_amt`'s step is now 0.04. MIDI sets the value and is
+  not stepped. test_control checks that 25 steps take the fade from 0 to 1.
+- test/test_screen.lua: 7 more assertions (138), test/test_control.lua 1. test/uisim/render_pages.lua: a new shot,
   `track2_03_TRACKS_SENDS_WET0`. Four SCENE shots change (the new cue); the other 93 are
   byte-identical. doc/ui is unchanged.
