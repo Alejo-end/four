@@ -621,13 +621,17 @@ M.EX = {
 -- `gone`: a device being unplugged, still listed (see lp_find_device)
 local function ex_find_device(gone)
   if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
+  -- the Exquis is two ports on the norns ("Exquis 1", "Exquis 2"), and pairs
+  -- has no order: take the one norns added first, which is port 1
+  local best = nil
   for _, dev in pairs(midi.devices) do
     if dev ~= gone and type(dev) == "table" and type(dev.name) == "string"
-        and dev.name:lower():find(EX_NAME, 1, true) then
-      return dev
+        and dev.name:lower():find(EX_NAME, 1, true)
+        and (not best or (dev.id or 0) < (best.id or 0)) then
+      best = dev
     end
   end
-  return nil
+  return best
 end
 
 -- a led key (level + hue * 16) -> r, g, b in the Launchpad's colour language

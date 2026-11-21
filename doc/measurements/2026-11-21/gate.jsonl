@@ -1,0 +1,10 @@
+{"id": "20.1", "status": "pass", "note": "the norns calls it 'Exquis 1'. A grid with a device is not attached, so it starts in PADS: the driver holds PADS and the log says PADS"}
+{"id": "20.2", "status": "pass", "note": "Redo VOICE; Undo TAKE; encoder 1, 2 of 3 ticks TAKE; the last tick VOICE; as many back TAKE; Up 2; Down 1; encoder 4 2; the push of encoder 4 KEYS; pad 50 in PADS, scene 2; pad 50 in KEYS, scene 1"}
+{"id": "20.3", "status": "pass", "note": "beat_repeat 1 with pad 11 held, 0 after the change to KEYS under it, 0 after the late release"}
+{"id": "20.4", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.5", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.6", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.7", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.8", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.9", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}
+{"id": "20.10", "status": "you", "note": "an Exquis is connected: these rows are for hands and eyes. test/device/exquis.py helps (watch, sweep)"}

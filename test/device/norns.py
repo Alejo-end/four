@@ -86,6 +86,7 @@ for _, d in pairs(midi.devices) do
 end
 table.sort(names)
 local ex = g.ex
+if ex and ex.device and ex.device.name then found = ex.device.name end
 print("@exq " .. table.concat(names, ";") .. "|" .. tostring(found) .. "|"
   .. (ex and (ex.surface and "PADS" or "KEYS") or "none") .. "|"
   .. tostring(g.gg ~= nil and g.gg.device ~= nil))
@@ -332,7 +333,8 @@ class Norns:
     def exquis_ask(self, name, head=""):
         """Run one of EXQUIS_LUA and return its marked answer."""
         out = self.lua(head + EXQUIS_LUA[name])
-        marked = [line.split("@exq ", 1)[1] for line in out.splitlines() if "@exq " in line]
+        # an empty answer is the bare mark: the REPL's line has lost its last space
+        marked = [line.split("@exq", 1)[1] for line in out.splitlines() if "@exq" in line]
         if not marked:
             raise RuntimeError(f"the Exquis snippet {name!r} gave no answer: {out[-200:]!r}")
         return marked[-1].strip()
