@@ -280,3 +280,51 @@ rework, or a removal. All PLANNED (nothing implemented yet).
   sound profile (l.1-3). **Scenes** are now understood and liked as manual
   checkpoint / version-control (l.6-26); no change asked. Open to verify, not a
   to-do: granular depth ("I need to test it", l.67).
+
+# UX feedback: 2026-11-21 (spoken notes on the sixty-sixth change)
+
+Spoken notes after a session on the device. The line numbers of the July notes
+do not apply here: there is no transcript file.
+
+Built the same day as the sixty-seventh to the seventieth change (doc/clock-plan.md).
+Not on the device yet, and not heard.
+
+## Motion
+
+31. **A motion pass must start at the first knob move, not at the arm.** "You
+    have to switch to the page that you actually want to control the knob on.
+    And then so much time already passed." The sixtieth change does this for a
+    first pass (the wait before the first move is cut, double-tap K1 arms from
+    any page). Open: was it on the device during this session, and did it feel
+    right? An overdub still starts at the arm, because it plays the loop.
+
+## Clock
+
+32. **Show the tempo, say where to change it, follow MIDI clock.** "I don't
+    know what the BPM is and where to change that or how to synchronize it with
+    MIDI." The tempo lives in the norns menu (PARAMS > CLOCK) and no page of
+    four shows it.
+
+33. **The loops must fit each other on the clock.** "It's very hard to do
+    manually to beat match the different sequences of the tracks." `win_beats`
+    and `motion_bars` set a length in beats, but nothing starts a take, a read
+    head or a motion loop on a bar line, so loops of the right length still
+    sit out of phase.
+
+## Recording
+
+34. **Show the record head, and align it with the play head by default.** "I
+    never know where the recording head is because it's not aligned with the
+    playhead." An overdub writes where the one write head stopped, which is
+    not where the focused track plays. Wanted: an option (aligned by default)
+    that starts the write at the play head. Item 30 asked for the first half
+    in July.
+
+## The input
+
+35. **Explain where the input goes and what acts on it.** "It's always passing
+    through... I just don't know how to control that or what's happening." Two
+    paths carry it to the output: the norns's own MONITOR (outside any script)
+    and four's `dry_wet` on MIX (0.5 at the start, after `out_level` and the
+    limiter, with no filter, effect or send on it). With both up the input
+    is heard twice, 6 ms apart.

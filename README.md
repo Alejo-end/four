@@ -80,6 +80,11 @@ voices and effects. Everything else works the same. To build the plugin yourself
 Two moves work on every page. K1 + K2 stops and starts everything. A tap of K1 + K3 turns
 every effect off.
 
+The tempo is on SCENE (K1+E2), and `PARAMS > CLOCK > source` follows MIDI clock. Hold K1
+on MIX to see where the input goes: the norns MONITOR and four's DRY/WET both pass it
+through, with no effect on it. The guide explains both
+([the clock](doc/manual.md#the-clock), [the input](doc/manual.md#where-the-input-goes)).
+
 ## The pages
 
 ![The twelve pages of four](doc/ui/four.png)

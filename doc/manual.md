@@ -99,7 +99,7 @@ the code.
 | EFFECT | Two effects in series for the track | on | type |
 | DELAY | The echoes of the tracks that send to it | hold forever | kill |
 | REVERB | A room for the tracks that send to it | wash | bloom |
-| MIX | Input, engine, tape and output levels | throw the engine | throw the tape |
+| MIX | Engine, tape and output levels. K1 held: the input's two ways out | throw the engine | throw the tape |
 | PADS | The take as eight slices to play | play the slice | route notes |
 | MOTION | Record knob moves, and set the four modulators | record | play |
 | SCENE | Keep a sound, call it back, fade from A to B | recall, hold: peek | capture |
@@ -174,6 +174,22 @@ is `FourBBD`, a model of a bucket brigade chip: a long time is dark.
 | ![MIX](ui/mix.png) | ![TAPE](ui/tape.png) |
 | MIX: E2 fades between the engine and the tape. | TAPE: a loop deck with its own speed and direction. |
 
+### Where the input goes
+
+The line input reaches the output in two ways, and both are always open:
+
+1. MONITOR is the norns's own path, from the input straight to the output. It runs with
+   or without a script. That is the sound you hear when no script is loaded.
+2. DRY/WET is four's path. At 0.5 (the start) it mixes the input, about 3 dB down, with
+   what four plays. Only the output level and the limiter act on it.
+
+Neither path has a filter, an effect, the delay or the reverb on it. With both up you hear
+the input twice, 6 ms apart, which sounds hollow. Hold K1 on MIX to see the two: K1+E2 is
+MONITOR and K1+E3 is DRY/WET. For the input alone through four, turn MONITOR down. For
+four alone, turn DRY/WET to 1 and MONITOR down. The input gain is `PARAMS > LEVELS > input`.
+
+A take records the input clean, whatever these two say.
+
 A tape pass records what four plays: the tracks and their effects, and the input as far
 as DRY/WET on MIX lets it through. The page says `SRC WET`. Hold K1 and turn E3 down to
 `SRC DRY`, and a pass records the line input alone. If the source is silent while the
@@ -244,6 +260,8 @@ E3 is its depth, K1+E2 its period and K1+E3 its target.
   the B end for the whole fade.
 - With A on LIVE, the fade starts from the sound you have when it leaves 0. Back at 0 you
   hear that sound again.
+- The top left reads the tempo (`120 BPM`, or `120 MIDI` when MIDI clock leads), and
+  K1+E2 sets it. See [The clock](#the-clock).
 - With A on a slot, the fade at 0 is A and at 1 is B, both ways. A new A changes nothing
   while the fade rests at 0. The first turn of the fade brings A in at once.
 - If you pick another A during a fade, the fade keeps its A until it is back at 0, so the
@@ -294,6 +312,35 @@ effect out before the sound breaks up.
   short pre-roll that keeps the attack.
 - `PARAMS > take - window > win length`: the loop's length locks to the clock, from one beat
   to eight bars. It locks the window of the track you are on.
+- The mark under the wave on TAKE shows where the next pass writes. A new take writes from
+  the start of the buffer. An overdub (overdub above 0) writes where the track plays:
+  `PARAMS > take - record > overdub head` is ALIGN at the start. It loops inside the
+  window, so what you play lands where you hear it. At speed 1 in PLAY the two heads stay
+  together. In another voice or at another speed the write goes on at speed 1. FREE is the
+  old law: the overdub goes on from where the last pass stopped.
+
+## The clock
+
+four runs on the norns clock. SCENE shows the tempo at the top left (`120 BPM`), and K1+E2
+on SCENE sets it. To follow another device's MIDI clock, set `PARAMS > CLOCK > source` to
+midi. SCENE then reads `120 MIDI`, and K1+E2 says `TEMPO: MIDI` and moves nothing.
+
+These follow the clock:
+
+- The window lock (`win length`) and a take on the clock (below) LOCK a track: its window
+  is a whole number of beats. A locked track keeps that length when the tempo moves.
+- `PARAMS > take - window > loop sync` (ON at the start): a locked track's head starts
+  again at its window's start on the clock. A track of one bar starts on every bar, one of
+  two bars on every second bar. So the four loops start together, and a loop that drifts
+  is put back each time round. A hand, a scene or SNAP that changes a window's length
+  unlocks that track.
+- `PARAMS > take - record > take on clock`: BEAT or BAR. A new take waits for the next
+  line (`REC ON BAR`), and its stop waits for the next line too (`STOP ON BAR`). So the
+  take is whole bars, to the sample, and its track is locked. Press again while it waits
+  to call it off, or to stop at once. Overdubs do not wait.
+- A motion pass with PASS in bars (MOTION K1+E3) counts from the bar line before your
+  first move. A move keeps its place in the bar, and the loop stays on the clock.
+- The pad sequencer, the synced delay, the beat repeat and the scene recall quantize.
 - Hold K3 on TAKE to go back to the take before the last change. Hold it again to come
   forward. A "<" at the top left means that there is a take to go back to.
 - The copy that UNDO keeps is written to the card when a take stops. A new take armed
@@ -408,7 +455,7 @@ is off, an effect at zero and a reverb at zero do not run.
 1. Every script hangs on LOADING. A second engine class is under `dust/code`. Deploy again
    with `rsync --delete`. The errors are in maiden's SC tab, not in matron.
 2. An engine edit changes nothing. You did not do SYSTEM > RESTART, or the count is not
-   `count: 198`.
+   `count: 199`.
 3. A dry take has reverb on it. Look at the system reverb in PARAMS and at the delay and
    reverb levels. A tap of K1 plus K3 turns all effects off.
 4. The delay or the reverb is silent. No track sends to it, and the page says `NO SEND`.
@@ -452,7 +499,7 @@ Then do SYSTEM > RESTART on the norns, and pick four in SELECT. Three rules:
    script on LOADING.
 2. If the engine file changes, do SYSTEM > RESTART. A Lua change needs only a script
    reload.
-3. After a restart, maiden prints the engine's command count. It must read `count: 198`.
+3. After a restart, maiden prints the engine's command count. It must read `count: 199`.
    A different number means that an old engine still runs.
 
 The documents:

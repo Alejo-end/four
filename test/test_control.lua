@@ -99,6 +99,9 @@ end
 -- system params mangler references but norns owns
 params:add_control("input_level", "in", controlspec.new(0, 1, "lin", 0, 0.8, ""))
 params:add_control("monitor_level", "mon", controlspec.new(0, 1, "lin", 0, 0.4, ""))
+-- ...and the clock's (PARAMS > CLOCK): the tempo SCENE's K1+E2 turns
+params:add_number("clock_tempo", "tempo", 1, 300, 120)
+params:add_option("clock_source", "source", { "internal", "midi", "link", "crow" }, 1)
 
 -- ============================================================================
 -- 1 · the encoder CONTRACT, checked against the source
@@ -1607,7 +1610,7 @@ do
   end
   for id in sc:gmatch("addCommand%(\\([%w_]+)") do add(id) end
   four_cmds(sc, add)
-  ok(n == 198, "the engine command count is 198, the expected fingerprint (got " .. n .. ")")
+  ok(n == 199, "the engine command count is 199, the expected fingerprint (got " .. n .. ")")
 
   -- (b) the buffer length lives in two languages; positions drift with no
   -- error anywhere if only one side changes
@@ -2030,8 +2033,12 @@ do
     if body:find("BufWr", 1, true) then writers[#writers + 1] = name end
   end
   ok(defs >= 10, "the engine's SynthDefs parse out of the .sc (" .. defs .. ")")
-  ok(#writers == 1 and writers[1] == "erode",
-    "only the erosion synth writes the take with BufWr (" .. table.concat(writers, ",") .. ")")
+  -- (\four_dub, the aligned overdub of the sixty-seventh change, is the
+  -- other: it too lives only while it writes)
+  table.sort(writers)
+  ok(#writers == 2 and writers[1] == "dub" and writers[2] == "erode",
+    "only the erosion and the aligned overdub synths write the take with BufWr ("
+      .. table.concat(writers, ",") .. ")")
   local set_mode = sc:match("setMode { arg i;(.-)\n    }")
   ok(set_mode and set_mode:find("this.updateErode", 1, true),
     "a mode switch re-checks the erosion head")
@@ -2274,12 +2281,14 @@ do
   near(params:get("pos_start"), 0.10 - PRE, 1e-4, "a short hit after a long wait is the take")
   near(params:get("pos_end"), 0.10 - PRE + 0.005, 1e-4, "...at least the 0.3s floor long")
   -- an overdub keeps the old material under the new, so it never waits, and
-  -- its head goes on from where it stood
+  -- its head goes on from where it stood (a FREE overdub: rec_align)
+  params:set("rec_align", 1)
   params:set("pre_level", 0.7)
   pass(0.60, 0.65, 0.66, 0.70)
   near(params:get("pos_start"), 0.60, 1e-4, "an overdub does not wait: the take starts at the arm")
   near(params:get("pos_end"), 0.70, 1e-4, "...where the head stood, and not at the buffer's start")
   params:set("pre_level", 0)
+  params:set("rec_align", 2)
   -- read live: turned off while WAIT shows, the start stays at the arm
   _h.push("rec_amp", 0); _h.push("rec_phase", 0.40); _h.run_ticks(1)
   params:set("rec", 1)
@@ -2307,10 +2316,17 @@ do
   pass(0.75, 0.004, nil, 0.05)                -- a new take: 0..0.05
   ok(not crossed and math.abs(params:get("pos_end") - 0.05) < 1e-4,
     "a new take left of the old window moves the window without crossing it")
+  params.set = real_set
+  params:set("rec_align", 1)                  -- (a FREE overdub moves the window)
+  params.set = function(self, id, v, ...)
+    real_set(self, id, v, ...)
+    if params:get("pos_start") > params:get("pos_end") then crossed = true end
+  end
   params:set("pre_level", 0.7)
   pass(0.70, 0.704, nil, 0.80)                -- an overdub past its end
   params.set = real_set
   params:set("pre_level", 0)
+  params:set("rec_align", 2)
   ok(not crossed and math.abs(params:get("pos_start") - 0.70) < 1e-4,
     "an overdub past the old window's end moves the window without crossing it")
   params:set("rec_wait", 1)
@@ -3581,6 +3597,8 @@ do
   near(params:get("pos_end"), 0.2, 1e-9, "...up to the stop")
 
   -- an overdub goes on from where the head is, as before
+  -- (a FREE overdub: rec_align, the sixty-seventh change)
+  params:set("rec_align", 1)
   params:set("pre_level", 0.5)
   _h.push("rec_phase", 0.2); _h.run_ticks(1)
   sent = {}
@@ -3592,6 +3610,7 @@ do
   near(params:get("pos_start"), 0.2, 1e-9, "...and its window is where it wrote")
   near(params:get("pos_end"), 0.3, 1e-9, "...both edges")
   params:set("pre_level", 0)
+  params:set("rec_align", 2)
 
   -- a pass longer than the buffer comes round its end (LOOP): the take is
   -- the whole buffer, and not the stretch after the wrap
@@ -4727,6 +4746,190 @@ do
   key(1, 1); key(1, 0); _h.run_ticks(1); key(1, 1); key(1, 0)
   params:set("motion_rec", 0); params:set("motion_play", 0)
   while #CTX.motion.lane_ids > 0 do CTX.motion.clear_lane() end
+end
+
+-- ============================================================================
+-- the clock, the record head and the input (the sixty-seventh to the
+-- seventieth change, doc/clock-plan.md)
+-- ============================================================================
+do
+  local mo = CTX.motion
+  params:set("stop_all", 0); params:set("rec", 0); params:set("rec_wait", 0)
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  params:set("track_sel", 1); params:set("mode", 5); params:set("rec_end", 1)
+  params:set("win_beats", 1); params:set("rec_sync", 1); params:set("rec_source", 1)
+  clock.get_tempo = function() return 120 end
+  local saved = { engine.rec_track, engine.rec, engine.head_sync, engine.commands, CTX.beats }
+  local tracks, syncs = {}, {}
+  engine.rec_track = function(...) tracks[#tracks + 1] = { ... } end
+  engine.rec = function() end
+  engine.head_sync = function(n) syncs[#syncs + 1] = n end
+  engine.commands = nil
+  local B = 0
+  CTX.beats = function() return B end
+
+  -- (1) AN ALIGNED OVERDUB (67th, 68th): rec_track's second argument is 2,
+  -- the window stays, a wrap inside it is not the buffer's, ONE-SHOT waits
+  params:set("pos_start", 0.2); params:set("pos_end", 0.4)
+  params:set("pre_level", 0.5)
+  _h.push("rec_phase", 0.25); _h.run_ticks(1)
+  params:set("rec", 1)
+  local c = tracks[#tracks]
+  ok(c and c[1] == 0 and c[2] == 2, "an overdub with ALIGN sends rec_track(track 1, 2)")
+  ok(CTX.rec_aligned, "...and the pass is an aligned one")
+  _h.push("rec_phase", 0.39); _h.run_ticks(1)
+  _h.push("rec_phase", 0.21); _h.run_ticks(1)              -- round the window
+  params:set("rec", 0)
+  near(params:get("pos_start"), 0.2, 1e-9, "an aligned pass leaves the window's start")
+  near(params:get("pos_end"), 0.4, 1e-9, "...and its end, past a wrap inside it")
+  ok(not CTX.rec_aligned, "...and the next pass is not aligned until its arm says so")
+  params:set("rec_end", 2)
+  params:set("rec", 1)
+  for _, v in ipairs({ 0.3, 0.39, 0.99, 0.01, 0.2 }) do _h.push("rec_phase", v); _h.run_ticks(1) end
+  ok(params:get("rec") == 1 and params:get("track_sel") == 1,
+    "an aligned pass never ends a ONE-SHOT track")
+  params:set("rec", 0); params:set("rec_end", 1)
+  params:set("pos_start", 0.2); params:set("pos_end", 0.4)
+  params:set("rec_align", 1)
+  params:set("rec", 1)
+  ok(tracks[#tracks][2] == 0, "an overdub with FREE goes on from the write head (0)")
+  params:set("rec", 0)
+  params:set("rec_align", 2)
+  engine.commands = { rec_track = { fmt = "iii" } }
+  params:set("rec", 1)
+  ok(tracks[#tracks][2] == 0, "an engine without head_sync is never sent a 2 (it reads it as a new take)")
+  params:set("rec", 0)
+  engine.commands = nil
+  params:set("pre_level", 0)
+  params:set("pos_start", 0.2); params:set("pos_end", 0.4)
+  params:set("rec", 1)
+  ok(tracks[#tracks][2] == 1 and not CTX.rec_aligned, "a new take is a new take, ALIGN or not")
+  params:set("rec", 0)
+
+  -- (2) TAKE marks where the next pass writes (68th)
+  params:set("pos_start", 0.2); params:set("pos_end", 0.4)
+  CTX.wave_any = true
+  T.goto_page("TAKE")
+  local y = 30 + 11 + 3
+  local function mark_at(x) return _h.pixel(x, y) > 0 and _h.pixel(x - 1, y + 1) > 0 end
+  params:set("pre_level", 0.5)
+  CTX.play_phase = 0.3; _h.run_ticks(1)
+  ok(mark_at(38), "an aligned overdub's mark is at the play head")
+  params:set("rec_align", 1)
+  _h.run_ticks(5); _h.push("rec_phase", 0.75); _h.run_ticks(1)
+  ok(mark_at(95) and not mark_at(38), "a free overdub's mark is at the write head")
+  params:set("rec_align", 2); params:set("pre_level", 0); _h.run_ticks(1)
+  ok(mark_at(1) and not mark_at(95), "a new take's mark is at the buffer's start")
+
+  -- (3) LOCKED TRACKS and LOOP SYNC (69th)
+  params:set("pos_start", 0.5); params:set("pos_end", 0.6)
+  params:set("win_beats", 4)                                  -- 1 BAR
+  ok(CTX.lock[1] and CTX.lock[1].beats == 4, "the window lock locks the track (4 beats)")
+  syncs = {}
+  CTX.on_beat(4); CTX.on_beat(5); CTX.on_beat(6); CTX.on_beat(8)
+  ok(#syncs == 2 and syncs[1] == 1 and syncs[2] == 1, "its head restarts on every bar and only there")
+  params:set("loop_sync", 1); syncs = {}; CTX.on_beat(12)
+  ok(#syncs == 0, "...not with LOOP SYNC off")
+  params:set("loop_sync", 2); params:set("stop_all", 1); syncs = {}; CTX.on_beat(12)
+  ok(#syncs == 0, "...nor under a STOP")
+  params:set("stop_all", 0)
+  params:set("mode", 1); syncs = {}; CTX.on_beat(12)
+  ok(#syncs == 0, "...nor while the track is OFF")
+  params:set("mode", 5)
+  params:set("win_beats", 1)
+  params:set("pos_end", 0.7); _h.run_ticks(1)
+  ok(CTX.lock[1] == nil, "a hand on the end unlocks the track")
+  -- a track that is not the focus keeps its length on a tempo move
+  params:set("t2_pos_start", 0.1); params:set("t2_pos_end", 0.1 + 8 * 0.5 / 60)
+  CTX.lock_track(2, 8)
+  ok(CTX.lock[2] and CTX.lock[2].beats == 8, "a window of 8 beats on track 2 locks it")
+  clock.get_tempo = function() return 60 end; _h.run_ticks(1)
+  near(params:get("t2_pos_end") - params:get("t2_pos_start"), 8 / 60, 1e-9,
+    "a tempo move gives track 2 its 8 beats at the new tempo")
+  clock.get_tempo = function() return 120 end; _h.run_ticks(1)
+  near(params:get("t2_pos_end") - params:get("t2_pos_start"), 8 * 0.5 / 60, 1e-9, "...and back")
+  params:set("t2_mode", 5); syncs = {}
+  CTX.on_beat(8); CTX.on_beat(12); CTX.on_beat(16)
+  ok(#syncs == 2 and syncs[1] == 2 and syncs[2] == 2, "track 2 restarts every 8 beats")
+  params:set("t2_mode", 1); CTX.lock[2] = nil
+
+  -- (4) A TAKE ON THE CLOCK (69th)
+  params:set("rec_sync", 3)                                    -- BAR
+  B = 3.4; params:set("rec", 1)
+  ok(params:get("rec") == 0 and CTX.sync_arm, "a new take on the clock waits for the bar")
+  params:set("rec", 1)
+  ok(not CTX.sync_arm and CTX.take_msg == "REC CALLED OFF", "a second press calls it off")
+  params:set("rec", 1)
+  B = 4; tracks = {}; CTX.on_beat(4)
+  ok(params:get("rec") == 1 and tracks[1] and tracks[1][2] == 1, "...and it arms on the bar, a new take")
+  _h.push("rec_phase", 0.02); _h.run_ticks(1)
+  _h.push("rec_phase", 0.065); _h.run_ticks(1)
+  B = 11.6; params:set("rec", 0)
+  ok(params:get("rec") == 1 and CTX.sync_stop, "a stop waits for the bar, and the page still says REC")
+  CTX.on_beat(11)
+  ok(params:get("rec") == 1, "...not on a beat that is not a bar")
+  B = 12; _h.push("rec_phase", 4 / 60); _h.run_ticks(1); CTX.on_beat(12)
+  ok(params:get("rec") == 0 and not CTX.sync_stop, "...and it stops on the bar")
+  near(params:get("pos_start"), 0, 1e-9, "the take starts at the buffer's start")
+  near(params:get("pos_end"), 4 / 60, 1e-9, "...and is two bars long, to the sample (4 s at 120)")
+  ok(CTX.lock[1] and CTX.lock[1].beats == 8, "...and the track is locked to 8 beats")
+  -- a second press stops at once
+  params:set("rec", 1); B = 16; CTX.on_beat(16)
+  ok(params:get("rec") == 1, "the next take arms on its bar")
+  _h.push("rec_phase", 0.04); _h.run_ticks(1)
+  B = 21; params:set("rec", 0); params:set("rec", 1); params:set("rec", 0)
+  ok(params:get("rec") == 0 and not CTX.sync_stop, "a second press of stop stops at once")
+  -- an arm the instrument makes itself does not wait
+  CTX.rec_set(1)
+  ok(params:get("rec") == 1, "an arm the instrument makes (a change of track) is at once")
+  CTX.rec_set(0)
+  ok(params:get("rec") == 0, "...and so is its stop")
+  -- an overdub does not wait
+  params:set("pre_level", 0.5); params:set("rec", 1)
+  ok(params:get("rec") == 1, "an overdub does not wait for the bar")
+  params:set("rec", 0); params:set("pre_level", 0)
+  params:set("rec_sync", 1)
+
+  -- (5) MOTION ON THE CLOCK (69th): the pass counts from the bar line before
+  -- its first move
+  params:set("motion_bars", 2)                                -- 1 BAR = 30 frames
+  params:set("motion_rec", 1); _h.run_ticks(2)
+  B = 41                                                       -- a beat into the bar of 40
+  params:set("cutoff", 900); _h.run_ticks(1)
+  ok(mo.sync_origin == 40, "a first pass on the clock counts from the bar line before its move")
+  for _ = 1, 40 do _h.run_ticks(1) end
+  local L = mo.lanes.cutoff
+  ok(mo.loop_len == 30 and L and L.f[1] == 8,
+    "...so the move keeps its place in the bar (frame 8 of 30: " .. tostring(L and L.f[1]) .. ")")
+  params:set("motion_rec", 0); params:set("motion_play", 0)
+  while #mo.lane_ids > 0 do mo.clear_lane() end
+  params:set("motion_bars", 1)
+
+  -- (6) THE TEMPO on SCENE's K1+E2, and the input on MIX's K1 (70th)
+  T.goto_page("SCENE")
+  key(1, 1); enc(2, 3); key(1, 0)
+  local bpm = params:get("clock_tempo")
+  ok(bpm > 120, "SCENE K1+E2 sets the tempo (" .. bpm .. ")")
+  params:set("clock_source", 2)
+  key(1, 1); enc(2, 3); key(1, 0)
+  ok(params:get("clock_tempo") == bpm and CTX.pop_text == "TEMPO: MIDI",
+    "...and with MIDI leading it says so and moves nothing")
+  params:set("clock_source", 1); params:set("clock_tempo", 120)
+  T.goto_page("MIX")
+  local mon = params:get("monitor_level")
+  key(1, 1); enc(2, 5); _h.run_ticks(1)
+  ok(params:get("monitor_level") > mon, "MIX K1+E2 is the norns's MONITOR")
+  local lit = 0
+  for x = 2, 60 do if _h.pixel(x, 13) > 0 then lit = lit + 1 end end
+  key(1, 0)
+  ok(lit > 10, "...and K1 held shows the input's two ways")
+  params:set("monitor_level", mon)
+
+  CTX.wave_any = false
+  engine.rec_track, engine.rec, engine.head_sync, engine.commands, CTX.beats =
+    saved[1], saved[2], saved[3], saved[4], saved[5]
+  clock.get_tempo = nil
 end
 
 T.report("control harness OK")

@@ -42,7 +42,7 @@ DECKS_OUT = ("softcut:output_1", "softcut:output_2")
 PSET = 90  # the test slot (CLAUDE.md, doc/plan.md); cleaned up by cleanup()
 assert PSET > 12, "slots 1 to 12 hold the shipped presets: a test never writes them"
 # the engine's fingerprint after a RESTART (CLAUDE.md STATUS)
-COUNT = "count: 198"
+COUNT = "count: 199"
 # the pages, in the order E1 walks them (PAGES in four.lua)
 PAGES = "TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE"
 

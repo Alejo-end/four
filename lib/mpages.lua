@@ -291,6 +291,7 @@ local SHORT = {
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
   ["@win_move"] = "MOV",
   ["@rec_src"] = "SRC", rec_source = "SRC",
+  ["@tempo"] = "BPM", clock_tempo = "BPM",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN",
@@ -379,6 +380,7 @@ local FULL = {
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
   ["@rec_src"] = "SOURCE", rec_source = "SOURCE",
+  ["@tempo"] = "TEMPO", clock_tempo = "TEMPO",
   density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
   cut_source = "SOURCE",
@@ -454,6 +456,8 @@ end
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
+  -- the tempo is the clock's, a param of the norns (none offscreen)
+  if id == "clock_tempo" and C.tempo then return tostring(floor(C.tempo() + 0.5)) end
   if not (id and params.lookup[id]) then return "--" end
   -- a track 2 id reads in its track 1 format (four)
   local key = T2_KEY[id] or id
@@ -797,6 +801,12 @@ local function take_top_row(frame, rec)
     ptext_r(name, rx, 12, 1, 6)
     rx = rx - text_w(name, 1) - 5
   end
+  -- the clock, while a take or the window follows it (the seventieth change)
+  if (wb > 1 or pget("rec_sync", 1) > 1) and C.clock_word and not (rec and wb > 1) then
+    local w = C.clock_word()
+    ptext_r(w, rx, 12, 1, 5)
+    rx = rx - text_w(w, 1) - 5
+  end
   if not rec and pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001 then
     ptext_r("ON SND", rx, 12, 1, 5)
   end
@@ -808,7 +818,10 @@ local function take_top_row(frame, rec)
     bx = bx + chip("REC", bx, 12) + 3
     ptext(REC_INTO[n], bx, 12, 1, 15)
     bx = bx + text_w(REC_INTO[n], 1) + 4
-    if pget("rec_end", 1) == 2 then
+    if C.sync_stop then
+      -- a take on the clock: the stop waits for the line
+      ptext(C.rec_sync_word() == "BEAT" and "STOP ON BEAT" or "STOP ON BAR", bx, 12, 1, 12)
+    elseif pget("rec_end", 1) == 2 then
       ptext(n < 4 and REC_THEN[n] or REC_LAST, bx, 12, 1, 6)
     end
     return
@@ -816,6 +829,11 @@ local function take_top_row(frame, rec)
   if C.undo_ready and C.undo_ready() then
     ptext("<", bx, 12, 1, 6)
     bx = bx + 7
+  end
+  if C.sync_arm then
+    -- a new take on the clock waits for the line (steady: no blink)
+    ptext(C.rec_sync_word() == "BEAT" and "REC ON BEAT" or "REC ON BAR", bx, 12, 1, 12)
+    return
   end
   if not rec then
     -- resample/regen: the buffer is being re-touched by output
@@ -946,7 +964,9 @@ local function body_TAKE(frame)
     if C.rec_waiting then
       ptext("WAIT", 84, 46, 2, 12)   -- steady: the header's track box is the blink
     else
-      local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
+      -- (an aligned pass loops in its window: its seconds count by the frame)
+      local el = C.rec_aligned and (frame - (C.rec_arm_frame or frame)) / FPS
+        or ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
       ptext(string.format("%.1fS", el), 84, 46, 2, 15)
     end
     -- input meter with the record-ready bracket (peak inside = clean take)
@@ -979,6 +999,26 @@ local function body_TAKE(frame)
     for y = TK_MID - TK_HALF, TK_MID + TK_HALF, 2 do screen.rect(phx, y, 1, 1) end
     screen.rect(phx, TK_MID - TK_HALF - 3, 1, 1)          -- caret stem
     screen.rect(phx - 1, TK_MID - TK_HALF - 4, 3, 1)      -- caret ▽ above the strip
+    screen.fill()
+  end
+  -- WHERE THE NEXT PASS WRITES (the sixty-seventh change), while none runs:
+  -- a small solid mark under the strip. A new take starts at the buffer's
+  -- start, an aligned overdub at the play head, a free one at the write head
+  -- (where the last pass stopped). The user could not tell where a press of
+  -- REC would write (doc/ux-feedback.md, items 30 and 34).
+  if not rec and C.wave_any then
+    local at
+    if pget("pre_level", 0) < 0.001 then
+      at = 0
+    elseif C.aligns and C.aligns() then
+      at = fmode ~= 1 and track_phase() or lo
+    else
+      at = C.rec_phase
+    end
+    local mx = clamp(floor(clamp(at, 0, 1) * 127 + 0.5), 1, 126)
+    screen.level(10)
+    screen.rect(mx, TK_MID + TK_HALF + 3, 1, 1)
+    screen.rect(mx - 1, TK_MID + TK_HALF + 4, 3, 1)
     screen.fill()
   end
   take_top_row(frame, rec)   -- last: a message's pocket covers the caret
@@ -1846,7 +1886,39 @@ local function vu(x, sig, k, newframe)
   end
 end
 
+-- MIX with K1 held (the seventieth change): the input's two ways to the
+-- output. The user heard the input pass through and could not tell how
+-- (doc/ux-feedback.md, item 35). MON is the norns's own monitor: it runs with
+-- or without a script. DRY is four's dry/wet: the input as it comes, mixed
+-- with what four plays. Neither has a filter or an effect on it, and with
+-- both up the input is heard twice, 6 ms apart (the limiter's delay).
+function M.mix_input(frame)
+  ptext("THE INPUT GOES OUT TWO WAYS", 2, 12, 1, 8)
+  local p = params.lookup["monitor_level"] and params:lookup_param("monitor_level")
+  local cs = p and p.controlspec
+  local mon = (cs and cs.unmap) and cs:unmap(params:get("monitor_level"))
+    or pget("monitor_level", 0)
+  local dry = sqrt(clamp(1 - pget("dry_wet", 0.5), 0, 1))
+  for i = 1, 2 do
+    local y = 20 + (i - 1) * 11
+    local v = i == 1 and clamp(mon, 0, 1) or dry
+    ptext(i == 1 and "MON" or "DRY", 2, y, 1, 12)
+    screen.level(2)
+    screen.rect(20, y, 60, 5)
+    screen.fill()
+    screen.level(v > 0.001 and 12 or 1)
+    screen.rect(20, y, floor(v * 60 + 0.5), 5)
+    screen.fill()
+    ptext_r(i == 1 and "NORNS" or "FOUR", 126, y, 1, 5)
+  end
+  ptext("NO FILTER OR FX ON EITHER", 2, 42, 1, 5)
+  if mon > 0.001 and dry > 0.001 then
+    ptext("BOTH UP: HEARD TWICE", 2, 49, 1, 10)
+  end
+end
+
 local function body_MIX(frame)
+  if C.alt then return M.mix_input(frame) end
   -- each lane's energy is its deck's REAL gain: the ONE law itself
   -- (C.mix_gains — trim x crossfade plateau x master x STOP), not a mirror
   local mixv = pget("mix", 0.5)
@@ -2346,6 +2418,11 @@ local function body_SCENE(frame)
       ptext_c("K1+E3 FADES", 64, 13, 1, 5)
     end
     ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
+    -- the clock (the seventieth change): "120 BPM", or "120 MIDI" when
+    -- another clock leads. K1+E2 sets it.
+    if pget("orbit_on", 0) ~= 1 and C.clock_word then
+      ptext(C.clock_word(), 2, 13, 1, 5)
+    end
   end
   -- the orbit lives here now (its knobs are this page's alt pair): a steady
   -- chip while the wander runs — the moving selector and rail are its motion

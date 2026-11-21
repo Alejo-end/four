@@ -7,7 +7,7 @@ on four. The STATUS block of CLAUDE.md says what is on the device now.
 
 This gate was written for mangler, the one-track instrument. For four:
 
-- Stage 0 expects `count: 198` and `Engine_Four.sc`, and stage 1 the twelve pages.
+- Stage 0 expects `count: 199` and `Engine_Four.sc`, and stage 1 the twelve pages.
 - The layer decks are gone (four, thirteenth change). Their rows say REMOVED and keep
   their numbers, so the other rows keep theirs: stage 9, 11.1 to 11.8, 12.3, 12.12, 13.5,
   15.7, 15.11 and 18.1. `test/device/gate.py` runs none of them and does not report
@@ -51,7 +51,7 @@ against the new Lua, which is the most confusing possible state.
 |---|---|---|
 | 0.1 | Only one `Engine_Four.sc` on the device | `find ~/dust/code -name 'Engine_Four.sc'` returns exactly one path |
 | 0.2 | Script loads | No hang on LOADING |
-| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 198` |
+| 0.3 | **Command count** | maiden shows `Engine.register_commands; count: 199` |
 
 **0.3 is the whole stage.** A lower count means that the old engine is still live, and
 every sound check below is then meaningless: restart again. Any other count means that
@@ -365,11 +365,11 @@ and that the engine polls behave as the stubs assume.
 
 The one engine change since stage 14: a new synth, `\four_repeat`, and a
 new command, `beat_repeat`. Do stage 0 again first: maiden must read
-`count: 198`. MIDI-map `beat repeat` to a pad or a footswitch (it is a hold).
+`count: 199`. MIDI-map `beat repeat` to a pad or a footswitch (it is a hold).
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 17.1 | **It loads** | RESTART, load the script | `count: 198`, no error in the SC tab | `\four_repeat`, `updateRepeat`, the three `repBufs` |
+| 17.1 | **It loads** | RESTART, load the script | `count: 199`, no error in the SC tab | `\four_repeat`, `updateRepeat`, the three `repBufs` |
 | 17.2 | **A repeat on the beat** | A take playing, clock at 120, `repeat length` 1/8. Hold `beat repeat` for two bars | It starts on the next eighth and stutters that eighth until you let go, then the live sound returns. The header shows RP | `clock.sync` in `repeat_start`, the `first` pass |
 | 17.3 | No clicks | Hold it over a sustained pad, then over drums | The loop points are smooth (the 3 ms fade); entering and leaving does not click | `fade`, the `gate` envelope |
 | 17.4 | A roll | While holding, turn `repeat length` from 1/8 to 1/16 to 1/32, then spin it fast | Each step re-captures a shorter slice: a roll, no click or smear between steps | The three capture buffers, `updateRepeat` |
@@ -409,7 +409,7 @@ and the bucket brigade. Most of it ran on the device without ears, and the bucke
 brigade and the sends never ran there. Do stage 0 first: build the plugin on the norns
 (ugen/README.md), install the binary alone in
 `~/.local/share/SuperCollider/Extensions/FourStretch/` BEFORE the engine, RESTART, and
-read `count: 198`. `python3 test/device/gate.py 19` runs it. It records a take on each
+read `count: 199`. `python3 test/device/gate.py 19` runs it. It records a take on each
 track: put a source on the input that you can tell apart.
 
 The CPU figures are the busiest scsynth thread in `top -H`, the way
@@ -418,7 +418,7 @@ of the whole JACK cycle, not the engine's. The budget is 60% of that thread.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
-| 19.1 | **The plugin is in** | RESTART with the binary installed, load the script | `count: 198`. The SC log says `four: FourStretch on`, and `Crone.engine.hasStretch` is true. The plugin folder holds no `.sc` file | The install order. Without the line, every row below runs the stock voices, JPverb and the stock delay |
+| 19.1 | **The plugin is in** | RESTART with the binary installed, load the script | `count: 199`. The SC log says `four: FourStretch on`, and `Crone.engine.hasStretch` is true. The plugin folder holds no `.sc` file | The install order. Without the line, every row below runs the stock voices, JPverb and the stock delay |
 | 19.2 | K1+E1 picks the track | On any page, hold K1 and turn E1 right four steps, then left three | The focus goes 2, 3, 4, stays at 4, then 3, 2, 1. The track badge in the header and the page name pop show it | `enc` in four.lua, `track_sel` |
 | 19.3 | TRACKS picks the focus | On TRACKS, turn E2 | `track_sel` follows E2 | `ENC_MAP.TRACKS` |
 | 19.4 | **Each track has its own take** | Focus track 1 and record drums on TAKE (K2). Focus track 2 and record a tone, then tracks 3 and 4 | Each pass writes only the focused track's buffers. The other tracks' buffers stay the same, bit for bit. The four takes differ. The engine's `recIdx` and `opIdx` follow the focus | `rec_track`, `buf_track`, `ctx.focus_take` |
@@ -483,9 +483,26 @@ it cannot find a fault that the two share. These rows can.
 | 20.9 | Hot-plug | Unplug it under a held pad. Plug it in again. Then with a grid attached | Nothing hangs, the held pad is released, and maiden shows no error. Plugged in, it is taken on the next frame, in PADS alone and in KEYS beside a grid | `Mgrid.hotplug`, `ex_release` |
 | 20.10 | It is given back | Open the Exquis's settings menu and close it. Then load another script | After the menu the pads are painted again. After four leaves, the Exquis is its own instrument again | The Refresh request, `ex:shutdown` |
 
+## Stage 21: the clock, the record head and the input (by hand)
+
+The sixty-seventh to the seventieth change (doc/clock-plan.md). The engine part needs the
+RESTART and `count: 199`. The offline check (test/dsp/check_dsp.sh, probe10) proved where
+an aligned pass writes and where a head sync puts the head. Only these rows can say how
+they sound. Set the tempo to 120 on SCENE (K1+E2) first.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 21.1 | **An aligned overdub lands where you hear it** | Track 1 in PLAY, a take of a short beat, overdub at 0.5, `overdub head` ALIGN. On TAKE the mark under the wave is at the play head. K2, play a hit on the beat you hear for two loops, K2 | The hits sit on the beat they were played on, loop after loop. The window does not move | `\four_dub`, `updateDub`, the phase bus. A hit late by a few ms is the audio's round trip, not this |
+| 21.2 | The old law | The same with `overdub head` FREE | The mark is where the last pass stopped, and the overdub goes there | `ctx.aligns` |
+| 21.3 | **A take on the clock** | `take on clock` BAR. K2 a little after a bar line, play, K2 in the middle of the second bar | TAKE says `REC ON BAR`, then REC on the bar, then `STOP ON BAR`. The take is two bars to the sample (`win length` FREE) | `ctx.on_beat`, `sync_arm`, `sync_stop` |
+| 21.4 | **The loops start together** | Two tracks with takes on the clock of one and two bars, both in PLAY, `loop sync` ON | They start together on every second bar, and stay together for five minutes. Listen at each restart of a loop that has not drifted: no click | `head_sync`, `sync` in winRead. A click: the jump is not faded (PLAY's seam fade covers the start only) |
+| 21.5 | **MIDI clock** | `PARAMS > CLOCK > source` midi, a drum machine sends its clock at 100 BPM | SCENE reads `100 MIDI`. The locked tracks take the new length and follow the machine. K1+E2 on SCENE says `TEMPO: MIDI` | `sync_locks`, `ctx.clock_word` |
+| 21.6 | A motion pass on the clock | MOTION K1+E3 to 1 BAR. Double-tap K1, move a knob on the second beat of a bar | The move comes back on the second beat of every bar | `sync_origin` in lib/mmotion.lua |
+| 21.7 | **The input's two ways** | Hold K1 on MIX. Turn E2 (MONITOR) and E3 (DRY/WET) | With both up the page says `BOTH UP: HEARD TWICE`, and the input sounds hollow. With MONITOR down the input comes through four only | `mix_input` in lib/mpages.lua |
+
 ## When it passes
 
-Write the date and `count: 198` into the STATUS block of `CLAUDE.md`, as the new
+Write the date and `count: 199` into the STATUS block of `CLAUDE.md`, as the new
 confirmed state. That block tells the next session which changes it can trust.
 
 If something fails, the "suspect" column is a starting point, not a verdict.

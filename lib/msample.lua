@@ -96,6 +96,7 @@ local function restore(r)
   params:set("resample", r.saved[2])
   params:set("rec_wait", r.saved[3])
   params:set("rec_source", r.saved[4])
+  params:set("rec_sync", r.saved[5] or 1)
 end
 
 local function abort(msg, detail)
@@ -226,12 +227,14 @@ function M.start()
   end
   -- the gear comes back on the line input: the take's source is IN for the
   -- pass, whatever RELAY left it on
+  -- (and its arm and stop are at once: the pass times its notes itself)
   local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0),
-    pget("rec_source", 1) }
+    pget("rec_source", 1), pget("rec_sync", 1) }
   params:set("pre_level", 0)
   params:set("resample", 0)
   params:set("rec_wait", 0)
   params:set("rec_source", 1)
+  params:set("rec_sync", 1)
   params:set("rec", 1)
   if pget("rec", 0) ~= 1 then
     -- the arm was refused; its own words stay on the screen. One that waits

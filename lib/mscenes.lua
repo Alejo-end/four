@@ -252,7 +252,8 @@ local SCENE_EXCLUDE = {
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
-  "rec_wait", "rec_thresh", "rec_end", "rec_source",
+  "rec_wait", "rec_thresh", "rec_end", "rec_source", "rec_align", "rec_sync",
+  "loop_sync",
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",

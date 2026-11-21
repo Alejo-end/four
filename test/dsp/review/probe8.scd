@@ -55,7 +55,7 @@ Engine_Four.new(ctx, { arg eng;
         [\take, 8.5, 4, [
             [0.0, [\b_alloc, 0, 192000, 1]], [0.0, [\b_alloc, 1, 192000, 1]],
             [0.001, [\s_new, \sine, 1000, 0, 0, \out, b]],
-            [0.002, [\s_new, \four_io, 1010, 1, 0, \in1, b, \in2, b + 1, \out, 0, \buf_l, 0, \buf_r, 1,
+            [0.002, [\s_new, \four_io, 1010, 1, 0, \dub_out, 1000, \in1, b, \in2, b + 1, \out, 0, \buf_l, 0, \buf_r, 1,
                 \play_bus, b + 2, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 1, \level, 1,
                 \lane_bus, b + 4, \dly_send, b + 6, \dly_ret, b + 8, \rev_send, b + 10, \rev_ret, b + 12,
                 \t2_ret, b + 14, \lanes_dly, b + 16, \lanes_rev, b + 18, \own_out, b + 20, \rec, 0]],
@@ -77,7 +77,7 @@ Engine_Four.new(ctx, { arg eng;
         [\clear, 6.2, 1, [
             [0.0, [\b_alloc, 0, 192000, 1]], [0.0, [\b_alloc, 1, 192000, 1]],
             [0.001, [\s_new, \sine, 1000, 0, 0, \out, b]],
-            [0.002, [\s_new, \four_io, 1010, 1, 0, \in1, b, \in2, b + 1, \out, 2, \buf_l, 0, \buf_r, 1,
+            [0.002, [\s_new, \four_io, 1010, 1, 0, \dub_out, 1000, \in1, b, \in2, b + 1, \out, 2, \buf_l, 0, \buf_r, 1,
                 \play_bus, b + 2, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 0.5, \level, 1,
                 \lane_bus, b + 4, \dly_send, b + 6, \dly_ret, b + 8, \rev_send, b + 10, \rev_ret, b + 12,
                 \t2_ret, b + 14, \lanes_dly, b + 16, \lanes_rev, b + 18, \own_out, b + 20, \rec, 0]],

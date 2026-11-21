@@ -3,7 +3,7 @@
 the sheets are doc/walkthrough.md). It measures what the people cannot.
 
     export NORNS_CTL=<control socket>        # see norns.py
-    python3 test/device/session.py prepare   # a fresh script, count 198, the takes empty
+    python3 test/device/session.py prepare   # a fresh script, count 199, the takes empty
     python3 test/device/session.py snap      # before the player's first fade (Part 1, task 5)
     python3 test/device/session.py home      # after the fade is back at 0: the ids off the origin
     python3 test/device/session.py takes     # Part 1's end: every track's take, and whether it plays
@@ -70,7 +70,7 @@ def prepare(n):
     n.load_script()
     text = n.transcript("lua")[start:]
     count = [ln.strip() for ln in text.splitlines() if "count:" in ln][:1]
-    save("prepare", count=count, ok=bool(count and "198" in count[0]),
+    save("prepare", count=count, ok=bool(count and "199" in count[0]),
          note="A fresh script. Put the supported set's gear at the input: a drum machine and a synth.")
 
 

@@ -48,7 +48,7 @@ Engine_Four.new(ctx, { arg eng;
     var wait = eng.respondsTo(\spaceWait).if({ eng.spaceWait }, { 0 });
     // io on buses of its own from `b`, wet only, with its output on `out`
     var io = { |id, b, out, more|
-        [0.002, [\s_new, \four_io, id, 1, 0, \in1, b, \in2, b + 1, \out, out, \buf_l, 0, \buf_r, 1,
+        [0.002, [\s_new, \four_io, id, 1, 0, \dub_out, 1000, \in1, b, \in2, b + 1, \out, out, \buf_l, 0, \buf_r, 1,
             \play_bus, b + 2, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 1, \level, 1,
             \lane_bus, b + 4, \dly_send, b + 6, \dly_ret, b + 8, \rev_send, b + 10, \rev_ret, b + 12,
             \t2_ret, b + 14, \lanes_dly, b + 16, \lanes_rev, b + 18, \own_out, b + 20, \rec, 0] ++ more]

@@ -5342,3 +5342,101 @@ the stand-in, test_exquis.lua, gate.py and exquis.py.
 - Left as written, on purpose: MIDI's own status bytes (named constants in each file),
   the grid cells that a test presses (four's layout), the gate's row ids, and the
   numbers in doc/device-gate.md's prose where a reader needs them.
+
+four, sixty-sixth change: **the Exquis on the norns for the first time (Lua and test
+tools; no engine change, the count stays 198)**. 2026-11-21.
+- The Exquis must be on the norns's USB. Over the TRS jack the norns sees only its own
+  port (`virtual`), and the driver must also send to the Exquis.
+- The norns lists the Exquis as two ports, `Exquis 1` and `Exquis 2`. `ex_find_device`
+  took the first one that `pairs` gave, which has no order. It now takes the one norns
+  added first (the lowest id), which is port 1. `exquis.py status` names the port the
+  driver holds.
+- test/device/norns.py: an empty answer of a snippet is the bare mark `@exq` (the REPL's
+  line loses its last space), and `exquis_ask` read it as no answer. `watch` stopped at
+  the first quiet quarter second. It now reads an empty answer as empty.
+- On the device: taken as `Exquis 1` in PADS, rows 20.1 to 20.3 pass. A watch of 180 s
+  saw 56 of the 61 pads on channel 16 (not 7, 12, 18, 36, 40: not pressed), each at
+  velocity 127, and the pushes of encoders 1 to 3 as 127 and 0. Encoder 1 sent 1 to 15
+  ticks below 64 in one message, so a fast turn is many ticks in one message. SysEx
+  arrives in pieces of three bytes, and the refresh request ends in `00` or `7F`; the
+  driver matches it across the pieces. The user: the lights look like the Launchpad's.
+- Not seen yet: the eight buttons, encoders 2 to 4, the push of encoder 4, an encoder
+  turned the other way, and the order of the sweep. Rows 20.4 to 20.10 stay open.
+
+four, sixty-seventh change: **an aligned overdub and a head sync (engine, test tools; the
+count goes to 199, NOT on the device)**. 2026-11-21. The user's notes of that day
+(doc/ux-feedback.md, items 33 and 34; the plan is doc/clock-plan.md): an overdub did not
+write where the track played, and two loops of one bar drifted apart.
+- `rec_track`'s second argument 2 is an aligned overdub. A small synth, `\four_dub`,
+  writes the pass after io. It starts where the track's read head is (it reads the phase
+  bus on the server at its first block, one block ahead) and loops inside the track's
+  window, on the read head's own law (winBounds, whole frames). It lives only while `rec`
+  is up and frees itself 10 ms after it falls. A STOP releases it, and START makes a new
+  one at the read head. The window, `rec_level`, `pre_level` and `freeze` follow it.
+- io writes nothing for an aligned pass: its `rec` stays 0 and its regen too while the
+  pass runs (`ioGate`). A first version kept io's rec up with rec_level 0 and pre_level 1:
+  their 10 ms lags printed the pass at -66 dB where io's head stood.
+- io sends its record signal to `\four_dub` on a bus of its own (`dub_out`): one UGen
+  more (113). The probes that make an io synth give it a spare bus.
+- `head_sync` ("i", track 1 to 4): the track's read head goes to its window's start. The
+  drones take a plain control `sync` straight into winRead's two Phasors (no UGen more),
+  set to 1 and back to 0 20 ms later.
+- test/dsp/review/probe10.scd and an_probe10.py, in check_dsp.sh: the write starts 0.0 ms
+  from the read head, a pass across the window's end goes on at its start and writes
+  nothing past it, io writes nothing (-240 dB), and the head is at the window's start
+  3.7 ms after a sync. `\four_dub` has 49 UGens. Both builds pass (stock and FourStretch).
+- The count is 199 in test_control, check_dsp.py, gate.py and session.py.
+
+four, sixty-eighth change: **the record head (Lua and test tools)**. 2026-11-21.
+- `rec_align` (PARAMS > take - record > overdub head): ALIGN at the start, FREE as before.
+  An overdub with ALIGN sends `rec_track(n, 2)`, but only to an engine that has
+  `head_sync` (an older one reads 2 as a new take). A new take is unchanged.
+- An aligned pass leaves the window as it is when it stops, never counts as a wrap, and
+  never ends a ONE-SHOT track. Its seconds on TAKE count by the frame.
+- TAKE marks where the next pass writes, while none runs: a small mark under the wave at
+  the buffer's start (a new take), the play head (ALIGN) or the write head (FREE).
+- The harness's free-overdub rows set FREE. New rows: the arm sends 2, the window stays,
+  an old engine never gets a 2, a new take is a new take, the three marks.
+
+four, sixty-ninth change: **the clock (Lua and test tools)**. 2026-11-21.
+- `ctx.beats()`: the norns clock's beats, and in the offscreen norns a count from the
+  frames.
+- LOCKED TRACKS: the window lock (`win_beats`) and a take on the clock lock a track to a
+  whole number of beats (`ctx.lock`). A tempo move gives every locked track its length
+  again (the lock followed the focused track only). A length that something else changed
+  unlocks it.
+- LOOP SYNC (`loop_sync`, PARAMS > take - window, ON at the start): one clock coroutine
+  calls `ctx.on_beat` on every beat. A locked track of L beats gets `head_sync` on every
+  beat that is a multiple of L, unless it is OFF or under a STOP.
+- A TAKE ON THE CLOCK (`rec_sync`, PARAMS > take - record > take on clock: FREE, BEAT,
+  BAR; FREE at the start). A new take waits for the next line (`REC ON BAR`), and its stop
+  too (`STOP ON BAR`, the param stays 1 while it waits). A second press calls the wait off
+  or stops at once. The window is the whole lines to the sample, and the track is locked.
+  Start on sound does not apply to it, and overdubs do not wait. The arms and stops the
+  instrument makes itself (a clear, UNDO, a change of track, a full ONE-SHOT track) go
+  through `ctx.rec_set` and never wait. AUTOSAMPLE sets FREE for its pass.
+- MOTION ON THE CLOCK: a first pass with PASS in bars counts from the bar line before its
+  first move (`sync_origin`), so a move keeps its place in the bar. An overdub's arm and
+  PLAY start at the clock's place in the loop, and each wrap is nudged back onto the
+  clock by up to three frames (with `motion_len` at AUTO).
+
+four, seventieth change: **the tempo, the input, the documents (Lua and documents)**.
+2026-11-21.
+- SCENE shows the clock at the top left (`120 BPM`, or `120 MIDI` when another clock
+  leads), and K1+E2 there sets the tempo (`@tempo`, `clock_tempo`). With MIDI or link
+  leading it pops `TEMPO: MIDI` and moves nothing. TAKE shows the clock while the window
+  lock or `rec_sync` is on. The word is built only when the tempo or the source changes.
+- MIX with K1 held draws the input's two ways out (MON, the norns's own, and DRY, four's
+  dry/wet), and K1+E2 is MONITOR. The input gain leaves MIX for PARAMS > LEVELS.
+- doc/manual.md: "Where the input goes", "The clock", the overdub head, SCENE's tempo.
+  README: one paragraph. doc/device-gate.md: stage 21 (rows 21.1 to 21.7), and the count
+  199. doc/controls.md regenerated. doc/clock-plan.md is the plan of the four changes.
+- test_control 1131. All checks pass on Lua 5.3, and the DSP check passes on both builds.
+
+On the device, 2026-11-21: the sixty-seventh to the seventieth change deployed and
+restarted. maiden read `count: 199`, the log `four: FourStretch on` and `four: CLOUD is
+FourCloud`, with no error. probe10 rendered by the norns's own scsynth: the aligned write
+starts 1.33 ms (one block) ahead of the read head (0.0 ms on the Mac), and every other row
+reads as on the Mac. A lock of one bar at 60 BPM put track 1's head at its window's start
+50 ms after each of four bars. An aligned pass of 1.5 s armed, kept its head in the window
+and left the window. Not heard.

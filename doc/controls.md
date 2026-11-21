@@ -57,14 +57,14 @@ modes, and VOICE draws HELD dim.
 | EFFECT | AMOUNT `effect_amt` | RATE `effect_rate` | AMT 2 `effect2_amt` | RATE 2 `effect2_rate` | ON* | TYPE, hold TRK 2 | no |
 | DELAY | WET `delay_mix` | FEEDBACK `delay_fb` | TIME `delay_time` | SYNC `delay_sync` | INF* | KILL* | no |
 | REVERB | WET `rev_mix` | DECAY `rev_decay` | SIZE `rev_size` | DAMP `rev_damp` | WASH* | BLOOM* | no |
-| MIX | MIX `mix` | OUT `out_level` | INPUT `input_level` | DRY/WET `dry_wet` | ENG* | TAPE* | no |
+| MIX | MIX `mix` | OUT `out_level` | MONITOR `monitor_level` | DRY/WET `dry_wet` | ENG* | TAPE* | no |
 | PADS | SLICE `seq_slice` | PITCH `pad_pitch` | VOICE `pad_voice` | RELEASE `voice_rel` | PAD, sounds while held | ROUTE* | no |
 | MOTION (lanes) | LANE `@mo_sel` | DEPTH `motion_depth` | LENGTH `motion_len` | PASS `motion_bars` | REC* | PLAY* | yes |
 | MOTION (LFO 1) | LANE `@mo_sel` | DEPTH `lfo1_depth` | PERIOD `lfo1_period` | TARGET `lfo1_target` | REC* | PLAY* | yes |
 | MOTION (LFO 2) | LANE `@mo_sel` | DEPTH `lfo2_depth` | PERIOD `lfo2_period` | TARGET `lfo2_target` | REC* | PLAY* | yes |
 | MOTION (LFO 3) | LANE `@mo_sel` | DEPTH `lfo3_depth` | PERIOD `lfo3_period` | TARGET `lfo3_target` | REC* | PLAY* | yes |
 | MOTION (LFO 4) | LANE `@mo_sel` | DEPTH `lfo4_depth` | PERIOD `lfo4_period` | TARGET `lfo4_target` | REC* | PLAY* | yes |
-| SCENE | A `scene_slot_a` | B `scene_slot` | none | FADE `scene_morph_amt` | RCL, hold PEEK | CAP | yes |
+| SCENE | A `scene_slot_a` | B `scene_slot` | TEMPO `@tempo` | FADE `scene_morph_amt` | RCL, hold PEEK | CAP | yes |
 
 On tracks 2 to 4 (shown for track 2) these rows differ from track 1's.
 Track 1 alone has the erosion, so VOICE in PLAY keeps SPEED and PITCH

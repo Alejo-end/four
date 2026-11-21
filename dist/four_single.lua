@@ -137,6 +137,7 @@ local rec_wrapped = false -- that pass came round the end of its buffer
 local rec_last = 0        -- ...read from the write head's last poll
 local polls = {}
 local redraw_clock
+local beat_clock          -- ctx.on_beat, on every beat of the clock
 local prev_midi_add, prev_midi_remove   -- norns' hot-plug callbacks, restored
 
 -- ============================================================================
@@ -1950,13 +1951,17 @@ M.EX = {
 -- `gone`: a device being unplugged, still listed (see lp_find_device)
 local function ex_find_device(gone)
   if type(midi) ~= "table" or type(midi.devices) ~= "table" then return nil end
+  -- the Exquis is two ports on the norns ("Exquis 1", "Exquis 2"), and pairs
+  -- has no order: take the one norns added first, which is port 1
+  local best = nil
   for _, dev in pairs(midi.devices) do
     if dev ~= gone and type(dev) == "table" and type(dev.name) == "string"
-        and dev.name:lower():find(EX_NAME, 1, true) then
-      return dev
+        and dev.name:lower():find(EX_NAME, 1, true)
+        and (not best or (dev.id or 0) < (best.id or 0)) then
+      best = dev
     end
   end
-  return nil
+  return best
 end
 
 -- a led key (level + hue * 16) -> r, g, b in the Launchpad's colour language
@@ -2594,7 +2599,8 @@ local MOTION_EXCLUDE = {
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
-  "rec_wait", "rec_thresh", "rec_end", "rec_source",
+  "rec_wait", "rec_thresh", "rec_end", "rec_source", "rec_align", "rec_sync",
+  "loop_sync",
   "take_undo", "undo_keep",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
@@ -2699,6 +2705,27 @@ local function wipe()
   M.loop_len = 0
   M.rec_len = 0
   M.playhead = 0
+  M.sync_origin = nil
+end
+
+-- MOTION ON THE CLOCK (the sixty-ninth change, doc/clock-plan.md). A first
+-- pass with PASS in bars counts from the bar line before its first move, so a
+-- move keeps its place in the bar, and the loop closes on the bar. While it
+-- plays at its own length (motion_len AUTO), each loop's start is put back on
+-- the clock: M.sync_origin is the beat of that first bar line.
+local function frames_per_beat()
+  return 60 / ((C.tempo and C.tempo()) or 120) * FPS
+end
+-- where the playhead is by the clock: frames since the origin, in the loop.
+-- `full` for a start (play, an overdub's arm): the whole place. At a wrap
+-- only a nudge of a few frames: a loop whose length no longer is the clock's
+-- (a tempo move) is left to run rather than jump.
+local function clock_playhead(full)
+  if not (M.sync_origin and C.beats and M.loop_len > 0) then return nil end
+  if pget("motion_len", 0) > 0 then return nil end
+  local f = floor((C.beats() - M.sync_origin) * frames_per_beat() + 0.5) % M.loop_len
+  if full or f <= 3 then return f end
+  return 0
 end
 
 -- motion_bars: a first pass's length on the clock, in frames, or nil (FREE)
@@ -2787,7 +2814,16 @@ local function capture_poll(offset)
           L.v[L.n] = v
         end
         moved_at[id] = C.frame
-        if M.loop_len == 0 and first_at == nil then first_at = offset end
+        if M.loop_len == 0 and first_at == nil then
+          first_at = offset
+          -- a pass on the clock starts at the bar line before this move
+          if M.pass_frames() and C.beats then
+            local b = C.beats()
+            local into = b % 4
+            first_at = offset - floor(into * frames_per_beat() + 0.5)
+            M.sync_origin = b - into
+          end
+        end
       end
       last_val[id] = v
     end
@@ -2815,9 +2851,11 @@ function M.set_armed(on)
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
       first_at = nil                            -- ...which counts from the first move
+      M.sync_origin = nil
     else
       -- overdub: replay the existing loop from the top while we punch in
-      M.playhead = 0
+      -- (a loop on the clock: from where the clock is in it)
+      M.playhead = clock_playhead(true) or 0
       reset_cursors()
       if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
     end
@@ -2827,7 +2865,9 @@ function M.set_armed(on)
       -- motion_len (>0) sets the PLAYBACK length, 0 = AUTO (= natural).
       local elapsed = C.frame - rec_start_frame
       -- the pass starts at its first move: the wait before it goes
-      if first_at and first_at > 0 then
+      -- (a pass on the clock starts at a bar line, which can be before the
+      -- arm: then first_at is below 0 and the moves go later)
+      if first_at and first_at ~= 0 then
         local ids = M.lane_ids
         for i = 1, #ids do
           local L = M.lanes[ids[i]]
@@ -2841,7 +2881,7 @@ function M.set_armed(on)
         -- a pass on the clock is exactly its length
         M.rec_len = bars
         M.loop_len = bars
-        M.playhead = 0
+        M.playhead = clock_playhead(true) or 0
         reset_cursors()
         if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
         print(string.format("four: MOTION loop of %.2fs, on the clock", bars / FPS))
@@ -2878,7 +2918,7 @@ end
 
 function M.set_playing(on)
   if on and M.loop_len > 0 then
-    M.playhead = 0
+    M.playhead = clock_playhead(true) or 0
     reset_cursors()
   end
 end
@@ -2987,7 +3027,7 @@ function M.tick()
   if pget("motion_play", 0) == 1 and M.loop_len > 0 then
     M.playhead = M.playhead + 1
     if M.playhead >= M.loop_len then
-      M.playhead = 0
+      M.playhead = clock_playhead() or 0    -- (on the clock: back on the bar)
       reset_cursors()
       -- an overdub stays armed loop after loop. Each loop is a new pass: the
       -- first move of a lane in it replaces that lane, so its events stay
@@ -4352,7 +4392,8 @@ local SCENE_EXCLUDE = {
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
-  "rec_wait", "rec_thresh", "rec_end", "rec_source",
+  "rec_wait", "rec_thresh", "rec_end", "rec_source", "rec_align", "rec_sync",
+  "loop_sync",
   "take_undo", "undo_keep",
   "export_take", "take_tighten", "print_take", "print_len",
   "pad_chop", "pad_even",
@@ -6349,6 +6390,7 @@ local SHORT = {
   pos_start = "ST", pos_end = "EN", pos_jitter = "JIT",
   ["@win_move"] = "MOV",
   ["@rec_src"] = "SRC", rec_source = "SRC",
+  ["@tempo"] = "BPM", clock_tempo = "BPM",
   scan = "SPEED", pitch = "PITCH",
   size = "SIZE", spread = "SPRD", density = "DENS", grain_level = "GRN",
   grain_jitter = "GJIT", grain_pitch_spread = "DTUN",
@@ -6437,6 +6479,7 @@ local FULL = {
   pos_start = "START", pos_end = "END", pos_jitter = "JITTER",
   ["@win_move"] = "MOVE",
   ["@rec_src"] = "SOURCE", rec_source = "SOURCE",
+  ["@tempo"] = "TEMPO", clock_tempo = "TEMPO",
   density = "DENSITY",
   warp_window = "WINDOW", warp_rand = "RANDOM",
   cut_source = "SOURCE",
@@ -6512,6 +6555,8 @@ end
 local function fmt_value(id)
   -- compound encoder targets ("@") read as their anchor param
   if id and C.enc_target then id = C.enc_target(id) end
+  -- the tempo is the clock's, a param of the norns (none offscreen)
+  if id == "clock_tempo" and C.tempo then return tostring(floor(C.tempo() + 0.5)) end
   if not (id and params.lookup[id]) then return "--" end
   -- a track 2 id reads in its track 1 format (four)
   local key = T2_KEY[id] or id
@@ -6855,6 +6900,12 @@ local function take_top_row(frame, rec)
     ptext_r(name, rx, 12, 1, 6)
     rx = rx - text_w(name, 1) - 5
   end
+  -- the clock, while a take or the window follows it (the seventieth change)
+  if (wb > 1 or pget("rec_sync", 1) > 1) and C.clock_word and not (rec and wb > 1) then
+    local w = C.clock_word()
+    ptext_r(w, rx, 12, 1, 5)
+    rx = rx - text_w(w, 1) - 5
+  end
   if not rec and pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001 then
     ptext_r("ON SND", rx, 12, 1, 5)
   end
@@ -6866,7 +6917,10 @@ local function take_top_row(frame, rec)
     bx = bx + chip("REC", bx, 12) + 3
     ptext(REC_INTO[n], bx, 12, 1, 15)
     bx = bx + text_w(REC_INTO[n], 1) + 4
-    if pget("rec_end", 1) == 2 then
+    if C.sync_stop then
+      -- a take on the clock: the stop waits for the line
+      ptext(C.rec_sync_word() == "BEAT" and "STOP ON BEAT" or "STOP ON BAR", bx, 12, 1, 12)
+    elseif pget("rec_end", 1) == 2 then
       ptext(n < 4 and REC_THEN[n] or REC_LAST, bx, 12, 1, 6)
     end
     return
@@ -6874,6 +6928,11 @@ local function take_top_row(frame, rec)
   if C.undo_ready and C.undo_ready() then
     ptext("<", bx, 12, 1, 6)
     bx = bx + 7
+  end
+  if C.sync_arm then
+    -- a new take on the clock waits for the line (steady: no blink)
+    ptext(C.rec_sync_word() == "BEAT" and "REC ON BEAT" or "REC ON BAR", bx, 12, 1, 12)
+    return
   end
   if not rec then
     -- resample/regen: the buffer is being re-touched by output
@@ -7004,7 +7063,9 @@ local function body_TAKE(frame)
     if C.rec_waiting then
       ptext("WAIT", 84, 46, 2, 12)   -- steady: the header's track box is the blink
     else
-      local el = ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
+      -- (an aligned pass loops in its window: its seconds count by the frame)
+      local el = C.rec_aligned and (frame - (C.rec_arm_frame or frame)) / FPS
+        or ((clamp(C.rec_phase, 0, 1) - C.rec_arm_phase) % 1) * C.BUF_SECS
       ptext(string.format("%.1fS", el), 84, 46, 2, 15)
     end
     -- input meter with the record-ready bracket (peak inside = clean take)
@@ -7037,6 +7098,26 @@ local function body_TAKE(frame)
     for y = TK_MID - TK_HALF, TK_MID + TK_HALF, 2 do screen.rect(phx, y, 1, 1) end
     screen.rect(phx, TK_MID - TK_HALF - 3, 1, 1)          -- caret stem
     screen.rect(phx - 1, TK_MID - TK_HALF - 4, 3, 1)      -- caret ▽ above the strip
+    screen.fill()
+  end
+  -- WHERE THE NEXT PASS WRITES (the sixty-seventh change), while none runs:
+  -- a small solid mark under the strip. A new take starts at the buffer's
+  -- start, an aligned overdub at the play head, a free one at the write head
+  -- (where the last pass stopped). The user could not tell where a press of
+  -- REC would write (doc/ux-feedback.md, items 30 and 34).
+  if not rec and C.wave_any then
+    local at
+    if pget("pre_level", 0) < 0.001 then
+      at = 0
+    elseif C.aligns and C.aligns() then
+      at = fmode ~= 1 and track_phase() or lo
+    else
+      at = C.rec_phase
+    end
+    local mx = clamp(floor(clamp(at, 0, 1) * 127 + 0.5), 1, 126)
+    screen.level(10)
+    screen.rect(mx, TK_MID + TK_HALF + 3, 1, 1)
+    screen.rect(mx - 1, TK_MID + TK_HALF + 4, 3, 1)
     screen.fill()
   end
   take_top_row(frame, rec)   -- last: a message's pocket covers the caret
@@ -7904,7 +7985,39 @@ local function vu(x, sig, k, newframe)
   end
 end
 
+-- MIX with K1 held (the seventieth change): the input's two ways to the
+-- output. The user heard the input pass through and could not tell how
+-- (doc/ux-feedback.md, item 35). MON is the norns's own monitor: it runs with
+-- or without a script. DRY is four's dry/wet: the input as it comes, mixed
+-- with what four plays. Neither has a filter or an effect on it, and with
+-- both up the input is heard twice, 6 ms apart (the limiter's delay).
+function M.mix_input(frame)
+  ptext("THE INPUT GOES OUT TWO WAYS", 2, 12, 1, 8)
+  local p = params.lookup["monitor_level"] and params:lookup_param("monitor_level")
+  local cs = p and p.controlspec
+  local mon = (cs and cs.unmap) and cs:unmap(params:get("monitor_level"))
+    or pget("monitor_level", 0)
+  local dry = sqrt(clamp(1 - pget("dry_wet", 0.5), 0, 1))
+  for i = 1, 2 do
+    local y = 20 + (i - 1) * 11
+    local v = i == 1 and clamp(mon, 0, 1) or dry
+    ptext(i == 1 and "MON" or "DRY", 2, y, 1, 12)
+    screen.level(2)
+    screen.rect(20, y, 60, 5)
+    screen.fill()
+    screen.level(v > 0.001 and 12 or 1)
+    screen.rect(20, y, floor(v * 60 + 0.5), 5)
+    screen.fill()
+    ptext_r(i == 1 and "NORNS" or "FOUR", 126, y, 1, 5)
+  end
+  ptext("NO FILTER OR FX ON EITHER", 2, 42, 1, 5)
+  if mon > 0.001 and dry > 0.001 then
+    ptext("BOTH UP: HEARD TWICE", 2, 49, 1, 10)
+  end
+end
+
 local function body_MIX(frame)
+  if C.alt then return M.mix_input(frame) end
   -- each lane's energy is its deck's REAL gain: the ONE law itself
   -- (C.mix_gains — trim x crossfade plateau x master x STOP), not a mirror
   local mixv = pget("mix", 0.5)
@@ -8404,6 +8517,11 @@ local function body_SCENE(frame)
       ptext_c("K1+E3 FADES", 64, 13, 1, 5)
     end
     ptext_r(params:string("scene_recall_mode"), 126, 13, 1, 5)
+    -- the clock (the seventieth change): "120 BPM", or "120 MIDI" when
+    -- another clock leads. K1+E2 sets it.
+    if pget("orbit_on", 0) ~= 1 and C.clock_word then
+      ptext(C.clock_word(), 2, 13, 1, 5)
+    end
   end
   -- the orbit lives here now (its knobs are this page's alt pair): a steady
   -- chip while the wander runs — the moving selector and rail are its motion
@@ -9105,6 +9223,7 @@ local function restore(r)
   params:set("resample", r.saved[2])
   params:set("rec_wait", r.saved[3])
   params:set("rec_source", r.saved[4])
+  params:set("rec_sync", r.saved[5] or 1)
 end
 
 local function abort(msg, detail)
@@ -9235,12 +9354,14 @@ function M.start()
   end
   -- the gear comes back on the line input: the take's source is IN for the
   -- pass, whatever RELAY left it on
+  -- (and its arm and stop are at once: the pass times its notes itself)
   local saved = { pget("pre_level", 0), pget("resample", 0), pget("rec_wait", 0),
-    pget("rec_source", 1) }
+    pget("rec_source", 1), pget("rec_sync", 1) }
   params:set("pre_level", 0)
   params:set("resample", 0)
   params:set("rec_wait", 0)
   params:set("rec_source", 1)
+  params:set("rec_sync", 1)
   params:set("rec", 1)
   if pget("rec", 0) ~= 1 then
     -- the arm was refused; its own words stay on the screen. One that waits
@@ -9418,6 +9539,32 @@ function ctx.tempo()
   return 120
 end
 
+-- THE CLOCK'S BEATS (the sixty-ninth change): the norns clock, and in the
+-- offscreen norns (no clock) a count from the frames at the tempo.
+function ctx.beats()
+  if clock and clock.get_beats then
+    local ok, b = pcall(clock.get_beats)
+    if ok and type(b) == "number" then return b end
+  end
+  return (ctx.frame or 0) / FPS * ctx.tempo() / 60
+end
+
+-- A TAKE ON THE CLOCK: how many beats its line is (0 = FREE), and its word
+local REC_SYNC_BEATS, REC_SYNC_WORD = { 0, 1, 4 }, { "", "BEAT", "BAR" }
+function ctx.rec_sync_beats()
+  return REC_SYNC_BEATS[math.floor(pget("rec_sync", 1) + 0.5)] or 0
+end
+function ctx.rec_sync_word()
+  return REC_SYNC_WORD[math.floor(pget("rec_sync", 1) + 0.5)] or ""
+end
+-- An arm or a stop the instrument makes itself (a clear, UNDO, a change of
+-- track, a full ONE-SHOT track): at once, never on the clock
+function ctx.rec_set(v)
+  ctx.rec_force = true
+  params:set("rec", v)
+  ctx.rec_force = false
+end
+
 -- the EFFECTIVE softcut record source: the cut_source knob. The SRC flag and
 -- the meters read THIS, never the raw param, so one place decides it.
 function ctx.eff_cut_source()
@@ -9461,7 +9608,26 @@ function ctx.enc_target(id)
   if id == "@route_to" then return "route_sel" end
   if id == "@trk_level" then return ctx.LEVEL_ID[ctx.tsel()] end
   if id == "@rec_src" then return "rec_source" end
+  if id == "@tempo" then return "clock_tempo" end
   return id
+end
+
+-- THE CLOCK IN WORDS (the seventieth change): "120 BPM" on the norns's own
+-- clock, "120 MIDI" (LINK, CROW) when another one leads it. Built again only
+-- when the tempo or the source changes: the redraw allocates nothing.
+local CLOCK_WORD = { internal = "BPM", midi = "MIDI", link = "LINK", crow = "CROW" }
+local clock_cache = { t = -1, src = nil, word = "" }
+function ctx.clock_source()
+  if not params.lookup["clock_source"] then return "internal" end
+  return string.lower(params:string("clock_source") or "internal")
+end
+function ctx.clock_word()
+  local t, src = math.floor(ctx.tempo() + 0.5), ctx.clock_source()
+  if t ~= clock_cache.t or src ~= clock_cache.src then
+    clock_cache.t, clock_cache.src = t, src
+    clock_cache.word = t .. " " .. (CLOCK_WORD[src] or string.upper(src))
+  end
+  return clock_cache.word
 end
 
 -- where a loop deck's MATERIAL is (Mdeck.extent), for the scene clamp. The
@@ -10111,16 +10277,20 @@ local ENC_MAP = {
   EFFECT = { "effect_amt", "effect2_amt", "effect_rate", "effect2_rate" },
   DELAY  = { "delay_mix", "delay_time", "delay_fb", "delay_sync" },
   REVERB = { "rev_mix", "rev_size", "rev_decay", "rev_damp" },
-  MIX    = { "mix", "input_level", "out_level", "dry_wet" },
+  -- (the seventieth change) K1 held is the input's two ways to the output:
+  -- the norns MONITOR and four's DRY/WET. The input gain stays in PARAMS
+  -- > LEVELS, where norns has it.
+  MIX    = { "mix", "monitor_level", "out_level", "dry_wet" },
   PADS   = { "seq_slice", "pad_voice", "pad_pitch", "voice_rel" },
   -- E2 walks the lanes and then the two modulator rows (@mo_sel); with a
   -- modulator row selected the other three are its own (MOTION_LFO below)
   MOTION = { "@mo_sel", "motion_len", "motion_depth", "motion_bars" },
   -- the crossfader: E2 picks A (LIVE or a slot), E3 picks B (the slot K2
   -- recalls and K3 captures into), both with no shift, and K1+E3 fades
-  -- between them. K1+E2 is nothing. The orbit's drift and reach, and the
+  -- between them. K1+E2 is the TEMPO (the seventieth change: the clock's
+  -- page, beside the recall quantize). The orbit's drift and reach, and the
   -- recall quantize, are set-and-forget: they live in PARAMS.
-  SCENE  = { "scene_slot_a", nil, "scene_slot", "scene_morph_amt" },
+  SCENE  = { "scene_slot_a", "@tempo", "scene_slot", "scene_morph_amt" },
 }
 
 -- VOICE face pair per engine mode (the S-4 move: the encoders always
@@ -10565,7 +10735,7 @@ local REC_PREROLL = 1 / FPS
 
 -- Does this engine put the write head at 0 for a new take? The command
 -- `rec_track` took one argument until the forty-ninth change. An arity
--- change does not move the command count, so `count: 198` cannot tell an old
+-- change does not move the command count, so the count cannot tell an old
 -- engine: its format can. (The offscreen norns has no format table.)
 local warned_old_head = false
 function ctx.head_resets()
@@ -10592,17 +10762,33 @@ local function rec_src()
   return math.floor(pget("rec_source", 1) + 0.5) - 1
 end
 ctx.rec_src = rec_src
--- point io at track n's buffer pair. `fresh` opens a new take there: the
--- write head goes to the start of the pair. The source goes with it.
-local function rec_track(n, fresh)
+-- point io at track n's buffer pair. `how`: 0 (or false) goes on from the
+-- write head, 1 (or true) opens a new take there (the write head goes to the
+-- start of the pair), 2 is an ALIGNED overdub (the sixty-seventh change: it
+-- starts at the track's read head and loops in its window). The source goes
+-- with it.
+local function rec_track(n, how)
   if not engine.rec_track then return end
+  how = (how == true or how == 1) and 1 or (how == 2 and 2 or 0)
   if ctx.relay_ok() then
-    engine.rec_track(n - 1, fresh and 1 or 0, rec_src())
+    engine.rec_track(n - 1, how, rec_src())
   elseif ctx.head_resets() then
-    engine.rec_track(n - 1, fresh and 1 or 0)
+    engine.rec_track(n - 1, math.min(how, 1))
   else
     engine.rec_track(n - 1)
   end
+end
+
+-- Can this engine write an aligned overdub? It came with `head_sync`, the
+-- one command of the sixty-seventh change: an older engine reads a 2 as a
+-- new take. (The offscreen norns has no command table: it can.)
+function ctx.can_align()
+  local c = engine.commands
+  return not c or c.head_sync ~= nil
+end
+-- Does the next overdub align? (an overdub, ALIGN, and an engine that can)
+function ctx.aligns()
+  return pget("pre_level", 0) >= 0.001 and pget("rec_align", 2) == 2 and ctx.can_align()
 end
 
 -- why a pass from this source cannot record into the focused track, or nil.
@@ -10649,7 +10835,8 @@ function ctx.head_poll(v)
       return
     end
   end
-  if rec_open and v < rec_last - 0.5 then rec_wrapped = true end
+  -- (an aligned pass loops in its window: its wraps are not the buffer's)
+  if rec_open and v < rec_last - 0.5 and not ctx.rec_aligned then rec_wrapped = true end
   rec_last = v
   ctx.rec_phase = v
   ctx.rec_poll_time = util.time and util.time() or nil
@@ -10657,7 +10844,9 @@ end
 local rec_heard, rec_quiet = false, 0   -- this pass: sound seen, last quiet head
 local rec_moved = false                 -- this pass's start moved to the sound
 local function waits()
+  -- (a take on the clock starts on its line, not on the sound)
   return pget("rec_wait", 0) == 1 and pget("pre_level", 0) < 0.001
+    and not ctx.rec_synced
 end
 local function tick_rec_wait()
   if pget("rec", 0) ~= 1 or rec_heard then ctx.rec_waiting = false; return end
@@ -10717,7 +10906,7 @@ function ctx.clear_recording()
   -- disarm first, like the TAPE erase: wiping while armed kept
   -- recording into the freshly cleared buffer, and the rec-stop later built a
   -- window whose first seconds were the erased silence
-  if pget("rec", 0) == 1 then params:set("rec", 0) end
+  if pget("rec", 0) == 1 then ctx.rec_set(0) end
   engine.clear()
   -- the engine's \clear released a held repeat with it. Through ctx: the
   -- local is declared further down, and read from here it would be a global
@@ -11024,7 +11213,7 @@ function ctx.take_undo()
   end
   -- finish a change still being written, so UNDO goes back exactly one.
   -- A pass's stop marks a state itself; regen and erosion are marked here
-  if pget("rec", 0) == 1 then params:set("rec", 0) end
+  if pget("rec", 0) == 1 then ctx.rec_set(0) end
   local writing = pget("regen", 0) > 0 or Mpages.eroding()
   if pget("regen", 0) > 0 then params:set("regen", 0) end
   if Mpages.eroding() then params:set("erode", 0) end
@@ -11068,7 +11257,7 @@ function ctx.focus_take(n)
   n = clamp(math.floor(n + 0.5), 1, NTRACKS)
   if n == FOCUS then return end
   local recording = pget("rec", 0) == 1
-  if recording then params:set("rec", 0) end
+  if recording then ctx.rec_set(0) end
   local t = TAKES[FOCUS]
   t.wave_any, t.take_len = ctx.wave_any, ctx.take_len
   t.undo_cur, t.undo_prev, t.snap_mem = undo_cur, undo_prev, snap_mem
@@ -11086,7 +11275,7 @@ function ctx.focus_take(n)
   -- with no gap, and its part there starts at 0)
   rec_track(n, false)
   buf_track(n)
-  if recording then params:set("rec", 1) end
+  if recording then ctx.rec_set(1) end
 end
 function ctx.focus() return FOCUS end
 
@@ -11129,20 +11318,22 @@ end
 -- performance lays itself across the four tracks. On track 4 it stops.
 local rec_prev_el = 0
 local function tick_rec_end()
-  if pget("rec", 0) ~= 1 or pget("rec_end", 1) ~= 2 or not ctx.rec_arm_phase then
+  -- (an aligned pass loops in its window and never reaches the buffer's end)
+  if pget("rec", 0) ~= 1 or pget("rec_end", 1) ~= 2 or not ctx.rec_arm_phase
+      or ctx.rec_aligned then
     rec_prev_el = 0
     return
   end
   local el = (ctx.rec_phase - ctx.rec_arm_phase) % 1
   if rec_prev_el > 0.9 and el < 0.1 then
     rec_prev_el = 0
-    params:set("rec", 0)
+    ctx.rec_set(0)
     Mdeck.set_pair(WIN[1], WIN[2], 0, 1)    -- the whole 60s is the take
     ctx.take_len = 1
     if FOCUS < NTRACKS then
       local from = FOCUS
       params:set("track_sel", FOCUS + 1)
-      params:set("rec", 1)
+      ctx.rec_set(1)
       -- a refused arm (the next track is the source) keeps its own words
       if pget("rec", 0) == 1 then take_say("TRACK " .. from .. " FULL - REC ON " .. FOCUS) end
     else
@@ -11483,6 +11674,7 @@ local function apply_window_len()
     if ctx.motion and ctx.motion.account then ctx.motion.account(WIN[2]) end
   end
   win_lo, win_hi = pget(WIN[1], 0), pget(WIN[2], 1)
+  ctx.lock_track(FOCUS, b)
 end
 -- each frame: a tempo move, or the start moved while the end did not
 local function sync_window_len()
@@ -11496,6 +11688,88 @@ local function sync_window_len()
     end
   end
   win_lo, win_hi = lo, hi
+end
+
+-- LOCKED TRACKS (the sixty-ninth change, doc/clock-plan.md). A track whose
+-- window the lock (win_beats) or a take on the clock set to whole beats is
+-- locked: ctx.lock[n] holds the beats and the tempo. On a tempo move the
+-- window takes its length again at the new tempo, on every locked track (the
+-- lock above follows the focused one only). A window whose length something
+-- else changed (a hand, a scene, SNAP) is not locked after that. The heads of
+-- the locked tracks restart on the clock (ctx.on_beat).
+ctx.lock = {}
+local function win_of(n)
+  local a, b = tid_n(n, "pos_start"), tid_n(n, "pos_end")
+  local x, y = pget(a, 0), pget(b, 1)
+  return min(x, y), max(x, y), (y >= x) and b or a
+end
+local function beats_len(beats, t) return beats * 60 / t / BUF_SECS end
+function ctx.lock_track(n, beats)
+  local lo, hi = win_of(n)
+  local t = ctx.tempo()
+  if beats >= 1 and math.abs((hi - lo) - beats_len(beats, t)) < 1e-6 then
+    ctx.lock[n] = { beats = beats, tempo = t }
+  else
+    ctx.lock[n] = nil   -- (it did not fit: a start too late for the length)
+  end
+end
+local function sync_locks()
+  local t = ctx.tempo()
+  for n = 1, NTRACKS do
+    local L = ctx.lock[n]
+    if L then
+      local lo, hi, end_id = win_of(n)
+      if math.abs((hi - lo) - beats_len(L.beats, t)) < 1e-6 then
+        L.tempo = t
+      elseif math.abs((hi - lo) - beats_len(L.beats, L.tempo)) < 1e-6 then
+        if math.abs(t - L.tempo) > L.tempo * 0.005 then
+          local want = lo + beats_len(L.beats, t)
+          if want > 1 then
+            ctx.lock[n] = nil
+          else
+            params:set(end_id, want)
+            if ctx.motion and ctx.motion.account then ctx.motion.account(end_id) end
+            L.tempo = t
+          end
+        end
+      else
+        ctx.lock[n] = nil
+      end
+    end
+  end
+end
+
+-- ON EVERY BEAT of the clock (a coroutine in init; the tests call it): a take
+-- that waits for its line arms or stops there, and the locked tracks whose
+-- length is a whole number of beats into this one start again at their
+-- window's start (head_sync, the sixty-seventh change), so they all start
+-- together on the bar and a loop that drifted is put back each time round.
+function ctx.on_beat(b)
+  b = math.floor(b + 0.5)
+  local q = ctx.rec_sync_beats()
+  if q == 0 or b % q == 0 then
+    if ctx.sync_stop then
+      ctx.sync_go = true
+      params:set("rec", 0)
+      ctx.sync_go = false
+    end
+    if ctx.sync_arm then
+      ctx.sync_arm = false
+      ctx.sync_go = true
+      params:set("rec", 1)
+      ctx.sync_go = false
+    end
+  end
+  if pget("loop_sync", 2) ~= 2 or pget("stop_all", 0) == 1 or not engine.head_sync then
+    return
+  end
+  for n = 1, NTRACKS do
+    local L = ctx.lock[n]
+    if L and pget(tid_n(n, "mode"), n == 1 and 5 or 1) ~= 1 then
+      local k = math.floor(L.beats + 0.5)
+      if k >= 1 and b % k == 0 then engine.head_sync(n) end
+    end
+  end
 end
 
 -- BEAT REPEAT (the engine's \four_repeat). Held, it waits for the next
@@ -11730,11 +12004,13 @@ local function init_params()
     if engine.rec then engine.rec(v == 1 and 0 or pget("rec", 0)) end
   end)
 
-  params:add_group("grp_rec", "take - record", 19)
+  params:add_group("grp_rec", "take - record", 21)
   add_eng_binary("rec", "record")
   -- when capture stops, snap the window to the take just recorded so playback
   -- immediately loops what you played — not a 60s window of mostly silence
   params:set_action("rec", function(v)
+    -- (a stop that waits for the clock puts the param back: nothing to do)
+    if ctx.rec_hold then return end
     if v == 1 then
       -- a source that cannot record into this track refuses the arm
       local why = ctx.relay_refusal(FOCUS)
@@ -11759,6 +12035,27 @@ local function init_params()
         params:set("rec", 0)
         return
       end
+      -- A TAKE ON THE CLOCK (the sixty-ninth change, rec_sync): a new take
+      -- waits for the next beat or bar line, and ctx.on_beat arms it there.
+      -- A second press while it waits calls it off. An arm the instrument
+      -- makes itself (ctx.rec_set) does not wait, nor does an overdub.
+      local q = ctx.rec_sync_beats()
+      local new_take = pget("pre_level", 0) < 0.001
+      if q > 0 and new_take and not ctx.sync_go and not ctx.rec_force then
+        local word = ctx.rec_sync_word()
+        if ctx.sync_arm then
+          ctx.sync_arm = false
+          take_say("REC CALLED OFF", "REC called off while it waited for the " .. word)
+        else
+          ctx.sync_arm = true
+          take_say("REC ON " .. word, "REC waits for the next " .. word)
+        end
+        params:set("rec", 0)
+        return
+      end
+      ctx.sync_arm = false
+      ctx.rec_synced = q > 0 and new_take and ctx.sync_go == true
+      ctx.rec_sync_q, ctx.rec_arm_beats = q, ctx.beats()
       -- EACH PART STARTS AT THE START OF ITS OWN BUFFER (C4 of
       -- doc/signature-workflow.md, the forty-ninth change). The write head
       -- is one for the four tracks, and it stopped where a pass ended. The
@@ -11769,12 +12066,32 @@ local function init_params()
       -- the head is, as before. So does a STOP and START inside a pass: the
       -- stop action sends the engine its rec, and never comes through here.
       local fresh = pget("pre_level", 0) < 0.001 and ctx.head_resets()
-      rec_track(FOCUS, fresh)
+      -- AN ALIGNED OVERDUB (the sixty-seventh change, rec_align): it writes
+      -- where the track plays, and loops in its window
+      local aligned = not fresh and ctx.aligns()
+      rec_track(FOCUS, fresh and 1 or (aligned and 2 or 0))
+      ctx.rec_aligned, ctx.rec_arm_frame = aligned, ctx.frame
       if fresh then
         ctx.rec_phase, ctx.rec_reset_at = 0, ctx.frame
       end
       -- the head starts to move now, from the place the script holds
       ctx.rec_poll_time = util.time and util.time() or nil
+    end
+    -- ...and its stop waits for the next line too, so the take is whole
+    -- beats or bars. The param goes back to 1 while it waits, so the page
+    -- still says REC. A second press stops at once.
+    if v == 0 and rec_open and ctx.rec_synced and not ctx.sync_go and not ctx.rec_force then
+      if ctx.sync_stop then
+        ctx.sync_stop = false
+      else
+        ctx.sync_stop = true
+        local word = ctx.rec_sync_word()
+        take_say("STOP ON " .. word, "the take stops at the next " .. word)
+        ctx.rec_hold = true
+        params:set("rec", 1)
+        ctx.rec_hold = false
+        return
+      end
     end
     if engine.rec then
       -- under a STOP everything is halted, capture included: an arm made
@@ -11822,7 +12139,12 @@ local function init_params()
     end
     -- the window writes go through set_pair, widening edge first: a take
     -- laid down past the old window's end used to cross the pair for a moment
-    if rec_wrapped then
+    local aligned = ctx.rec_aligned
+    ctx.rec_aligned = false
+    if aligned then
+      -- an aligned overdub wrote inside the window it plays: the window
+      -- stays as it is (the sixty-seventh change)
+    elseif rec_wrapped then
       -- the pass came round the end of the buffer (LOOP: it is longer than
       -- 60 s, or an overdub began near the end). A window cannot cross the
       -- seam, so the take is the whole buffer.
@@ -11843,6 +12165,22 @@ local function init_params()
       Mdeck.set_pair(WIN[1], WIN[2], 0, 1)
     end
     rec_moved = false
+    -- A TAKE ON THE CLOCK is whole beats or bars from its arm: the window is
+    -- put on that length to the sample, and the track is locked to it (it
+    -- keeps that length on a tempo move, and its head restarts on the line,
+    -- see ctx.on_beat). A pass shorter than one line keeps its own window.
+    ctx.sync_stop = false
+    if ctx.rec_synced and not aligned then
+      local q = ctx.rec_sync_q or 4
+      local units = math.floor((ctx.beats() - (ctx.rec_arm_beats or 0)) / q + 0.02)
+      local a = ctx.rec_arm_phase or 0
+      local want = a + units * q * 60 / ctx.tempo() / BUF_SECS
+      if units >= 1 and want <= 1 then
+        Mdeck.set_pair(WIN[1], WIN[2], a, want)
+        ctx.lock_track(FOCUS, units * q)
+      end
+    end
+    ctx.rec_synced = false
     -- the take bounds what a PSET save writes (the write head runs
     -- 0..pos_end). regen fills the whole buffer, so it forces a full save.
     -- GROW ONLY: this is a high-water mark, and a rec pass overwrites only
@@ -11853,7 +12191,9 @@ local function init_params()
     -- material resets the mark on purpose (clear/load/print), never a punch.
     local bound = pget("regen", 0) > 0 and 1 or pget(WIN[2], 1)
     if bound > (ctx.take_len or 0) then ctx.take_len = bound end
-    apply_window_len()   -- a locked length: the new take is that long
+    if not aligned then
+      apply_window_len()   -- a locked length: the new take is that long
+    end
     ctx.undo_mark()
   end)
   -- START ON SOUND: an arm records at once, and the take starts where the
@@ -11862,6 +12202,14 @@ local function init_params()
   -- (four) what a pass does at the end of its track's 60s: LOOP records
   -- over the start, ONE-SHOT ends the take and records on into the next track
   params:add_option("rec_end", "rec end", { "LOOP", "ONE-SHOT" }, 1)
+  -- WHERE AN OVERDUB WRITES (the sixty-seventh change). ALIGN: at the place
+  -- the track plays, looping in its window, so what you play lands where
+  -- you hear it. FREE: on from the write head, where the last pass stopped
+  -- (four's law before). A new take starts at the buffer's start either way.
+  params:add_option("rec_align", "overdub head", { "FREE", "ALIGN" }, 2)
+  -- A NEW TAKE ON THE CLOCK (the sixty-ninth change): FREE starts and stops
+  -- at the press. BEAT and BAR wait for the next line, both ways.
+  params:add_option("rec_sync", "take on clock", { "FREE", "BEAT", "BAR" }, 1)
   -- RELAY: what a take records from (TAKE K1+E3). A track is that track
   -- after its filter, colour, effects and level, before its sends.
   params:add_option("rec_source", "rec source", SRC_NAMES, 1)
@@ -11923,7 +12271,7 @@ local function init_params()
       return v < 0.05 and "AUTO (window)" or string.format("%.1f s", v)
     end)
 
-  params:add_group("grp_window", "take - window", 5)
+  params:add_group("grp_window", "take - window", 6)
   -- fine_unit: ~10ms nudges on a tight window once fine_delta scales it
   add_eng_control("pos_start", "win start", fine_unit(0.0))
   add_eng_control("pos_end", "win end", fine_unit(1.0))
@@ -11931,6 +12279,9 @@ local function init_params()
   -- length in beats that the start carries with it
   params:add_option("win_beats", "win length", WIN_BEAT_NAMES, 1)
   params:set_action("win_beats", function() apply_window_len() end)
+  -- LOOP SYNC (the sixty-ninth change): the head of a track locked to whole
+  -- beats starts again at its window's start on the clock (ctx.on_beat)
+  params:add_option("loop_sync", "loop sync", { "OFF", "ON" }, 2)
   -- a start that jumps past a locked window's end takes the end with it at
   -- once (see sync_window_len), so the engine never reads a crossed pair
   params:set_action("pos_start", function(v)
@@ -12661,6 +13012,7 @@ function init()
     ctx.idle_dim = ctx.frame - ctx.last_input > FPS * 120
     sync_delay_time()    -- keep a synced delay on the clock (writes when off)
     sync_window_len()    -- ...and a locked window's length, on a tempo move
+    sync_locks()         -- ...and every locked track's (the sixty-ninth change)
     tick_rec_wait()        -- a start-on-sound take begins at the sound
     tick_rec_end()         -- ONE-SHOT: a full track hands on to the next
     -- a REC that waited for the UNDO copy arms once it is written
@@ -12703,6 +13055,20 @@ function init()
   -- the clock (the FREE modulators). The simulator has no util.time, so there
   -- every frame is 1/FPS.
   local now = util.time
+  -- ON EVERY BEAT (the sixty-ninth change). The offscreen norns has no
+  -- clock.sync: its tests call ctx.on_beat themselves.
+  if clock.sync and clock.get_beats then
+    beat_clock = clock.run(function()
+      while true do
+        clock.sync(1)
+        local ok, b = pcall(clock.get_beats)
+        if ok and type(b) == "number" then
+          local fine, err = pcall(ctx.on_beat, b)
+          if not fine then print("four: beat error - " .. tostring(err)) end
+        end
+      end
+    end)
+  end
   redraw_clock = clock.run(function()
     local due = now and now() or 0
     local last = due
@@ -12734,6 +13100,7 @@ end
 function cleanup()
   for _, p in ipairs(polls) do p:stop() end
   if redraw_clock then clock.cancel(redraw_clock) end
+  if beat_clock then clock.cancel(beat_clock) end
   if export_clock then clock.cancel(export_clock) end  -- stop a pending export
   export_clock, export_next = nil, nil
   ctx.cancel_task()     -- ...and a conversion in flight
@@ -12789,6 +13156,17 @@ function enc(n, d)
     elseif id == "@rec_src" and pget("rec", 0) == 1 then
       -- the source of a pass that records cannot change under it
       take_say("SOURCE: STOP REC FIRST", "the take's source changes only between passes")
+    elseif id == "@tempo" then
+      -- the tempo, when the norns's own clock leads (PARAMS > CLOCK >
+      -- source). Another clock sets it: the turn says so and moves nothing.
+      local src = ctx.clock_source()
+      if src ~= "internal" or not params.lookup["clock_tempo"] then
+        ctx.pop_text = "TEMPO: " .. (src == "internal" and "PARAMS"
+          or CLOCK_WORD[src] or string.upper(src))
+        ctx.pop_until = ctx.frame + math.floor(FPS * 0.9)
+      else
+        params:delta("clock_tempo", d)
+      end
     elseif id == "@rec_src" then
       -- the take's source, one step at a time, past the focused track (a
       -- track never records itself)

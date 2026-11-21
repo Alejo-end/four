@@ -58,7 +58,8 @@ def buffers():
 # One build: the five probes and engine.scd in parallel, each in its own folder
 # (run_probe.sh and run_engine.sh write conf.yaml and their log into it).
 JOBS = [('p1', 'probe1.scd'), ('p2', 'probe2.scd'), ('p3', 'probe3.scd'), ('p4', 'probe4.scd'),
-        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('p8', 'probe8.scd'), ('p9', 'probe9.scd'), ('eng', None)]
+        ('p6', 'probe6.scd'), ('p7', 'probe7.scd'), ('p8', 'probe8.scd'), ('p9', 'probe9.scd'),
+        ('p10', 'probe10.scd'), ('eng', None)]
 
 def render(build):
     env = dict(os.environ)
@@ -93,12 +94,12 @@ def check(build):
     print(f"---- {build}: {'the FourStretch plugin from ' + PLUG if build == 'plugin' else 'the stock voices (no plugin)'}", flush=True)
     t = time.time(); runs = render(build)
     print(f"      rendered in {time.time() - t:.0f} s", flush=True)
-    # the engine compiles, with 198 commands and no ERROR, in every run
+    # the engine compiles, with 199 commands and no ERROR, in every run
     for job, (d, rc, o, log) in runs.items():
         c = re.search(r'COMMANDS (\d+)', log)
-        ok = rc == 0 and c and int(c.group(1)) == 198 and 'ERROR' not in log
+        ok = rc == 0 and c and int(c.group(1)) == 199 and 'ERROR' not in log
         say('PASS' if ok else 'FAIL', build, f"{job}: compiles, COMMANDS {c.group(1) if c else '?'}, "
-            f"{'no ERROR' if 'ERROR' not in log else 'ERROR in the log'}, exit {rc} (needs 198, no ERROR)")
+            f"{'no ERROR' if 'ERROR' not in log else 'ERROR in the log'}, exit {rc} (needs 199, no ERROR)")
         if not ok:
             print(o[-1500:]); return
     plug_on = 'FourStretch on' in runs['p1'][3]
@@ -239,14 +240,36 @@ def check(build):
     # The fifty-ninth change (RELAY) adds the take's source: a bus read, two
     # Selects and the round and clip of their index. One io synth: no cost a
     # row can see.
-    target(build, "the UGens of four_io (106, one for the head's trigger, five for the take's source)",
-           num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 112, '', fmt='.0f')
+    # The sixty-seventh change adds one: the Out.ar of the record signal for
+    # \four_dub (an aligned overdub).
+    target(build, "the UGens of four_io (106, one for the head's trigger, five for the take's source, one for the dub)",
+           num(r'^UGENS four_io (\d+)', runs['p8'][3].replace('\r', '')), 113, '', fmt='.0f')
     # A CLEAR WITH REGEN RUNNING (the fiftieth change, gate row 10.8, probe8's
     # _clear). The script stops regen a moment after the clear, and io's write
     # fades out over 10 ms into the pair that was just zeroed. The engine
     # zeroes the pair again when that fade is over.
     target(build, "a clear with regen running leaves nothing in the buffer: frames (were 576, 12 ms)",
            num(r'^CLEAR with regen running: frames left in the buffer (\d+)', a8), 0, '', fmt='.0f')
+
+    # AN ALIGNED OVERDUB AND A HEAD SYNC (the sixty-seventh change, probe10,
+    # doc/clock-plan.md). \four_dub starts where the track's read head is and
+    # loops in its window. io writes nothing for that pass. head_sync sends
+    # the read head to the window's start.
+    a10 = analyse(os.path.join(REV, 'an_probe10.py'), runs['p10'][0], 'p10')
+    target(build, "an aligned overdub writes where the track reads: write minus read 5 ms after the arm",
+           abs(num(r'^WRITE minus READ, 5 ms after the arm: ([-\d.]+)', a10)), 1.5, 'ms')
+    target(build, "...and the pass lies in the buffer where the head read at the arm",
+           abs(num(r'^FIRST pass starts where the head read at the arm: ([-\d.]+)', a10)), 3, 'ms')
+    target(build, "an aligned pass that crosses the window's end goes on at its start",
+           num(r'^SECOND pass after the wrap, at the window.s start: \d+ Hz at ([-\d.]+)', a10), -20, 'dB', low=False)
+    target(build, "...and writes nothing past the window's end",
+           num(r'^PAST the window.s end, 2.02 to 2.4 s: ([-\d.]+)', a10), -100, 'dB')
+    target(build, "io writes nothing for an aligned pass (where io's own head stood)",
+           num(r'^BEFORE the window, 0 to 0.95 s .*: ([-\d.]+)', a10), -100, 'dB')
+    target(build, "head_sync puts the read head at the window's start (ms of travel 5 ms after it)",
+           num(r'^SYNC puts the head at the window.s start: ([-\d.]+)', a10), 5, 'ms')
+    target(build, "the UGens of four_dub (one synth, only while an aligned pass runs)",
+           num(r'^UGENS four_dub (\d+)', runs['p10'][3].replace('\r', '')), 49, '', fmt='.0f')
 
     # A VOICE CHANGE KEEPS ITS SOUND AND ITS PLACE (C2 of the plan, the
     # fifty-first change, probe9). The old drone left in 20 ms at once, and a new

@@ -65,7 +65,7 @@ Engine_Four.new(ctx, { arg eng;
         [\lim, 3.6, 2, [[0, 3.6], [1, 3.6]],
             [[0.0, [\d_recv, def.(\four_io)]],
              [0.001, [\s_new, \limsrc, 1000, 0, 0, \out, 60]],
-             [0.001, [\s_new, \four_io, 1001, 1, 0, \in1, 60, \in2, 61, \out, 0, \buf_l, 0, \buf_r, 1,
+             [0.001, [\s_new, \four_io, 1001, 1, 0, \dub_out, 1000, \in1, 60, \in2, 61, \out, 0, \buf_l, 0, \buf_r, 1,
                 \play_bus, 70, \rec_phase_out, 0, \rec_amp_out, 1, \dry_wet, 0, \level, 1,
                 \lane_bus, 72, \dly_send, 74, \dly_ret, 76, \rev_send, 78, \rev_ret, 80, \t2_ret, 82,
                 \lanes_dly, 84, \lanes_rev, 86, \own_out, 88, \rec_level, 1, \pre_level, 0]],

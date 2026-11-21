@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-20)
+## STATUS (2026-11-21)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -20,16 +20,25 @@ are `/four/...` (lib/mosc.lua and visuals/bridge.js must agree), and the log lin
 with `four:`. The one-track mangler is retired as the git tag `mangler-1`. The GitHub
 repository is `Alejo-end/four` since 2026-11-13, and the old address redirects.
 
-**The fingerprint.** After a RESTART, maiden must read **`count: 198`**. That is
+**The fingerprint.** After a RESTART, maiden must read **`count: 199`**. That is
 mangler's 66 and nine for track 1: crush, the two FX sends, and six effect commands for
-the two slots. Then `dly_rev`, 36 for each of tracks 2 to 4, 12 sends, `rec_track` and
-`buf_track`.
-Older text in this repository says 63, 65, 66, 173, 185 or 197: each was true in its day.
+the two slots. Then `dly_rev`, 36 for each of tracks 2 to 4, 12 sends, `rec_track`,
+`buf_track` and `head_sync` (the sixty-seventh change).
+Older text in this repository says 63, 65, 66, 173, 185, 197 or 198: each was true in its
+day. The device runs 199 since 2026-11-21.
 
 **The instrument.**
 - Four tracks, each with its own material (four 60 s buffers). K1+E1 picks the track.
   A new take starts at the start of its track's buffer (the forty-ninth change), so four
-  parts of up to 60 s each fit. An overdub goes on from where the write head is.
+  parts of up to 60 s each fit. An overdub writes where the track plays and loops in its
+  window (`rec_align` ALIGN, the sixty-seventh change: `\four_dub`), or with FREE goes
+  on from where the write head is. TAKE marks where the next pass writes.
+- THE CLOCK (the sixty-ninth and seventieth changes, doc/clock-plan.md): SCENE shows the
+  tempo and K1+E2 sets it. A track whose window is whole beats (`win_beats`, or a take
+  on the clock, `rec_sync`) is locked: it keeps its length on a tempo move, and its head
+  restarts on the clock (`loop_sync`, `head_sync`). A motion pass in bars counts from
+  the bar line before its first move. K1 held on MIX shows the input's two ways out
+  (MONITOR and DRY/WET).
 - Each track has a voice (OFF GRAIN WARP PV PLAY CLOUD), a window, a filter, COLOR
   (drive, crush), two EFFECT slots in series and its sends to the delay and the reverb.
   The effect types are OFF CHORUS FLANGE WOBBLE RESON RING ECHO, each with an amount and
@@ -170,6 +179,11 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 63rd: a new take waits for the UNDO copy (`REC - KEEPING UNDO`); no double tap of K1 on TRACKS (Lua, test tool) | not checked: the norns left the network | no |
 | 64th: every harness runs with an Exquis: a stand-in in the offscreen norns, three more runs each way in check.lua, stage 20 of the gate, test/device/exquis.py (test tools, documents) | not run there: no Exquis yet | |
 | 65th: the Exquis's numbers are written once: the driver names them and hands them out as `M.EX`, and the stand-in, the tests and the device tools read them (Lua, test tools) | no: deploy and reload before stage 20, whose tools need `grid.EX` | |
+| 66th: the Exquis on the norns for the first time: the driver takes port 1 of its two ports, and the device tool reads an empty answer (Lua, test tools) | yes, 2026-11-21: taken over USB as `Exquis 1`, rows 20.1 to 20.3 pass, 56 of 61 pads seen on channel 16. The buttons, encoders 2 to 4 and the sweep's order are not seen yet | no |
+| 67th: an aligned overdub (`\four_dub`) and `head_sync`, `count: 199` (engine, test tools) | yes, 2026-11-21, `count: 199`, `four: FourStretch on`. probe10 on the norns's scsynth: the write starts 1.33 ms (one block) ahead of the read, 0.0 on the Mac | no |
+| 68th: `rec_align` (ALIGN at the start), TAKE marks where the next pass writes (Lua, test tools) | deployed 2026-11-21: an aligned pass armed (`rec_aligned`), its head stayed in the window, the window stayed | no |
+| 69th: the clock: locked tracks, loop sync, a take on the clock (`rec_sync`), motion on the bar (Lua, test tools) | deployed 2026-11-21: with a lock of 1 bar at 60 BPM the head was at the window's start 50 ms after each of four bars | no |
+| 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | deployed 2026-11-21, loads, not looked at | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -209,8 +223,7 @@ back out (OFF to WOBBLE -4.4 dB, was -15.8; row 19.12 has no hole). Phase B of t
 only, deployed and loaded on the device but not walked. The user asked to merge them on
 2026-11-20, and they are on `main`. Phase D (Relay, C13) is the fifty-ninth change: the user said yes on 2026-11-20, and it is on `main` and on the device, with the sixtieth change (motion from any page, MIDI faders, the control page). Phase E (section 6) is people: its sheets and its tool are ready (doc/walkthrough.md, test/device/session.py), and it waits for a first-time player and the user's set. The
 Exquis driver (47th) and PRESS (52nd) are committed and on `main`, never run with their
-hardware. The tests are ready for an Exquis (64th): when one is on the norns, run
-`exquis.py status`, `sweep` and `watch`, then stage 20. Another session can share this checkout: stage only your own hunks.
+hardware. The Exquis ran on the norns on 2026-11-21 (66th), over USB: the TRS jack cannot carry the driver. Rows 20.4 to 20.10 are open. Another session can share this checkout: stage only your own hunks.
 
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
@@ -226,7 +239,8 @@ judgement, the first on four as a whole. The item-by-item session of doc/plan.md
 has not taken place, and the shipped presets have never been heard. The earlier judgement
 is the user's on FourStretch, above.
 
-**The walkthrough.** doc/device-gate.md, stages 0 to 20, top to bottom. Stage 20 is the
+**The walkthrough.** doc/device-gate.md, stages 0 to 21, top to bottom. Stage 21 is the
+clock, the record head and the input (the user's notes of 2026-11-21), by hand. Stage 20 is the
 Exquis: it needs one on the norns and has never run. Stage 19 is four's own work. It has not
 passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 `test/device/gate.py` ran it at `count: 66` with no ears, which is NOT a pass
@@ -250,17 +264,19 @@ changes). No run with the `/four/` addresses is on record.
 merged into `main` on 2026-10-23. mangler2 then forked from mangler and became four.
 doc/changelog.md holds that history.
 
-**Next work:** doc/plan.md.
+**Next work:** doc/plan.md, and doc/clock-plan.md (the user's notes of 2026-11-21, deployed: stage 21 by ear is next).
 
 **Engine deploy ritual (every time the .sc changes, no exceptions):**
 1. replace the file, and check it on disk with a REPL grep
 2. SYSTEM > RESTART (sclang only recompiles at startup; a script reload is NOT enough)
-3. load the script and check `Engine.register_commands; count: 198` in maiden. A wrong
+3. load the script and check `Engine.register_commands; count: 199` in maiden. A wrong
    count means an old engine is still live. An arity change on an existing command does
    NOT move the count. test/test_control.lua parses the command set and fails if the
-   source no longer adds up to 198. `rec_track` took a second argument in the
+   source no longer adds up to 199. `rec_track` took a second argument in the
    forty-ninth change and a third (the take's source) in the fifty-ninth: the script
    reads `engine.commands.rec_track.fmt` (`iii`) and says so when the engine is older.
+   Its second argument 2 (an aligned overdub, the sixty-seventh change) is sent only to
+   an engine that has `head_sync`: an older one reads 2 as a new take.
 
 Lua-only changes skip all this: save and reload the script.
 
@@ -483,6 +499,14 @@ Each line was learned the hard way; the change log has the story.
   that material (RESON was 7 dB under OFF on an off-note tone). Cross at equal power, or
   keep the dry sound whole up to the middle. Measure the level of every effect against
   OFF at the amount it starts with (gate row 19.11, probe7).
+- A buffer writer that stays parked still writes: BufWr at a head that does not move
+  writes back what it read, and that can put one old sample back into a clear or a file
+  that loads (both run outside the audio thread). An extra writer lives only while it
+  writes (`\four_dub` frees itself 10 ms after its rec falls).
+- Silencing a writer with its levels is not silence when the levels are lagged: io's
+  rec_level and pre_level have 10 ms lags, and a pass handed to `\four_dub` that way
+  printed itself at -66 dB where io's head stood (probe10). Shut the gate itself: io's
+  rec stays 0 while a pass is aligned (`ioGate`).
 - A write that fades out outlives the command that stopped it. io's rec and regen
   gates ramp over 10 ms, so a buffer zeroed while one of them runs is written to after
   the zero. The engine's `clear` zeroes again 60 ms later, behind a counter that a file,

@@ -14,6 +14,10 @@ loop of play (record four parts, bend them, keep the sound, fade back to it). It
 gate rows 19.12 and 19.27 (its changes C1 and C5), and it uses Phase 2 and Phase 4 below
 as its gates. This plan stays the order of work for everything else.
 
+Since 2026-11-21 doc/clock-plan.md holds the user's notes of that day (the clock, the
+record head, the input), built as the sixty-seventh to the seventieth change. Their next
+step is the deploy, the RESTART (`count: 199`) and stage 21 of doc/device-gate.md.
+
 ## Where the project stands
 
 The STATUS block of CLAUDE.md is the one record of the device: what is on it, the

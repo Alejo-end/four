@@ -20,7 +20,7 @@
 // pair the buffer commands use. THE EFFECT: every track has two effect slots
 // in series after its COLOR (`effect` and `effect2` pick OFF, CHORUS, FLANGE,
 // WOBBLE, RESON, RING or ECHO; `_amt` and `_rate` are each slot's knobs).
-// Count: 198 (CLAUDE.md has the sum; test/test_control.lua checks it).
+// Count: 199 (CLAUDE.md has the sum; test/test_control.lua checks it).
 //
 // HARD RULE: exactly one `Engine_Four` class under dust/code (and mangler's `Engine_Mangler` is a different class). A duplicate
 // hangs every norns script forever on "LOADING".
@@ -57,6 +57,12 @@ Engine_Four : CroneEngine {
     // recPass counts the passes that began at the start of their buffer
     // (rec_track's second argument). io's write head goes to 0 when it steps.
     var <recPass = 0;
+    // AN ALIGNED OVERDUB (rec_track's second argument 2, the sixty-seventh
+    // change): dubOn says the passes go to \four_dub, which starts at the
+    // track's read head and loops in its window. dubSynth lives only while a
+    // pass runs. dubBus carries io's record signal to it, and dubVals holds
+    // the knobs it takes when it is made.
+    var dubOn = false, dubSynth, dubBus, dubVals;
     // bufGen counts, for each pair, the commands that put material in it or
     // cleared it. A clear zeroes the pair again a moment later (clearWait),
     // and only if nothing else came to that pair since.
@@ -335,6 +341,48 @@ Engine_Four : CroneEngine {
             // cutoff, resonance, and the out synth's level, fx_dly, fx_rev
             { this.gset(lane[\group], name, v, t) }
         );
+    }
+
+    // track i (0 to 3): its drone values, and the bus its read head writes
+    trackParams { arg i; ^(i == 0).if({ playParams }, { extra[i - 1][\params] }) }
+    trackPhase { arg i; ^(i == 0).if({ phaseBus }, { extra[i - 1][\phase] }) }
+
+    // AN ALIGNED OVERDUB: \four_dub runs while `rec` is up and the passes
+    // are aligned (rec_track 2). A rec that falls releases it, and it frees
+    // itself 10 ms later. A STOP sends rec 0 and START rec 1, so START makes
+    // a new one, at the read head.
+    updateDub { arg rec;
+        var p;
+        (dubOn and: { rec > 0 }).if({
+            dubSynth.isNil.if({
+                p = this.trackParams(recIdx);
+                dubSynth = Synth.new(\four_dub, [
+                    \buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx],
+                    \src_bus, dubBus, \from_bus, this.trackPhase(recIdx),
+                    \rec_phase_out, recPhaseBus,
+                    \pos_start, p[\pos_start] ? 0, \pos_end, p[\pos_end] ? 1,
+                ] ++ dubVals.getPairs, ioSynth, \addAfter);
+            });
+        }, {
+            dubSynth.notNil.if({ dubSynth.set(\rec, 0); dubSynth = nil });
+        });
+    }
+
+    // io's two writes, rec and regen. While the passes are aligned io's rec
+    // stays 0, so io writes nothing for a pass and \four_dub writes it. A
+    // pass always holds regen (io's regenRun has (1 - rec)), so regen is 0
+    // in io while an aligned pass runs. (A first version kept io's rec up
+    // with rec_level 0 and pre_level 1: their 10 ms lags printed the pass
+    // at -66 dB where io's head stood, probe10.)
+    ioGate {
+        var rec = dubVals[\rec], regen = dubVals[\regen];
+        ioSynth.set(\rec, dubOn.if({ 0 }, { rec }),
+            \regen, (dubOn and: { rec > 0 }).if({ 0 }, { regen }));
+    }
+
+    // a window edge of track i moved: the aligned overdub follows it
+    dubWindow { arg i, name, v;
+        (dubSynth.notNil and: { i == recIdx }).if({ dubSynth.set(name, v) });
     }
 
     setModeN { arg tr, i;
@@ -704,6 +752,8 @@ Engine_Four : CroneEngine {
         var bufSecs = 60;
 
         bufGen = Array.fill(4, 0);
+        dubVals = Dictionary[\rec_level -> 1.0, \pre_level -> 0.0, \freeze -> 0,
+            \rec -> 0, \regen -> 0.0];
         leaving = Array.newClear(4);
         leaveGen = Array.fill(4, 0);
         modeGen = Array.fill(4, 0);
@@ -741,6 +791,7 @@ Engine_Four : CroneEngine {
         outBuses = Array.fill(4, { Bus.audio(s, 2) });
         recPhaseBus = Bus.control(s, 1);
         recAmpBus = Bus.control(s, 1);
+        dubBus = Bus.audio(s, 2);
         // the beat repeat's three capture buffers: 2s of stereo each (a half
         // note down to 60 BPM), allocated once, never per repeat (2.3 MB)
         repBufs = Array.fill(3, { Buffer.alloc(s, (s.sampleRate * 2).asInteger, 2) });
@@ -907,7 +958,7 @@ Engine_Four : CroneEngine {
         // 0 in the bundle of the spawn starts it at 0, because a synth's
         // UGens are built at its first block, after the whole bundle.
         winRead = { arg pos_start, pos_end, scan, buf, phase_out, pitchMul = 1, run = 1, quiet = 0,
-                hfrom = 0, hlead = 0, hspan = 1, scan_t = 0.02, run_t = 0.02;
+                hfrom = 0, hlead = 0, hspan = 1, scan_t = 0.02, run_t = 0.02, sync = 0;
             var lo, span, frames, loF, spanF, rate, whole, frac, phase, winPos;
             #lo, span = winBounds.(pos_start, pos_end);
             // THE HEAD COUNTS IN FRAMES, in two parts. It was one float from
@@ -925,9 +976,14 @@ Engine_Four : CroneEngine {
             spanF = (span * frames).round.max(64);
             rate = gl.(scan, scan_t) * pitchMul * (gl.(run, run_t) > 0.001)
                 * BufRateScale.kr(buf);
-            whole = Phasor.ar(0, rate,
+            // HEAD SYNC (the sixty-seventh change): `sync` going above 0
+            // sends the head to the window's start. head_sync sets it to 1
+            // and back to 0 20 ms later. A plain control (never t_, see
+            // CLAUDE.md), straight into the Phasors: no UGen more. A drone
+            // is born with 0, so it does not jump at its start.
+            whole = Phasor.ar(sync, rate,
                 Trig.kr(((In.kr(phase_out) * hfrom) + hlead).round % hspan, 0), spanF);
-            frac = Phasor.ar(0, rate, 0, 1);
+            frac = Phasor.ar(sync, rate, 0, 1);
             phase = (whole / spanF).clip(0, 1);
             winPos = lo + (phase * span);
             Out.kr(phase_out, A2K.kr(winPos) * (1 - quiet));
@@ -1035,13 +1091,13 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
             var winPos, phase, span, lo, look, bufDur, trig, dur, pch, readLen;
             var off, pos, r, wid, panL, panR, envSel, comp, sig;
             #winPos, phase, span = winRead.(pos_start, pos_end, scan * (1 - pv_freeze),
-                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             lo = winPos - (phase * span);
             bufDur = BufDur.kr(buf_l);
             // while recording, read a quarter second behind the record head
@@ -1107,11 +1163,11 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
             var winPos, phase, span, idx, frac, ptr, l, r, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             stretchOn.if({
                 // bufL, bufR, the head in frames, pitch, window in frames,
                 // overlaps, rand (positional: see the MiClouds call)
@@ -1138,7 +1194,7 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
             var winPos, phase, span, idx, frac, sigL, sigR, chainL, chainR, l, r, sig, edge;
@@ -1146,7 +1202,7 @@ Engine_Four : CroneEngine {
             // vocoder sustains what is under it; pitch is its own knob
             #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end,
                 stretchOn.if({ scan * (1 - pv_freeze) }, { scan }),
-                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
+                buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             // cubic interp like every other read path — PV magnifies linear-
             // interp images: MagFreeze sustains whatever aliasing lands in the FFT
             // the seam fade before the FFT: a wrap click fed to MagFreeze
@@ -1187,11 +1243,11 @@ Engine_Four : CroneEngine {
                 clouds_lofi = 0,
                 warp_window = 0.25, warp_overlaps = 4, warp_rand = 0, pv_freeze = 0,
                 erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
             var winPos, phase, span, idx, frac, sigL, sigR, edge, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, gl.(pitch, pitch_t), level, handover, hfrom, hlead, hspan, scan_t, level_t);
+            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, gl.(pitch, pitch_t), level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             stretchOn.if({
                 // a windowed sinc in place of the cubic: nothing folds above
                 // pitch 1 and the images sit below -70dB. On a whole frame
@@ -1278,11 +1334,11 @@ Engine_Four : CroneEngine {
                     clouds_mode = 0, clouds_lofi = 0,
                     warp_window = 0.25, warp_overlaps = 4, warp_rand = 0,
                     pv_freeze = 0, erode = 0, wear = 0.5, level = 1, gate = 1, handover = 0,
-                hfrom = 0, hlead = 0, hspan = 1, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
+                hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
                 var winPos, phase, span, idx, frac, srcL, srcR, sig, dens, edge;
-                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t);
+                #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
                 // Clouds' density is silent at 0.5: below it grains are
                 // random, above it periodic. Mapping 1..200 across 0.5 made
                 // density 13 to 16 silent and the default 20 about 20 dB
@@ -1743,6 +1799,9 @@ Engine_Four : CroneEngine {
                 // 2 the bus `src_bus` (track 2, 3 or 4 after its lane), 3 the
                 // mix before the limiter. rec_track sets both.
                 rec_src = 0, src_bus = 0,
+                // an aligned overdub: \four_dub writes the pass from here,
+                // and io's own rec stays 0 (ioGate)
+                dub_out = 0,
                 // the glide times of io's own knobs (gl)
                 level_t = 0.02, dry_wet_t = 0.02, delay_mix_t = 0.02, rev_mix_t = 0.02,
                 fx_dly_t = 0.02, fx_rev_t = 0.02, dly_rev_t = 0.02;
@@ -1875,7 +1934,53 @@ Engine_Four : CroneEngine {
             RecordBuf.ar(srcR, buf_r, 0, recLvl, preLvl, runW, 1, newPass);
             Out.kr(rec_amp_out,
                 Amplitude.kr(recL.abs.max(recR.abs) * rec_level, 0.01, 0.1));
+            // the record signal, for \four_dub (an aligned overdub)
+            Out.ar(dub_out, [srcL, srcR]);
             Out.ar(out, sig);
+        }).add;
+
+        // ---- AN ALIGNED OVERDUB (the sixty-seventh change). io's write head
+        // is one for the four tracks, and an overdub went on from where the
+        // last pass stopped: not where the track plays. This synth writes the
+        // pass instead of io (io's `dub` holds its own write shut). It starts
+        // where the track's read head is and loops inside the track's window,
+        // on the read head's own law: winBounds, whole frames, and the place
+        // for the first block only (Trig.kr, as winRead does). The head reads
+        // the phase bus on the server at its first block: what sclang reads
+        // is already old (CLAUDE.md, the lessons). The bus holds where the
+        // drone was one block ago, so the write starts one block ahead.
+        // It lives only while `rec` is up and frees itself 10 ms after it
+        // falls: a writer that stays parked writes back what it read, and that
+        // can put one old sample back into a clear or a file that loads.
+        // At speed 1 in PLAY the two heads stay together. Another speed or
+        // voice reads at its own pace, and the write goes on at speed 1.
+        SynthDef(\four_dub, {
+            arg buf_l, buf_r, src_bus, from_bus, rec_phase_out,
+                pos_start = 0, pos_end = 1, rec = 1, freeze = 0,
+                rec_level = 1.0, pre_level = 0.0;
+            var lo, span, frames, loF, spanF, env, fz, w, run, whole, idx, src;
+            var oldL, oldR, recLvl, preLvl;
+            #lo, span = winBounds.(pos_start, pos_end);
+            frames = BufFrames.kr(buf_l);
+            loF = (lo * frames).round;
+            spanF = (span * frames).round.max(64);
+            // 10 ms in and out, straight, like io's rec gate
+            env = EnvGen.ar(Env([0, 1, 0], [0.01, 0.01], 0, 1), rec, doneAction: 2);
+            fz = Slew.ar(K2A.ar(1 - freeze), 100, 100);
+            w = env * fz;
+            run = w > 0;
+            whole = Phasor.ar(0, run,
+                Trig.kr((((In.kr(from_bus) * frames).round + BlockSize.ir) - loF) % spanF, 0),
+                spanF);
+            idx = loF + whole;
+            src = In.ar(src_bus, 2);
+            recLvl = Lag.kr(rec_level, 0.01) * w;
+            preLvl = 1 - (w * (1 - Lag.kr(pre_level, 0.01)));
+            oldL = BufRd.ar(1, buf_l, idx, 1, 1);
+            oldR = BufRd.ar(1, buf_r, idx, 1, 1);
+            BufWr.ar((src[0] * recLvl) + (oldL * preLvl), buf_l, idx, 1);
+            BufWr.ar((src[1] * recLvl) + (oldR * preLvl), buf_r, idx, 1);
+            ReplaceOut.kr(rec_phase_out, A2K.kr(idx / frames));
         }).add;
 
         // ---- BEAT REPEAT, in its own spawn/release synth (updateRepeat).
@@ -2079,6 +2184,7 @@ Engine_Four : CroneEngine {
             \play_bus, playBus,
             \rec_phase_out, recPhaseBus,
             \rec_amp_out, recAmpBus,
+            \dub_out, dubBus,
             \rev_send, revSendBus,
             \rev_ret, revRetBus,
             \dly_send, dlySendBus,
@@ -2099,7 +2205,14 @@ Engine_Four : CroneEngine {
             this.addCommand(name, "f", { arg msg;
                 var v = msg[1], t = this.glideT(name);
                 ioKeys.includes(name).if({
-                    this.gset(ioSynth, name, v, t);
+                    // (rec and regen reach io through ioGate: an aligned pass
+                    // is not io's)
+                    ((name == \rec) or: { name == \regen }).if({
+                        dubVals[name] = v;
+                        this.ioGate;
+                    }, {
+                        this.gset(ioSynth, name, v, t);
+                    });
                     // track 1's lane takes its own (the names io also has,
                     // level, fx_dly and fx_rev, are io's alone)
                     [\level, \fx_dly, \fx_rev].includes(name).not.if({
@@ -2127,6 +2240,15 @@ Engine_Four : CroneEngine {
                         eroSynth.set(name, v);
                     });
                 });
+                // the aligned overdub's knobs, its life and track 1's window
+                dubVals.includesKey(name).if({
+                    dubVals[name] = v;
+                    dubSynth.notNil.if({ dubSynth.set(name, v) });
+                });
+                (name == \rec).if({ this.updateDub(v) });
+                ((name == \pos_start) or: { name == \pos_end }).if({
+                    this.dubWindow(0, name, v);
+                });
                 (name == \erode).if({ this.updateErode });
                 ((name == \delay_mix) or: { name == \delay_fb }).if({
                     this.updateDelay;
@@ -2149,12 +2271,22 @@ Engine_Four : CroneEngine {
         // The third argument, since the fifty-ninth change ("iii"), is the
         // take's SOURCE (RELAY): 0 the line input, 1 to 4 a track after its
         // lane, 5 the mix. io's rec_src and src_bus follow it.
+        // The second argument 2 (the sixty-seventh change) is an ALIGNED
+        // overdub: the passes go to \four_dub (updateDub), which starts at
+        // the track's read head and loops in its window. An older engine
+        // reads 2 as 1, so the script sends 2 only to an engine that has
+        // head_sync, the command that came with it.
         this.addCommand(\rec_track, "iii", { arg msg;
             var src = (msg[3] ? 0).asInteger.clip(0, 5);
+            var how = (msg[2] ? 0).asInteger;
             recIdx = msg[1].asInteger.clip(0, 3);
             ioSynth.set(\rec_src, [0, 1, 2, 2, 2, 3].at(src),
                 \src_bus, ((src >= 2) and: { src <= 4 }).if({ outBuses[src - 1].index }, { 0 }));
-            ((msg[2] ? 0) > 0).if({
+            // (a pass that still runs ends here: the next one is set up)
+            this.updateDub(0);
+            dubOn = how == 2;
+            this.ioGate;
+            (how == 1).if({
                 recPass = recPass + 1;
                 bufGen[recIdx] = bufGen[recIdx] + 1;   // a new take: see clearWait
                 ioSynth.set(\buf_l, bufLs[recIdx], \buf_r, bufRs[recIdx], \rec_pass, recPass);
@@ -2164,6 +2296,22 @@ Engine_Four : CroneEngine {
         });
         this.addCommand(\buf_track, "i", { arg msg;
             opIdx = msg[1].asInteger.clip(0, 3);
+        });
+        // HEAD SYNC (the sixty-seventh change): track 1 to 4's read head goes
+        // to its window's start. The script sends it on the clock, so the
+        // loops of the locked tracks start together (doc/clock-plan.md).
+        this.addCommand(\head_sync, "i", { arg msg;
+            var i = (msg[1].asInteger - 1).clip(0, 3);
+            var now = { (i == 0).if({ playSynth }, { extra[i - 1][\synth] }) };
+            var syn = now.value;
+            syn.notNil.if({
+                syn.set(\sync, 1);
+                // back to 0 for the next one, on the drone that is still there
+                SystemClock.sched(0.02, {
+                    (now.value === syn).if({ syn.set(\sync, 0) });
+                    nil
+                });
+            });
         });
 
         // ---- tracks 2 to 4: `t<n>_<drone arg>` for each of its drone
@@ -2176,6 +2324,9 @@ Engine_Four : CroneEngine {
                     var t = this.glideT(cmd);
                     tr[\params][k] = msg[1];
                     tr[\synth].notNil.if({ this.gset(tr[\synth], k, msg[1], t) });
+                    ((k == \pos_start) or: { k == \pos_end }).if({
+                        this.dubWindow(tr[\n] - 1, k, msg[1]);
+                    });
                 });
             });
             stripKeys.do({ arg k;
@@ -2382,6 +2533,7 @@ Engine_Four : CroneEngine {
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });
         repSynth.notNil.if({ repSynth.free });
+        dubSynth.notNil.if({ dubSynth.free });
         repBufs.notNil.if({ repBufs.do({ arg b; b.free }) });
         ioSynth.free;
         playGroup.free;
@@ -2403,5 +2555,6 @@ Engine_Four : CroneEngine {
         lanes.notNil.if({ lanes.do({ arg l; l.notNil.if({ l[\sBus].free; l[\pBus].free }) }) });
         recPhaseBus.free;
         recAmpBus.free;
+        dubBus.notNil.if({ dubBus.free });
     }
 }

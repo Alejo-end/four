@@ -133,7 +133,8 @@ local MOTION_EXCLUDE = {
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",
-  "rec_wait", "rec_thresh", "rec_end", "rec_source",
+  "rec_wait", "rec_thresh", "rec_end", "rec_source", "rec_align", "rec_sync",
+  "loop_sync",
   "take_undo", "undo_keep",
   "clear_rec", "sample_file", "export_take", "take_tighten", "print_take",
   "t2_file", "t3_file", "t4_file",   -- four: each track's own material
@@ -238,6 +239,27 @@ local function wipe()
   M.loop_len = 0
   M.rec_len = 0
   M.playhead = 0
+  M.sync_origin = nil
+end
+
+-- MOTION ON THE CLOCK (the sixty-ninth change, doc/clock-plan.md). A first
+-- pass with PASS in bars counts from the bar line before its first move, so a
+-- move keeps its place in the bar, and the loop closes on the bar. While it
+-- plays at its own length (motion_len AUTO), each loop's start is put back on
+-- the clock: M.sync_origin is the beat of that first bar line.
+local function frames_per_beat()
+  return 60 / ((C.tempo and C.tempo()) or 120) * FPS
+end
+-- where the playhead is by the clock: frames since the origin, in the loop.
+-- `full` for a start (play, an overdub's arm): the whole place. At a wrap
+-- only a nudge of a few frames: a loop whose length no longer is the clock's
+-- (a tempo move) is left to run rather than jump.
+local function clock_playhead(full)
+  if not (M.sync_origin and C.beats and M.loop_len > 0) then return nil end
+  if pget("motion_len", 0) > 0 then return nil end
+  local f = floor((C.beats() - M.sync_origin) * frames_per_beat() + 0.5) % M.loop_len
+  if full or f <= 3 then return f end
+  return 0
 end
 
 -- motion_bars: a first pass's length on the clock, in frames, or nil (FREE)
@@ -326,7 +348,16 @@ local function capture_poll(offset)
           L.v[L.n] = v
         end
         moved_at[id] = C.frame
-        if M.loop_len == 0 and first_at == nil then first_at = offset end
+        if M.loop_len == 0 and first_at == nil then
+          first_at = offset
+          -- a pass on the clock starts at the bar line before this move
+          if M.pass_frames() and C.beats then
+            local b = C.beats()
+            local into = b % 4
+            first_at = offset - floor(into * frames_per_beat() + 0.5)
+            M.sync_origin = b - into
+          end
+        end
       end
       last_val[id] = v
     end
@@ -354,9 +385,11 @@ function M.set_armed(on)
     if M.loop_len == 0 then
       rec_start_frame = C.frame                 -- first pass: start the clock
       first_at = nil                            -- ...which counts from the first move
+      M.sync_origin = nil
     else
       -- overdub: replay the existing loop from the top while we punch in
-      M.playhead = 0
+      -- (a loop on the clock: from where the clock is in it)
+      M.playhead = clock_playhead(true) or 0
       reset_cursors()
       if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
     end
@@ -366,7 +399,9 @@ function M.set_armed(on)
       -- motion_len (>0) sets the PLAYBACK length, 0 = AUTO (= natural).
       local elapsed = C.frame - rec_start_frame
       -- the pass starts at its first move: the wait before it goes
-      if first_at and first_at > 0 then
+      -- (a pass on the clock starts at a bar line, which can be before the
+      -- arm: then first_at is below 0 and the moves go later)
+      if first_at and first_at ~= 0 then
         local ids = M.lane_ids
         for i = 1, #ids do
           local L = M.lanes[ids[i]]
@@ -380,7 +415,7 @@ function M.set_armed(on)
         -- a pass on the clock is exactly its length
         M.rec_len = bars
         M.loop_len = bars
-        M.playhead = 0
+        M.playhead = clock_playhead(true) or 0
         reset_cursors()
         if pget("motion_play", 0) ~= 1 then params:set("motion_play", 1) end
         print(string.format("four: MOTION loop of %.2fs, on the clock", bars / FPS))
@@ -417,7 +452,7 @@ end
 
 function M.set_playing(on)
   if on and M.loop_len > 0 then
-    M.playhead = 0
+    M.playhead = clock_playhead(true) or 0
     reset_cursors()
   end
 end
@@ -526,7 +561,7 @@ function M.tick()
   if pget("motion_play", 0) == 1 and M.loop_len > 0 then
     M.playhead = M.playhead + 1
     if M.playhead >= M.loop_len then
-      M.playhead = 0
+      M.playhead = clock_playhead() or 0    -- (on the clock: back on the bar)
       reset_cursors()
       -- an overdub stays armed loop after loop. Each loop is a new pass: the
       -- first move of a lane in it replaces that lane, so its events stay
