@@ -199,14 +199,56 @@ inline void irfft(const float* re, const float* im, float* x, float* zr, float* 
 
 #endif
 
+// A buffer, and the LOOP that PV and WARP read in it (setLoop). Their frames and
+// grains reach past the head, so near the loop's point they read what lies
+// outside the window: silence, before and after a take. The level fell by 27 dB
+// there. Inside a loop a read past the end goes on at the start, and the other
+// way round. The splice itself is smoothed: half of its step is added on each
+// side and dies over SEAM frames, so there is no click, no hole, and the loop
+// keeps its length.
 struct Buf {
     const float* data;   // mono
     int frames;
+    pos_t lo = 0, span = 0;             // span 0: no loop, the whole buffer wraps
+    pos_t safeLo = 0, safeHi = -1;      // a plain read from here to there (-1: frames)
+    int seam = 0;
+    float half = 0.f;                   // half of the step at the splice
+    static const int SEAM = 240;
+
+    void setLoop(pos_t lo_, pos_t span_) {
+        if (frames <= 0) return;
+        if (lo_ < 0) lo_ = 0;
+        if (lo_ > frames - 1) lo_ = frames - 1;
+        if (span_ > frames - lo_) span_ = frames - lo_;
+        if (span_ < 64) return;
+        lo = lo_; span = span_;
+        seam = span / 4 < SEAM ? (int)(span / 4) : SEAM;
+        half = 0.5f * (data[lo] - data[lo + span - 1]);
+        safeLo = lo + seam; safeHi = lo + span - seam;
+    }
+    inline pos_t hi() const { return safeHi < 0 ? frames : safeHi; }
+    inline bool plain(pos_t from, pos_t to) const { return from >= safeLo && to <= hi(); }
     inline float at(pos_t i) const {
-        if (i >= 0 && i < frames) return data[i];     // the usual case, with no division
+        if (i >= safeLo && i < hi()) return data[i];  // the usual case, with no division
         if (frames <= 0) return 0.f;
-        i %= frames; if (i < 0) i += frames;
-        return data[i];
+        if (span <= 0) {
+            i %= frames; if (i < 0) i += frames;
+            return data[i];
+        }
+        pos_t k = (i - lo) % span; if (k < 0) k += span;
+        float v = data[lo + k];
+        if (k < seam) v -= half * fall((float)k / seam);
+        else if (k >= span - seam) v += half * fall((float)(span - 1 - k) / seam);
+        return v;
+    }
+    static inline float fall(float u) { return (1.f - u) * (1.f - u) * (1.f + 2.f * u); }
+    // the shortest way from a to b, round the loop
+    inline pos_t way(pos_t a, pos_t b) const {
+        pos_t d = b - a;
+        if (span <= 0) return d;
+        d %= span;
+        if (d < 0) d += span;
+        return d > span / 2 ? d - span : d;
     }
 };
 
@@ -418,7 +460,7 @@ struct PV {
     void readFrame(const Buf& b, pos_t end, float* re, bool add) {
         const float* w = tables().win;
         pos_t s = end - N;
-        if (b.frames > 0 && s >= 0 && s + N <= b.frames) {
+        if (b.frames > 0 && b.plain(s, end)) {
             const float* d = b.data + s;
             if (add) for (int i = 0; i < N; i++) re[i] += d[i] * w[i];
             else for (int i = 0; i < N; i++) re[i] = d[i] * w[i];
@@ -584,12 +626,17 @@ struct PV {
 //   * So at speed 1 every grain continues the last, and the output is the
 //     take, sample for sample. At other speeds the grains meet in phase.
 //   * Both channels share every start, so the stereo image is the take's.
+//   * A grain that reaches the loop's end goes on inside the loop. A grain that
+//     continues the last one goes on at the start (so speed 1 stays exact). Any
+//     other crosses at a moment of its own, next to grains that did not cross
+//     yet, and a tone cancels in that overlap. So it goes on `skip` frames past
+//     the start, where the wave looks most like the loop's end.
 struct Warp {
     static const int MAXG = 10;
     static const int REACH = 480;        // 10 ms each way
     static const int TPL = 512;          // the template, in frames
     static const int DEC = 4;
-    struct Grain { pos_t q; int i; int len; float step; bool on; };   // step: window table places per sample
+    struct Grain { pos_t q; int i; int len; float step; bool on; pos_t skip; };   // step: window table places per sample
     Grain g[MAXG];
     int toNext;
     pos_t cont; bool hasCont;
@@ -597,6 +644,8 @@ struct Warp {
     Resampler rs;
     uint32_t seed;
     float lastCorr;
+    pos_t skipLo, skipSpan, skip;        // the place, for the loop it was found in
+    static const int XF = 240;           // the crossing, in frames
     float seg[(2 * REACH + TPL) / DEC + 4], tpl[TPL / DEC + 4];
 
     void init() { std::memset(this, 0, sizeof(Warp)); seed = 2463534242u; }
@@ -637,6 +686,31 @@ struct Warp {
         return fine;
     }
 
+    // where a grain goes on past the loop's end, in frames from its start (0:
+    // the start itself, in a loop too short to search)
+    pos_t skipOf(const Buf& bl, const Buf& br) {
+        if (bl.span < 4 * (2 * REACH + TPL)) return 0;
+        if (bl.lo != skipLo || bl.span != skipSpan) {
+            skipLo = bl.lo; skipSpan = bl.span;
+            pos_t q = search(bl, br, bl.lo + REACH, bl.lo + bl.span - TPL);
+            skip = q + TPL - bl.lo;
+            if (skip < TPL) skip = TPL;
+        }
+        return skip;
+    }
+    // a place past the loop's end, for a grain that skips
+    static inline pos_t past(const Buf& b, pos_t p, pos_t sk) {
+        return (sk > 0 && p >= b.lo + b.span) ? p - b.span + sk : p;
+    }
+    inline float grainAt(const Buf& b, pos_t p, pos_t sk) {
+        const pos_t end = b.lo + b.span;
+        if (p < b.lo || p >= end + b.span - sk || end > b.frames) return b.at(p);
+        if (p >= end) return b.data[p - b.span + sk];
+        if (p < end - XF) return b.data[p];
+        const float u = (float)(p - (end - XF)) * (1.f / XF);
+        return b.data[p] + u * (b.data[p - b.span + sk] - b.data[p]);
+    }
+
     // one sample at pitch 1
     inline void tick(float headF, float windowFrames, float overlaps, float rand,
                      const Buf& bl, const Buf& br, float& outL, float& outR) {
@@ -647,15 +721,22 @@ struct Warp {
             int len = hop * k;
             pos_t head = (pos_t)std::llrint(headF);
             if (rand > 0) head += (pos_t)std::floor(rnd() * rand * len);
-            pos_t q;
-            if (hasCont && std::llabs(cont - head) <= REACH) q = cont;
-            else if (hasCont) q = search(bl, br, head, cont);
-            else q = head;
+            pos_t q, sk = 0;
+            // how far the last grain's continuation is, round the loop's point
+            const pos_t ahead = bl.way(head, cont);
+            if (hasCont && std::llabs(ahead) <= REACH) q = head + ahead;
+            else {
+                q = hasCont ? search(bl, br, head, cont) : head;
+                if (bl.span > 0) {
+                    q = bl.lo + ((q - bl.lo) % bl.span + bl.span) % bl.span;
+                    if (q + len > bl.lo + bl.span) sk = skipOf(bl, br);
+                }
+            }
             for (int j = 0; j < MAXG; j++) if (!g[j].on) {
-                g[j].q = q; g[j].i = 0; g[j].len = len; g[j].step = (float)N / len; g[j].on = true;
+                g[j].q = q; g[j].i = 0; g[j].len = len; g[j].step = (float)N / len; g[j].on = true; g[j].skip = sk;
                 break;
             }
-            cont = q + hop; hasCont = true;
+            cont = past(bl, q + hop, sk); hasCont = true;
             toNext = hop;
             gain = 2.0f / k;
         }
@@ -667,7 +748,8 @@ struct Warp {
             int wi = (int)wp; float wf = wp - wi;
             float w = t.win[wi] + ((wi + 1 < N ? t.win[wi + 1] : 0.f) - t.win[wi]) * wf;
             pos_t p = gr.q + gr.i;
-            if (p >= 0 && p < bl.frames && p < br.frames) { l += bl.data[p] * w; r += br.data[p] * w; }
+            if (gr.skip > 0) { l += grainAt(bl, p, gr.skip) * w; r += grainAt(br, p, gr.skip) * w; }
+            else if (bl.plain(p, p + 1) && br.plain(p, p + 1)) { l += bl.data[p] * w; r += br.data[p] * w; }
             else { l += bl.at(p) * w; r += br.at(p) * w; }
             if (++gr.i >= gr.len) gr.on = false;
         }

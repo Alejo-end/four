@@ -328,3 +328,10 @@ Not on the device yet, and not heard.
     and four's `dry_wet` on MIX (0.5 at the start, after `out_level` and the
     limiter, with no filter, effect or send on it). With both up the input
     is heard twice, 6 ms apart.
+
+# 2026-11-24
+
+36. **The tracks are hard to mix.** "I just played it and sounds great just a bit hard to
+    mix the different tracks but sound is good." Open. Ask which part: to find a track's
+    level, to hold a balance while another page is open, or to hear one track alone.
+    Today TRACKS sets one level at a time, and MIX holds the engine and the tape.

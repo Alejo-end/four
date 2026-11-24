@@ -5467,3 +5467,26 @@ tools)**. 2026-11-24.
   its hits are 2.4 s apart. The input by DRY comes 8.7 ms after MONITOR.
 - The norns booted with an old clock (it had no network) and then jumped by days: sclang
   took 90% of a core and its REPL did not answer. The four services, restarted, cured it.
+
+four, seventy-second change: **no hole at the loop's point in PV and WARP, and a tape clear
+makes no xrun (engine, plugin, Lua)**. 2026-11-24.
+- PV's frames and WARP's grains reach past the head, so at the loop's point they read what
+  lies outside the window: silence, around a fresh take. FourPV and FourWarp take the loop
+  as two more inputs (`lo`, `span`). `Buf::setLoop` wraps every read in it, and smooths
+  the splice over 240 frames a side with half of its step (no click, no hole, the loop
+  keeps its length). At speed 1 both return the looped take sample for sample.
+- WARP at another speed: a grain that crosses the end goes on up to 31 ms inside the start,
+  where the wave looks most like the end. Without it a tone cancelled between the grains.
+- An older binary ignores the two inputs, and an older graph plays as before on the new one.
+  The stock voices (no plugin) are unchanged.
+- test_core has the loop at speeds 1, 0.5, 1.7 and -1 and pitch 1 and 2, on a tone and on
+  noise. The plugin was built on the norns and ships in ignore/plugins/.
+- On the device, a take of 4 s, the deepest 20 ms against the median: WARP -74.0 dB before
+  and -2.4 now, PV -21.6 and -2.6 (PLAY alone reads -3). At half speed WARP -74.0 and -3.7,
+  PV -42.4 and -5.9. Four PV at pitch 2 cost 35.6% (35.4 before), four WARP 14.4% (13.6),
+  and at pitch 2 24.4% (22.0).
+- THE XRUN OF A PRESET LOAD over four PV tracks is softcut's `buffer_clear_region`, which a
+  preset with an empty tape runs. 10 s of region is enough, and a clear of the whole buffer
+  makes none. The tape is alone in softcut since the layer decks left, so it clears the
+  whole (`Mdeck.zero`). Preset 6 over four PV tracks: 1 to 4 xruns in each of 10 loads
+  before, none in 10 loads now.

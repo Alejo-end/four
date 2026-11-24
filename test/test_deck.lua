@@ -266,9 +266,8 @@ do
   ok(last("loop_end", 1)[3] > last("loop_start", 1)[3], "crossed tape bounds sort")
   calls = {}
   Mtape.clear_buffer()
-  local tc = last("buffer_clear_region")
-  near(tc and tc[2] or -1, 0, 1e-6, "tape clear starts at 0")
-  near(tc and tc[3] or -1, 60, 1e-6, "...and takes exactly the tape's 60s")
+  ok(count("buffer_clear") == 1 and count("buffer_clear_region") == 0,
+    "the tape is alone in softcut: it clears the whole buffer (a region clear makes xruns)")
   -- the true STOP reaches the tape through the same delegated law
   P.tape_rate = 1; P.tape_reverse = 0; P.stop_all = 1
   calls = {}

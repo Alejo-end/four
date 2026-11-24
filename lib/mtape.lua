@@ -21,6 +21,7 @@ local D     -- the deck module (lib/mdeck), handed in at init — `include` has
 -- drifted once before a review caught it; now they exist once.
 local TAPE = {
   id = "tape", name = "TAPE", va = 1, vb = 2, from = 0, len = TAPE_LEN,
+  alone = true,   -- no other deck is in softcut's buffer (Mdeck.zero)
   pre_default = 0,   -- classic tape: REPLACE unless tape_pre is raised
   keymap = { rec = "tape_rec", rate = "tape_rate", reverse = "tape_reverse",
              pre = "tape_pre", freeze = "tape_freeze", fade = "tape_fade",
@@ -116,9 +117,7 @@ function M.forward() return D.forward(TAPE) end
 -- (a raw write here bypassed the cap the loop updates apply)
 function M.set_fade() D.update_fade(TAPE) end
 
--- REGION-scoped, not the whole buffer. sc.buffer_clear() takes every voice's
--- audio with it, so a TAPE erase would silently wipe any other deck that
--- shares the buffer. (Mdeck.clear also resets the descriptor's unused
+-- The whole buffer: the tape is alone in it (Mdeck.zero). (Mdeck.clear also resets the descriptor's unused
 -- display fields — harmless; the tape picture is mpages' twave.)
 function M.clear_buffer()
   D.clear(TAPE)
@@ -139,7 +138,7 @@ end
 function M.init_tape()
   M.set_source(pget("cut_source", 1))   -- dry/processed record source
   audio.level_cut(1)       -- softcut master out: persists across scripts, force up
-  sc.buffer_clear_region(0, TAPE_LEN)
+  D.zero(TAPE)
   for v = 1, 2 do
     sc.enable(v, 1)
     sc.buffer(v, v)
@@ -204,7 +203,7 @@ end
 function M.pset_read(number)
   local path = path_for(number)
   if util.file_exists(path) then
-    sc.buffer_clear_region(0, TAPE_LEN)   -- the save may hold only the start
+    D.zero(TAPE)   -- the save may hold only the start
     sc.buffer_read_stereo(path, 0, 0, TAPE_LEN)
     C.twave_any = true
     D.restored_extent(TAPE, path)

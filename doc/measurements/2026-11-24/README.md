@@ -22,5 +22,5 @@ read a log line. The cold file is right.
   three in the first warm PV load came 1.9 s before its load.
 - crone logged no seek error in any load. The main Lua thread was held for about 100 ms
   by a whole load from the card.
-- The cause over four PV tracks is not isolated. Each of the four tracks changes voice in
-  that load, and the crossfade of one track at a time is meant to spread that cost.
+- The cause was found the same day: softcut's region clear of the tape (the seventy-second
+  change in doc/changelog.md). With the fix, 10 loads over four PV tracks had no xrun.

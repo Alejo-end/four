@@ -185,6 +185,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 69th: the clock: locked tracks, loop sync, a take on the clock (`rec_sync`), motion on the bar (Lua, test tools) | deployed 2026-11-21: with a lock of 1 bar at 60 BPM the head was at the window's start 50 ms after each of four bars | no |
 | 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | yes, 2026-11-24: stage 21 measured, SCENE and MIX screens captured | no |
 | 71st: a head sync leaves a loop that is in time alone and fades a jump (`\four_sync`), stage 21 as a test (engine, test tools) | yes, 2026-11-24, `count: 199`: row 21.4 has no break and no drift over five minutes (PLAY clicked at three of six restarts before) | no |
+| 72nd: PV and WARP wrap inside the loop (`Buf::setLoop`), so their seam has no hole; a tape clear makes no xrun (engine, plugin, Lua) | yes, 2026-11-24, `count: 199`, plugin built there: WARP -2.4 dB at the seam (-74.0 before), PV -2.6 dB (-21.6) | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -229,8 +230,7 @@ hardware. The Exquis ran on the norns on 2026-11-21 (66th), over USB: the TRS ja
 **What is pending on the device** (doc/plan.md, Phase 0): the plugin, the costs, stage
 19 and the frame clock are done (doc/measurements/2026-11-16/). Row 19.12 (breaks when
 TYPE steps) has no break since the forty-second change. Row 19.27 passes on the supported set
-(2026-11-20); the dense set is over the limit by design. WARP and PV dip
-by about 27 dB at their own loop seam (doc/plan.md, Phase 0, item 8). Open too: the user's look at REVERB's squares (the
+(2026-11-20); the dense set is over the limit by design. Open too: the user's look at REVERB's squares (the
 screens are in doc/measurements/2026-11-16/screens/), and why a silent CLOUD track costs
 more than one that sounds.
 
@@ -239,6 +239,10 @@ with the plugin (FourCloud included), and said "it sounds nice". That is a gener
 judgement, the first on four as a whole. The item-by-item session of doc/plan.md, Phase 2,
 has not taken place, and the shipped presets have never been heard. The earlier judgement
 is the user's on FourStretch, above.
+On 2026-11-24, with the seventy-first change on the norns, the user said "it sounds good":
+again a general judgement. They named no row of stage 21 and no item of Phase 2.
+Later that day, after playing: "sounds great just a bit hard to mix the different tracks"
+(doc/ux-feedback.md, item 36).
 
 **The walkthrough.** doc/device-gate.md, stages 0 to 21, top to bottom. Stage 21 is the
 clock, the record head and the input (the user's notes of 2026-11-21): `gate.py 21`
@@ -491,6 +495,11 @@ Each line was learned the hard way; the change log has the story.
 - The offline check on the Mac is not the device's scsynth. `test/device/norns_nrt.sh`
   renders a probe's scores with the norns's own scsynth, offline, in seconds. Run it
   before the RESTART for any change that the first block of a synth can decide.
+- A softcut region clear (`buffer_clear_region`) makes scsynth miss blocks at a load of
+  32%, and `buffer_clear` makes none (measured 2026-11-24). Nothing else shares softcut's
+  buffer, so the tape clears it whole (`Mdeck.zero`).
+- A PV frame or a WARP grain reads past the head. A looped read must wrap in the loop, not
+  in the buffer: outside a take there is silence.
 - A synth that frees itself at its first block (`FreeSelf`) still plays that block. An
   envelope that starts to fall at once prints a step: `\four_sync` waits two blocks.
 - A head that is put back on the clock at every beat line moves by the jitter of the

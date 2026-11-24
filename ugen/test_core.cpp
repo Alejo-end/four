@@ -3,6 +3,7 @@
 //   clang++ -O2 -std=c++17 -Iugen/vendor/eurorack -o /tmp/test_core ugen/test_core.cpp && /tmp/test_core
 #include "four_core.h"
 #include "four_cloud.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -219,6 +220,70 @@ int main() {
         for (int i = at; i < at + 1800; i++) post += oL[i] * oL[i];
         expect(10 * std::log10((pre + 1e-12) / (post + 1e-12)) < -30, "speed 0.25: energy before the attack against after, dB",
                10 * std::log10((pre + 1e-12) / (post + 1e-12)));
+    }
+
+
+    // THE LOOP'S POINT: a take of 1.2 s with silence around it, as a fresh take
+    // has. The frames and the grains must wrap in the loop: no hole, no click.
+    std::printf("the loop\n");
+    {
+        const pos_t lo = 30000, span = 57600 + 37;
+        std::vector<float> tL(200000, 0.f), tR(200000, 0.f), zL(200000, 0.f), zR(200000, 0.f);
+        for (pos_t i = 0; i < span; i++) {
+            tL[lo + i] = 0.25f * (float)std::sin(2 * PI * 441.7 * i / 48000); tR[lo + i] = 0.6f * tL[lo + i];
+            zL[lo + i] = nL[20000 + i]; zR[lo + i] = nR[20000 + i];
+        }
+        auto runL = [&](int kind, const std::vector<float>& L, const std::vector<float>& R, double speed,
+                        float pitch, bool loop, int n) {
+            static PV pv; static Warp w; pv.init(); w.init();
+            std::vector<float> a(n, 0), b(n, 0), pos(64); double p = 0;
+            for (int i = 0; i + 64 <= n; i += 64) {
+                Buf bl{L.data(), (int)L.size()}, br{R.data(), (int)R.size()};
+                if (loop) { bl.setLoop(lo, span); br.setLoop(lo, span); }
+                for (int j = 0; j < 64; j++) {
+                    pos[j] = (float)(lo + (pos_t)std::floor(p));
+                    p += speed; if (p >= span) p -= span; if (p < 0) p += span;
+                }
+                if (kind == 0) pv.process(&a[i], &b[i], 64, pos.data(), pitch, bl, br);
+                else w.process(&a[i], &b[i], 64, pos.data(), pitch, 12000, 4, 0.f, bl, br);
+            }
+            return a;
+        };
+        for (int mat = 0; mat < 2; mat++) for (int kind = 0; kind < 2; kind++) for (double sp : {1.0, 0.5, -1.0, 1.7}) for (float pi : {1.f, 2.f}) {
+            for (int loop = 0; loop < 2; loop++) {
+                int n = 48000 * 8; auto o = mat ? runL(kind, zL, zR, sp, pi, loop, n) : runL(kind, tL, tR, sp, pi, loop, n);
+                std::vector<double> lv; double d2 = 0;
+                for (int c = 48000; c + 960 < n - 960; c += 240) {
+                    double e = 0; for (int i = 0; i < 960; i++) e += o[c + i] * o[c + i];
+                    lv.push_back(std::sqrt(e / 960));
+                }
+                for (int i = 48000; i < n - 1000; i++) d2 = std::fmax(d2, std::fabs(o[i] - 2 * o[i - 1] + o[i - 2]));
+                std::vector<double> sorted = lv; std::sort(sorted.begin(), sorted.end());
+                double dip = db(sorted.front() / sorted[sorted.size() / 2]);
+                int wide = 0; for (double v : lv) if (db(v / sorted[sorted.size() / 2]) < -6) wide++;
+                double turns = std::fmax(1.0, (n - 48000) * std::fabs(sp) / span);
+                char what[96]; std::snprintf(what, 96, "%s %s %.1f pitch %.0f%s: deepest 20 ms, dB", mat ? "noise" : "tone", kind ? "WARP" : "PV",
+                    sp, pi, loop ? "" : " (no loop)");
+                if (loop) expect(dip > (kind && !mat ? -9 : -3), what, dip); else std::printf("  %-58s %10.2f\n", what, dip);
+                std::printf("     second difference x1000 %.2f, under -6 dB %.1f ms a turn\n", d2 * 1000, wide * 5 / turns);
+            }
+        }
+        // speed 1 returns the looped take, sample for sample, off the splice
+        for (int kind = 0; kind < 2; kind++) {
+            int n = 48000 * 6; auto o = runL(kind, zL, zR, 1.0, 1.f, true, n);
+            double best = 1e30; int at = 0;
+            for (int lag = -100; lag <= 4096; lag++) {
+                double e = 0; for (int i = 100000; i < 101000; i++) { double d = o[i] - zL[lo + (((pos_t)i - lag) % span + span) % span]; e += d * d; }
+                if (e < best) { best = e; at = lag; }
+            }
+            double err = 0, ref = 1e-12; int used = 0;
+            for (int i = 100000; i < n - 64; i++) {
+                pos_t q = (((pos_t)i - at) % span + span) % span;
+                if (q < 241 || q > span - 241) continue;
+                double d = o[i] - zL[lo + q]; err += d * d; ref += zL[lo + q] * zL[lo + q]; used++;
+            }
+            expect(db(std::sqrt(err / ref)) < -90, kind ? "WARP speed 1: the looped take, dB" : "PV speed 1: the looped take, dB", db(std::sqrt(err / ref)));
+        }
     }
 
     std::printf("WARP core\n");

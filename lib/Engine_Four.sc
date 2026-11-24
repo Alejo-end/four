@@ -996,7 +996,7 @@ Engine_Four : CroneEngine {
             phase = (whole / spanF).clip(0, 1);
             winPos = lo + (phase * span);
             Out.kr(phase_out, A2K.kr(winPos) * (1 - quiet));
-            [winPos, phase, span, loF + (whole - frac).round, frac];
+            [winPos, phase, span, loF + (whole - frac).round, frac, loF, spanF];
         };
         // the read for winRead's two-part head: four plain reads at whole
         // frames and the cubic between them (BufRd's own, the same curve).
@@ -1175,13 +1175,13 @@ Engine_Four : CroneEngine {
                 hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
-            var winPos, phase, span, idx, frac, ptr, l, r, sig;
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
+            var winPos, phase, span, idx, frac, loF, spanF, ptr, l, r, sig;
+            #winPos, phase, span, idx, frac, loF, spanF = winRead.(pos_start, pos_end, scan, buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             stretchOn.if({
                 // bufL, bufR, the head in frames, pitch, window in frames,
-                // overlaps, rand (positional: see the MiClouds call)
+                // overlaps, rand, the loop (positional: see the MiClouds call)
                 sig = warpClass.ar(buf_l, buf_r, idx, pitch,
-                    warp_window * SampleRate.ir, warp_overlaps, warp_rand);
+                    warp_window * SampleRate.ir, warp_overlaps, warp_rand, loF, spanF);
                 l = sig[0];
                 r = sig[1];
             }, {
@@ -1206,10 +1206,10 @@ Engine_Four : CroneEngine {
                 hfrom = 0, hlead = 0, hspan = 1, sync = 0, hold = 0, rel = 0.02, crv = -4, att = 0.01, acrv = -4,
                 scan_t = 0.02, pitch_t = 0.02, pan_t = 0.02, density_t = 0.02, clouds_fb_t = 0.02,
                 level_t = 0.02;
-            var winPos, phase, span, idx, frac, sigL, sigR, chainL, chainR, l, r, sig, edge;
+            var winPos, phase, span, idx, frac, loF, spanF, sigL, sigR, chainL, chainR, l, r, sig, edge;
             // with FourStretch, FRZ holds the head (GRAIN's law) and the
             // vocoder sustains what is under it; pitch is its own knob
-            #winPos, phase, span, idx, frac = winRead.(pos_start, pos_end,
+            #winPos, phase, span, idx, frac, loF, spanF = winRead.(pos_start, pos_end,
                 stretchOn.if({ scan * (1 - pv_freeze) }, { scan }),
                 buf_l, phase_out, 1, level, handover, hfrom, hlead, hspan, scan_t, level_t, sync);
             // cubic interp like every other read path — PV magnifies linear-
@@ -1217,9 +1217,9 @@ Engine_Four : CroneEngine {
             // the seam fade before the FFT: a wrap click fed to MagFreeze
             // is held as a steady hiss
             stretchOn.if({
-                // no seam fade: the frames overlap, so the loop point is a
-                // crossfade of spectra already
-                sig = pvClass.ar(buf_l, buf_r, idx, gl.(pitch, pitch_t));
+                // no seam fade: the frames wrap inside the loop, and the
+                // plugin smooths the splice (Buf in ugen/four_core.h)
+                sig = pvClass.ar(buf_l, buf_r, idx, gl.(pitch, pitch_t), loF, spanF);
                 l = sig[0];
                 r = sig[1];
             }, {

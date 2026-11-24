@@ -341,12 +341,19 @@ function M.close_loop(d)
   M.jump(d, clamp(get(d, "start", 0), 0, 1))
 end
 
--- wipe THIS deck only. sc.buffer_clear() would take the whole buffer with it —
--- the tape and every other deck included — which is the one collision that
--- makes adding decks not purely additive.
+-- The zeros of a deck's region. sc.buffer_clear() takes the whole buffer with
+-- it, so a deck that shares the buffer clears its region. A deck that is ALONE
+-- in softcut (the tape, since the layer decks left) clears it whole: on the
+-- norns a region clear makes the scsynth miss blocks (1 or 2 xruns each time
+-- over four PV tracks, from 10 s of region up), and the whole clear makes none.
+function M.zero(d)
+  if d.alone then sc.buffer_clear() else sc.buffer_clear_region(d.from, d.len) end
+end
+
+-- wipe THIS deck only
 function M.clear(d)
   d.gen = d.gen + 1
-  sc.buffer_clear_region(d.from, d.len)
+  M.zero(d)
   -- through mpages when it is there, so a repaint still queued for this strip
   -- (a PSET restore fills strips one after another) is cancelled with it and
   -- cannot draw the old waveform over the silence

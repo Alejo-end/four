@@ -61,7 +61,7 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 7. DONE 2026-11-16: the frame period, logged for 60 s while four played. 901 frames in
    60.00 s, p95 67.6 ms, none late, redraw p95 11.5 ms, and the sum of `frame_dt` is
    60.07 s, so a FREE modulator keeps its rate.
-8. Open, found 2026-11-18 with row 19.33: WARP and PV dip at their own loop seam. Over a
+8. DONE 2026-11-24 (the seventy-second change). Found 2026-11-18 with row 19.33: WARP and PV dip at their own loop seam. Over a
    1 kHz take of 4 s the level fell by about 27 dB, for 82 ms in WARP and 26 ms in PV
    (doc/measurements/2026-11-18/). PLAY has its seam fade. doc/dsp-plan.md names the
    seam as not built. Row 19.33 now reads its levels away from the seam.
@@ -157,7 +157,10 @@ doc/device-gate.md, and fix or revert it.
   recording gave no xrun, from memory or from the card, and crone logged no seek error.
   A load over four PV tracks gave 1 or 2 xruns (3 with the recording), each time 0.04
   to 0.06 s after it started, and the files alone gave none. So candidates 1, 2 and 4
-  below have no measured case. First find what fails in the PV case.
+  below have no measured case.
+- **Found and fixed (2026-11-24, the seventy-second change).** The PV case is softcut's
+  region clear of the tape, which a load of a preset with an empty tape runs. The
+  candidates below have nothing left to fix.
 
 Candidate fixes, in order of cost:
 

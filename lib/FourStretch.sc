@@ -1,11 +1,12 @@
 // The classes of the FourStretch UGens (ugen/FourStretch.cpp). THIS FILE IS
 // THE ONLY COPY: the binary in the Extensions folder ships with no class
 // file, because a second copy of a class hangs every norns script on LOADING.
-// Both are stereo and read two mono buffers at `pos`, a head in FRAMES.
+// Both are stereo and read two mono buffers at `pos`, a head in FRAMES. `lo`
+// and `span` are the loop in frames: their reads wrap in it (0: no loop).
 
 FourPV : MultiOutUGen {
-    *ar { arg bufL, bufR, pos, pitch = 1;
-        ^this.multiNew('audio', bufL, bufR, pos, pitch)
+    *ar { arg bufL, bufR, pos, pitch = 1, lo = 0, span = 0;
+        ^this.multiNew('audio', bufL, bufR, pos, pitch, lo, span)
     }
     init { arg ... theInputs;
         inputs = theInputs;
@@ -14,8 +15,9 @@ FourPV : MultiOutUGen {
 }
 
 FourWarp : MultiOutUGen {
-    *ar { arg bufL, bufR, pos, pitch = 1, windowFrames = 12000, overlaps = 4, rand = 0;
-        ^this.multiNew('audio', bufL, bufR, pos, pitch, windowFrames, overlaps, rand)
+    *ar { arg bufL, bufR, pos, pitch = 1, windowFrames = 12000, overlaps = 4, rand = 0,
+            lo = 0, span = 0;
+        ^this.multiNew('audio', bufL, bufR, pos, pitch, windowFrames, overlaps, rand, lo, span)
     }
     init { arg ... theInputs;
         inputs = theInputs;

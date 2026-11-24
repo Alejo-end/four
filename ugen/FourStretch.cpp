@@ -1,7 +1,9 @@
 // FourStretch: the SuperCollider face of four_core.h. Two UGens, both stereo,
 // both read two mono buffers at a head given in frames:
-//   FourPV.ar(bufL, bufR, pos, pitch)
-//   FourWarp.ar(bufL, bufR, pos, pitch, windowFrames, overlaps, rand)
+//   FourPV.ar(bufL, bufR, pos, pitch, lo, span)
+//   FourWarp.ar(bufL, bufR, pos, pitch, windowFrames, overlaps, rand, lo, span)
+// lo and span are the loop, in frames (0: the whole buffer). An older binary does
+// not read these two, and a graph without them plays as it did.
 //   FourRead.ar(bufL, bufR, pos, frac, ratio)   PLAY's read, a windowed sinc
 //   FourTanh.ar(in)                             tanh, about ten times as fast
 //   FourCloud.ar([inL, inR], pit, pos, ...)     Mutable Instruments Clouds
@@ -29,6 +31,15 @@ static inline four::Buf bufOf(Unit* unit, float fbufnum) {
     return four::Buf { b->data, (int)b->frames };
 }
 
+// the loop, from two inputs that an older graph does not have
+static inline void loopOf(Unit* unit, int input, four::Buf& a, four::Buf& b) {
+    if ((int)unit->mNumInputs < input + 2) return;
+    const float lo = IN0(input), span = IN0(input + 1);
+    if (!(span >= 1.f) || !(lo >= 0.f)) return;
+    a.setLoop((four::pos_t)lrintf(lo), (four::pos_t)lrintf(span));
+    b.setLoop((four::pos_t)lrintf(lo), (four::pos_t)lrintf(span));
+}
+
 // the head as one value per sample, whatever rate the input runs at
 static inline const float* headOf(Unit* unit, int input, float* tmp, int n) {
     if (INRATE(input) == calc_FullRate) return IN(input);
@@ -41,6 +52,7 @@ static void FourPV_next(FourPV* unit, int inNumSamples) {
     float* outL = OUT(0); float* outR = OUT(1);
     four::Buf bl = bufOf(unit, IN0(0)), br = bufOf(unit, IN0(1));
     float tmp[64];
+    loopOf(unit, 4, bl, br);
     for (int done = 0; done < inNumSamples; done += 64) {
         int n = sc_min(64, inNumSamples - done);
         const float* pos = INRATE(2) == calc_FullRate ? IN(2) + done : headOf(unit, 2, tmp, n);
@@ -67,6 +79,7 @@ static void FourWarp_next(FourWarp* unit, int inNumSamples) {
     float* outL = OUT(0); float* outR = OUT(1);
     four::Buf bl = bufOf(unit, IN0(0)), br = bufOf(unit, IN0(1));
     float tmp[64];
+    loopOf(unit, 7, bl, br);
     for (int done = 0; done < inNumSamples; done += 64) {
         int n = sc_min(64, inNumSamples - done);
         const float* pos = INRATE(2) == calc_FullRate ? IN(2) + done : headOf(unit, 2, tmp, n);
