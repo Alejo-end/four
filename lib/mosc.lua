@@ -211,6 +211,7 @@ end
 local ALLOW = {}
 for _, id in ipairs({ "mode", "t2_mode", "t3_mode", "t4_mode", "track_sel",
     "grain_level", "t2_level", "t3_level", "t4_level",
+    "mute_1", "mute_2", "mute_3", "mute_4",
     "fx_dly", "t2_fx_dly", "t3_fx_dly", "t4_fx_dly",
     "fx_rev", "t2_fx_rev", "t3_fx_rev", "t4_fx_rev",
     "delay_mix", "rev_mix", "mix", "out_level", "dry_wet", "cutoff", "resonance",

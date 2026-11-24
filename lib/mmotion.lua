@@ -130,6 +130,7 @@ local MOTION_TOMBSTONES = {
 local MOTION_EXCLUDE = {
   -- stage-setting levels + STOP (mix, the performance crossfade, IS recorded)
   "sc_level", "cut_level", "out_level", "stop_all",
+  "mute_1", "mute_2", "mute_3", "mute_4",   -- a hand on the mixer, like STOP
   -- capture transports + write plumbing: a replayed arm or blend writes the
   -- buffer, which a loop must never do behind your back
   "rec", "tape_rec", "rec_level", "pre_level", "resample", "regen",

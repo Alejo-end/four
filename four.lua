@@ -675,6 +675,43 @@ for n = 2, NTRACKS do
   MODE_ID[n], LEVEL_ID[n] = "t" .. n .. "_mode", "t" .. n .. "_level"
 end
 ctx.MODE_ID, ctx.LEVEL_ID = MODE_ID, LEVEL_ID
+-- MUTE AND SOLO (the seventy-third change, doc/mix-plan.md). The engine gets
+-- a track's level times its gain here, 0 or 1 (the level's eng_map, so a
+-- modulator's sends go through it too). The param keeps the level, and the
+-- head runs on. ctx.solo is the track held alone (TRACKS K2 held), or nil:
+-- it is heard muted or not, and no other track is.
+ctx.MUTE_ID = { "mute_1", "mute_2", "mute_3", "mute_4" }
+function ctx.track_gain(n)
+  if ctx.solo then return n == ctx.solo and 1 or 0 end
+  return pget(ctx.MUTE_ID[n], 0) == 1 and 0 or 1
+end
+-- one track's level to the engine again (its gain changed)
+function ctx.level_send(n)
+  local id = LEVEL_ID[n]
+  if not (params.lookup[id] and engine[id]) then return end
+  local v = pget(id, 1)
+  if ctx.lfo and ctx.lfo.swinging(id) then v = ctx.lfo.swung(id, v) end
+  engine[id](v * ctx.track_gain(n))
+end
+function ctx.set_solo(n)
+  ctx.solo = n
+  for k = 1, NTRACKS do ctx.level_send(k) end
+end
+-- THE LEVEL IN dB: E3 on TRACKS goes in steps of 0.5 dB, from silence
+-- (below LEVEL_FLOOR) to the top of the param. Its range and its id are the
+-- old ones, so a preset, a scene and a MIDI map hold.
+ctx.LEVEL_FLOOR, ctx.LEVEL_TOP = -40, 1.5
+function ctx.level_db(v)
+  return v > 0 and 20 * math.log(v, 10) or -math.huge
+end
+function ctx.level_step(id, d)
+  local k, floor_k = nil, ctx.LEVEL_FLOOR * 2
+  local db = ctx.level_db(pget(id, 1))
+  k = db < ctx.LEVEL_FLOOR and floor_k - 1 or math.floor(db * 2 + 0.5)
+  k = k + d
+  if k < floor_k then params:set(id, 0)
+  else params:set(id, math.min(ctx.LEVEL_TOP, 10 ^ (k / 40))) end
+end
 local function flash_page()
   -- the proof it worked: the page name pops, now with its track
   ctx.page_flash = ctx.frame + math.floor(FPS * 0.7)
@@ -757,7 +794,7 @@ local TAKE_UNDO = function() ctx.take_undo() end
 -- K2 (ON) and K3 (MODE) for the focus. ON: a tap latches, a hold plays the
 -- track only while held (the punch law of every key). Off remembers the
 -- mode, so on brings back the voice you had; the first on is PLAY.
-local T_KEYS, T_ON, T_MODE = {}, {}, {}
+local T_KEYS, T_ON, T_MODE, T_MUTE, T_SOLO = {}, {}, {}, {}, {}
 local last_mode = {}
 for n = 1, NTRACKS do
   local mid = MODE_ID[n]
@@ -802,10 +839,21 @@ for n = 1, NTRACKS do
       params:set(mid, 1)
     end,
   }
-  T_MODE[n] = { label = "MODE", act = function()
+  -- MODE's tap cycles the voices and skips OFF; held, it turns the track
+  -- OFF (K2 mutes a track that is on: the head runs on, and no CPU is saved)
+  T_MODE[n] = { label = "MODE", tap = function()
     if pget(mid, 1) == 1 then fit_new_track(n) end
     cycle_mode(mid)
-  end }
+  end, hold = function() T_ON[n].poff() end, hold_label = "OFF" }
+  -- K2 on a track that is on: MUTE on a tap, SOLO while it is held (from the
+  -- frame a tap is over). key_def picks this, or T_ON for a track that is off.
+  local function solo_on() ctx.set_solo(n) end
+  local function solo_off() ctx.set_solo(nil) end
+  local function mute() ptoggle(ctx.MUTE_ID[n]) end
+  T_MUTE[n] = { label = "MUTE", lit = function() return pget(ctx.MUTE_ID[n], 0) == 1 end,
+    tap = mute, hold = solo_on, hold_label = "SOLO", hold_at = TAP_FRAMES, release = solo_off }
+  T_SOLO[n] = { label = "SOLO", lit = function() return true end,
+    tap = mute, hold = solo_on, hold_label = "SOLO", hold_at = TAP_FRAMES, release = solo_off }
 end
 
 -- ---- the routing (four) -------------------------------------------------
@@ -865,7 +913,7 @@ local KEYS = {
   },
   -- (TRACKS's keys follow the focus: key_def picks T_ON / T_MODE; these
   -- are track 1's, the shape doc/controls.md documents)
-  TRACKS = { k2 = T_ON[1], k3 = T_MODE[1] },
+  TRACKS = { k2 = T_MUTE[1], k3 = T_MODE[1] },
   TAPE = {
     k2 = pk("REC", "tape_rec"),
     k3 = pk("REV", "tape_reverse"),
@@ -1021,7 +1069,9 @@ local function key_def(n)
   end
   if page == "TRACKS" then
     local t = tsel()
-    return n == 2 and T_ON[t] or T_MODE[t]
+    if n == 3 then return T_MODE[t] end
+    if ctx.solo == t then return T_SOLO[t] end
+    return pget(MODE_ID[t], 1) == 1 and T_ON[t] or T_MUTE[t]
   end
   -- VOICE K2 is mode-contextual, like its encoders: PLAY = HEAL, else FRZ
   if page == "VOICE" and n == 2 and pget("mode", 5) == 5 then
@@ -1168,7 +1218,7 @@ local function tick_keys()
     if st.def and st.def.hold and not st.fired then
       if ctx.page ~= st.page then
         st.fired, st.aborted = true, true   -- E1 left the page mid-hold: abort
-      elseif ctx.frame - st.frame >= ERASE_FRAMES then
+      elseif ctx.frame - st.frame >= (st.def.hold_at or ERASE_FRAMES) then
         st.fired = true
         st.def.hold()
       end
@@ -2884,6 +2934,8 @@ local function init_params()
       if FOCUS > 1 and pget("t" .. FOCUS .. "_mode", 1) == 1 then
         params:set("t" .. FOCUS .. "_mode", 5)
       end
+      -- ...and is heard: a take into a muted track came back silent
+      if pget(ctx.MUTE_ID[FOCUS], 0) == 1 then params:set(ctx.MUTE_ID[FOCUS], 0) end
       rec_open = true
       rec_wrapped, rec_last = false, ctx.rec_phase
       take_gen = take_gen + 1   -- a live pass outranks a conversion in flight
@@ -3099,8 +3151,10 @@ local function init_params()
   add_eng_control("spread", "spread", unit(0.5))
   add_eng_control("pan", "pan",
     controlspec.new(-1, 1, "lin", 0, 0.0, ""))
-  add_eng_control("grain_level", "grain level",
-    controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+  -- (track 1's level: the id is mangler's. The map is the mute, see
+  -- ctx.track_gain.)
+  add_eng_control("grain_level", "t1 level",
+    controlspec.new(0, 1.5, "lin", 0, 1.0, ""), function(v) return v * ctx.track_gain(1) end)
   -- granular character: grain jitter (0 = a regular, steady stream of
   -- equal grains; 1 = Poisson timing and lengths that vary), the detune
   -- spread (0 = off), and a 3-way grain-envelope shape. shape is
@@ -3268,12 +3322,16 @@ local function init_params()
   -- grain knobs, filter and level. Each id is track 1's with a `t<n>_`
   -- prefix, with the same range, so a knob means the same thing on every
   -- track. OFF by default: a track costs nothing until it is switched on.
-  params:add_group("grp_tracks", "tracks", 2)
+  params:add_group("grp_tracks", "tracks", 6)
   -- which track VOICE and FILTER address (K3 held on either page steps it),
   -- and the ROUTE grid's cursor
   params:add_number("track_sel", "track (focus)", 1, NTRACKS, 1)
   params:set_action("track_sel", function(v) ctx.focus_take(v) end)
   params:add_number("route_sel", "route cell", 1, #ROUTES, 1)
+  for n = 1, NTRACKS do
+    params:add_binary(ctx.MUTE_ID[n], "t" .. n .. " mute", "toggle", 0)
+    params:set_action(ctx.MUTE_ID[n], function() ctx.level_send(n) end)
+  end
   for n = 2, NTRACKS do
     local pre, lab = "t" .. n .. "_", "t" .. n .. " "
     params:add_group("grp_t" .. n, "track " .. n, 35)
@@ -3281,7 +3339,8 @@ local function init_params()
     params:add_file(pre .. "file", lab .. "load file", _path.audio)
     params:set_action(pre .. "file", function(f) ctx.track_load(n, f) end)
     add_eng_option(pre .. "mode", lab .. "mode", MODE_NAMES, 1)
-    add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""))
+    add_eng_control(pre .. "level", lab .. "level", controlspec.new(0, 1.5, "lin", 0, 1.0, ""),
+      function(v) return v * ctx.track_gain(n) end)
     add_eng_control(pre .. "pos_start", lab .. "win start", fine_unit(0.0))
     add_eng_control(pre .. "pos_end", lab .. "win end", fine_unit(1.0))
     -- the lock follows the focus (C10): a start past the focused track's
@@ -3959,7 +4018,8 @@ function enc(n, d)
       -- matches its flash against the slot's id, and the resolver turns it back
       -- into a value for display. (@win_move works for exactly this reason.)
       local real = ctx.enc_target(id)
-      params:delta(real, fine_delta(real, d))
+      if id == "@trk_level" then ctx.level_step(real, d)
+      else params:delta(real, fine_delta(real, d)) end
     elseif id == "@mo_sel" then
       -- one walk over the rows MOTION draws: no lane (0), the lanes, then
       -- the four modulators
@@ -4078,6 +4138,8 @@ function key(n, z)
       if def.hold then
         -- tap = the def's tap; between the tap and the arc = the abort zone
         if not st.fired and ctx.frame - st.frame < TAP_FRAMES then def.tap() end
+        -- a hold that lasts as long as the key (SOLO) ends with it
+        if st.fired and not st.aborted and def.release then def.release() end
         st.fired = false
       elseif def.dryerase then
         local dt = ctx.frame - (ctx.k13_frame or ctx.frame)

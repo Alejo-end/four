@@ -3464,12 +3464,72 @@ do
   params:set("pos_start", 0); params:set("pos_end", 1)
   key(3, 1); key(3, 0)
   ok(params:get("t2_mode") == 2, "K3 cycles its mode (PLAY to GRAIN)")
+  -- K3 held is OFF, and K2 on a track that is OFF is ON (the punch law)
+  key(3, 1); _h.run_ticks(CTX.ERASE_FRAMES + 2); key(3, 0)
+  ok(params:get("t2_mode") == 1, "K3 held turns it off")
   key(2, 1); key(2, 0)
-  ok(params:get("t2_mode") == 1, "K2 again turns it off")
-  key(2, 1); key(2, 0)
-  ok(params:get("t2_mode") == 2, "...and on brings back GRAIN")
+  ok(params:get("t2_mode") == 2, "...and K2 brings back GRAIN")
+  key(3, 1); _h.run_ticks(CTX.ERASE_FRAMES + 2); key(3, 0)
   key(2, 1); _h.run_ticks(10); key(2, 0)
-  ok(params:get("t2_mode") == 1, "K2 held plays it only while held")
+  ok(params:get("t2_mode") == 1, "K2 held on a track that is off plays it only while held")
+  -- MUTE AND SOLO (the seventy-third change)
+  do
+    key(2, 1); key(2, 0)
+    ok(params:get("t2_mode") == 2 and CTX.key_def(2).label == "MUTE", "on a track that is on K2 is MUTE")
+    local sent, old = {}, {}
+    for n = 1, 4 do
+      local id = CTX.LEVEL_ID[n]
+      old[id] = engine[id]
+      engine[id] = function(v) sent[n] = v end
+    end
+    params:set("t2_level", 0.8)
+    key(2, 1); key(2, 0)
+    ok(params:get("mute_2") == 1 and sent[2] == 0, "a tap mutes it: the engine gets 0")
+    ok(params:get("t2_level") == 0.8 and params:get("t2_mode") == 2, "...and the level and the voice stay")
+    ok(CTX.key_def(2).lit(), "...and the key's word says so")
+    params:set("t2_level", 0.5)
+    ok(sent[2] == 0, "a level that moves under a mute stays silent")
+    redraw()
+    key(2, 1); _h.run_ticks(CTX.TAP_FRAMES + 1)
+    ok(CTX.solo == 2 and sent[2] == 0.5 and sent[1] == 0 and sent[3] == 0 and sent[4] == 0,
+      "K2 held is SOLO: this track alone, muted or not")
+    ok(CTX.key_def(2).label == "SOLO", "...and the key's word is SOLO")
+    redraw()
+    CTX.step_page(1); enc(1, 0)
+    key(2, 0)
+    ok(CTX.solo == nil and sent[1] == params:get("grain_level") and sent[2] == 0,
+      "the key coming up ends the solo, also from another page")
+    ok(params:get("mute_2") == 1, "...and the mute is as it was")
+    T.goto_page("TRACKS")
+    key(2, 1); key(2, 0)
+    ok(params:get("mute_2") == 0 and sent[2] == 0.5, "a second tap brings it back at its level")
+    -- a focus that moves under a held SOLO: the release still ends it
+    key(2, 1); _h.run_ticks(CTX.TAP_FRAMES + 1)
+    params:set("track_sel", 3); key(2, 0)
+    ok(CTX.solo == nil, "a solo ends with its key, also after the focus moved")
+    params:set("track_sel", 2)
+    -- a recall leaves the mutes
+    params:set("mute_3", 1)
+    CTX.scene.capture(6); params:set("mute_3", 0); CTX.scene.recall(6)
+    ok(params:get("mute_3") == 0, "a scene leaves the mutes alone")
+    -- the dB steps
+    params:set("grain_level", 1); params:set("t2_level", 1)
+    enc(3, 1)
+    local up = params:get("t2_level")
+    ok(math.abs(20 * math.log(up, 10) - 0.5) < 1e-6, "one step of E3 is 0.5 dB")
+    enc(3, -1)
+    ok(math.abs(params:get("t2_level") - 1) < 1e-9, "...and back is the same place")
+    for _ = 1, 100 do enc(3, 1) end
+    ok(params:get("t2_level") == 1.5, "the top is the param's top")
+    for _ = 1, 200 do enc(3, -1) end
+    ok(params:get("t2_level") == 0, "the bottom is silence")
+    enc(3, 1)
+    ok(math.abs(20 * math.log(params:get("t2_level"), 10) + 40) < 1e-6, "...and one step up is -40 dB")
+    redraw()
+    params:set("t2_level", 1)
+    for n = 1, 4 do engine[CTX.LEVEL_ID[n]] = old[CTX.LEVEL_ID[n]] end
+    params:set("t2_mode", 1)
+  end
   redraw()
   -- K1 held: the sends of the focused track
   CTX.alt = true

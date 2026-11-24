@@ -461,6 +461,14 @@ local function fmt_value(id)
   if not (id and params.lookup[id]) then return "--" end
   -- a track 2 id reads in its track 1 format (four)
   local key = T2_KEY[id] or id
+  if id == C.LEVEL_ID[1] or id == C.LEVEL_ID[2] or id == C.LEVEL_ID[3]
+      or id == C.LEVEL_ID[4] then               -- a track's level, in dB
+    local v = params:get(id)
+    if v <= 0 then return "SILENT" end
+    local db = C.level_db(v)
+    if math.abs(db) < 0.05 then db = 0 end
+    return string.format(db > 0 and "+%.1fDB" or "%.1fDB", db)
+  end
   if key == "route_sel" then                    -- the cell: from > to
     local r = C.route_cur and C.route_cur()
     return r and SHORT[r.id] or "-"
@@ -876,6 +884,7 @@ local function track_window() return track_window_n(cur_track()) end
 -- an extra track is sounding: switched on and its level up
 local function track_live(n)
   return pget(TK[n].mode, 1) ~= 1 and pget(TK[n].level, 1) > 0.001
+    and C.track_gain(n) > 0
 end
 M.on_t2 = on_t2
 
@@ -1265,7 +1274,9 @@ M.RT_WET = { [5] = "delay_mix", [6] = "rev_mix" }
 M.RT_MSG = { [5] = "DELAY WET IS 0", [6] = "REVERB WET IS 0" }
 M.rt_prev, M.rt_prev_id, M.rt_msg, M.rt_msg_at = 0, nil, nil, nil
 local function track_sounds(n)
-  if n == 1 then return pget("mode", 5) ~= 1 end
+  if n == 1 then
+    return pget("mode", 5) ~= 1 and pget("grain_level", 1) > 0.001 and C.track_gain(1) > 0
+  end
   return track_live(n)
 end
 local function route_grid(frame)
@@ -1346,6 +1357,11 @@ local TR_EMPTY = "EMPTY"
 local TR_Y0, TR_RH = 12, 10
 local TR_SX, TR_SW = 46, 49          -- the window strip
 local TR_LX, TR_LW = 102, 24         -- the level bar
+-- where a level sits on the bar, 0 to 1, in dB
+function M.level_bar(v)
+  local lo, hi = C.LEVEL_FLOOR, C.level_db(C.LEVEL_TOP)
+  return clamp((C.level_db(v) - lo) / (hi - lo), 0, 1)
+end
 local function body_TRACKS(frame)
   if C.alt then route_grid(frame); return end
   local audible = (C.mix_gains()) > 0.001
@@ -1392,17 +1408,21 @@ local function body_TRACKS(frame)
         screen.fill()
       end
     end
-    -- the level (0 to 1.5, unity marked)
-    local lv = clamp(pget(C.LEVEL_ID[n], 1) / 1.5, 0, 1)
-    screen.level(1)
-    screen.rect(TR_LX, y + 1, TR_LW, 3)
-    screen.fill()
-    screen.level(sounds and 11 or 4)
-    screen.rect(TR_LX, y + 1, floor(lv * TR_LW + 0.5), 3)
-    screen.fill()
-    screen.level(7)
-    screen.rect(TR_LX + 16, y, 1, 5)
-    screen.fill()
+    -- the level in dB (silence to the top, 0 dB marked), or the mute
+    if C.solo ~= n and pget(C.MUTE_ID[n], 0) == 1 then
+      ptext("MUTE", TR_LX, y, 1, n == focus and 12 or 7)
+    else
+      local lv = M.level_bar(pget(C.LEVEL_ID[n], 1))
+      screen.level(1)
+      screen.rect(TR_LX, y + 1, TR_LW, 3)
+      screen.fill()
+      screen.level(sounds and 11 or 4)
+      screen.rect(TR_LX, y + 1, floor(lv * TR_LW + 0.5), 3)
+      screen.fill()
+      screen.level(7)
+      screen.rect(TR_LX + floor(M.level_bar(1) * TR_LW + 0.5), y, 1, 5)
+      screen.fill()
+    end
   end
 end
 
@@ -2559,6 +2579,7 @@ local function purity()
   if not C.wave_any then return false end
   if pget("stop_all", 0) == 1 then return false end
   if pget("mode", 5) ~= 5 then return false end             -- PLAY only
+  if C.track_gain(1) == 0 then return false end              -- muted: nothing is heard
   -- track 2 is a second engine source: switched on and audible, the output
   -- is not the take alone
   -- (and tracks 3 and 4; and a send moves sound between tracks even when

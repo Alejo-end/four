@@ -5490,3 +5490,18 @@ makes no xrun (engine, plugin, Lua)**. 2026-11-24.
   makes none. The tape is alone in softcut since the layer decks left, so it clears the
   whole (`Mdeck.zero`). Preset 6 over four PV tracks: 1 to 4 xruns in each of 10 loads
   before, none in 10 loads now.
+
+four, seventy-third change: **levels in dB, mute and solo on TRACKS (Lua and test tools)**.
+2026-11-24. Steps 1 and 3 of doc/mix-plan.md, for item 36 of doc/ux-feedback.md.
+- E3 on TRACKS moves a level in steps of 0.5 dB, from silence (below -40 dB) to the param's
+  top, +3.5 dB. The readout and the bar are in dB. The ids and the ranges are as before,
+  and PARAMS names track 1's level `t1 level` (it was `grain level`).
+- K2 on TRACKS is MUTE on a tap (at the release) and SOLO while held (from the fifth frame). The
+  engine gets the level times `ctx.track_gain`, as the level's `eng_map`, so a modulator's
+  sends go through it. The head runs on, and the level param stays.
+- K2 no longer turns a track off: K3 held does, and K2 on a track that is off is ON.
+- `mute_1` to `mute_4`: binary params, out of scenes and motion, in mosc's ALLOW. A REC
+  pass on a muted track unmutes it.
+- `track_sounds`, the header cells, TRACKS and `purity()` know the gain. Track 1's level 0
+  now reads as silent, as it did on tracks 2 to 4.
+- A key def can have `hold_at` (its own threshold) and `release`.

@@ -30,7 +30,9 @@ then the four modulators. With a modulator selected the other knobs are
 its own.
 
 Tracks: four engine tracks and one focus. On TRACKS, E2 picks the focused
-track and E3 sets its level. K2 turns it on and off, K3 cycles its mode.
+track and E3 sets its level in steps of 0.5 dB. K2 mutes it on a tap and
+solos it while held (on a track that is off, K2 turns it on). K3 cycles its
+mode, and held it turns the track off.
 Hold K1 there for its sends: K1+E2 picks where it sends (another track,
 D the delay or R the reverb), K1+E3 how much. TAKE, VOICE, FILTER and
 EFFECT then edit the focused track (their page pop reads 2 VOICE ...),
@@ -51,7 +53,7 @@ modes, and VOICE draws HELD dim.
 | VOICE (PV) | SPEED `scan` | PITCH `pitch` | SPEED `scan` | PITCH `pitch` | FRZ* | MODE, hold TRK 2 | no |
 | VOICE (CLOUD) | SIZE `size` | DENSITY `density` | SPEED `scan` | PITCH `pitch` | FRZ* | MODE, hold TRK 2 | no |
 | VOICE (OFF) | SPEED `scan` | PITCH `pitch` | SPEED `scan` | PITCH `pitch` | FRZ* | MODE, hold TRK 2 | no |
-| TRACKS | TRACK `track_sel` | LEVEL `@trk_level` | TO `@route_to` | AMT `@route_amt` | ON* | MODE | no |
+| TRACKS | TRACK `track_sel` | LEVEL `@trk_level` | TO `@route_to` | AMT `@route_amt` | MUTE, hold SOLO | MODE, hold OFF | no |
 | TAPE | RATE `tape_rate` | LOOP `loop_end` | PRE `tape_pre` | SOURCE `cut_source` | REC* | REV* | yes |
 | FILTER | CUTOFF `cutoff` | RESO `resonance` | DRIVE `drive` | CRUSH `crush` | OPEN* | TYPE, hold TRK 2 | no |
 | EFFECT | AMOUNT `effect_amt` | RATE `effect_rate` | AMT 2 `effect2_amt` | RATE 2 `effect2_rate` | ON* | TYPE, hold TRK 2 | no |

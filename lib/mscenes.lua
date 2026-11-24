@@ -248,6 +248,7 @@ local SCENE_EXCLUDE = {
   -- the master + STOP: a scene must never rewrite stage volume or unmute
   -- (out_level is the ONE of these the safe snapshot takes — SAFE_EXTRA_IDS)
   "out_level", "stop_all",
+  "mute_1", "mute_2", "mute_3", "mute_4",   -- a hand on the mixer, like STOP
   -- capture transports + write plumbing: a scene changes how it sounds,
   -- never whether or what it is recording
   "rec", "tape_rec", "rec_level", "pre_level", "clear_rec", "sample_file",

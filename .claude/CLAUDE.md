@@ -186,6 +186,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | yes, 2026-11-24: stage 21 measured, SCENE and MIX screens captured | no |
 | 71st: a head sync leaves a loop that is in time alone and fades a jump (`\four_sync`), stage 21 as a test (engine, test tools) | yes, 2026-11-24, `count: 199`: row 21.4 has no break and no drift over five minutes (PLAY clicked at three of six restarts before) | no |
 | 72nd: PV and WARP wrap inside the loop (`Buf::setLoop`), so their seam has no hole; a tape clear makes no xrun (engine, plugin, Lua) | yes, 2026-11-24, `count: 199`, plugin built there: WARP -2.4 dB at the seam (-74.0 before), PV -2.6 dB (-21.6) | no |
+| 73rd: TRACKS: levels in dB steps, K2 MUTE and held SOLO, K3 held OFF (`mute_1` to `mute_4`, `ctx.track_gain`) (Lua, test tools) | no: the norns was away | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

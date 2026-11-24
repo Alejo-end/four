@@ -96,7 +96,9 @@ local out = {
   "its own.",
   "",
   "Tracks: four engine tracks and one focus. On TRACKS, E2 picks the focused",
-  "track and E3 sets its level. K2 turns it on and off, K3 cycles its mode.",
+  "track and E3 sets its level in steps of 0.5 dB. K2 mutes it on a tap and",
+  "solos it while held (on a track that is off, K2 turns it on). K3 cycles its",
+  "mode, and held it turns the track off.",
   "Hold K1 there for its sends: K1+E2 picks where it sends (another track,",
   "D the delay or R the reverb), K1+E3 how much. TAKE, VOICE, FILTER and",
   "EFFECT then edit the focused track (their page pop reads 2 VOICE ...),",
@@ -112,7 +114,7 @@ local out = {
   "|---|---|---|---|---|---|---|---|",
 }
 
--- the VOICE rail's order, then OFF (TRACKS K2 turns a track off)
+-- the VOICE rail's order, then OFF (TRACKS K3 held turns a track off)
 local MODES = { { 5, "PLAY" }, { 2, "GRAIN" }, { 3, "WARP" }, { 4, "PV" },
   { 6, "CLOUD" }, { 1, "OFF" } }
 local FOCUS = { { 1, "lanes" } }

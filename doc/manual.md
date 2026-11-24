@@ -93,7 +93,7 @@ the code.
 |---|---|---|---|
 | TAKE | Record a sound and set its loop | record | snap the loop, hold: undo |
 | VOICE | How the track plays the take | freeze (heal in PLAY) | next voice |
-| TRACKS | The four tracks: on, level and sends | track on | next voice |
+| TRACKS | The four tracks: level, mute, solo and sends | tap mute, hold solo | tap next voice, hold off |
 | TAPE | A loop deck that records what four plays, or the input alone | record | reverse |
 | FILTER | Low-pass, high-pass or band-pass, with drive and crush | open | type |
 | EFFECT | Two effects in series for the track | on | type |
@@ -132,6 +132,18 @@ decay. Recording is never affected.
 |---|---|
 | ![TRACKS](ui/tracks.png) | ![TRACKS, the sends](ui/tracks-sends.png) |
 | E2 picks the track and E3 sets its level. | Hold K1: E2 picks where the track sends, E3 how much. |
+
+E3 moves the level in steps of 0.5 dB, from silence to +3.5 dB. The bar is in dB too, and
+the mark on it is 0 dB. The bar shows the knob and not how loud the track is.
+
+K2 is MUTE on a tap. The loop runs on under the mute, and the level stays as it was. Hold
+K2 for SOLO: you hear that track alone (also when it is muted) until you let go. Its sends
+and the tails of the delay and the reverb ring on. A muted track says `MUTE`, and its
+number in the header is dim. A scene and the motion loop leave the mutes alone. A preset
+keeps them. A new pass of REC on a muted track takes its mute off. Each mute is a param
+(PARAMS > tracks), so a MIDI button reaches it.
+
+Hold K3 to turn a track OFF: this is how you save CPU. K2 on a track that is off turns it on.
 
 The sends grid has a column for each track, D for the delay and R for the reverb. Every
 send starts at zero. The echoes and the tail are added to the dry sound, which never ducks.
