@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-21)
+## STATUS (2026-11-24)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -183,7 +183,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 67th: an aligned overdub (`\four_dub`) and `head_sync`, `count: 199` (engine, test tools) | yes, 2026-11-21, `count: 199`, `four: FourStretch on`. probe10 on the norns's scsynth: the write starts 1.33 ms (one block) ahead of the read, 0.0 on the Mac | no |
 | 68th: `rec_align` (ALIGN at the start), TAKE marks where the next pass writes (Lua, test tools) | deployed 2026-11-21: an aligned pass armed (`rec_aligned`), its head stayed in the window, the window stayed | no |
 | 69th: the clock: locked tracks, loop sync, a take on the clock (`rec_sync`), motion on the bar (Lua, test tools) | deployed 2026-11-21: with a lock of 1 bar at 60 BPM the head was at the window's start 50 ms after each of four bars | no |
-| 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | deployed 2026-11-21, loads, not looked at | no |
+| 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | yes, 2026-11-24: stage 21 measured, SCENE and MIX screens captured | no |
+| 71st: a head sync leaves a loop that is in time alone and fades a jump (`\four_sync`), stage 21 as a test (engine, test tools) | yes, 2026-11-24, `count: 199`: row 21.4 has no break and no drift over five minutes (PLAY clicked at three of six restarts before) | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -240,7 +241,8 @@ has not taken place, and the shipped presets have never been heard. The earlier 
 is the user's on FourStretch, above.
 
 **The walkthrough.** doc/device-gate.md, stages 0 to 21, top to bottom. Stage 21 is the
-clock, the record head and the input (the user's notes of 2026-11-21), by hand. Stage 20 is the
+clock, the record head and the input (the user's notes of 2026-11-21): `gate.py 21`
+measures it, and 21.1, 21.4 and 21.7 still need ears. Stage 20 is the
 Exquis: it needs one on the norns and has never run. Stage 19 is four's own work. It has not
 passed since 2026-07-16 at `count: 63`, under mangler. On 2026-11-06
 `test/device/gate.py` ran it at `count: 66` with no ears, which is NOT a pass
@@ -489,6 +491,11 @@ Each line was learned the hard way; the change log has the story.
 - The offline check on the Mac is not the device's scsynth. `test/device/norns_nrt.sh`
   renders a probe's scores with the norns's own scsynth, offline, in seconds. Run it
   before the RESTART for any change that the first block of a synth can decide.
+- A synth that frees itself at its first block (`FreeSelf`) still plays that block. An
+  envelope that starts to fall at once prints a step: `\four_sync` waits two blocks.
+- A head that is put back on the clock at every beat line moves by the jitter of the
+  command (JACK's period, sclang) each time, and clicks. Read the head on the server and
+  leave it alone when it is near enough.
 - On the norns every UGen counts. A control-rate operator costs about 0.01% of the
   scsynth thread for each synth that holds it: nine more in FLANGE and four in ECHO took
   the dense set from 62.4% to 63.5% (the forty-fifth change, first version). When a law

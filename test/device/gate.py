@@ -3505,6 +3505,321 @@ def stage20():
                     "(watch, sweep)")
 
 
+def onsets(xs, rate, part=0.15, rest=0.25):
+    """Every start of a hit (s): a level over `part` of the peak after `rest` s under it."""
+    thr = part * max((abs(x) for x in xs), default=0)
+    out, last = [], -1e9
+    for i, x in enumerate(xs):
+        if thr > 0.003 and abs(x) > thr:
+            if i - last > rest * rate:
+                out.append(i / rate)
+            last = i
+    return out
+
+
+# A MIDI clock for the norns's virtual MIDI port, run on the norns: start, then
+# 24 clocks a beat. Python's standard library has no ALSA, so through ctypes.
+MIDI_CLOCK_PY = """
+import ctypes, subprocess, struct, sys, time
+bpm, secs = float(sys.argv[1]), float(sys.argv[2])
+dest, client = None, None
+for line in subprocess.run(['aconnect', '-l'], capture_output=True, text=True).stdout.splitlines():
+    if line.startswith('client'):
+        client = int(line.split()[1].rstrip(':'))
+    elif 'Virtual RawMIDI' in line:
+        dest = client      # two of them: the last is the one matron reads
+a = ctypes.CDLL('libasound.so.2')
+h = ctypes.c_void_p()
+assert a.snd_seq_open(ctypes.byref(h), b'default', 3, 0) == 0
+a.snd_seq_create_simple_port(h, b'clock', 1 | 32, 2)
+me = a.snd_seq_client_id(h)
+def send(kind):
+    ev = struct.pack('<BBBB8sBBBB12s', kind, 0, 0, 253, bytes(8), me, 0, dest, 0, bytes(12))
+    a.snd_seq_event_output_direct(h, ctypes.create_string_buffer(ev, 28))
+send(30)
+t = time.monotonic()
+end = t + secs
+while t < end:
+    send(36)
+    t += 60 / bpm / 24
+    time.sleep(max(0, t - time.monotonic()))
+send(32)
+"""
+
+
+def stage21():
+    """The clock, the record head and the input: what a computer can judge of
+    the rows. The ears still judge 21.1, 21.4 and 21.7."""
+    keep = {p: n.get(p) for p in ("clock_tempo", "clock_source")}
+    mon = n.lua('print(params:get("monitor_level"))').strip()
+
+    def base(tempo=120):
+        n.load_script()
+        n.set("clock_source", 1)
+        n.set("clock_tempo", tempo)
+        n.set("dry_wet", 1)
+        for pid, v in (("rec_wait", 0), ("pre_level", 0), ("regen", 0), ("rec_sync", 1)):
+            n.set(pid, v)
+        modes("PLAY", "OFF", "OFF", "OFF")
+
+    def in_clock(code):
+        """Run Lua in a norns coroutine; it must set __gr. Wait for the answer."""
+        n.lua("__gr = nil clock.run(function() " + code + " end)")
+        for _ in range(400):
+            time.sleep(0.1)
+            out = n.lua("print(__gr)").strip().splitlines()[-1]
+            if out != "nil":
+                return out
+        raise TimeoutError("the coroutine gave no answer")
+
+    def hit_take(secs=2.0, at=0.5):
+        """A free take with one hit in it."""
+        n.set("rec", 1)
+        time.sleep(at)
+        n.signal("hit")
+        time.sleep(secs - at)
+        n.set("rec", 0)
+        time.sleep(0.6)
+
+    def overdub(name, align):
+        """One overdub hit, recorded with the output and the player's own signal."""
+        base()
+        hit_take()
+        head = num(n.ctx("c.rec_phase"))
+        n.set("rec_align", align)
+        n.set("pre_level", 0.9)
+        n.goto("TAKE")
+        time.sleep(0.3)
+        shot(name)
+        win = (n.get("pos_start"), n.get("pos_end"))
+        armed = {}
+
+        def play():
+            time.sleep(2)
+            n.set("rec", 1)
+            armed["aligned"] = n.ctx("tostring(c.rec_aligned)")
+            armed["at"] = num(n.ctx("c.rec_arm_phase"))
+            # a place in the loop that holds no hit yet: 0.5 s is the first one's
+            for _ in range(200):
+                ph = num(n.ctx("c.play_phase")) * 60
+                lo = win[0] * 60
+                if 1.1 < ph - lo < 1.4:
+                    break
+                time.sleep(0.02)
+            n.signal("hit")
+            time.sleep(4)
+            n.set("rec", 0)
+        rate, chans = during(play, name, 16, (ENGINE_OUT[0], "scsig:out_1"))
+        return rate, chans, win, armed, head
+
+    def c211():
+        rate, (out, sig), win, armed, _ = overdub("21.1_aligned", 2)
+        loop = (win[1] - win[0]) * 60
+        heard, played = onsets(out, rate), onsets(sig, rate)
+        hit = played[0]
+        after = [t for t in heard if t > hit + 0.3]
+        # each hit comes back one loop after it was played: the rest is latency
+        late = sorted(((t - hit) % loop, t) for t in after)
+        near = [(d if d < loop / 2 else d - loop) * 1000 for d, _ in late]
+        ours = [round(d, 1) for d in near if abs(d) < 60]
+        kept = (n.get("pos_start"), n.get("pos_end")) == win
+        ok = armed["aligned"] == "true" and kept and len(ours) >= 2 and all(abs(d) < 15 for d in ours)
+        return verdict(ok, f"loop {loop:.3f} s, the hit came back {ours} ms off its place, "
+                           f"the window stayed={kept}. Ears: the hits against the beat", "measured")
+
+    def c212():
+        rate, (out, sig), win, armed, head = overdub("21.2_free", 1)
+        ok = armed["aligned"] != "true" and abs(armed["at"] - head) * 60 < 0.1
+        return verdict(ok, f"the last pass stopped at {head * 60:.3f} s, this one began at {armed['at'] * 60:.3f} s, "
+                           f"aligned={armed['aligned']}")
+
+    def c213():
+        base()
+        n.goto("TAKE")
+        n.set("rec_sync", 3)
+        n.signal("drums")
+        said = in_clock(
+            'local r = {} clock.sync(4) clock.sleep(0.3) params:set("rec", 1) '
+            'r[1] = "wait " .. tostring(__ctx.sync_arm) .. " rec " .. params:get("rec") '
+            'clock.sync(4) clock.sleep(0.1) r[2] = "bar rec " .. params:get("rec") '
+            'clock.sync(4) clock.sleep(1.0) params:set("rec", 0) '
+            'r[3] = "stop " .. tostring(__ctx.sync_stop) .. " rec " .. params:get("rec") '
+            'clock.sync(4) clock.sleep(0.2) r[4] = "end rec " .. params:get("rec") '
+            '__gr = table.concat(r, ", ")')
+        n.signal(None)
+        secs = (n.get("pos_end") - n.get("pos_start")) * 60
+        lock = n.ctx("c.lock[1] and c.lock[1].beats")
+        ok = said == "wait true rec 0, bar rec 1, stop true rec 1, end rec 0" and abs(secs - 4) < 0.0001 and num(lock) == 8
+        return verdict(ok, f"{said}; the window is {secs:.5f} s, locked to {lock} beats")
+
+    def bar_take(track, bars, sound):
+        n.set("track_sel", track)
+        time.sleep(0.3)
+        if sound == "tone":
+            n.signal("tone")
+        hit = "" if sound == "tone" else "clock.sleep(0.25)"
+        n.lua('__gr = nil clock.run(function() clock.sync(4) clock.sleep(0.3) params:set("rec", 1) '
+              f'clock.sync(4) {hit} __gr = 1 clock.sync(4) ' + 'clock.sync(4) ' * (bars - 1) +
+              '__gr = 2 end)')
+        # (the stop is set half a beat before its line, so it waits for that one)
+        while n.lua("print(__gr)").strip().splitlines()[-1] not in ("1", "2"):
+            time.sleep(0.02)
+        if sound == "hit":
+            n.signal("hit")
+        time.sleep(0.5 + (bars - 1) * 2)
+        n.set("rec", 0)
+        time.sleep(2.2)
+        n.signal(None)
+
+    def c214():
+        out = {}
+        base()
+        n.set("rec_sync", 3)
+        bar_take(1, 1, "hit")
+        bar_take(2, 2, "hit")
+        out["locks"] = n.lua('print(__ctx.lock[1] and __ctx.lock[1].beats, __ctx.lock[2] and __ctx.lock[2].beats)')
+        n.set("rec_sync", 1)
+        for which, (a, b) in {"1": ("PLAY", "OFF"), "2": ("OFF", "PLAY")}.items():
+            modes(a, b, "OFF", "OFF")
+            time.sleep(4)
+        # one track a side: track 1 left, track 2 right
+        for pid, v in (("pan", -1), ("t2_pan", 1)):
+            n.lua(f'if params.lookup["{pid}"] then params:set("{pid}", {v}) end')
+        out["pans"] = n.lua('print(params.lookup["pan"] ~= nil, params.lookup["t2_pan"] ~= nil)')
+        modes("PLAY", "PLAY", "OFF", "OFF")
+        time.sleep(5)
+        secs = int(os.environ.get("SYNC_SECS", "300"))
+        rate, (l, r) = engine_rec("21.4_together", secs)
+        a, b = onsets(l, rate), onsets(r, rate)
+        out["hits"] = (len(a), len(b))
+        if a and b:
+            # every hit of track 2 against the nearest one of track 1
+            gap = [min((t - x for x in a), key=abs) * 1000 for t in b]
+            out["track 2 against 1, ms"] = (round(min(gap), 1), round(sorted(gap)[len(gap) // 2], 1), round(max(gap), 1))
+            step = [(y - x) * 1000 - 2000 for x, y in zip(a, a[1:])]
+            out["track 1 loop against 2 s, ms"] = (round(min(step), 2), round(max(step), 2))
+            out["track 1 steps over 1 ms"] = sum(1 for d in step if abs(d) > 1)
+            out["track 1 over the recording, ms"] = round(((a[-1] - a[0]) - 2 * (len(a) - 1)) * 1000, 1)
+            spread = max(gap) - min(gap)
+        else:
+            spread = 1e9
+        # a loop that drifted (track 2 runs fast for 2 s) comes back to its place
+        def nudge():
+            time.sleep(5)
+            n.set("t2_scan", 1.1)
+            time.sleep(1.2)
+            n.set("t2_scan", 1)
+        rate, (l, r) = during(nudge, "21.4_drift", 24)
+        a, b = onsets(l, rate), onsets(r, rate)
+        back = [round(min((t - x for x in a), key=abs) * 1000, 1) for t in b]
+        out["track 2 against 1, ms, with track 2 nudged at 5 s"] = back
+        # the restart of a loop that has not drifted: a tone, sync on and off
+        n.set("rec_sync", 3)
+        n.lua('if params.lookup["pan"] then params:set("pan", 0) end')
+        modes("PLAY", "OFF", "OFF", "OFF")
+        bar_take(1, 1, "tone")
+        for mode in ("PLAY", "WARP", "PV", "GRAIN"):
+            modes(mode, "OFF", "OFF", "OFF")
+            time.sleep(3)
+            for word, v in (("off", 1), ("on", 2)):
+                n.set("loop_sync", v)
+                time.sleep(2.5)
+                rate, chans = engine_rec(f"21.4_{mode}_{word}", 12)
+                out[f"{mode} sync {word}: breaks, holes, step"] = (
+                    audio.breaks(chans, rate)[:8], audio.gaps(chans[0], rate)[:8], audio.step(chans))
+        return verdict(spread < 6 and abs(back[-1] - back[0]) < 12, f"{out}. Listen to 21.4_*.wav", "measured")
+
+    def c215():
+        base()
+        n.set("win_beats", 1)
+        hit_take(8, 0.5)
+        n.lua('params:set("win_beats", 4)')
+        locked = n.ctx("c.lock[1] and c.lock[1].beats")
+        before = (n.get("pos_end") - n.get("pos_start")) * 60
+        n.ssh("cat > /tmp/mg_clock.py", stdin=MIDI_CLOCK_PY.encode())
+        n.set("clock_source", 2)
+        n.ssh("nohup python3 /tmp/mg_clock.py 100 22 >/tmp/mg_clock.log 2>&1 &")
+        time.sleep(8)
+        word = n.ctx("c.clock_word()")
+        n.goto("SCENE")
+        shot("21.5_scene")
+        tempo = [num(n.lua("print(clock.get_tempo())")) for _ in range(5)]
+        after = (n.get("pos_end") - n.get("pos_start")) * 60
+        n.key(1, 1)
+        time.sleep(0.4)
+        n.enc(2, 3)
+        time.sleep(0.2)
+        shot("21.5_turn")
+        n.key(1, 0)
+        kept = n.get("clock_source")
+        rate, chans = engine_rec("21.5_follow", 10)
+        hits = onsets(chans[0], rate)
+        loops = [round(y - x, 4) for x, y in zip(hits, hits[1:])]
+        time.sleep(4)
+        n.set("clock_source", 1)
+        log = n.ssh("cat /tmp/mg_clock.log; rm -f /tmp/mg_clock.py /tmp/mg_clock.log").strip()
+        beats = num(locked) or 0
+        ok = word == "100 MIDI" and beats > 0 and abs(after - beats * 0.6) < 0.02
+        return verdict(ok, f"SCENE says {word!r}; tempo {tempo}; a window locked to {locked} beats went from "
+                           f"{before:.4f} to {after:.4f} s; the loop's hits are {loops} s apart; "
+                           f"source after K1+E2 {kept}; {log}", "measured")
+
+    def c216():
+        base()
+        hit_take()
+        n.lua('params:set("motion_bars", 2) params:set("cutoff", 2000)')
+        time.sleep(0.5)
+        said = in_clock(
+            'params:set("motion_rec", 1) clock.sync(4) clock.sync(1) params:set("cutoff", 4000) '
+            'clock.sleep(0.75) params:set("cutoff", 1000) '
+            'clock.sync(4) clock.sync(4) local r, last = {}, params:get("cutoff") '
+            'local stop = clock.get_beats() + 32 '
+            'while clock.get_beats() < stop do clock.sleep(0.005) local v = params:get("cutoff") '
+            'if v > 3000 and last <= 3000 then r[#r + 1] = string.format("%.2f", clock.get_beats() % 4) end last = v end '
+            '__gr = "rec " .. params:get("motion_rec") .. " play " .. params:get("motion_play") .. " at " .. table.concat(r, " ")')
+        at = [float(x) for x in said.split(" at ")[1].split()] if " at " in said else []
+        n.set("motion_play", 0)
+        ok = len(at) >= 6 and all(abs(x - 1) < 0.3 for x in at)
+        return verdict(ok, f"{said} (beats in the bar, the move was at 1.00)")
+
+    def c217():
+        base()
+        out = {}
+        n.goto("MIX")
+        n.signal("hit")
+        for name, level, wet in (("monitor", 0, 1), ("dry", "-math.huge", 0.5)):
+            n.lua(f'params:set("monitor_level", {level}) params:set("dry_wet", {wet})')
+            time.sleep(0.5)
+            rate, (o, s) = during(lambda: (time.sleep(1), n.signal("hit")), f"21.7_{name}", 4,
+                                  ("crone:output_1", "scsig:out_1"))
+            a, b = onsets(s, rate), onsets(o, rate)
+            out[name + ", ms after the source"] = round((b[0] - a[0]) * 1000, 2) if a and b else None
+        n.lua('params:set("monitor_level", 0)')
+        n.key(1, 1)
+        time.sleep(0.6)
+        shot("21.7_mix_input")
+        m0, d0 = n.get("monitor_level"), n.get("dry_wet")
+        n.enc(2, -5)
+        n.enc(3, 5)
+        time.sleep(0.2)
+        m1, d1 = n.get("monitor_level"), n.get("dry_wet")
+        n.key(1, 0)
+        out["K1+E2 moves MONITOR"] = (m0, m1)
+        out["K1+E3 moves DRY/WET"] = (d0, d1)
+        ok = m0 != m1 and d0 != d1 and all(out[k + ", ms after the source"] is not None for k in ("monitor", "dry"))
+        return verdict(ok, f"{out}. Look at 21.7_mix_input.png", "measured")
+
+    try:
+        for cid, fn in (("21.1", c211), ("21.2", c212), ("21.3", c213), ("21.4", c214),
+                        ("21.5", c215), ("21.6", c216), ("21.7", c217)):
+            check(cid, fn)
+    finally:
+        n.signal(None)
+        n.lua(f'params:set("monitor_level", {"-math.huge" if "inf" in mon else mon})')
+        n.set("clock_source", int(keep["clock_source"]))
+        n.set("clock_tempo", keep["clock_tempo"])
+
+
 def cleanup():
     n.signal_quit()
     n.ssh(f"rm -f ~/dust/data/four/four-{PSET}.pset ~/dust/data/four/*-{PSET}.lua "
@@ -3513,7 +3828,8 @@ def cleanup():
 
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,
           8: stage8, 9: stage9, 10: stage10, 11: stage11, 12: stage12, 13: stage13, 14: stage14,
-          15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19, 20: stage20}
+          15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19, 20: stage20,
+          21: stage21}
 
 
 def main():

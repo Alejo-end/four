@@ -483,19 +483,19 @@ it cannot find a fault that the two share. These rows can.
 | 20.9 | Hot-plug | Unplug it under a held pad. Plug it in again. Then with a grid attached | Nothing hangs, the held pad is released, and maiden shows no error. Plugged in, it is taken on the next frame, in PADS alone and in KEYS beside a grid | `Mgrid.hotplug`, `ex_release` |
 | 20.10 | It is given back | Open the Exquis's settings menu and close it. Then load another script | After the menu the pads are painted again. After four leaves, the Exquis is its own instrument again | The Refresh request, `ex:shutdown` |
 
-## Stage 21: the clock, the record head and the input (by hand)
+## Stage 21: the clock, the record head and the input
 
 The sixty-seventh to the seventieth change (doc/clock-plan.md). The engine part needs the
 RESTART and `count: 199`. The offline check (test/dsp/check_dsp.sh, probe10) proved where
-an aligned pass writes and where a head sync puts the head. Only these rows can say how
-they sound. Set the tempo to 120 on SCENE (K1+E2) first.
+an aligned pass writes and where a head sync puts the head. `python3 test/device/gate.py 21` measures the rows
+(SYNC_SECS sets the length of 21.4's recording). Only ears can say how they sound. Set the tempo to 120 on SCENE (K1+E2) first.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
 | 21.1 | **An aligned overdub lands where you hear it** | Track 1 in PLAY, a take of a short beat, overdub at 0.5, `overdub head` ALIGN. On TAKE the mark under the wave is at the play head. K2, play a hit on the beat you hear for two loops, K2 | The hits sit on the beat they were played on, loop after loop. The window does not move | `\four_dub`, `updateDub`, the phase bus. A hit late by a few ms is the audio's round trip, not this |
 | 21.2 | The old law | The same with `overdub head` FREE | The mark is where the last pass stopped, and the overdub goes there | `ctx.aligns` |
 | 21.3 | **A take on the clock** | `take on clock` BAR. K2 a little after a bar line, play, K2 in the middle of the second bar | TAKE says `REC ON BAR`, then REC on the bar, then `STOP ON BAR`. The take is two bars to the sample (`win length` FREE) | `ctx.on_beat`, `sync_arm`, `sync_stop` |
-| 21.4 | **The loops start together** | Two tracks with takes on the clock of one and two bars, both in PLAY, `loop sync` ON | They start together on every second bar, and stay together for five minutes. Listen at each restart of a loop that has not drifted: no click | `head_sync`, `sync` in winRead. A click: the jump is not faded (PLAY's seam fade covers the start only) |
+| 21.4 | **The loops start together** | Two tracks with takes on the clock of one and two bars, both in PLAY, `loop sync` ON | They start together on every second bar, and stay together for five minutes. Listen at each restart of a loop that has not drifted: no click | `\four_sync`. A loop within 10 ms of its place is left alone, and a jump is faded in PLAY |
 | 21.5 | **MIDI clock** | `PARAMS > CLOCK > source` midi, a drum machine sends its clock at 100 BPM | SCENE reads `100 MIDI`. The locked tracks take the new length and follow the machine. K1+E2 on SCENE says `TEMPO: MIDI` | `sync_locks`, `ctx.clock_word` |
 | 21.6 | A motion pass on the clock | MOTION K1+E3 to 1 BAR. Double-tap K1, move a knob on the second beat of a bar | The move comes back on the second beat of every bar | `sync_origin` in lib/mmotion.lua |
 | 21.7 | **The input's two ways** | Hold K1 on MIX. Turn E2 (MONITOR) and E3 (DRY/WET) | With both up the page says `BOTH UP: HEARD TWICE`, and the input sounds hollow. With MONITOR down the input comes through four only | `mix_input` in lib/mpages.lua |

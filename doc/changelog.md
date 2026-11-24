@@ -5440,3 +5440,30 @@ starts 1.33 ms (one block) ahead of the read head (0.0 ms on the Mac), and every
 reads as on the Mac. A lock of one bar at 60 BPM put track 1's head at its window's start
 50 ms after each of four bars. An aligned pass of 1.5 s armed, kept its head in the window
 and left the window. Not heard.
+
+four, seventy-first change: **a head sync leaves a loop in time alone (engine and test
+tools)**. 2026-11-24.
+- Stage 21 ran on the device for the first time, as a test (`gate.py 21`). Row 21.4 found
+  a fault of the sixty-seventh change: with loop sync ON, PLAY clicked at three of six
+  restarts of a loop that had not drifted (a step of 0.055 over the tone). The command
+  arrives up to 2.7 ms early or late, and each one moved the head.
+- `\four_sync` (39 UGens, 18 ms at each `head_sync`, right after the drone) reads the head
+  on the server. Within 10 ms of the window's start it does nothing. Further, the head
+  jumps 8 ms after the command, and lands 8 ms into the window, so the loop is in time. In
+  PLAY the jump is faded. The drones' `sync` is mapped to a control bus (`syncBus`), so no
+  drone def grows. The count stays 199.
+- probe10: a jump 1.3 to 2.7 ms off its command on both scsynths, a sync in time does not
+  move the head and adds no step, and a faded jump has a second difference of 0.0008. The
+  DSP check passes on both builds. Its first run failed one random GRAIN row (-12.9 dB
+  against -12), and the second passed.
+- On the device after a RESTART (`count: 199`, FourStretch on): PLAY, WARP, PV and GRAIN
+  with sync ON show the same breaks and the same steps as with it OFF. Two loops of one
+  and two bars over five minutes: no step over 1 ms, 0.0 ms of drift. A loop run 10% fast
+  for 1.2 s comes back to 2.7 ms of its place. No xruns in the run.
+- The other rows: an aligned overdub comes back 11.4 ms late each time (the travel of the
+  audio through JACK, not compensated). The take on the clock is 4.00000 s for two bars. A
+  motion move at beat 1.00 comes back at 0.93. With MIDI clock at 100 BPM through the
+  shield's virtual port, SCENE says `100 MIDI`, a locked bar goes from 2.0 to 2.4 s, and
+  its hits are 2.4 s apart. The input by DRY comes 8.7 ms after MONITOR.
+- The norns booted with an old clock (it had no network) and then jumped by days: sclang
+  took 90% of a core and its REPL did not answer. The four services, restarted, cured it.

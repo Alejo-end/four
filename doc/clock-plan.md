@@ -1,8 +1,9 @@
 # four: the clock, the record head and the input (plan of 2026-11-21)
 
-STATE (2026-11-21): changes 67 to 70 are built, deployed (`count: 199`) and pass every offline check (the Lua
-harnesses on Lua 5.3, the DSP check on both builds). They are on the device, and
-nobody has heard them. Next: stage 21 of doc/device-gate.md, by ear.
+STATE (2026-11-24): changes 67 to 70 are built and on the device (`count: 199`).
+Stage 21 was measured there. It found that a head sync clicked, and the
+seventy-first change fixed it. Nobody has heard any of it. Next: rows 21.1,
+21.4 and 21.7 by ear.
 
 This plan answers items 31 to 35 of doc/ux-feedback.md, the user's notes of
 2026-11-21. It is the order of work for the sixty-seventh to the seventieth

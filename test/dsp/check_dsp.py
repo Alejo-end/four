@@ -266,8 +266,16 @@ def check(build):
            num(r'^PAST the window.s end, 2.02 to 2.4 s: ([-\d.]+)', a10), -100, 'dB')
     target(build, "io writes nothing for an aligned pass (where io's own head stood)",
            num(r'^BEFORE the window, 0 to 0.95 s .*: ([-\d.]+)', a10), -100, 'dB')
-    target(build, "head_sync puts the read head at the window's start (ms of travel 5 ms after it)",
-           num(r'^SYNC puts the head at the window.s start: ([-\d.]+)', a10), 5, 'ms')
+    target(build, "head_sync puts a loop that is off on its command (the head, 20 ms after it)",
+           abs(num(r'^SYNC puts the loop on its command: ([-\d.]+)', a10)), 3, 'ms')
+    target(build, "...and leaves a loop that is in time alone (it came 5 ms early)",
+           abs(num(r'^SYNC in time leaves the head alone: ([-\d.]+)', a10)), 0.1, 'ms')
+    target(build, "...with no step in the wave (largest second difference over a tone)",
+           num(r'^SYNC in time over a tone: ([-\d.]+)', a10), 0.002, '', fmt='.4f')
+    target(build, "a head_sync that jumps in PLAY is faded (largest second difference)",
+           num(r'^SYNC jump over a tone, the largest second difference: ([-\d.]+)', a10), 0.004, '', fmt='.4f')
+    target(build, "the UGens of four_sync (one synth, 18 ms at each head_sync)",
+           num(r'^UGENS four_sync (\d+)', runs['p10'][3].replace('\r', '')), 39, '', fmt='.0f')
     target(build, "the UGens of four_dub (one synth, only while an aligned pass runs)",
            num(r'^UGENS four_dub (\d+)', runs['p10'][3].replace('\r', '')), 49, '', fmt='.0f')
 

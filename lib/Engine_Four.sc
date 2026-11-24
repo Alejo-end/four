@@ -79,6 +79,7 @@ Engine_Four : CroneEngine {
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
+    var <syncBus;   // four: what each track's drone reads as `sync` (head_sync)
     var <playParams;
     var <ioKeys;
     // reverb+shimmer spawn/free synth: freed once rev_mix is 0 (spaceWait
@@ -345,6 +346,8 @@ Engine_Four : CroneEngine {
 
     // track i (0 to 3): its drone values, and the bus its read head writes
     trackParams { arg i; ^(i == 0).if({ playParams }, { extra[i - 1][\params] }) }
+    // track i's `sync` control is mapped to its bus, which \four_sync writes
+    syncMap { arg i; ^("c" ++ (syncBus.index + i)).asSymbol }
     trackPhase { arg i; ^(i == 0).if({ phaseBus }, { extra[i - 1][\phase] }) }
 
     // AN ALIGNED OVERDUB: \four_dub runs while `rec` is up and the passes
@@ -390,6 +393,7 @@ Engine_Four : CroneEngine {
             tr[\synth] = this.swapDrone(tr[\n], tr[\synth], tr[\mode] ? 0, i, [
                 \buf_l, bufLs[tr[\n] - 1], \buf_r, bufRs[tr[\n] - 1],
                 \play_bus, tr[\bus], \phase_out, tr[\phase],
+                \sync, this.syncMap(tr[\n] - 1),
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
                 \level, playParams[\level], \rec, playParams[\rec],
                 \freeze, playParams[\freeze],
@@ -406,6 +410,7 @@ Engine_Four : CroneEngine {
             playSynth = this.swapDrone(1, playSynth, from, i, [
                 \buf_l, bufL, \buf_r, bufR,
                 \play_bus, playBus, \phase_out, phaseBus,
+                \sync, this.syncMap(0),
                 \grain_env1, grainEnv1, \grain_env2, grainEnv2,
             ] ++ playParams.getPairs, playParams, bufL);
             this.updateErode;
@@ -785,6 +790,7 @@ Engine_Four : CroneEngine {
         dlySendBus = Bus.audio(s, 2);
         dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
+        syncBus = Bus.control(s, 4);
         tRetBus = Bus.audio(s, 2);
         tDlyBus = Bus.audio(s, 2);
         tRevBus = Bus.audio(s, 2);
@@ -977,12 +983,15 @@ Engine_Four : CroneEngine {
             rate = gl.(scan, scan_t) * pitchMul * (gl.(run, run_t) > 0.001)
                 * BufRateScale.kr(buf);
             // HEAD SYNC (the sixty-seventh change): `sync` going above 0
-            // sends the head to the window's start. head_sync sets it to 1
-            // and back to 0 20 ms later. A plain control (never t_, see
-            // CLAUDE.md), straight into the Phasors: no UGen more. A drone
-            // is born with 0, so it does not jump at its start.
+            // sends the head to the window's start. It is mapped to a control
+            // bus that \four_sync pulses (the seventy-first change). A plain
+            // control (never t_, see CLAUDE.md), straight into the Phasors:
+            // no UGen more. The bus is 0 at rest, so a drone does not jump
+            // at its start. The head lands 384 frames (8 ms) into the window:
+            // the time \four_sync takes to fade out and jump, so the loop is
+            // in time and not 8 ms late.
             whole = Phasor.ar(sync, rate,
-                Trig.kr(((In.kr(phase_out) * hfrom) + hlead).round % hspan, 0), spanF);
+                Trig.kr(((In.kr(phase_out) * hfrom) + hlead).round % hspan, 0), spanF, 384);
             frac = Phasor.ar(sync, rate, 0, 1);
             phase = (whole / spanF).clip(0, 1);
             winPos = lo + (phase * span);
@@ -1983,6 +1992,39 @@ Engine_Four : CroneEngine {
             ReplaceOut.kr(rec_phase_out, A2K.kr(idx / frames));
         }).add;
 
+        // ---- A HEAD SYNC (the sixty-seventh change, and the seventy-first,
+        // which put it in a synth of its own). One runs for 18 ms at each
+        // head_sync, right after the track's drone, and frees itself.
+        // A LOOP THAT IS IN TIME IS LEFT ALONE. The command arrives a few ms
+        // early or late at each beat (JACK's period, sclang, the network of
+        // clocks), so a jump every time round moved the head by that much and
+        // broke the wave: a step of 0.055 over a tone of -19 dB in PLAY, at
+        // three of six restarts (gate row 21.4). The head's place is read
+        // here, on the server, at the first block. Nearer than 10 ms to where
+        // it must be: nothing happens. Further (a loop that drifted, a new
+        // window, a tempo move): it jumps.
+        // THE JUMP IS FADED in PLAY (`duck`): 5 ms out, the jump, 5 ms in.
+        // The other voices' windows overlap, so a jump is smooth already:
+        // they get the same wait and no fade. The jump comes 8 ms after the
+        // command, and winRead lands the head 8 ms into the window.
+        SynthDef(\four_sync, {
+            arg play_bus, from_bus, sync_bus, buf, pos_start = 0, pos_end = 1, duck = 0;
+            var fade = 0.005, lead, hold, dur, len, err, t, env;
+            // a synth that frees itself at its first block still plays that
+            // block: the fade waits two, or a sync in time prints a step
+            lead = ControlDur.ir * 2;
+            hold = ControlDur.ir * 4;
+            dur = BufDur.kr(buf);
+            len = ((pos_end - pos_start).abs * dur).max(0.01);
+            err = ((((In.kr(from_bus) - pos_start.min(pos_end)) * dur) + (len * 0.5)) % len)
+                - (len * 0.5);
+            FreeSelf.kr(Impulse.kr(0) * (err.abs < 0.01));
+            t = Sweep.kr(0, 1) - lead;
+            ReplaceOut.kr(sync_bus, (t >= fade) * (t < (fade + (ControlDur.ir * 2.5))));
+            env = EnvGen.ar(Env([1, 1, 1 - duck, 1 - duck, 1], [lead, fade, hold, 0.005]), doneAction: 2);
+            ReplaceOut.ar(play_bus, In.ar(play_bus, 2) * env);
+        }).add;
+
         // ---- BEAT REPEAT, in its own spawn/release synth (updateRepeat).
         // Placed after io, it reads io's finished output off the engine's out
         // bus and REPLACES it. On spawn it passes the output through while it
@@ -2300,17 +2342,20 @@ Engine_Four : CroneEngine {
         // HEAD SYNC (the sixty-seventh change): track 1 to 4's read head goes
         // to its window's start. The script sends it on the clock, so the
         // loops of the locked tracks start together (doc/clock-plan.md).
+        // \four_sync decides on the server (the seventy-first change).
         this.addCommand(\head_sync, "i", { arg msg;
             var i = (msg[1].asInteger - 1).clip(0, 3);
-            var now = { (i == 0).if({ playSynth }, { extra[i - 1][\synth] }) };
-            var syn = now.value;
+            var syn = (i == 0).if({ playSynth }, { extra[i - 1][\synth] });
+            var mode = (i == 0).if({ modeV }, { extra[i - 1][\mode] ? 0 });
+            var p = this.trackParams(i);
             syn.notNil.if({
-                syn.set(\sync, 1);
-                // back to 0 for the next one, on the drone that is still there
-                SystemClock.sched(0.02, {
-                    (now.value === syn).if({ syn.set(\sync, 0) });
-                    nil
-                });
+                Synth.new(\four_sync, [
+                    \play_bus, (i == 0).if({ playBus }, { extra[i - 1][\bus] }),
+                    \from_bus, this.trackPhase(i), \sync_bus, syncBus.index + i,
+                    \buf, bufLs[i],
+                    \pos_start, p[\pos_start] ? 0, \pos_end, p[\pos_end] ? 1,
+                    \duck, (mode == 4).binaryValue
+                ], syn, \addAfter);
             });
         });
 
@@ -2547,6 +2592,7 @@ Engine_Four : CroneEngine {
         dlySendBus.free;
         dlyRetBus.free;
         phaseBus.free;
+        syncBus.free;
         extra.notNil.if({ extra.do({ arg tr; tr[\bus].free; tr[\phase].free }) });
         tRetBus.free;
         tDlyBus.free;
