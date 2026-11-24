@@ -1,0 +1,54 @@
+{"name": "control_empty", "cold": false, "xruns": 0, "xruns_at": [], "lua_ms": null, "crone": 0}
+{"name": "seq_01_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 116.5, "crone": 0, "dead_ms": [], "rms_db": -17.9}
+{"name": "seq_02_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 95.3, "crone": 0, "dead_ms": [], "rms_db": -21.2}
+{"name": "seq_03_round1", "cold": true, "xruns": 1, "xruns_at": [0.12], "lua_ms": 108.3, "crone": 0, "dead_ms": [], "rms_db": -18.2}
+{"name": "seq_04_round1", "cold": true, "xruns": 2, "xruns_at": [0.88, 0.88], "lua_ms": 122.3, "crone": 0, "dead_ms": [], "rms_db": -16.7}
+{"name": "seq_05_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 113.0, "crone": 0, "dead_ms": [], "rms_db": -17.1}
+{"name": "seq_06_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 107.7, "crone": 0, "dead_ms": [], "rms_db": -18.8}
+{"name": "seq_07_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 130.4, "crone": 0, "dead_ms": [], "rms_db": -20.8}
+{"name": "seq_08_round1", "cold": true, "xruns": 1, "xruns_at": [0.14], "lua_ms": 111.9, "crone": 0, "dead_ms": [], "rms_db": -16.1}
+{"name": "seq_09_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 116.7, "crone": 0, "dead_ms": [], "rms_db": -23.0}
+{"name": "seq_10_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 109.2, "crone": 0, "dead_ms": [], "rms_db": -14.2}
+{"name": "seq_11_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 138.6, "crone": 0, "dead_ms": [], "rms_db": -18.7}
+{"name": "seq_12_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 133.4, "crone": 0, "dead_ms": [], "rms_db": -19.6}
+{"name": "seq_01_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 122.3, "crone": 0}
+{"name": "seq_02_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 108.3, "crone": 0}
+{"name": "seq_03_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 97.4, "crone": 0}
+{"name": "seq_04_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 103.4, "crone": 0}
+{"name": "seq_05_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 105.3, "crone": 0}
+{"name": "seq_06_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 98.9, "crone": 0}
+{"name": "seq_07_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 92.1, "crone": 0}
+{"name": "seq_08_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 106.6, "crone": 0}
+{"name": "seq_09_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 102.3, "crone": 0}
+{"name": "seq_10_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 102.4, "crone": 0}
+{"name": "seq_11_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 114.2, "crone": 0}
+{"name": "seq_12_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 106.1, "crone": 0}
+{"name": "seq_01_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 96.2, "crone": 0}
+{"name": "seq_02_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 95.7, "crone": 0}
+{"name": "seq_03_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 102.3, "crone": 0}
+{"name": "seq_04_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 99.2, "crone": 0}
+{"name": "seq_05_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 112.6, "crone": 0}
+{"name": "seq_06_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 110.9, "crone": 0}
+{"name": "seq_07_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 96.5, "crone": 0}
+{"name": "seq_08_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 95.3, "crone": 0}
+{"name": "seq_09_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 107.7, "crone": 0}
+{"name": "seq_10_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 93.0, "crone": 0}
+{"name": "seq_11_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 118.2, "crone": 0}
+{"name": "seq_12_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 122.0, "crone": 0}
+{"name": "control_playing", "cold": false, "xruns": 0, "xruns_at": [], "lua_ms": null, "crone": 0, "dead_ms": [], "rms_db": -16.8}
+{"name": "part_params_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 21.7, "crone": 0}
+{"name": "part_files_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 18.9, "crone": 0}
+{"name": "part_one_file_round1", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 20.1, "crone": 0}
+{"name": "part_params_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 27.0, "crone": 0}
+{"name": "part_files_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 18.3, "crone": 0}
+{"name": "part_one_file_round2", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 20.4, "crone": 0}
+{"name": "part_params_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 24.6, "crone": 0}
+{"name": "part_files_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 19.6, "crone": 0}
+{"name": "part_one_file_round3", "cold": true, "xruns": 0, "xruns_at": [], "lua_ms": 19.6, "crone": 0}
+{"name": "heavy_round1_scsynth", "percent": 32.1}
+{"name": "heavy_four_PV_06_round1", "cold": true, "xruns": 1, "xruns_at": [0.04], "lua_ms": 43.9, "crone": 0, "dead_ms": [], "rms_db": -14.7}
+{"name": "heavy_round2_scsynth", "percent": 32.8}
+{"name": "heavy_four_PV_06_round2", "cold": true, "xruns": 2, "xruns_at": [0.05, 0.06], "lua_ms": 32.4, "crone": 0}
+{"name": "heavy_round3_scsynth", "percent": 32.8}
+{"name": "heavy_four_PV_06_round3", "cold": true, "xruns": 1, "xruns_at": [0.05], "lua_ms": 31.0, "crone": 0}
+{"name": "slots_untouched", "ok": true, "xruns_boot": 663}

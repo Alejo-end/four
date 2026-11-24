@@ -1,0 +1,54 @@
+{"name": "control_empty", "xruns": 0, "xruns_at": [], "lua_ms": null, "crone": 0}
+{"name": "seq_01_round1", "xruns": 2, "xruns_at": [0.06, 0.06], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -19.0}
+{"name": "seq_02_round1", "xruns": 0, "xruns_at": [], "lua_ms": 48.6, "crone": 0, "dead_ms": [], "rms_db": -16.9}
+{"name": "seq_03_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -17.0}
+{"name": "seq_04_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -16.7}
+{"name": "seq_05_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -16.2}
+{"name": "seq_06_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -16.4}
+{"name": "seq_07_round1", "xruns": 1, "xruns_at": [0.74], "lua_ms": 2.0, "crone": 0, "dead_ms": [], "rms_db": -15.9}
+{"name": "seq_08_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -15.8}
+{"name": "seq_09_round1", "xruns": 0, "xruns_at": [], "lua_ms": 57.1, "crone": 0, "dead_ms": [], "rms_db": -18.6}
+{"name": "seq_10_round1", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0, "dead_ms": [], "rms_db": -17.0}
+{"name": "seq_11_round1", "xruns": 0, "xruns_at": [], "lua_ms": 63.6, "crone": 0, "dead_ms": [], "rms_db": -17.8}
+{"name": "seq_12_round1", "xruns": 0, "xruns_at": [], "lua_ms": 60.4, "crone": 0, "dead_ms": [], "rms_db": -20.4}
+{"name": "seq_01_round2", "xruns": 0, "xruns_at": [], "lua_ms": 47.9, "crone": 0}
+{"name": "seq_02_round2", "xruns": 0, "xruns_at": [], "lua_ms": 50.1, "crone": 0}
+{"name": "seq_03_round2", "xruns": 0, "xruns_at": [], "lua_ms": 46.3, "crone": 0}
+{"name": "seq_04_round2", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_05_round2", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_06_round2", "xruns": 0, "xruns_at": [], "lua_ms": 65.7, "crone": 0}
+{"name": "seq_07_round2", "xruns": 0, "xruns_at": [], "lua_ms": 2.0, "crone": 0}
+{"name": "seq_08_round2", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_09_round2", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_10_round2", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_11_round2", "xruns": 0, "xruns_at": [], "lua_ms": 54.2, "crone": 0}
+{"name": "seq_12_round2", "xruns": 0, "xruns_at": [], "lua_ms": 47.7, "crone": 0}
+{"name": "seq_01_round3", "xruns": 0, "xruns_at": [], "lua_ms": 53.9, "crone": 0}
+{"name": "seq_02_round3", "xruns": 0, "xruns_at": [], "lua_ms": 55.7, "crone": 0}
+{"name": "seq_03_round3", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_04_round3", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_05_round3", "xruns": 0, "xruns_at": [], "lua_ms": 53.8, "crone": 0}
+{"name": "seq_06_round3", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_07_round3", "xruns": 0, "xruns_at": [], "lua_ms": 2.0, "crone": 0}
+{"name": "seq_08_round3", "xruns": 0, "xruns_at": [], "lua_ms": 1.0, "crone": 0}
+{"name": "seq_09_round3", "xruns": 0, "xruns_at": [], "lua_ms": 52.2, "crone": 0}
+{"name": "seq_10_round3", "xruns": 0, "xruns_at": [], "lua_ms": 49.5, "crone": 0}
+{"name": "seq_11_round3", "xruns": 0, "xruns_at": [], "lua_ms": 58.2, "crone": 0}
+{"name": "seq_12_round3", "xruns": 0, "xruns_at": [], "lua_ms": 45.7, "crone": 0}
+{"name": "control_playing", "xruns": 0, "xruns_at": [], "lua_ms": null, "crone": 0, "dead_ms": [], "rms_db": -17.8}
+{"name": "part_params_round1", "xruns": 0, "xruns_at": [], "lua_ms": 4.9, "crone": 0}
+{"name": "part_files_round1", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "part_one_file_round1", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "part_params_round2", "xruns": 0, "xruns_at": [], "lua_ms": 4.7, "crone": 0}
+{"name": "part_files_round2", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "part_one_file_round2", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "part_params_round3", "xruns": 0, "xruns_at": [], "lua_ms": 7.1, "crone": 0}
+{"name": "part_files_round3", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "part_one_file_round3", "xruns": 0, "xruns_at": [], "lua_ms": 0.5, "crone": 0}
+{"name": "heavy_round1_scsynth", "percent": 32.5}
+{"name": "heavy_four_PV_06_round1", "xruns": 3, "xruns_at": [-1.88, 0.05, 0.06], "lua_ms": 9.4, "crone": 0, "dead_ms": [], "rms_db": -12.5}
+{"name": "heavy_round2_scsynth", "percent": 31.8}
+{"name": "heavy_four_PV_06_round2", "xruns": 1, "xruns_at": [0.05], "lua_ms": 15.7, "crone": 0}
+{"name": "heavy_round3_scsynth", "percent": 32.8}
+{"name": "heavy_four_PV_06_round3", "xruns": 1, "xruns_at": [0.05], "lua_ms": 20.7, "crone": 0}
+{"name": "slots_untouched", "ok": true, "xruns_boot": 655}

@@ -688,7 +688,7 @@ lua test/amalgamate.lua
 lua test/controls.lua
 
 # the DSP, offline on the Mac, after ANY engine or ugen change: compiles the real
-# engine (count 198), renders the review probes, one verdict. About 30 s. KNOWN rows
+# engine (count 199), renders the review probes, one verdict. About 30 s. KNOWN rows
 # are open faults that fail only when they get worse. FOUR_PLUGIN_DIR (a folder with
 # FourStretch.scx from ugen/build_mac.sh) adds the plugin build.
 # The work folder must be OUTSIDE the repo: it holds a stand-in CroneEngine .sc file,

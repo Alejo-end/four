@@ -16,7 +16,7 @@ still 0.9% of the time). The results are in doc/measurements/2026-11-20/gate.jso
 2. Open an SSH control session and set `NORNS_CTL` (test/device/norns.py says how). Keep it
    open to the end.
 3. Run `python3 test/device/session.py prepare`. It loads a fresh four and checks
-   `count: 198`.
+   `count: 199`.
 4. Use only the supported set: any four voices up to PV at pitch 2.
 5. Save only to PSET slot 90.
 

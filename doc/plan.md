@@ -15,13 +15,14 @@ gate rows 19.12 and 19.27 (its changes C1 and C5), and it uses Phase 2 and Phase
 as its gates. This plan stays the order of work for everything else.
 
 Since 2026-11-21 doc/clock-plan.md holds the user's notes of that day (the clock, the
-record head, the input), built as the sixty-seventh to the seventieth change. Their next
-step is the deploy, the RESTART (`count: 199`) and stage 21 of doc/device-gate.md.
+record head, the input), built as the sixty-seventh to the seventieth change. They were
+deployed at `count: 199`, and stage 21 of doc/device-gate.md was measured on
+2026-11-24. Rows 21.1, 21.4 and 21.7 still need ears.
 
 ## Where the project stands
 
 The STATUS block of CLAUDE.md is the one record of the device: what is on it, the
-fingerprint (`count: 198`), and what nobody has heard. Read it first. This plan says only
+fingerprint (`count: 199`), and what nobody has heard. Read it first. This plan says only
 what to do.
 
 - **What four is.** Four tracks, each with its own 60 s of material. Each track has a
@@ -39,11 +40,11 @@ what to do.
 ## Phase 0: bring the device up to the code
 
 The STATUS block of CLAUDE.md says which changes the device lacks. To bring it to
-`count: 198`, in this order:
+`count: 199`, in this order:
 
 1. DONE 2026-11-16: the plugin built on the norns (`ugen/build_norns.sh`, the proof
    printed `all passed`), shipped in `ignore/plugins/`, installed by four itself.
-2. DONE 2026-11-16: deployed and restarted, `count: 198`.
+2. DONE 2026-11-16: deployed and restarted, `count: 198` (the count of that day).
 3. DONE 2026-11-16: the delay adds 1.4%, and in silence it costs less than with sound
    (doc/measurements/2026-11-16/). A silent CLOUD track costs more than a sounding one:
    3.9% against 2.5%.
@@ -100,7 +101,7 @@ whether the show works.
    - `node visuals/test_bridge.js` passes.
    - `lua test/check.lua` with `LUA53` set passes.
    - The norns answers on `norns.local`.
-   - Maiden reads `count: 198`.
+   - Maiden reads `count: 199`.
    - The system output level is not at -inf. On 2026-11-12 it read -inf, so
      crone's outputs were silent.
 
@@ -151,6 +152,12 @@ doc/device-gate.md, and fix or revert it.
 - **Also seen.** crone printed "error seeking to frame 2400256; aborting read".
   softcut tries to read past the end of a 50 s file.
 - **Goal.** Loading a preset during a show makes no audible glitch.
+
+- **Measured again (2026-11-24, doc/measurements/2026-11-24/).** 48 loads in a row with no
+  recording gave no xrun, from memory or from the card, and crone logged no seek error.
+  A load over four PV tracks gave 1 or 2 xruns (3 with the recording), each time 0.04
+  to 0.06 s after it started, and the files alone gave none. So candidates 1, 2 and 4
+  below have no measured case. First find what fails in the PV case.
 
 Candidate fixes, in order of cost:
 
@@ -307,7 +314,7 @@ The details are in CLAUDE.md. In short:
       norns-matron` over one SSH master session that stays open.
    3. Wait for both `compile done` and the `engines: [...]` line in the
       sclang log. A load before the second line hangs.
-   4. Load the script, and make sure that maiden reads `count: 198`.
+   4. Load the script, and make sure that maiden reads `count: 199`.
 5. Capture audio from `SuperCollider:out_1/2` with `n.record(..., ports=...)`.
    crone's outputs follow the system output level.
 6. Add an entry to doc/changelog.md for every change, as "four, Nth change".
