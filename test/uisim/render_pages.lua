@@ -238,6 +238,8 @@ elseif TRACK2 then
   goto_page("TRACKS")
   run_ticks(10)
   redraw()
+  for t, v in ipairs({ 0.5, 0.2, 0.05, 0 }) do push("amp_t" .. t, v) end
+  redraw()
   export(pfx("TRACKS", ""))
   -- track 2 muted; then track 3's level turning and its SOLO held
   params:set("mute_2", 1)

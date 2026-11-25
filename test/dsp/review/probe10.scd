@@ -27,7 +27,7 @@ Engine_Four.new(ctx, { arg eng;
         SynthDef(\bufplay, { |buf, out| Out.ar(out, PlayBuf.ar(1, buf, 1, 1, 0, 0)) })
     ];
     var std = syn.collect({ |d| [0.0, [\d_recv, d.asBytes]] })
-        ++ [\four_io, \four_play, \four_dub, \four_sync].collect({ |n| [0.0, [\d_recv, def.(n)]] });
+        ++ [\four_io, \four_play, \four_dub, \four_sync, \four_meter].collect({ |n| [0.0, [\d_recv, def.(n)]] });
     var b = 600, d = 1000, score;
     var dub = { |id, on|
         [[on, [\s_new, \four_dub, id, 3, 1010, \buf_l, 0, \buf_r, 1, \src_bus, d, \from_bus, 0,
@@ -41,6 +41,7 @@ Engine_Four.new(ctx, { arg eng;
     ("COMMANDS " ++ eng.cmdNames.size).postln;
     ("UGENS four_dub " ++ SynthDescLib.global[\four_dub].def.children.size).postln;
     ("UGENS four_sync " ++ SynthDescLib.global[\four_sync].def.children.size).postln;
+    ("UGENS four_meter " ++ SynthDescLib.global[\four_meter].def.children.size).postln;
     "FOUR_PLUGIN_DIR".getenv.notNil.if({
         opts.ugenPluginsPath = [Platform.resourceDir +/+ "plugins", "FOUR_PLUGIN_DIR".getenv];
     });
@@ -63,6 +64,10 @@ Engine_Four.new(ctx, { arg eng;
         [1.6, [\n_set, 1050, \rec, 0]],
         [2.9, [\n_set, 1000, \freq, 880]],
         [3.6, [\n_set, 1051, \rec, 0]],
+        // the tracks' meters: the sine on bus b (0.25) and an unwritten bus
+        [0.004, [\s_new, \four_meter, 1070, 3, 1010, \ob1, 1900, \ob2, b, \ob3, 1902, \ob4, 1904, \out, 10]],
+        [0.005, [\s_new, \headtap, 1071, 1, 0, \bus, 11, \out, 3]],
+        [4.1, [\n_free, 1071]],
         [4.2, [\n_free, 1000]],
         [4.3, [\s_new, \bufplay, 1030, 1, 0, \buf, 0, \out, 3]],
         [8.5, [\c_set, 0, 0]]

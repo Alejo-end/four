@@ -500,6 +500,21 @@ an aligned pass writes and where a head sync puts the head. `python3 test/device
 | 21.6 | A motion pass on the clock | MOTION K1+E3 to 1 BAR. Double-tap K1, move a knob on the second beat of a bar | The move comes back on the second beat of every bar | `sync_origin` in lib/mmotion.lua |
 | 21.7 | **The input's two ways** | Hold K1 on MIX. Turn E2 (MONITOR) and E3 (DRY/WET) | With both up the page says `BOTH UP: HEARD TWICE`, and the input sounds hollow. With MONITOR down the input comes through four only | `mix_input` in lib/mpages.lua |
 
+## Stage 22: the mix of the tracks
+
+The seventy-third and seventy-fourth changes (doc/mix-plan.md). The meters need the RESTART.
+`python3 test/device/gate.py 22` measures 22.1 to 22.6.
+
+| # | Check | Do | Pass | Suspect |
+|---|---|---|---|---|
+| 22.1 | The level in dB | TRACKS, 12 steps of E3 down on a tone, and back | -6 dB on the knob and at the output, and back at 0 | `ctx.level_step` |
+| 22.2 | **MUTE** | K2 tapped twice over a tone, on track 1 and on track 2 | Silence, no click, and the loop goes on where it would be | `ctx.track_gain`, the level's glide |
+| 22.3 | **SOLO** | Two tracks, K2 held on one | The other is silent and comes back at its level | `ctx.set_solo`, `release` of the key def |
+| 22.4 | The meters | Each track alone, then muted | The meter reads the track's peak within 4 dB, and 0 when muted. Look at the picture | `\four_meter`, `amp_t1` to `amp_t4` |
+| 22.5 | OFF and ON | K3 held, then K2 | The track goes off, and comes back in its voice | `T_MODE`, `T_ON` |
+| 22.6 | The cost | Four PLAY with and without the meters | Under 1 point of the scsynth thread | `\four_meter` |
+| 22.7 | **The mix, by hand** | Play four tracks and set a balance | It is easy. Item 36 of doc/ux-feedback.md | |
+
 ## When it passes
 
 Write the date and `count: 199` into the STATUS block of `CLAUDE.md`, as the new

@@ -20,6 +20,7 @@ The only PSET slot a test writes is PSET (90). Slots 1 to 12 hold the shipped
 presets, and a write there replaces their take, tape and scene files too.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -3820,6 +3821,147 @@ def stage21():
         n.set("clock_tempo", keep["clock_tempo"])
 
 
+def stage22():
+    """The mix of the tracks (the seventy-third and seventy-fourth changes,
+    doc/mix-plan.md): the levels, MUTE, SOLO, the meters and their cost."""
+    n.load_script()
+    n.set("dry_wet", 1)
+    for pid in ("rec_wait", "pre_level", "regen"):
+        n.set(pid, 0)
+    n.set("rec_end", 1)
+    for t, kind in ((1, "tone"), (2, "tone"), (3, "drums"), (4, "drums")):
+        n.set("track_sel", t)
+        time.sleep(0.3)
+        n.signal(kind)
+        time.sleep(0.4)
+        n.set("rec", 1)
+        time.sleep(8)
+        n.set("rec", 0)
+        time.sleep(0.5)
+    n.signal(None)
+    n.set("track_sel", 1)
+    n.goto("TRACKS")
+    tap = lambda k: (n.tap(k, 0.05), time.sleep(0.4))
+
+    def phase(t):
+        return num(n.ctx("c.play_phase" if t == 1 else f"c.play_phases[{t}]"))
+
+    def after_seam(t):
+        """Wait until track t's head is in the first part of its window."""
+        lo, hi = n.get(tp(t, "pos_start")), n.get(tp(t, "pos_end"))
+        end = time.time() + 20
+        while time.time() < end:
+            if 0.02 < (phase(t) - lo) / max(hi - lo, 1e-6) < 0.12:
+                return
+            time.sleep(0.1)
+
+    def c221():
+        modes("PLAY", "OFF", "OFF", "OFF")
+        after_seam(1)
+        a = level("22.1_0dB", 2)
+        for _ in range(12):
+            n.enc(3, -1)
+        v = n.get("grain_level")
+        after_seam(1)
+        b = level("22.1_minus6", 2)
+        for _ in range(12):
+            n.enc(3, 1)
+        back = n.get("grain_level")
+        ok = abs(20 * math.log10(v) + 6) < 0.01 and abs(a - b - 6) < 0.5 and abs(back - 1) < 1e-6
+        return verdict(ok, f"12 steps down: the knob {20 * math.log10(v):.2f} dB, the output {b - a:.1f} dB; back at {back}")
+
+    def c222():
+        out, ok = {}, True
+        for t in (1, 2):
+            modes(*["PLAY" if k == t else "OFF" for k in range(1, 5)])
+            n.set("track_sel", t)
+            after_seam(t)
+            ph0, t0 = phase(t), time.time()
+            seen = []
+            rate, chans = during(lambda: (time.sleep(1), tap(2), seen.append(n.get(f"mute_{t}")), time.sleep(1), tap(2)),
+                                 f"22.2_mute{t}", 5)
+            env = audio.envelope(chans[0], rate, 0.05)
+            quiet = sum(1 for v in env if v < -80) * 0.05
+            ph1, dt = phase(t), time.time() - t0
+            length = (n.get(tp(t, "pos_end")) - n.get(tp(t, "pos_start"))) * 60
+            off = ((ph1 - ph0) * 60 - dt) % length
+            off = min(off, length - off)
+            brk = audio.breaks(chans, rate)
+            out[t] = {"quiet_db": min(env), "loud_db": max(env), "breaks": brk, "step": audio.step(chans),
+                      "head_off_s": round(off, 2), "mute": (seen, n.get(f"mute_{t}")), "quiet_s": round(quiet, 2)}
+            ok = ok and seen == [1] and 0.8 < quiet < 2.5 and max(env) > -40 and not brk and off < 0.3 and n.get(f"mute_{t}") == 0
+        return verdict(ok, out)
+
+    def c223():
+        modes("PLAY", "OFF", "PLAY", "OFF")
+        n.set("track_sel", 3)
+        after_seam(1)
+        rate, chans = during(lambda: (time.sleep(0.8), n.key(2, 1), time.sleep(2), n.key(2, 0)), "22.3_solo", 5)
+        x = chans[0]
+        cut = lambda a, b: x[int(a * rate):int(b * rate)]
+        tone = [audio.band(cut(a, b), rate, 220) for a, b in ((0.2, 1.0), (2.0, 3.0), (4.0, 4.8))]
+        back = n.get("mute_1") == 0 and n.get("mute_3") == 0
+        ok = back and tone[1] < tone[0] - 30 and abs(tone[2] - tone[0]) < 1 and n.ctx("tostring(c.solo)") == "nil"
+        return verdict(ok, f"track 1's tone before, under track 3's SOLO and after: {tone} dB; breaks {audio.breaks(chans, rate)}")
+
+    def c224():
+        out, ok = {}, n.ctx("tostring(c.has_meter)") == "true"
+        for t in range(1, 5):
+            modes(*["PLAY" if k == t else "OFF" for k in range(1, 5)])
+            time.sleep(1)
+            seen = []
+            for _ in range(20):
+                seen.append(num(n.ctx(f"c.amp_t[{t}]")))
+                time.sleep(0.05)
+            rate, chans = engine_rec(f"22.4_t{t}", 2)
+            peak = audio.stats(chans[0])["peak_db"]
+            n.set(f"mute_{t}", 1)
+            time.sleep(3)
+            muted = num(n.ctx(f"c.amp_t[{t}]"))
+            n.set(f"mute_{t}", 0)
+            got = audio.db(max(seen))
+            out[t] = {"meter_db": got, "out_peak_db": peak, "muted": round(muted, 5)}
+            ok = ok and abs(got - peak) < 4 and muted < 0.001
+        modes("PLAY", "PLAY", "PLAY", "PLAY")
+        n.goto("TRACKS")
+        time.sleep(1)
+        shot("22.4_meters")
+        return verdict(ok, f"{out}. Look at 22.4_meters.png", "measured")
+
+    def c225():
+        modes("PLAY", "PLAY", "OFF", "OFF")
+        n.set("track_sel", 2)
+        n.goto("TRACKS")
+        n.tap(3, 1.5)
+        time.sleep(0.3)
+        off = n.get("t2_mode")
+        tap(2)
+        on = n.get("t2_mode")
+        return verdict(off == 1 and on == 5, f"K3 held: t2_mode {off}; then K2: {on}")
+
+    def c226():
+        modes("PLAY", "PLAY", "PLAY", "PLAY")
+        time.sleep(2)
+        rows = []
+        for _ in range(3):
+            n.sc("Crone.engine.meterSynth.run(false);")
+            time.sleep(1)
+            a1 = [num(n.ctx("c.amp_t[1]")) for _ in range(5)]
+            if len(set(a1)) > 1:
+                return "fail", f"the meter still moves when its synth is paused: {a1}"
+            a = sc_thread(8)
+            n.sc("Crone.engine.meterSynth.run(true);")
+            time.sleep(1)
+            rows.append((a, sc_thread(8)))
+        cost = sum(b - a for a, b in rows) / len(rows)
+        return verdict(cost < 1.0, f"scsynth thread without and with the meters: {rows}; they cost {cost:.2f} points", "measured")
+
+    for cid, fn in (("22.1", c221), ("22.2", c222), ("22.3", c223), ("22.4", c224), ("22.5", c225), ("22.6", c226)):
+        check(cid, fn)
+    n.load_script()
+    you("22.7", why="play the four tracks and set a balance on TRACKS: is it easy now?")
+
+
 def cleanup():
     n.signal_quit()
     n.ssh(f"rm -f ~/dust/data/four/four-{PSET}.pset ~/dust/data/four/*-{PSET}.lua "
@@ -3829,7 +3971,7 @@ def cleanup():
 STAGES = {0: stage0, 1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5, 6: stage6, 7: stage7,
           8: stage8, 9: stage9, 10: stage10, 11: stage11, 12: stage12, 13: stage13, 14: stage14,
           15: stage15, 16: stage16, 17: stage17, 18: stage18, 19: stage19, 20: stage20,
-          21: stage21}
+          21: stage21, 22: stage22}
 
 
 def main():

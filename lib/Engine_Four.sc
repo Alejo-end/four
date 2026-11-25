@@ -79,6 +79,7 @@ Engine_Four : CroneEngine {
     var <grainEnv1, <grainEnv2;
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
+    var <meterBus, <meterSynth;   // each track's level after its lane (\four_meter)
     var <syncBus;   // four: what each track's drone reads as `sync` (head_sync)
     var <playParams;
     var <ioKeys;
@@ -791,6 +792,7 @@ Engine_Four : CroneEngine {
         dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
         syncBus = Bus.control(s, 4);
+        meterBus = Bus.control(s, 4);
         tRetBus = Bus.audio(s, 2);
         tDlyBus = Bus.audio(s, 2);
         tRevBus = Bus.audio(s, 2);
@@ -1992,6 +1994,20 @@ Engine_Four : CroneEngine {
             ReplaceOut.kr(rec_phase_out, A2K.kr(idx / frames));
         }).add;
 
+        // ---- THE TRACKS' METERS (the seventy-fourth change, doc/mix-plan.md):
+        // how loud each track is after its lane and its level, the louder
+        // side, as four polls. A paused strip writes no bus, and reads 0.
+        SynthDef(\four_meter, {
+            arg ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0, out = 0;
+            Out.kr(out, [ob1, ob2, ob3, ob4].collect({ arg b;
+                var x = In.ar(b, 2).abs;
+                // Amplitude.ar, not .kr: on an audio input .kr counts its times
+                // in blocks and steps them by samples, so 0.3 s was 5 ms and the
+                // polls (15 a second) missed the hits. 1.5 s is 40 dB a second.
+                A2K.kr(Amplitude.ar(x[0].max(x[1]), 0.005, 1.5))
+            }));
+        }).add;
+
         // ---- A HEAD SYNC (the sixty-seventh change, and the seventy-first,
         // which put it in a synth of its own). One runs for 18 ms at each
         // head_sync, right after the track's drone, and frees itself.
@@ -2236,6 +2252,10 @@ Engine_Four : CroneEngine {
             \own_out, outBuses[0],
             \lane_bus, lanes[0][\pBus],
         ], playGroup, \addAfter);
+        meterSynth = Synth.new(\four_meter, [
+            \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
+            \out, meterBus
+        ], ioSynth, \addAfter);
 
         // every float control as one command; rec/freeze/level fan out to both
         // synths; revParams route to \four_reverb and delayParams to
@@ -2547,6 +2567,10 @@ Engine_Four : CroneEngine {
                 tr[\phase].getSynchronous;
             });
         });
+        4.do({ arg i;
+            var bus = Bus.new(\control, meterBus.index + i, 1, meterBus.server);
+            this.addPoll(("amp_t" ++ (i + 1)).asSymbol, { bus.getSynchronous });
+        });
         this.addPoll(\rec_phase, {
             recPhaseBus.getSynchronous;
         });
@@ -2593,6 +2617,8 @@ Engine_Four : CroneEngine {
         dlyRetBus.free;
         phaseBus.free;
         syncBus.free;
+        meterSynth.notNil.if({ meterSynth.free });
+        meterBus.free;
         extra.notNil.if({ extra.do({ arg tr; tr[\bus].free; tr[\phase].free }) });
         tRetBus.free;
         tDlyBus.free;

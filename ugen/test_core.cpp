@@ -268,6 +268,53 @@ int main() {
                 std::printf("     second difference x1000 %.2f, under -6 dB %.1f ms a turn\n", d2 * 1000, wide * 5 / turns);
             }
         }
+        // a short loop under a long grain, and a window that moves: no click
+        {
+            auto worst = [&](int how) {
+                static Warp w; w.init();
+                const int n = 48000 * 8; double p = 0, d2 = 0; float y1 = 0, y2 = 0;
+                std::vector<float> tone(400000), a(64), b(64), pos(64);
+                for (size_t i = 0; i < tone.size(); i++) tone[i] = 0.25f * (float)std::sin(2 * PI * 441.7 * i / 48000);
+                for (int i = 0; i + 64 <= n; i += 64) {
+                    double f = (double)i / n;
+                    pos_t l = 20000, sp = 6037;
+                    if (how == 1) { l = 20000 + (pos_t)(f * 100000); sp = 120000; }
+                    if (how == 2) sp = 200000 - (pos_t)(f * 100000);
+                    Buf bl{tone.data(), (int)tone.size()}, br{tone.data(), (int)tone.size()};
+                    bl.setLoop(l, sp); br.setLoop(l, sp);
+                    for (int j = 0; j < 64; j++) { pos[j] = (float)(l + (pos_t)p); p += 0.7; if (p >= sp) p -= sp; }
+                    w.process(a.data(), b.data(), 64, pos.data(), 1.f, 12000, 4, 0.f, bl, br);
+                    for (int j = 0; j < 64; j++) {
+                        if (i > 24000) d2 = std::fmax(d2, std::fabs(a[j] - 2 * y1 + y2));
+                        y2 = y1; y1 = a[j];
+                    }
+                }
+                return d2 * 1000;
+            };
+            const char* what[] = {"WARP in a loop of 126 ms: second difference, x1000",
+                "WARP, the start moves: second difference, x1000", "WARP, the end moves: second difference, x1000"};
+            for (int h = 0; h < 3; h++) { double v = worst(h); expect(v < 10, what[h], v); }
+        }
+        // a new take in the same loop: the splice is found again
+        {
+            static Warp w; w.init();
+            const pos_t lo2 = 20000, sp2 = 48000; std::vector<float> tone(100000), a(64), b(64), pos(64);
+            std::vector<double> lv; double p = 0, e = 0;
+            auto fill = [&](double f) { for (size_t i = 0; i < tone.size(); i++) tone[i] = 0.25f * (float)std::sin(2 * PI * f * i / 48000); };
+            fill(1000);
+            for (int i = 0; i + 64 <= 48000 * 16; i += 64) {
+                if (i == 64 * 4500) fill(441.7);
+                Buf bl{tone.data(), (int)tone.size()}, br{tone.data(), (int)tone.size()};
+                bl.setLoop(lo2, sp2); br.setLoop(lo2, sp2);
+                for (int j = 0; j < 64; j++) { pos[j] = (float)(lo2 + (pos_t)p); p += 0.7; if (p >= sp2) p -= sp2; }
+                w.process(a.data(), b.data(), 64, pos.data(), 1.f, 12000, 4, 0.f, bl, br);
+                for (int j = 0; j < 64; j++) e += a[j] * a[j];
+                if ((i / 64) % 15 == 14) { if (i > 48000 * 10) lv.push_back(std::sqrt(e / 960)); e = 0; }
+            }
+            std::sort(lv.begin(), lv.end());
+            double dip = db(lv.front() / lv[lv.size() / 2]);
+            expect(dip > -2, "WARP, a new take in the same loop: deepest 20 ms, dB", dip);
+        }
         // speed 1 returns the looped take, sample for sample, off the splice
         for (int kind = 0; kind < 2; kind++) {
             int n = 48000 * 6; auto o = runL(kind, zL, zR, 1.0, 1.f, true, n);

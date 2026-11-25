@@ -1357,6 +1357,7 @@ local TR_EMPTY = "EMPTY"
 local TR_Y0, TR_RH = 12, 10
 local TR_SX, TR_SW = 46, 49          -- the window strip
 local TR_LX, TR_LW = 102, 24         -- the level bar
+M.TR_ZERO = 22   -- 0 dB on the level bar, in pixels (of TR_LW, see level_bar)
 -- where a level sits on the bar, 0 to 1, in dB
 function M.level_bar(v)
   local lo, hi = C.LEVEL_FLOOR, C.level_db(C.LEVEL_TOP)
@@ -1416,11 +1417,31 @@ local function body_TRACKS(frame)
       screen.level(1)
       screen.rect(TR_LX, y + 1, TR_LW, 3)
       screen.fill()
-      screen.level(sounds and 11 or 4)
-      screen.rect(TR_LX, y + 1, floor(lv * TR_LW + 0.5), 3)
-      screen.fill()
+      local kx = floor(lv * TR_LW + 0.5)
+      if C.has_meter then
+        -- the knob's travel dim, the track's sound over it (after its level),
+        -- and the knob itself a tick. A track that is not heard lies flat
+        screen.level(3)
+        screen.rect(TR_LX, y + 1, kx, 3)
+        screen.fill()
+        local mw = floor(M.level_bar(C.amp_t[n]) * TR_LW + 0.5)
+        if audible and mw > 0 then   -- (a track that is OFF can play a send)
+          screen.level(12)
+          screen.rect(TR_LX, y + 1, mw, 3)
+          screen.fill()
+        end
+        screen.level(sounds and 15 or 5)
+        screen.rect(TR_LX + min(kx, TR_LW - 1), y - 1, 1, 7)
+        screen.fill()
+      else
+        screen.level(sounds and 11 or 4)
+        screen.rect(TR_LX, y + 1, kx, 3)
+        screen.fill()
+      end
+      -- 0 dB: a dot over and under the bar
       screen.level(7)
-      screen.rect(TR_LX + floor(M.level_bar(1) * TR_LW + 0.5), y, 1, 5)
+      screen.rect(TR_LX + M.TR_ZERO, y, 1, 1)
+      screen.rect(TR_LX + M.TR_ZERO, y + 4, 1, 1)
       screen.fill()
     end
   end

@@ -2286,6 +2286,7 @@ local function draw_main_ws()
   end
   local eg, tg = C.mix_gains()
   local eng_on = pget("mode", 5) > 1 and eg > 0.001 and C.wave_any
+    and C.track_gain(1) > 0
   local tape_on = C.twave_any and tg > 0.001
   gg:led(floor(clamp(C.play_phase, 0, 0.999) * 8) + 1, 3, eng_on and 15 or 4, "white")
   gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, tape_on and 15 or 4, "white")
@@ -3835,7 +3836,8 @@ add("rev_mix", "rev_mix", true)
 -- track 2 (four): on = switched on and audible, then its own head,
 -- window and knobs, so the visuals can give it a layer of its own
 add("t2_on", function()
-  return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001) and 1 or 0
+  return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001
+    and C.track_gain(2) > 0) and 1 or 0
 end)
 add("t2_mode", "t2_mode")
 add("t2_level", "t2_level")
@@ -7465,6 +7467,7 @@ local TR_EMPTY = "EMPTY"
 local TR_Y0, TR_RH = 12, 10
 local TR_SX, TR_SW = 46, 49          -- the window strip
 local TR_LX, TR_LW = 102, 24         -- the level bar
+M.TR_ZERO = 22   -- 0 dB on the level bar, in pixels (of TR_LW, see level_bar)
 -- where a level sits on the bar, 0 to 1, in dB
 function M.level_bar(v)
   local lo, hi = C.LEVEL_FLOOR, C.level_db(C.LEVEL_TOP)
@@ -7524,11 +7527,31 @@ local function body_TRACKS(frame)
       screen.level(1)
       screen.rect(TR_LX, y + 1, TR_LW, 3)
       screen.fill()
-      screen.level(sounds and 11 or 4)
-      screen.rect(TR_LX, y + 1, floor(lv * TR_LW + 0.5), 3)
-      screen.fill()
+      local kx = floor(lv * TR_LW + 0.5)
+      if C.has_meter then
+        -- the knob's travel dim, the track's sound over it (after its level),
+        -- and the knob itself a tick. A track that is not heard lies flat
+        screen.level(3)
+        screen.rect(TR_LX, y + 1, kx, 3)
+        screen.fill()
+        local mw = floor(M.level_bar(C.amp_t[n]) * TR_LW + 0.5)
+        if audible and mw > 0 then   -- (a track that is OFF can play a send)
+          screen.level(12)
+          screen.rect(TR_LX, y + 1, mw, 3)
+          screen.fill()
+        end
+        screen.level(sounds and 15 or 5)
+        screen.rect(TR_LX + min(kx, TR_LW - 1), y - 1, 1, 7)
+        screen.fill()
+      else
+        screen.level(sounds and 11 or 4)
+        screen.rect(TR_LX, y + 1, kx, 3)
+        screen.fill()
+      end
+      -- 0 dB: a dot over and under the bar
       screen.level(7)
-      screen.rect(TR_LX + floor(M.level_bar(1) * TR_LW + 0.5), y, 1, 5)
+      screen.rect(TR_LX + M.TR_ZERO, y, 1, 1)
+      screen.rect(TR_LX + M.TR_ZERO, y + 4, 1, 1)
       screen.fill()
     end
   end
@@ -10461,6 +10484,19 @@ end
 -- The ramp waits until the press is a hold, in every recall mode: a tap
 -- recalls, and a ramp that had already run would move the sound before the
 -- recall is due (a BEAT or BAR queue) or turn a GLIDE into a jump.
+-- THE NORNS MENU takes a key's release (K1 tapped while K2 is held): a hold
+-- that waits is called off, and a SOLO ends, or it would stay with no key.
+function ctx.menu_keys()
+  if not (norns.menu and norns.menu.status and norns.menu.status()) then return end
+  for n = 2, 3 do
+    local st = key_state[n]
+    if st.def and st.def.hold then
+      st.fired, st.aborted, st.def = true, true, nil
+      ctx.held[n] = false
+    end
+  end
+  if ctx.solo then ctx.set_solo(nil) end
+end
 local function tick_keys()
   -- a key held to the arc on a def with a `hold` (TAKE K3 = UNDO) fires AT
   -- the threshold, the same promise the eraser keeps
@@ -10885,6 +10921,7 @@ function ctx.relay_refusal(dest)
   if not ctx.relay_ok() then return "SOURCE NEEDS A RESTART" end
   if s == 5 then return nil end
   if s == dest then return "SOURCE IS THIS TRACK" end
+  if ctx.track_gain(s) == 0 then return "T" .. s .. " IS MUTED" end
   -- does the destination reach the source through the sends?
   local seen, todo = { [dest] = true }, { dest }
   while #todo > 0 do
@@ -13005,6 +13042,18 @@ local function init_params()
     if pget("beat_repeat", 0) == 1 then params:set("beat_repeat", 0) end
     -- the OSC link is about this room, not a sound: a PSET never changes it
     Mosc.cfg_reload()
+    -- a PSET saved before the mutes has no line for them, and norns leaves
+    -- what the file does not name: an old preset would load muted
+    local fd = type(filename) == "string" and io.open(filename, "r")
+    if fd then
+      local text = fd:read("a")
+      fd:close()
+      for n = 1, NTRACKS do
+        if not text:find('"' .. ctx.MUTE_ID[n] .. '"', 1, true) then
+          params:set(ctx.MUTE_ID[n], 0)
+        end
+      end
+    end
     each_part(2, number)
   end
   params.action_delete = function(filename, name, number) each_part(3, number) end
@@ -13068,6 +13117,19 @@ function init()
     p:start()
     polls[#polls + 1] = p
   end
+  -- the tracks' meters (an engine older than the seventy-fourth change has
+  -- none: TRACKS then draws the knob alone, and no line warns)
+  ctx.amp_t = { 0, 0, 0, 0 }
+  ctx.has_meter = false
+  for t = 1, NTRACKS do
+    local p = poll.set("amp_t" .. t, function(v) ctx.amp_t[t] = v end)
+    if p then
+      p.time = 1 / FPS
+      p:start()
+      polls[#polls + 1] = p
+      ctx.has_meter = true
+    end
+  end
   watch("play_phase", function(v) ctx.play_phase = v end)
   watch("play_phase2", function(v) ctx.play_phase2 = v; ctx.play_phases[2] = v end)
   watch("play_phase3", function(v) ctx.play_phases[3] = v end)
@@ -13124,6 +13186,7 @@ function init()
     Mscenes.tick()
     Mout.tick()   -- after the morph and the LFOs moved: send what they are now
     Mosc.tick()   -- the visuals link: the same frame's state, as OSC
+    ctx.menu_keys()
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

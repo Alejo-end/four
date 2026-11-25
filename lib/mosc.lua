@@ -66,7 +66,8 @@ add("rev_mix", "rev_mix", true)
 -- track 2 (four): on = switched on and audible, then its own head,
 -- window and knobs, so the visuals can give it a layer of its own
 add("t2_on", function()
-  return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001) and 1 or 0
+  return (pget("t2_mode", 1) ~= 1 and pget("t2_level", 1) > 0.001
+    and C.track_gain(2) > 0) and 1 or 0
 end)
 add("t2_mode", "t2_mode")
 add("t2_level", "t2_level")

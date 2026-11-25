@@ -3508,6 +3508,25 @@ do
     params:set("track_sel", 3); key(2, 0)
     ok(CTX.solo == nil, "a solo ends with its key, also after the focus moved")
     params:set("track_sel", 2)
+    -- the norns menu opens under a held SOLO, and takes the release
+    key(2, 1); _h.run_ticks(CTX.TAP_FRAMES + 1)
+    ok(CTX.solo == 2, "SOLO is held")
+    local st = norns.menu.status
+    norns.menu.status = function() return true end
+    _h.run_ticks(2)
+    norns.menu.status = st
+    ok(CTX.solo == nil, "...and the norns menu ends it")
+    -- a relay from a muted track says so
+    params:set("rec_source", 2); params:set("mute_1", 1)
+    ok(CTX.relay_refusal(2) == "T1 IS MUTED", "a take from a muted track is refused")
+    params:set("mute_1", 0); params:set("rec_source", 1)
+    -- a PSET from before the mutes loads with none
+    params:set("mute_3", 1)
+    local tmp = os.tmpname()
+    local fd = io.open(tmp, "w"); fd:write('"t2_level": 0.5\n'); fd:close()
+    params.action_read(tmp, false, "90")
+    os.remove(tmp)
+    ok(params:get("mute_3") == 0, "an old PSET loads with no mute")
     -- a recall leaves the mutes
     params:set("mute_3", 1)
     CTX.scene.capture(6); params:set("mute_3", 0); CTX.scene.recall(6)

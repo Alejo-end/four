@@ -5505,3 +5505,17 @@ four, seventy-third change: **levels in dB, mute and solo on TRACKS (Lua and tes
 - `track_sounds`, the header cells, TRACKS and `purity()` know the gain. Track 1's level 0
   now reads as silent, as it did on tracks 2 to 4.
 - A key def can have `hold_at` (its own threshold) and `release`.
+
+four, seventy-fourth change: **a meter for each track on TRACKS (engine, Lua, test tools)**.
+2026-11-24. Step 2 of doc/mix-plan.md.
+- `\four_meter` (26 UGens, one synth after io): how loud each track is after its lane and
+  its level, the louder side, as the polls `amp_t1` to `amp_t4`. No command: the count stays 199.
+- TRACKS fills the level bar with the sound, and the knob is a tick on it. 0 dB is a dot
+  over and under the bar. An engine without the polls draws the knob alone, as before.
+- probe10 reads a sine of 0.25 as 0.23. Stage 22 of doc/device-gate.md, as a test.
+- A review of the seventy-second to the seventy-fourth change, with its faults fixed in the
+  plugin (a WARP grain keeps the loop it started in, so a window that moves does not click,
+  where the second difference was 0.143 and is 0.007. A grain longer than its loop fades at
+  every crossing. The splice is found again each second, for a new take in the same window)
+  and in Lua (the norns menu ends a held SOLO, a take from a muted track is refused, an
+  old PSET loads with no mute, the grid and the visuals know the mute).

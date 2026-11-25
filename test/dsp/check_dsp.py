@@ -274,6 +274,10 @@ def check(build):
            num(r'^SYNC in time over a tone: ([-\d.]+)', a10), 0.002, '', fmt='.4f')
     target(build, "a head_sync that jumps in PLAY is faded (largest second difference)",
            num(r'^SYNC jump over a tone, the largest second difference: ([-\d.]+)', a10), 0.004, '', fmt='.4f')
+    target(build, "a track's meter reads its level (a sine of 0.25, off by)",
+           abs(num(r'^METER of a sine of 0.25: ([\d.]+)', a10) - 0.25), 0.03, '', fmt='.3f')
+    target(build, "the UGens of four_meter (one synth, always on)",
+           num(r'^UGENS four_meter (\d+)', runs['p10'][3].replace('\r', '')), 40, '', fmt='.0f')
     target(build, "the UGens of four_sync (one synth, 18 ms at each head_sync)",
            num(r'^UGENS four_sync (\d+)', runs['p10'][3].replace('\r', '')), 39, '', fmt='.0f')
     target(build, "the UGens of four_dub (one synth, only while an aligned pass runs)",

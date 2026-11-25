@@ -1210,6 +1210,19 @@ end
 -- The ramp waits until the press is a hold, in every recall mode: a tap
 -- recalls, and a ramp that had already run would move the sound before the
 -- recall is due (a BEAT or BAR queue) or turn a GLIDE into a jump.
+-- THE NORNS MENU takes a key's release (K1 tapped while K2 is held): a hold
+-- that waits is called off, and a SOLO ends, or it would stay with no key.
+function ctx.menu_keys()
+  if not (norns.menu and norns.menu.status and norns.menu.status()) then return end
+  for n = 2, 3 do
+    local st = key_state[n]
+    if st.def and st.def.hold then
+      st.fired, st.aborted, st.def = true, true, nil
+      ctx.held[n] = false
+    end
+  end
+  if ctx.solo then ctx.set_solo(nil) end
+end
 local function tick_keys()
   -- a key held to the arc on a def with a `hold` (TAKE K3 = UNDO) fires AT
   -- the threshold, the same promise the eraser keeps
@@ -1634,6 +1647,7 @@ function ctx.relay_refusal(dest)
   if not ctx.relay_ok() then return "SOURCE NEEDS A RESTART" end
   if s == 5 then return nil end
   if s == dest then return "SOURCE IS THIS TRACK" end
+  if ctx.track_gain(s) == 0 then return "T" .. s .. " IS MUTED" end
   -- does the destination reach the source through the sends?
   local seen, todo = { [dest] = true }, { dest }
   while #todo > 0 do
@@ -3754,6 +3768,18 @@ local function init_params()
     if pget("beat_repeat", 0) == 1 then params:set("beat_repeat", 0) end
     -- the OSC link is about this room, not a sound: a PSET never changes it
     Mosc.cfg_reload()
+    -- a PSET saved before the mutes has no line for them, and norns leaves
+    -- what the file does not name: an old preset would load muted
+    local fd = type(filename) == "string" and io.open(filename, "r")
+    if fd then
+      local text = fd:read("a")
+      fd:close()
+      for n = 1, NTRACKS do
+        if not text:find('"' .. ctx.MUTE_ID[n] .. '"', 1, true) then
+          params:set(ctx.MUTE_ID[n], 0)
+        end
+      end
+    end
     each_part(2, number)
   end
   params.action_delete = function(filename, name, number) each_part(3, number) end
@@ -3817,6 +3843,19 @@ function init()
     p:start()
     polls[#polls + 1] = p
   end
+  -- the tracks' meters (an engine older than the seventy-fourth change has
+  -- none: TRACKS then draws the knob alone, and no line warns)
+  ctx.amp_t = { 0, 0, 0, 0 }
+  ctx.has_meter = false
+  for t = 1, NTRACKS do
+    local p = poll.set("amp_t" .. t, function(v) ctx.amp_t[t] = v end)
+    if p then
+      p.time = 1 / FPS
+      p:start()
+      polls[#polls + 1] = p
+      ctx.has_meter = true
+    end
+  end
   watch("play_phase", function(v) ctx.play_phase = v end)
   watch("play_phase2", function(v) ctx.play_phase2 = v; ctx.play_phases[2] = v end)
   watch("play_phase3", function(v) ctx.play_phases[3] = v end)
@@ -3873,6 +3912,7 @@ function init()
     Mscenes.tick()
     Mout.tick()   -- after the morph and the LFOs moved: send what they are now
     Mosc.tick()   -- the visuals link: the same frame's state, as OSC
+    ctx.menu_keys()
     tick_keys()  -- the K1+K3 erase arc fires AT its threshold
     -- never draw over the system menu; the grid stays live inside it
     if norns.menu.status() == false then redraw() end

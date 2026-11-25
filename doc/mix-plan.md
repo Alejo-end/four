@@ -1,7 +1,7 @@
 # four: the next steps, and the mix of the tracks (plan of 2026-11-24)
 
-STATE: steps 1 and 3 are built (the seventy-third change), not on the device. Step 2
-and step 4 are open. It answers item 36 of doc/ux-feedback.md: "sounds great
+STATE: steps 1 to 3 are built (the seventy-third and seventy-fourth changes). Step 4 is
+open. Stage 22 of doc/device-gate.md is the test. It answers item 36 of doc/ux-feedback.md: "sounds great
 just a bit hard to mix the different tracks". doc/plan.md stays the order of work for
 everything else.
 

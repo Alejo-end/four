@@ -636,7 +636,14 @@ struct Warp {
     static const int REACH = 480;        // 10 ms each way
     static const int TPL = 512;          // the template, in frames
     static const int DEC = 4;
-    struct Grain { pos_t q; int i; int len; float step; bool on; pos_t skip; };   // step: window table places per sample
+    // a grain keeps the loop it started in: a window that moves under it would
+    // fold its place again at every block, and click. k is its place in that
+    // loop, and it goes on at `skip` when it reaches the end.
+    struct Grain {
+        int i, len; float step; bool on;     // step: window table places per sample
+        int k, lo, span, seam, skip;
+        float halfL, halfR;
+    };
     Grain g[MAXG];
     int toNext;
     pos_t cont; bool hasCont;
@@ -645,6 +652,8 @@ struct Warp {
     uint32_t seed;
     float lastCorr;
     pos_t skipLo, skipSpan, skip;        // the place, for the loop it was found in
+    int skipAge;                         // samples since it was found
+    static const int SKIP_LIFE = 48000;  // a new take can lie in the same loop
     static const int XF = 240;           // the crossing, in frames
     float seg[(2 * REACH + TPL) / DEC + 4], tpl[TPL / DEC + 4];
 
@@ -690,25 +699,26 @@ struct Warp {
     // the start itself, in a loop too short to search)
     pos_t skipOf(const Buf& bl, const Buf& br) {
         if (bl.span < 4 * (2 * REACH + TPL)) return 0;
-        if (bl.lo != skipLo || bl.span != skipSpan) {
-            skipLo = bl.lo; skipSpan = bl.span;
+        if (bl.lo != skipLo || bl.span != skipSpan || skipAge > SKIP_LIFE) {
+            skipAge = 0; skipLo = bl.lo; skipSpan = bl.span;
             pos_t q = search(bl, br, bl.lo + REACH, bl.lo + bl.span - TPL);
             skip = q + TPL - bl.lo;
             if (skip < TPL) skip = TPL;
         }
         return skip;
     }
-    // a place past the loop's end, for a grain that skips
-    static inline pos_t past(const Buf& b, pos_t p, pos_t sk) {
-        return (sk > 0 && p >= b.lo + b.span) ? p - b.span + sk : p;
-    }
-    inline float grainAt(const Buf& b, pos_t p, pos_t sk) {
-        const pos_t end = b.lo + b.span;
-        if (p < b.lo || p >= end + b.span - sk || end > b.frames) return b.at(p);
-        if (p >= end) return b.data[p - b.span + sk];
-        if (p < end - XF) return b.data[p];
-        const float u = (float)(p - (end - XF)) * (1.f / XF);
-        return b.data[p] + u * (b.data[p - b.span + sk] - b.data[p]);
+    // one channel of a grain at its place
+    static inline float grainAt(const float* d, const Grain& g, float half) {
+        const int k = g.k;
+        if (g.skip > 0) {                    // across the end, onto `skip`
+            const int x = k - (g.span - XF);
+            if (x < 0) return d[k];
+            const float u = (float)x * (1.f / XF);
+            return d[k] + u * (d[k - g.span + g.skip] - d[k]);
+        }
+        if (k < g.seam) return d[k] - half * Buf::fall((float)k / g.seam);
+        if (k >= g.span - g.seam) return d[k] + half * Buf::fall((float)(g.span - 1 - k) / g.seam);
+        return d[k];
     }
 
     // one sample at pitch 1
@@ -732,11 +742,24 @@ struct Warp {
                     if (q + len > bl.lo + bl.span) sk = skipOf(bl, br);
                 }
             }
-            for (int j = 0; j < MAXG; j++) if (!g[j].on) {
-                g[j].q = q; g[j].i = 0; g[j].len = len; g[j].step = (float)N / len; g[j].on = true; g[j].skip = sk;
-                break;
-            }
-            cont = past(bl, q + hop, sk); hasCont = true;
+            // the loop, or the whole buffer
+            const pos_t glo = bl.span > 0 ? bl.lo : 0;
+            const pos_t gsp = bl.span > 0 ? bl.span : (bl.frames < br.frames ? bl.frames : br.frames);
+            if (gsp > 0) {
+                pos_t k = (q - glo) % gsp; if (k < 0) k += gsp;
+                for (int j = 0; j < MAXG; j++) if (!g[j].on) {
+                    Grain& gr = g[j];
+                    gr.i = 0; gr.len = len; gr.step = (float)N / len; gr.on = true;
+                    gr.k = (int)k; gr.lo = (int)glo; gr.span = (int)gsp; gr.skip = (int)sk;
+                    gr.seam = bl.seam; gr.halfL = bl.half; gr.halfR = br.half;
+                    break;
+                }
+                k += hop;
+                while (k >= gsp) k += sk - gsp;
+                cont = glo + k;
+            } else cont = q + hop;
+            hasCont = true;
+            skipAge = skipAge > SKIP_LIFE ? skipAge : skipAge + hop;
             toNext = hop;
             gain = 2.0f / k;
         }
@@ -747,10 +770,10 @@ struct Warp {
             float wp = (float)gr.i * gr.step;
             int wi = (int)wp; float wf = wp - wi;
             float w = t.win[wi] + ((wi + 1 < N ? t.win[wi + 1] : 0.f) - t.win[wi]) * wf;
-            pos_t p = gr.q + gr.i;
-            if (gr.skip > 0) { l += grainAt(bl, p, gr.skip) * w; r += grainAt(br, p, gr.skip) * w; }
-            else if (bl.plain(p, p + 1) && br.plain(p, p + 1)) { l += bl.data[p] * w; r += br.data[p] * w; }
-            else { l += bl.at(p) * w; r += br.at(p) * w; }
+            if (gr.lo + gr.span > bl.frames || gr.lo + gr.span > br.frames) { gr.on = false; continue; }
+            l += grainAt(bl.data + gr.lo, gr, gr.halfL) * w;
+            r += grainAt(br.data + gr.lo, gr, gr.halfR) * w;
+            if (++gr.k >= gr.span) gr.k = gr.skip;
             if (++gr.i >= gr.len) gr.on = false;
         }
         outL = l * gain; outR = r * gain;

@@ -950,6 +950,7 @@ local function draw_main_ws()
   end
   local eg, tg = C.mix_gains()
   local eng_on = pget("mode", 5) > 1 and eg > 0.001 and C.wave_any
+    and C.track_gain(1) > 0
   local tape_on = C.twave_any and tg > 0.001
   gg:led(floor(clamp(C.play_phase, 0, 0.999) * 8) + 1, 3, eng_on and 15 or 4, "white")
   gg:led(floor(clamp(C.tape_phase, 0, 0.999) * 8) + 1, 4, tape_on and 15 or 4, "white")
