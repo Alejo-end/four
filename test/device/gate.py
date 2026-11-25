@@ -3956,7 +3956,47 @@ def stage22():
         cost = sum(b - a for a, b in rows) / len(rows)
         return verdict(cost < 1.0, f"scsynth thread without and with the meters: {rows}; they cost {cost:.2f} points", "measured")
 
-    for cid, fn in (("22.1", c221), ("22.2", c222), ("22.3", c223), ("22.4", c224), ("22.5", c225), ("22.6", c226)):
+    def c228():
+        """The loop's point in WARP and PV (the seventy-second change): the
+        deepest 20 ms of a tone against the median, with PLAY for comparison."""
+        out, ok = {}, True
+        n.set("track_sel", 1)
+        n.signal("tone")
+        time.sleep(0.4)
+        n.set("rec", 1)
+        time.sleep(4.03)
+        n.set("rec", 0)
+        time.sleep(0.5)
+        n.signal(None)
+        for mode in ("PLAY", "WARP", "PV"):
+            for speed in (1, 0.5):
+                modes(mode, "OFF", "OFF", "OFF")
+                n.set("scan", speed)
+                time.sleep(3)
+                rate, chans = engine_rec(f"22.8_{mode}_{speed}", 12 if speed == 1 else 18)
+                w = int(rate * 0.02)
+                lv = sorted(audio.rms(chans[0][i:i + w]) for i in range(0, len(chans[0]) - w, w // 2))
+                dip = round(audio.db(lv[0] / lv[len(lv) // 2]), 1)
+                brk = audio.breaks(chans, rate)
+                out[f"{mode} x{speed}"] = (dip, brk)
+                # (PLAY has its 5 ms seam fade, so it is shown and not judged)
+                ok = ok and (mode == "PLAY" or (dip > -8 and not brk))
+        n.set("scan", 1)
+        # a window edge that moves by hand in WARP: no break
+        modes("WARP", "OFF", "OFF", "OFF")
+        time.sleep(2)
+        lo, hi = n.get("pos_start"), n.get("pos_end")
+
+        def move():
+            for k in range(20):
+                n.set("pos_start", lo + (hi - lo) * 0.02 * k)
+                time.sleep(0.1)
+        rate, chans = during(move, "22.8_WARP_edge", 4)
+        out["WARP, the start moves: breaks"] = audio.breaks(chans, rate)
+        ok = ok and not out["WARP, the start moves: breaks"]
+        return verdict(ok, f"deepest 20 ms in dB, and breaks: {out}")
+
+    for cid, fn in (("22.1", c221), ("22.2", c222), ("22.3", c223), ("22.4", c224), ("22.5", c225), ("22.6", c226), ("22.8", c228)):
         check(cid, fn)
     n.load_script()
     you("22.7", why="play the four tracks and set a balance on TRACKS: is it easy now?")

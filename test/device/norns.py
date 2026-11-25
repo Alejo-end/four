@@ -271,7 +271,24 @@ class Norns:
             return self.socks[kind].text
 
     # ---- the script --------------------------------------------------------
+    def ready(self, wait=60):
+        """Wait until both REPLs answer: after a RESTART they can be a while.
+
+        The last error goes up if they never do (the norns is off, or sclang
+        floods after a jump of the clock: CLAUDE.md)."""
+        end = time.time() + wait
+        while True:
+            try:
+                self.lua("print(1)", timeout=5)
+                self.sc("1.postln;", timeout=5)
+                return True
+            except TimeoutError:
+                if time.time() > end:
+                    raise
+                time.sleep(2)
+
     def load_script(self, wait=25):
+        self.ready()
         # look only at text after this load: an older "init() done" in the same
         # connection would hand back the previous instance's ctx
         start = len(self.transcript("lua"))

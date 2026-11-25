@@ -503,7 +503,7 @@ an aligned pass writes and where a head sync puts the head. `python3 test/device
 ## Stage 22: the mix of the tracks
 
 The seventy-third and seventy-fourth changes (doc/mix-plan.md). The meters need the RESTART.
-`python3 test/device/gate.py 22` measures 22.1 to 22.6.
+`python3 test/device/gate.py 22` measures 22.1 to 22.6 and 22.8.
 
 | # | Check | Do | Pass | Suspect |
 |---|---|---|---|---|
@@ -513,6 +513,7 @@ The seventy-third and seventy-fourth changes (doc/mix-plan.md). The meters need 
 | 22.4 | The meters | Each track alone, then muted | The meter reads the track's peak within 4 dB, and 0 when muted. Look at the picture | `\four_meter`, `amp_t1` to `amp_t4` |
 | 22.5 | OFF and ON | K3 held, then K2 | The track goes off, and comes back in its voice | `T_MODE`, `T_ON` |
 | 22.6 | The cost | Four PLAY with and without the meters | Under 1 point of the scsynth thread | `\four_meter` |
+| 22.8 | The loop's point in WARP and PV | A tone of 4 s, speed 1 and 0.5, then the window's start moved in WARP | No dip under -8 dB and no break | `Buf::setLoop`, `Warp::grainAt` in ugen/four_core.h |
 | 22.7 | **The mix, by hand** | Play four tracks and set a balance | It is easy. Item 36 of doc/ux-feedback.md | |
 
 ## When it passes

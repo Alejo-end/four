@@ -134,7 +134,8 @@ decay. Recording is never affected.
 | E2 picks the track and E3 sets its level. | Hold K1: E2 picks where the track sends, E3 how much. |
 
 E3 moves the level in steps of 0.5 dB, from silence to +3.5 dB. The bar is in dB too, and
-the mark on it is 0 dB. The bar shows the knob and not how loud the track is.
+the two dots on it are 0 dB. The bright bar is how loud the track is now, after its level,
+and the tick is where the knob stands. Compare the four bright bars to set a balance.
 
 K2 is MUTE on a tap. The loop runs on under the mute, and the level stays as it was. Hold
 K2 for SOLO: you hear that track alone (also when it is muted) until you let go. Its sends

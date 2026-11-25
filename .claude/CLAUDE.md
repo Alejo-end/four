@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-24)
+## STATUS (2026-11-25)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -53,6 +53,8 @@ day. The device runs 199 since 2026-11-21.
 - AUTOSAMPLE (lib/msample.lua, PARAMS > take - autosample): every note of a range
   goes out of a MIDI port, comes back on the line input into one take, and is cut on
   its attack. A MIDI keyboard then plays the take as a multisample (`ctx.pad_notes`).
+- TRACKS (the seventy-third and seventy-fourth changes): E3 is the level in steps of
+  0.5 dB, K2 MUTE, held SOLO, K3 held OFF. The bar is each track's meter.
 - Twelve pages: TAKE VOICE TRACKS TAPE FILTER EFFECT DELAY REVERB MIX PADS MOTION SCENE.
   TRACKS is the hub: E2 picks the focused track, which TAKE, VOICE, FILTER and EFFECT
   then edit. K1 held on TRACKS shows the sends.
@@ -109,9 +111,9 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-18 it runs the fifty-third change at `count: 198`, with the plugin
-  built there on 2026-11-16 (`ignore/plugins/armv7l/`), which four's startup install put
-  in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugin of 2026-11-13 is kept in
+- Since 2026-11-24 it runs the seventy-fourth change (branch `mix`) at `count: 199`, with
+  the plugin built there that day (`ignore/plugins/armv7l/`), which four's startup install
+  put in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugins of 2026-11-13 and 2026-11-16 are kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
   (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
@@ -186,7 +188,8 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 70th: the tempo on SCENE K1+E2, the input's two ways on MIX K1, the guide's clock and input sections, stage 21 (Lua, documents) | yes, 2026-11-24: stage 21 measured, SCENE and MIX screens captured | no |
 | 71st: a head sync leaves a loop that is in time alone and fades a jump (`\four_sync`), stage 21 as a test (engine, test tools) | yes, 2026-11-24, `count: 199`: row 21.4 has no break and no drift over five minutes (PLAY clicked at three of six restarts before) | no |
 | 72nd: PV and WARP wrap inside the loop (`Buf::setLoop`), so their seam has no hole; a tape clear makes no xrun (engine, plugin, Lua) | yes, 2026-11-24, `count: 199`, plugin built there: WARP -2.4 dB at the seam (-74.0 before), PV -2.6 dB (-21.6) | no |
-| 73rd: TRACKS: levels in dB steps, K2 MUTE and held SOLO, K3 held OFF (`mute_1` to `mute_4`, `ctx.track_gain`) (Lua, test tools) | no: the norns was away | no |
+| 73rd: TRACKS: levels in dB steps, K2 MUTE and held SOLO, K3 held OFF (`mute_1` to `mute_4`, `ctx.track_gain`) (Lua, test tools) | yes, 2026-11-24: rows 22.1 to 22.3 and 22.5 pass | no |
+| 74th: a meter for each track on TRACKS (`\four_meter`, polls `amp_t1` to `amp_t4`), and the review's fixes: a WARP grain keeps its loop, a SOLO ends in the norns menu, an old PSET loads unmuted (engine, plugin, Lua, test tools) | yes, 2026-11-24, `count: 199`, plugin built there. The first version of the meters cost 0.43 points. Row 22.4 failed on drums, and its fix (`Amplitude.ar`, 1.5 s) is deployed and not measured: the norns went off | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -245,7 +248,8 @@ again a general judgement. They named no row of stage 21 and no item of Phase 2.
 Later that day, after playing: "sounds great just a bit hard to mix the different tracks"
 (doc/ux-feedback.md, item 36).
 
-**The walkthrough.** doc/device-gate.md, stages 0 to 21, top to bottom. Stage 21 is the
+**The walkthrough.** doc/device-gate.md, stages 0 to 22, top to bottom. Stage 22 is the mix of the
+tracks (`gate.py 22`). Stage 21 is the
 clock, the record head and the input (the user's notes of 2026-11-21): `gate.py 21`
 measures it, and 21.1, 21.4 and 21.7 still need ears. Stage 20 is the
 Exquis: it needs one on the norns and has never run. Stage 19 is four's own work. It has not
@@ -548,8 +552,13 @@ Each line was learned the hard way; the change log has the story.
   starts late. A cross into PLAY on the drones' own start curve (fast at first) read
   +1.6 dB on the Mac and +3.2 dB on the norns's scsynth. Cross two sounds that are in
   step on a straight line, where a late block is 7%: +0.5 and +1.2 dB.
-- WARP and PV dip at their own loop seam (found with row 19.33 on a take of 4 s). A
-  device row that reads a level waits until the head is past the seam (`after_seam`).
+- A loop's point can dip (PLAY fades 5 ms there; WARP and PV did until the seventy-second
+  change). A device row that reads a level waits until the head is past it (`after_seam`).
+- `Amplitude.kr` on an audio input counts its times in blocks and steps them by samples:
+  a release of 0.3 s was 5 ms. Use `Amplitude.ar` and `A2K`. A poll comes 15 times a
+  second, so a meter's fall must be slow (1.5 s, 40 dB a second).
+- A preset test on the device can read differently through a file path than through a slot
+  number: the parts that ride a PSET (tape, scenes, take) load only with a number.
 - A knob in a SynthDef is `gl.(value, value_t)`, never a bare `.lag`: every write sends
   the glide time with the value (`gset`). A new knob joins `glideKeys` in the engine,
   and its def must not grow (VarLag with warp 1 is one UGen: without the warp it is an

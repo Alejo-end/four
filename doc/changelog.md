@@ -5519,3 +5519,7 @@ four, seventy-fourth change: **a meter for each track on TRACKS (engine, Lua, te
   every crossing. The splice is found again each second, for a new take in the same window)
   and in Lua (the norns menu ends a held SOLO, a take from a muted track is refused, an
   old PSET loads with no mute, the grid and the visuals know the mute).
+
+Tidied on 2026-11-25 (documents and test tools): CLAUDE.md's status and lessons, the meters in
+doc/manual.md, `Norns.ready` (a device test waits for the REPLs), row 22.8 (the loop's point
+in WARP and PV, with a window edge that moves).
