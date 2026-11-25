@@ -5539,10 +5539,10 @@ branch `proposal-a`, not on the device)**. 2026-11-25. The lines of `proposal-ds
 - A DC blocker (3.8 Hz) before every reverb: FourRoom passes DC with 16 dB of gain.
 - FourDelay, FourGrain and FourBBD print a line when there is no real-time memory.
 - The LeakDC row and the room's DC row of check_dsp.py are PASS rows now.
-- To do on the norns: a plugin build, the RESTART, and what doc/mix-plan.md lists. Then by ear:
+- On the norns since 2026-11-25 and measured (doc/measurements/2026-11-25/README.md). Then by ear:
   more low end on each take.
 - The reverb has two UGens more (the blocker, one a side), so check_dsp.py's limits for it are
-  40 and 35 (38 and 33 before). The cost is not measured on the norns yet.
+  40 and 35 (38 and 33 before). On the norns the reverb costs 5.0 points (4.8 before).
 
 four, seventy-sixth change: **a loaded file no longer holds the screen (Lua, a device tool)**.
 2026-11-25, from the user's note that the screen freezes at times.
