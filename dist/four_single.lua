@@ -3896,20 +3896,24 @@ local function is_number_host(h)
   return h:match("^%d+%.%d+%.%d+%.%d+$") ~= nil
 end
 
+-- THE LOOKUP RUNS BESIDE THE SCRIPT (norns.system_cmd, the seventy-seventh
+-- change). It was a popen read on the frame clock: 15 ms when the computer is
+-- on the network, and 5 s when it is not (measured). So with the link on and
+-- the computer away, the whole script stood still for 5 s once a minute.
+local function answer(h, text)
+  local ip = text and text:match("(%d+%.%d+%.%d+%.%d+)")
+  if not ip or resolved_name ~= h then return end   -- the host changed meanwhile
+  if ip ~= resolved then print("four: osc host " .. h .. " is " .. ip) end
+  resolved = ip
+end
 local function resolve(h)
   if is_number_host(h) then return h end
   local now = C.frame / C.FPS
   if resolved_name == h and now - resolved_at < RESOLVE_EVERY then return resolved end
   resolved_name, resolved_at = h, now
-  local ok, p = pcall(io.popen, "getent ahostsv4 '" .. h:gsub("[^%w%.%-_]", "") .. "' 2>/dev/null")
-  if ok and p then
-    local line = p:read("l")
-    p:close()
-    local ip = line and line:match("^(%d+%.%d+%.%d+%.%d+)")
-    if ip then
-      if ip ~= resolved then print("four: osc host " .. h .. " is " .. ip) end
-      resolved = ip
-    end
+  if norns.system_cmd then
+    norns.system_cmd("getent ahostsv4 '" .. h:gsub("[^%w%.%-_]", "") .. "' 2>/dev/null | head -n 1",
+      function(text) answer(h, text) end)
   end
   return resolved
 end

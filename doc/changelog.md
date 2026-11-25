@@ -5538,3 +5538,9 @@ four, seventy-sixth change: **a loaded file no longer holds the screen (Lua, a d
 - test/device/freeze.py: logs each time Lua was held over 120 ms, while somebody plays.
 - At rest and for four minutes of play the watcher saw no hold. The freezes that the user
   meant are not reproduced, so this can be a part of them only.
+
+four, seventy-seventh change: **the visuals link no longer holds the script (Lua)**. 2026-11-25.
+- With `osc_on` and a host given as a name, lib/mosc.lua looked the name up once a minute with
+  a popen read on the frame clock. Measured on the norns: 12 to 15 ms when the computer is on
+  the network, 5.0 s when it is not. The lookup goes to `norns.system_cmd` now, which calls
+  back. Drawing is not the cause: each page draws in 1 to 3 ms on the norns.

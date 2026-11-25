@@ -3527,6 +3527,31 @@ do
     params.action_read(tmp, false, "90")
     os.remove(tmp)
     ok(params:get("mute_3") == 0, "an old PSET loads with no mute")
+    -- the OSC host's lookup never holds the frame clock (77th): it goes to
+    -- norns.system_cmd, and its answer lands later
+    do
+      local Mo
+      for i = 1, 255 do
+        local k, v = debug.getupvalue(init, i)
+        if k == nil then break end
+        if k == "Mosc" then Mo = v end
+      end
+      ok(Mo ~= nil, "the OSC module is in reach")
+      local old_cmd, old_popen, cmds = norns.system_cmd, io.popen, {}
+      norns.system_cmd = function(cmd, cb) cmds[#cmds + 1] = { cmd, cb } end
+      io.popen = function() error("a lookup on the frame clock") end
+      ok(Mo.resolve("one.local") == nil and #cmds == 1 and cmds[1][1]:find("one.local", 1, true),
+        "a name is asked for beside the script, and nothing is sent yet")
+      ok(Mo.resolve("one.local") == nil and #cmds == 1, "...once, not at every frame")
+      cmds[1][2]("192.168.1.7     STREAM one.local\n")
+      ok(Mo.resolve("one.local") == "192.168.1.7", "...and its answer is the host")
+      Mo.resolve("two.local")
+      cmds[1][2]("192.168.1.8 STREAM\n")
+      ok(Mo.resolve("two.local") == "192.168.1.7", "a late answer to the old name is dropped")
+      cmds[2][2]("")
+      ok(Mo.resolve("two.local") == "192.168.1.7", "a name that is not found keeps the last number")
+      norns.system_cmd, io.popen = old_cmd, old_popen
+    end
     -- a recall leaves the mutes
     params:set("mute_3", 1)
     CTX.scene.capture(6); params:set("mute_3", 0); CTX.scene.recall(6)
