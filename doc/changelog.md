@@ -5529,6 +5529,21 @@ meter's time in SuperCollider is a fall of 20 dB, so the first 1.5 s was too slo
 read -53 dB after 3 s) and 0.5 s missed drum peaks by 4 dB. It is 1 ms up and 0.8 s down (25 dB
 a second): tones and drums read within 0.6 dB of the output's peak. Cost 0.23 points.
 
+four, seventy-fifth change: **proposal A, three small DSP fixes (engine and plugin, on the
+branch `proposal-a`, not on the device)**. 2026-11-25. The lines of `proposal-dsp-fixes`
+(7578dda and 0ceeabb), written again on the present engine.
+- The LeakDCs on the take's dry arm and the regen arm run at 0.9995, a corner of 3.8 Hz (38 Hz
+  before: 2.8 dB off at 40 Hz on each take and each regen pass). A relay from a track or the MIX
+  has no LeakDC, as before. The sends between tracks keep 0.995: with 3.8 Hz two tracks that
+  send into each other rang at 9 to 14 Hz.
+- A DC blocker (3.8 Hz) before every reverb: FourRoom passes DC with 16 dB of gain.
+- FourDelay, FourGrain and FourBBD print a line when there is no real-time memory.
+- The LeakDC row and the room's DC row of check_dsp.py are PASS rows now.
+- To do on the norns: a plugin build, the RESTART, and what doc/mix-plan.md lists. Then by ear:
+  more low end on each take.
+- The reverb has two UGens more (the blocker, one a side), so check_dsp.py's limits for it are
+  40 and 35 (38 and 33 before). The cost is not measured on the norns yet.
+
 four, seventy-sixth change: **a loaded file no longer holds the screen (Lua, a device tool)**.
 2026-11-25, from the user's note that the screen freezes at times.
 - `Mwav.load_tick` (the wave strip that draws in after a load) was bounded in bins and not in

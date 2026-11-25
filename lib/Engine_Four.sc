@@ -1716,6 +1716,10 @@ Engine_Four : CroneEngine {
                 + (InFeedback.ar(ob2, 2) * gl.(snd2, snd2_t))
                 + (InFeedback.ar(ob3, 2) * gl.(snd3, snd3_t))
                 + (InFeedback.ar(ob4, 2) * gl.(snd4, snd4_t));
+            // LeakDC stays at 0.995 here, unlike the record arms. Two tracks that
+            // send into each other form a loop: with a 3.8 Hz corner its ring fell
+            // from about 40 Hz to 9 to 14 Hz and put -10 dBFS below 20 Hz into the
+            // limiter (rendered, stock filter, 2026-11-16).
             Out.ar(sbus, (In.ar(in_bus, 2) * gl.(pre_gain, pre_gain_t) * 2.sqrt)
                 + th.value(LeakDC.ar(sendIn)));
         }).add;
@@ -1913,7 +1917,10 @@ Engine_Four : CroneEngine {
             recPhase = Phasor.ar(newPass, runW * SampleDur.ir / BufDur.kr(buf_l), 0, 1);
             Out.kr(rec_phase_out, A2K.kr(recPhase));
             // LeakDC on the take's dry arm: a line input with DC offset would
-            // print it into the buffer and eat limiter headroom. (the regen
+            // print it into the buffer and eat limiter headroom. 0.9995 is a
+            // corner of 3.8 Hz. The default 0.995 is a 38 Hz high-pass: it took
+            // 2.8 dB at 40 Hz from every take, and again on every regen pass.
+            // (the regen
             // arm below already has its own; the monitor path stays untouched.)
             // resample is lagged because a step in THIS blend gets printed
             // permanently into the take, not just heard once.
@@ -1924,12 +1931,12 @@ Engine_Four : CroneEngine {
             // changes at an arm, while the rec gate is shut.
             tap = In.ar(src_bus, 2);
             srcK = rec_src.round.clip(0, 3);
-            baseL = Select.ar(srcK, [LeakDC.ar(inL), own[0], tap[0], preLim[0]]);
-            baseR = Select.ar(srcK, [LeakDC.ar(inR), own[1], tap[1], preLim[1]]);
+            baseL = Select.ar(srcK, [LeakDC.ar(inL, 0.9995), own[0], tap[0], preLim[0]]);
+            baseR = Select.ar(srcK, [LeakDC.ar(inR, 0.9995), own[1], tap[1], preLim[1]]);
             recL = (baseL * (1 - resample)) + (preLim[0] * resample);
             recR = (baseR * (1 - resample)) + (preLim[1] * resample);
-            srcL = (recL * (1 - regG)) + (LeakDC.ar(preLim[0]) * regG);
-            srcR = (recR * (1 - regG)) + (LeakDC.ar(preLim[1]) * regG);
+            srcL = (recL * (1 - regG)) + (LeakDC.ar(preLim[0], 0.9995) * regG);
+            srcR = (recR * (1 - regG)) + (LeakDC.ar(preLim[1], 0.9995) * regG);
             // record-safety limiter: transparent below 0.99, stops a hot take
             // hard-clipping into the buffer.
             srcL = Limiter.ar(srcL, 0.99, 0.002);
@@ -2152,7 +2159,9 @@ Engine_Four : CroneEngine {
             rev_decay = gl.(rev_decay, rev_decay_t);
             rev_damp = gl.(rev_damp, rev_damp_t);
             shimmer = gl.(shimmer.clip(0, 0.95), shimmer_t);
-            wet = In.ar(in_bus, 2);                 // io's post-delay wet send
+            // a DC blocker (3.8 Hz) before every reverb and before the shimmer
+            // feedback joins: FourRoom passes DC with 16 dB of gain
+            wet = LeakDC.ar(In.ar(in_bus, 2), 0.9995);
             // shimmer feedback: the pitched tail recirculates into the reverb
             // INPUT so it climbs in octaves. shimmer=0 -> shimOut 0 -> revIn==wet.
             fbIn = LocalIn.ar(2);

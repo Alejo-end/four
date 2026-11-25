@@ -345,8 +345,9 @@ def check(build):
     # fifty-first change closed it: see the rows of probe9 above)
     known(build, "the drive folds in hearing: 5 kHz at -6 dBFS, full drive, not an odd harmonic below 16 kHz",
           num(r'^r\. DRIVE 1.*not an odd harmonic ([-\d.]+) dB', a4), -27.3, 3, 'dB')
-    known(build, "the take is not the input: LeakDC on the record arm at 40 Hz",
-          num(r'LeakDC on the dry arm: 40 Hz ([-+\d.]+) dB', a1), -2.8, 0.5, 'dB', worse_up=False)
+    # proposal A: LeakDC at 0.9995 (3.8 Hz). At 0.995 (38 Hz) this row was -2.80 dB.
+    target(build, "the take keeps its bass: LeakDC on the record arm at 40 Hz (was -2.80 dB)",
+           num(r'LeakDC on the dry arm: 40 Hz ([-+\d.]+) dB', a1), -0.1, 'dB', low=False)
     known(build, "the master limiter moves the image: one-sided burst, shift",
           -num(r'master out 1\.55-1\.75 s:.*image L-R ([-+\d.]+) dB', a1), 3.85, 1, 'dB')
     known(build, "the record limiter moves the image of the take: shift",
@@ -382,17 +383,20 @@ def check(build):
     # more with the plugin and three more without: its decay, its damping and
     # its shimmer had no lag at all. (The Mac has no DFM1 and no JPverb: the
     # filter and the reverb count their stock paths here.)
+    # Proposal A adds two to the reverb: the DC blocker at its input, one a side.
     for name, limit in (('four_lane_in', 28), ('four_filt_lo', 26), ('four_filt_hi', 14), ('four_colour', 40),
                         ('four_lane_out', 15), ('four_delay', 17 if build == 'plugin' else 21),
-                        ('four_reverb', 38 if build == 'plugin' else 33)):
+                        ('four_reverb', 40 if build == 'plugin' else 35)):
         target(build, f"the UGens of {name} (a glide must not grow a def)",
                num(rf'^UGENS {name} (\d+)', runs['p4'][3].replace('\r', '')), limit, '', fmt='.0f')
     v = num(r'minus B \(left alone\): ([-\d.]+) dBFS', a1)
     say('KNOWN', build, f"the reverb's 9 knobs on a running synth change nothing: difference {v:.1f} dBFS "
         "(known -300, it cannot get worse; a change shows they act)")
     if build == 'plugin':
-        known(build, "the reverb passes DC: DC 0.5 for 10 s, decay 30, shimmer 0.95, peak out",
-              num(r'DC 0\.5 10 s, 0 st.*peak\s+([\d.]+)', a4), 3.16, 0.4, '')
+        # proposal A: a DC blocker before the room (3.16 was the room's DC gain).
+        # What is left is the blocker's step response.
+        target(build, "the reverb blocks DC: DC 0.5 for 10 s, decay 30, shimmer 0.95, peak out (was 3.16)",
+               num(r'DC 0\.5 10 s, 0 st.*peak\s+([\d.]+)', a4), 0.15, '')
     else:
         # FreeVerb (no plugin): the shimmer loop runs away at 0 st. Its level is
         # chaotic (unseeded WhiteNoise, PitchShift's random grains): over seven
@@ -402,7 +406,7 @@ def check(build):
               num(r'decay 30, shim \.95, 0 st(?:\s+[-\d.]+){4}\s+([-\d.]+)', a1), 0, 10, 'dBFS')
         known(build, "the shimmer loop runs away at 0 st (FreeVerb): 40 Hz at 0 dBFS, RMS at 59 s",
               num(r'40 Hz 0 dBFS 10 s, 0 st(?:\s+[-\d.]+){3}\s+([-\d.]+)', a4), 0, 10, 'dBFS')
-        known(build, "the reverb passes DC and runs away (FreeVerb): DC 0.5 for 10 s, 0 st, RMS at 59 s",
+        known(build, "the shimmer loop runs away at 0 st (FreeVerb): DC 0.5 for 10 s, RMS at 59 s",
               num(r'DC 0\.5 10 s, 0 st(?:\s+[-\d.]+){3}\s+([-\d.]+)', a4), 0, 10, 'dBFS')
 
 def core():

@@ -161,7 +161,11 @@ static void FourDelay_Ctor(FourDelay* unit) {
     int need = (int)(sc_max(IN0(4), 0.001f) * SAMPLERATE) + 8, size = 64;
     while (size < need) size <<= 1;
     unit->mem = (float*)RTAlloc(unit->mWorld, size * sizeof(float));
-    if (!unit->mem) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    if (!unit->mem) {
+        SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1);
+        Print("FourDelay: no real-time memory for %lu bytes\n", (unsigned long)(size * sizeof(float)));
+        return;
+    }
     unit->core.init(unit->mem, size);
     unit->lastD = IN0(1) * (float)SAMPLERATE;
     SETCALC(FourDelay_next);
@@ -203,7 +207,11 @@ static void FourGrain_next(FourGrain* unit, int inNumSamples) {
 }
 static void FourGrain_Ctor(FourGrain* unit) {
     unit->core = (four::Grains*)RTAlloc(unit->mWorld, sizeof(four::Grains));
-    if (!unit->core) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    if (!unit->core) {
+        SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1);
+        Print("FourGrain: no real-time memory for %lu bytes\n", (unsigned long)(sizeof(four::Grains)));
+        return;
+    }
     unit->core->init();
     SETCALC(FourGrain_next);
     OUT0(0) = 0.f; OUT0(1) = 0.f;
@@ -265,7 +273,11 @@ static void FourBBD_next(FourBBD* unit, int inNumSamples) {
 }
 static void FourBBD_Ctor(FourBBD* unit) {
     unit->mem = (float*)RTAlloc(unit->mWorld, 8192 * sizeof(float));
-    if (!unit->mem) { SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1); return; }
+    if (!unit->mem) {
+        SETCALC(ft->fClearUnitOutputs); ClearUnitOutputs(unit, 1);
+        Print("FourBBD: no real-time memory for %lu bytes\n", (unsigned long)(8192 * sizeof(float)));
+        return;
+    }
     unit->core.init(unit->mem, 8192, SAMPLERATE);
     unit->lastTime = -1.f; unit->lastTone = -1.f;
     SETCALC(FourBBD_next);
