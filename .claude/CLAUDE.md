@@ -189,7 +189,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 71st: a head sync leaves a loop that is in time alone and fades a jump (`\four_sync`), stage 21 as a test (engine, test tools) | yes, 2026-11-24, `count: 199`: row 21.4 has no break and no drift over five minutes (PLAY clicked at three of six restarts before) | no |
 | 72nd: PV and WARP wrap inside the loop (`Buf::setLoop`), so their seam has no hole; a tape clear makes no xrun (engine, plugin, Lua) | yes, 2026-11-24, `count: 199`, plugin built there: WARP -2.4 dB at the seam (-74.0 before), PV -2.6 dB (-21.6) | no |
 | 73rd: TRACKS: levels in dB steps, K2 MUTE and held SOLO, K3 held OFF (`mute_1` to `mute_4`, `ctx.track_gain`) (Lua, test tools) | yes, 2026-11-24: rows 22.1 to 22.3 and 22.5 pass | no |
-| 74th: a meter for each track on TRACKS (`\four_meter`, polls `amp_t1` to `amp_t4`), and the review's fixes: a WARP grain keeps its loop, a SOLO ends in the norns menu, an old PSET loads unmuted (engine, plugin, Lua, test tools) | yes, 2026-11-24, `count: 199`, plugin built there. The first version of the meters cost 0.43 points. Row 22.4 failed on drums, and its fix (`Amplitude.ar`, 1.5 s) is deployed and not measured: the norns went off | no |
+| 74th: a meter for each track on TRACKS (`\four_meter`, polls `amp_t1` to `amp_t4`), and the review's fixes: a WARP grain keeps its loop, a SOLO ends in the norns menu, an old PSET loads unmuted (engine, plugin, Lua, test tools) | yes, 2026-11-25, `count: 199`, plugin built there on 2026-11-24: stage 22 passes but 22.7, which needs ears. The meters cost 0.23 points. WARP and PV at the loop's point: no dip under -2.5 dB, no break, also with a window edge that moves | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -556,7 +556,7 @@ Each line was learned the hard way; the change log has the story.
   change). A device row that reads a level waits until the head is past it (`after_seam`).
 - `Amplitude.kr` on an audio input counts its times in blocks and steps them by samples:
   a release of 0.3 s was 5 ms. Use `Amplitude.ar` and `A2K`. A poll comes 15 times a
-  second, so a meter's fall must be slow (1.5 s, 40 dB a second).
+  second, so a meter's fall must be slow (0.8 s, 25 dB a second: the time is a fall of 20 dB).
 - A preset test on the device can read differently through a file path than through a slot
   number: the parts that ride a PSET (tape, scenes, take) load only with a number.
 - A knob in a SynthDef is `gl.(value, value_t)`, never a bare `.lag`: every write sends

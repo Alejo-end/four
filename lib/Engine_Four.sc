@@ -2003,8 +2003,8 @@ Engine_Four : CroneEngine {
                 var x = In.ar(b, 2).abs;
                 // Amplitude.ar, not .kr: on an audio input .kr counts its times
                 // in blocks and steps them by samples, so 0.3 s was 5 ms and the
-                // polls (15 a second) missed the hits. 1.5 s is 40 dB a second.
-                A2K.kr(Amplitude.ar(x[0].max(x[1]), 0.005, 1.5))
+                // polls (15 a second) missed the hits. The time is a fall of 20 dB.
+                A2K.kr(Amplitude.ar(x[0].max(x[1]), 0.001, 0.8))
             }));
         }).add;
 

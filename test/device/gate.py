@@ -3916,7 +3916,7 @@ def stage22():
             rate, chans = engine_rec(f"22.4_t{t}", 2)
             peak = audio.stats(chans[0])["peak_db"]
             n.set(f"mute_{t}", 1)
-            time.sleep(3)
+            time.sleep(3)   # (the meter falls 25 dB a second)
             muted = num(n.ctx(f"c.amp_t[{t}]"))
             n.set(f"mute_{t}", 0)
             got = audio.db(max(seen))
