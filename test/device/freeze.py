@@ -30,7 +30,7 @@ __fz.id = clock.run(function()
     __fz.n = __fz.n + 1
     if now - last > 0.12 then
       local c = __ctx
-      __fz.log[#__fz.log + 1] = string.format("%.2f held %d ms page %s menu %s rec %s morph %s lua %d to %d KB",
+      __fz.log[#__fz.log + 1] = string.format("%.2f held %.0f ms page %s menu %s rec %s morph %s lua %.0f to %.0f KB",
         now, (now - last) * 1000, tostring(c and c.PAGES[c.page]), tostring(norns.menu.status()), tostring(params:get("rec")),
         tostring(params:get("scene_morph_amt")), mem, m)
     end
@@ -67,9 +67,12 @@ while time.time() - start < SECS:
     time.sleep(0.5)
 el = time.time() - start
 stop.set()
-f1 = int(re.findall(r"\d+", n.ctx("c.frame"))[-1])
+f1 = int(re.findall(r"\d+", n.lua("print(__ctx.frame)", timeout=60))[-1])
 print(f"{(f1 - f0) / el:.1f} frames a second (15 is right)")
 print("the REPL was slow (Lua, or the network):", slow)
+# the watcher itself must have lived to the end, or "never" means nothing
+alive = n.lua('print("@fz " .. tostring(__fz ~= nil and __fz.n))', timeout=60).split("@fz")[-1].strip()
+print("the watcher woke", alive, "times (about", round(el * 40), "is right)")
 print("@ Lua held:")
 print(n.lua('for _, l in ipairs(__fz.log) do print(l) end clock.cancel(__fz.id) __fz = nil', timeout=20) or "never")
 for row in busy:

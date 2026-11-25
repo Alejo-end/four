@@ -190,7 +190,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 72nd: PV and WARP wrap inside the loop (`Buf::setLoop`), so their seam has no hole; a tape clear makes no xrun (engine, plugin, Lua) | yes, 2026-11-24, `count: 199`, plugin built there: WARP -2.4 dB at the seam (-74.0 before), PV -2.6 dB (-21.6) | no |
 | 73rd: TRACKS: levels in dB steps, K2 MUTE and held SOLO, K3 held OFF (`mute_1` to `mute_4`, `ctx.track_gain`) (Lua, test tools) | yes, 2026-11-24: rows 22.1 to 22.3 and 22.5 pass | no |
 | 74th: a meter for each track on TRACKS (`\four_meter`, polls `amp_t1` to `amp_t4`), and the review's fixes: a WARP grain keeps its loop, a SOLO ends in the norns menu, an old PSET loads unmuted (engine, plugin, Lua, test tools) | yes, 2026-11-25, `count: 199`, plugin built there on 2026-11-24: stage 22 passes but 22.7, which needs ears. The meters cost 0.23 points. WARP and PV at the loop's point: no dip under -2.5 dB, no break, also with a window edge that moves | no |
-| 76th, 77th: a loaded file and the visuals link's lookup no longer hold the script (Lua) | files deployed 2026-11-25, four not reloaded | no |
+| 76th, 77th: a loaded file and the visuals link's lookup no longer hold the script (Lua) | yes, 2026-11-25, loaded at 12:28 | the user, 2026-11-25: "the freeze is gone" (minutes after the load, the Mac on the network) |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

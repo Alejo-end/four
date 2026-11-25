@@ -5536,8 +5536,10 @@ four, seventy-sixth change: **a loaded file no longer holds the screen (Lua, a d
   two frames: 110 and 80 ms on the norns for a loop of 8 s, at each step through a folder. A
   frame now reads 10000 samples at most. The picture is the same, bin for bin.
 - test/device/freeze.py: logs each time Lua was held over 120 ms, while somebody plays.
-- At rest and for four minutes of play the watcher saw no hold. The freezes that the user
-  meant are not reproduced, so this can be a part of them only.
+- CORRECTED: the first run of the watcher crashed at its first hold (a float in `%d`, 11:39:02
+  on the norns), so it did see one over 120 ms and said none. The tool is fixed and checks that
+  it lived. At rest for 150 s it saw none, with 15.0 frames a second. The freezes that the
+  user meant are not reproduced, so this can be a part of them only.
 
 four, seventy-seventh change: **the visuals link no longer holds the script (Lua)**. 2026-11-25.
 - With `osc_on` and a host given as a name, lib/mosc.lua looked the name up once a minute with
