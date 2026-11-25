@@ -5528,3 +5528,13 @@ On the device, 2026-11-25 (the seventy-fourth change): stage 22 passes but row 2
 meter's time in SuperCollider is a fall of 20 dB, so the first 1.5 s was too slow (a muted track
 read -53 dB after 3 s) and 0.5 s missed drum peaks by 4 dB. It is 1 ms up and 0.8 s down (25 dB
 a second): tones and drums read within 0.6 dB of the output's peak. Cost 0.23 points.
+
+four, seventy-sixth change: **a loaded file no longer holds the screen (Lua, a device tool)**.
+2026-11-25, from the user's note that the screen freezes at times.
+- `Mwav.load_tick` (the wave strip that draws in after a load) was bounded in bins and not in
+  samples. A file much shorter than the 60 s strip has few bins, so its 200000 reads fell in
+  two frames: 110 and 80 ms on the norns for a loop of 8 s, at each step through a folder. A
+  frame now reads 10000 samples at most. The picture is the same, bin for bin.
+- test/device/freeze.py: logs each time Lua was held over 120 ms, while somebody plays.
+- At rest and for four minutes of play the watcher saw no hold. The freezes that the user
+  meant are not reproduced, so this can be a part of them only.

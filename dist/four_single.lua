@@ -5659,31 +5659,54 @@ end
 -- fill up to BINS_PER_TICK bins of the queue's HEAD per call (driven by the
 -- redraw clock), then close its file and move on. bounded work per frame →
 -- the reads never block the UI; each strip draws IN over ~nb/10 frames.
+-- THE WORK IS BOUNDED IN SAMPLES TOO (the seventy-sixth change). A file much
+-- shorter than the strip has few bins and 200000 samples to read, so all of it
+-- fell in two frames: on the norns 110 and 80 ms for a loop of 8 s, and the
+-- screen stood still. A frame reads TICK_SAMPLES at most (about 10 ms), and a
+-- bin can take several.
+local TICK_SAMPLES = 10000
 function M.load_tick()
   local p = fills[1]
   if not p then return end
   local bins = p.bins
   -- a finer strip fills more bins a tick, so it draws in over the same time
-  local last = min(p.i + p.per, p.nb)
-  for i = p.i + 1, last do
+  local stop, left = p.i + p.per, TICK_SAMPLES
+  while p.i < p.nb and p.i < stop and left > 0 do
+    local i = p.i + 1
     local b0 = floor((i - 1) / p.nb * p.frames)
     local n = floor(i / p.nb * p.frames) - b0
-    local peak = 0
-    if n > 0 then
-      p.f:seek("set", p.dpos + b0 * p.fbytes)
-      local chunk = p.f:read(n * p.fbytes)
+    local at, peak = p.at or 0, p.peak or 0    -- frames of this bin already read
+    if n > at then
+      -- whole frames, as many as the budget holds
+      local take = min(n - at, max(1, floor(left * p.step / p.fbytes)))
+      p.f:seek("set", p.dpos + (b0 + at) * p.fbytes)
+      local chunk = p.f:read(take * p.fbytes)
       if chunk then
-        for pp = 1, #chunk - (p.bps - 1), p.step do
+        -- (the stride goes on where the last piece of the bin left it)
+        local from = p.off or 1
+        local last = #chunk - (p.bps - 1)
+        local pp = from
+        while pp <= last do
           -- magnitude: the decoder is signed, the strip wants height
           local v = p.readpeak(chunk, pp)
           if v < 0 then v = -v end
           if v > peak then peak = v end
+          pp = pp + p.step
         end
+        left = left - max(1, (pp - from) // p.step)
+        p.off = pp - #chunk
+        at = at + take
+      else
+        at = n
       end
     end
-    bins[i] = peak > 1 and 1 or peak
+    if at >= n then
+      bins[i] = peak > 1 and 1 or peak
+      p.i, p.at, p.peak, p.off = i, nil, nil, nil
+    else
+      p.at, p.peak = at, peak
+    end
   end
-  p.i = last
   if p.i >= p.nb then p.f:close(); table.remove(fills, 1) end
 end
 
