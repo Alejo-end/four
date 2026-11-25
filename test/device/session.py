@@ -4,7 +4,7 @@ the sheets are doc/walkthrough.md). It measures what the people cannot.
 
     export NORNS_CTL=<control socket>        # see norns.py
     python3 test/device/session.py prepare   # a fresh script, count 199, the takes empty
-    python3 test/device/session.py snap      # before the player's first fade (Part 1, task 5)
+    python3 test/device/session.py snap      # before the player's first fade (Part 1, task 6)
     python3 test/device/session.py home      # after the fade is back at 0: the ids off the origin
     python3 test/device/session.py takes     # Part 1's end: every track's take, and whether it plays
     python3 test/device/session.py record 5  # Part 2: record the output for 5 minutes, read the

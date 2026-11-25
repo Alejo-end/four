@@ -27,9 +27,10 @@ One person observes and writes. The observer explains nothing until a task ends.
 1. E1 all the way left is TAKE. K2 records, K2 stops.
 2. Hold K1 and turn E1 for the next track.
 3. VOICE, FILTER and EFFECT change the track you are on.
-4. E1 all the way right is SCENE. K3 keeps the sound.
-5. Hold K1 and turn E3 to fade to the kept sound and back.
-6. K1 and K2 together stop everything. Do it again to start.
+4. TRACKS sets the mix: E2 picks a track, E3 is its level. K2 mutes it, held it plays alone.
+5. E1 all the way right is SCENE. K3 keeps the sound.
+6. Hold K1 and turn E3 to fade to the kept sound and back.
+7. K1 and K2 together stop everything. Do it again to start.
 
 ## Part 1: a first-time player (the observer's sheet)
 
@@ -39,24 +40,25 @@ The player has never seen four, and can know a norns.
 |---|---|---|---|---|---|
 | 1 | Record four parts: drums, a bass line, a chord, a noise | | | | |
 | 2 | Change one voice, one filter and one effect, on any tracks | | | | |
-| 3 | Keep the sound | | | | |
-| 4 | Change two more things | | | | |
-| 5 | Fade to the kept sound and back, three times | | | | |
-| 6 | Point at the screen: which track records, which tracks play, where is the fade? | | | | |
+| 3 | Set a balance of the four tracks, then hear one of them alone | | | | |
+| 4 | Keep the sound | | | | |
+| 5 | Change two more things | | | | |
+| 6 | Fade to the kept sound and back, three times | | | | |
+| 7 | Point at the screen: which track records, which tracks play, where is the fade? | | | | |
 
-Before task 5, run `session.py snap`. After task 5, with the fade at 0, run `session.py
+Before task 6, run `session.py snap`. After task 6, with the fade at 0, run `session.py
 home` and write down which knobs the player turned during the fades. After the last task,
 run `session.py takes`.
 
 Part 1 passes when all of these are true:
 
-- [ ] Tasks 1 to 5 took 12 minutes or less, with no help.
+- [ ] Tasks 1 to 6 took 12 minutes or less without task 3, with no help.
 - [ ] At most two wrong presses cost sound (a STOP, a DRY, a lost take), and the player
       recovered from each without help.
 - [ ] At the end all four takes play (`takes`: `all_play` is true). No take was lost or
       replaced by mistake.
 - [ ] Back at 0 the fade is home: every id that `home` lists is a knob the hand moved.
-- [ ] Task 6 was answered right from the screen alone.
+- [ ] Task 7 was answered right from the screen alone.
 - [ ] The player kept playing after the last task without being asked. For how long: ____
 
 ## Part 2: the user, a five-minute set
@@ -85,6 +87,9 @@ Write each answer here, and copy it to doc/device-gate.md afterwards.
 | 5 | K1+K3 (DRY), then K1+K3 again | The same sound as before? | |
 | 6 | A full fade in one turn of E3 | Too fast, too slow or right? | |
 | 7 | Relay a filtered track into an empty one (TAKE, K1+E3 SOURCE) | Does the copy sound like what you heard? A click where its loop wraps? | |
+| 8 | Set a balance of four tracks on TRACKS, then tap and hold K2 | Is it easy? Does the mute come when you want it (it lands at the key's release)? A click? (row 22.7) | |
+| 9 | WARP and PV on a short loop, then move its window | A hole or a click at the loop's point? | |
+| 10 | Two loops on the clock for some minutes; an aligned overdub; MONITOR and DRY both up | Clicks or drift (21.4)? Late hits (21.1)? The hollow input (21.7)? | |
 
 ## The verdict
 

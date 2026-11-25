@@ -115,7 +115,7 @@ Raspberry Pi 4 and the 32-bit norns system.
 - SuperCollider gets one processor core on a norns, and the sound drops out above about
   60% load. Four CLOUD tracks take about 30%, or 40% in SPECTRAL mode. A track set to OFF
   costs nothing, but a CLOUD track keeps working in silence, so set the tracks you do not
-  use to OFF.
+  use to OFF (hold K3 on TRACKS).
 - The supported set: four PV tracks at pitch 2, each with drive, both effect slots and
   both sends, with the delay and the reverb on. Measured on a Pi 4, it takes about 57%
   with no dropout. PLAY, GRAIN at its default density and CLOUD outside SPECTRAL cost

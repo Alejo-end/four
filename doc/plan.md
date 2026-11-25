@@ -1,4 +1,4 @@
-# four: the plan (written 2026-11-12, corrected 2026-11-15)
+# four: the plan (written 2026-11-12, corrected 2026-11-25)
 
 This plan says what to do next, in order, and why. Read CLAUDE.md first: it has
 the hard rules, the deploy ritual and the lessons. The per-change history is in
@@ -19,6 +19,18 @@ record head, the input), built as the sixty-seventh to the seventieth change. Th
 deployed at `count: 199`, and stage 21 of doc/device-gate.md was measured on
 2026-11-24. Rows 21.1, 21.4 and 21.7 still need ears.
 
+Since 2026-11-24 doc/mix-plan.md holds the mix of the tracks (the seventy-third and
+seventy-fourth changes, on `main`). Its step 4 is open.
+
+**What comes next (2026-11-25).** In this order:
+1. The user's ears on the mix (row 22.7), on stage 21's three rows, and on proposal A
+   (branch `proposal-a`, on the norns). Merge proposal A only after that.
+2. The show checks of Phase 1, if a show is near.
+3. The session with a first-time player (doc/walkthrough.md). The tasks of "the observed
+   walkthrough" in Phase 4 can run with the same player.
+4. The rest of Phase 2, item by item. Phase 3 is done.
+5. Phase 4, from what the sessions found. Then Phase 5.
+
 ## Where the project stands
 
 The STATUS block of CLAUDE.md is the one record of the device: what is on it, the
@@ -29,8 +41,8 @@ what to do.
   voice (OFF, GRAIN, WARP, PV, PLAY, CLOUD), a window and a filter. It also has COLOR
   (drive, crush), two effect slots and its sends to the delay and the reverb. Tracks can
   send into each other. Four modulators can sit on any track. Twelve pages.
-- **Git.** Read `git status` first. On 2026-11-15 `main` was clean and pushed, at the
-  twentieth change. The `../mangler2` folder is a git worktree on branch `mangler2`. It is
+- **Git.** Read `git status` first. On 2026-11-25 `main` was pushed at the seventy-seventh
+  change, and `proposal-a` stands on it. The `../mangler2` folder is a git worktree on branch `mangler2`. It is
   fully merged, and `git worktree remove ../mangler2` removes it once the user agrees. The
   local folder is still named `mangler`: the user moves it, with no session open in it.
 - **The change log.** The visuals doodles are committed, but their entry is titled
@@ -66,10 +78,10 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
    (doc/measurements/2026-11-18/). PLAY has its seam fade. doc/dsp-plan.md names the
    seam as not built. Row 19.33 now reads its levels away from the seam.
 
-After this phase, measure the branch `proposal-dsp-fixes` (proposal A), then merge it.
-Record the send ring with LeakDC at 0.995 and look below 20 Hz. Run regen at 0.8 with a
-low resonant low-pass for 2 minutes. Measure the reverb's cost. Force a real-time memory
-failure and look for its message in maiden.
+Proposal A is written again on `proposal-a` (never merge `proposal-dsp-fixes`: its history
+is the private one). It was measured on the norns on 2026-11-25 (that branch's
+doc/measurements/2026-11-25/README.md). Open there: the user's ears, and a real-time memory
+failure with its message.
 
 Proposal B is dropped and kept on `proposal-b-ramp`. Its successor is built: the
 fifty-third change, a glide whose time follows the pace of the writes (row 19.34 on
@@ -143,7 +155,7 @@ doc/device-gate.md, and fix or revert it.
     change). Turn DECAY, DAMP and SIZE. Set a long delay time: it must grow dark.
 
 
-## Phase 3: no glitch when a preset loads
+## Phase 3: no glitch when a preset loads (DONE 2026-11-24)
 
 - **Measured (2026-11-12).** Loading preset 6 by hand gave 3 xruns at once, and 7
   on a second load. That preset then loaded the same 50 s file five times: the
