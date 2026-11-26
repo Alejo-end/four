@@ -5561,3 +5561,11 @@ four, seventy-seventh change: **the visuals link no longer holds the script (Lua
   a popen read on the frame clock. Measured on the norns: 12 to 15 ms when the computer is on
   the network, 5.0 s when it is not. The lookup goes to `norns.system_cmd` now, which calls
   back. Drawing is not the cause: each page draws in 1 to 3 ms on the norns.
+
+four, seventy-eighth change: **the plugin's README says what its identity is (documents)**. 2026-11-25.
+- ugen/README.md said that the three stretch voices return the take "sample for sample". Only PLAY
+  does, for whole frames at pitch 1 or below. `test_core.cpp` accepts a residual under -90 dB for
+  PV and WARP at speed 1. The text says so now.
+- Its cost section said that four PV at pitch 2 take 64%, over the budget. That was 2026-11-13.
+  The later figures are beside it now: 35.4% without effects (2026-11-17), and 53.6% to 62.2%
+  for the supported set (2026-11-20).

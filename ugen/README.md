@@ -20,8 +20,9 @@ anyone who wants to know what is in it, or to build it.
 | `FourBBD` | the delay | A bucket brigade with its clock, filters and compander. |
 | `FourCloud` | CLOUD | Mutable Instruments Clouds, the code of the MiClouds UGen of mi-UGens (`vendor/`). |
 
-The three stretch voices return the take sample for sample at speed 1 and
-pitch 1.
+At speed 1 and pitch 1 the three stretch voices return the take. PLAY is bit
+for bit there, for whole frames. PV and WARP leave a residual under -90 dB
+(`test_core.cpp`), which is far below hearing but is not bit for bit.
 
 ## How it installs
 
@@ -148,7 +149,10 @@ read on both sides (MiClouds wrote past it); `add` is applied.
 
 Measured on the norns, with four tracks in one voice. On 2026-11-13, as a
 share of the audio thread: PV at pitch 1 takes 49%, WARP 39% and PLAY 36%.
-Four PV tracks at pitch 2 take 64%, which is over the 60% budget. On
+Four PV tracks at pitch 2 took 64% that day. That figure is old: on
+2026-11-17 the same four tracks took 35.4% without effects, and on 2026-11-20
+the supported set (four PV at pitch 2 with every effect on) took 53.6% to
+62.2% over four runs, at the 60% limit. On
 2026-11-16, as SuperCollider's average load: four CLOUD tracks take 29.1%,
 and 38.7% in SPECTRAL. The figures are in `doc/measurements/`.
 
