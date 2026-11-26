@@ -80,8 +80,8 @@ The STATUS block of CLAUDE.md says which changes the device lacks. To bring it t
 
 Proposal A is written again on `proposal-a` (never merge `proposal-dsp-fixes`: its history
 is the private one). It was measured on the norns on 2026-11-25 (that branch's
-doc/measurements/2026-11-25/README.md). Open there: the user's ears, and a real-time memory
-failure with its message.
+doc/measurements/2026-11-25/README.md). Open there: the user's ears. The three
+messages of a real-time memory failure print on the Mac (the seventy-ninth change).
 
 Proposal B is dropped and kept on `proposal-b-ramp`. Its successor is built: the
 fifty-third change, a glide whose time follows the pace of the writes (row 19.34 on

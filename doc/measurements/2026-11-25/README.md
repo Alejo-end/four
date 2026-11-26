@@ -16,4 +16,5 @@ built on the norns), over JACK. Both at `count: 199`, with `four: FourStretch on
 - Regen keeps more low end and more below 20 Hz. The level still falls, so it does not run away.
 - The send ring rose by 5 dB below 20 Hz. Its sends keep their filter, so this comes from the
   takes' own low end. It stays 22 dB under the sound.
-- Not tried: a real-time memory failure and its message.
+- Not tried here: a real-time memory failure and its message. On 2026-11-26 the Mac's scsynth
+  printed all three, offline (the seventy-ninth change in doc/changelog.md).

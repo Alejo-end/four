@@ -5569,3 +5569,12 @@ four, seventy-eighth change: **the plugin's README says what its identity is (do
 - Its cost section said that four PV at pitch 2 take 64%, over the budget. That was 2026-11-13.
   The later figures are beside it now: 35.4% without effects (2026-11-17), and 53.6% to 62.2%
   for the supported set (2026-11-20).
+
+four, seventy-ninth change: **the plugin's memory messages print (documents)**. 2026-11-26.
+- The seventy-fifth change made FourDelay, FourGrain and FourBBD print a line when `RTAlloc`
+  fails. Nobody had seen the lines. The plugin of `proposal-a` was built with ugen/build_mac.sh
+  and run offline on the Mac's scsynth (3.14.1) with a small real-time pool (`memSize`).
+- 256 KB: `FourDelay: no real-time memory for 524288 bytes` (a 2 s delay). 48 KB: `FourBBD: no
+  real-time memory for 32768 bytes`. 18 to 27 KB: `FourGrain: no real-time memory for 10248
+  bytes`. 17 KB: the server refuses the synth itself (`/s_new out of real time memory`).
+- With 64 MB nothing prints. Not run on the norns's scsynth.
