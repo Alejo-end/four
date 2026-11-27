@@ -5641,3 +5641,19 @@ you're not using them, they should cost nothing".
   playing. The dense set reads 57.7% (64.2), the
   supported set 51.0% (58.0). The swaps, the send synth, the shimmer and the meter come and go
   as written. Rows 19.7 to 19.9 and stage 22 pass, and 22.7 needs ears.
+
+four, eighty-third change: **one def for each effect type (engine, test tools; branch `perf`)**.
+2026-11-28. The user asked for "the more professional approach".
+- CHORUS, the stock FLANGE and WOBBLE were one def, `\four_fx_mod` (90 UGens), that ran all three
+  laws and picked one, so a change between them glided for 100 ms and each slot paid for three
+  sets of LFOs and gains. They are `\four_fx_chorus` (38), `\four_fx_flange_stock` (35) and
+  `\four_fx_wobble` (43) now. A change between any two types is the S-curve crossfade that every
+  other change already was: one algorithm in each slot, as on a hardware unit. The laws are the
+  old ones. Each def is the old def with the other two branches taken out, and every render that
+  repeats from run to run is the same file as before.
+- `Engine_Four.fxKind` holds the table of types and defs once. probe6 and probe7 read it.
+- On the norns (`count: 199`): four CHORUS slots cost 1.6 points (2.5 before), four WOBBLE slots
+  1.7 (2.3). Rows 19.10 and 19.11 read as before, 19.12 and 19.29 have no break.
+- Also measured: a silent CLOUD track no longer costs more than one that sounds. Four CLOUD
+  tracks read 19.6% on a tone and 19.7% on silent takes, one CLOUD track 6.6% and 6.7%. The
+  difference of 2026-11-16 is gone, so nothing is changed for it.

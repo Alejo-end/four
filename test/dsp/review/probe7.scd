@@ -32,8 +32,8 @@ Engine_Four.new(ctx, { arg eng;
             Out.ar(out, (chord + kick + tick) ! 2) }),
         SynthDef(\copy, { |from, to| Out.ar(to, In.ar(from, 2)) })
     ];
-    var kinds = [nil, \four_fx_mod, eng.hasStretch.if({ \four_fx_flange }, { \four_fx_mod }),
-        \four_fx_mod, \four_fx_reson, \four_fx_ring, \four_fx_echo];
+    // the engine's own table of the effect types' defs (fxKind)
+    var kinds = (0..6).collect({ |t| eng.fxKind(t) });
     var std = syn.collect({ |d| [0.0, [\d_recv, d.asBytes]] })
         ++ kinds.select(_.notNil).asSet.asArray.collect({ |k| [0.0, [\d_recv, def.(k)]] });
     var amts = [0, 0.25, 0.5, 0.75, 1];

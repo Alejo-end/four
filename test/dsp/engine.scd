@@ -46,12 +46,12 @@ Engine_Four.new(ctx, { arg eng;
         // the effect synths work in place on a bus: a copy of the source goes
         // to a bus for each case, the effect acts on it, a tap sends it out
         [\fx, 4, 12, [],
-            [[0.0, [\d_recv, src.asBytes]], [0.0, [\d_recv, def.(\four_fx_mod)]],
+            [[0.0, [\d_recv, src.asBytes]], [0.0, [\d_recv, def.(\four_fx_chorus)]], [0.0, [\d_recv, def.(\four_fx_wobble)]],
              [0.0, [\d_recv, SynthDef(\copy, { |from, to| Out.ar(to, In.ar(from, 2)) }).asBytes]],
              [0.001, [\s_new, \src, 900, 0, 0, \out, 40]]]
             ++ [[0, 0.5, 0.5], [1, 1, 1], [1, 0.5, 0.5], [1, 1, 0], [3, 1, 1], [3, 1, 0]].collect({ |c, i|
                 [[0.002, [\s_new, \copy, 1000 + i, 1, 0, \from, 40, \to, 80 + (i * 2)]]]
-                ++ (c[0] > 0).if({ [[0.003, [\s_new, \four_fx_mod, 1100 + i, 1, 0,
+                ++ (c[0] > 0).if({ [[0.003, [\s_new, eng.fxKind(c[0]), 1100 + i, 1, 0,
                     \pbus, 80 + (i * 2), \type, c[0], \amt, c[1], \rate, c[2]]]] }, { [] })
                 ++ [[0.004, [\s_new, \copy, 1200 + i, 1, 0, \from, 80 + (i * 2), \to, i * 2]]] }).flatten(1)]
         ,

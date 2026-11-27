@@ -381,12 +381,18 @@ Engine_Four : CroneEngine {
         });
     }
 
+    // the def of each effect type (0 OFF, 1 CHORUS, 2 FLANGE, 3 WOBBLE, 4 RESON,
+    // 5 RING, 6 ECHO). One table: the probes read it too.
+    fxKind { arg type;
+        ^[nil, \four_fx_chorus, hasStretch.if({ \four_fx_flange }, { \four_fx_flange_stock }),
+            \four_fx_wobble, \four_fx_reson, \four_fx_ring, \four_fx_echo].at(type)
+    }
+
     // an effect slot (0 or 1): the synth of the type's kind, or none for OFF
     laneFx { arg lane, slot;
         var pre = (slot == 0).if({ "effect" }, { "effect2" });
         var type = (lane[\p][pre.asSymbol] ? 0).round.asInteger.clip(0, 6);
-        var kind = [nil, \four_fx_mod, hasStretch.if({ \four_fx_flange }, { \four_fx_mod }),
-            \four_fx_mod, \four_fx_reson, \four_fx_ring, \four_fx_echo].at(type);
+        var kind = this.fxKind(type);
         (kind == lane[\fxKind][slot]).if({
             lane[\fx][slot].notNil.if({ lane[\fx][slot].set(\type, type) });
         }, {
@@ -1647,8 +1653,8 @@ Engine_Four : CroneEngine {
         // synth one control step short of 0: on a straight line that step was
         // 1.4% of the effect, and the S curve leaves 0.05%. The norns's (3.13)
         // runs the release to its end.
-        //   \four_fx_mod    CHORUS, FLANGE, WOBBLE (type 1 to 3): one comb
-        //                   pair, so a change between them glides for 100ms
+        //   \four_fx_chorus, \four_fx_flange_stock, \four_fx_wobble: one comb
+        //                   pair each (fxKind says which def a type runs)
         //   \four_fx_reson  RESON     \four_fx_ring  RING
         // A NEW SYNTH'S LINES FILL FROM SILENCE: it reads the bus through a
         // 10ms fade-in. A line is born empty under a playing sound. Without
@@ -1683,10 +1689,14 @@ Engine_Four : CroneEngine {
                     gl.(amt.clip(0, 1), amt_t), gl.(rate.clip(0, 1), rate_t), gate));
             }).add;
         };
-        fxSlot.value(\four_fx_mod, { arg sig, type, a, r, gate;
-            var idx, lfoCh, lfoFl, wow, flut, flw, dt, decay, comb, dryG, wetG;
-            var chF, chD, wowF, wowD, flF, flD, p, flN, ramp;
-            idx = (type - 1).clip(0, 2);
+        // CHORUS, FLANGE (without the plugin) and WOBBLE: ONE DEF FOR EACH TYPE
+        // (the eighty-third change). They were one def, \four_fx_mod, that ran all
+        // three laws and picked one, so a change between them glided for 100 ms.
+        // Each slot paid for three sets of LFOs and gains. Now a slot runs its own
+        // type only, and a change between any two types is the S-curve crossfade
+        // that every other change already was, as on a hardware unit with one
+        // algorithm in each slot. The laws, and so the sound of each type, are the
+        // old ones: each def is the old def with the other two branches taken out.
             // THE AMOUNT KNOB RISES FAST AT FIRST (the forty-fifth change).
             // The user on the device, 2026-11-17: the effects were "a bit too
             // bland". Measured (test/dsp/review/probe7.scd), CHORUS and FLANGE
@@ -1698,7 +1708,6 @@ Engine_Four : CroneEngine {
             // scsynth thread for each synth: a first version with nine more of
             // them in FLANGE and four in ECHO took the dense set of gate row
             // 19.27 from 62.4% to 63.5%. probe7 counts each def's UGens.
-            p = a.sqrt;
             // DEPTH IS SET AS PITCH, not as time. A delay that moves by
             // D*sin(2pi*f*t) bends the pitch by the ratio 2pi*f*D at its
             // peak, so a fixed depth in time grew with the rate: measured,
@@ -1707,41 +1716,44 @@ Engine_Four : CroneEngine {
             // bend whatever the rate, up to the room the delay line has.
             // CHORUS 8 to 50 cents. WOBBLE's wow reaches 50 cents at the
             // knob's middle and 100 at its top, and its flutter 15 and 30.
+        //   CHORUS  8 to 50 cents. WOBBLE's wow reaches 50 cents at the knob's
+        //   middle and 100 at its top, and its flutter 15 and 30.
+        fxSlot.value(\four_fx_chorus, { arg sig, type, a, r, gate;
+            var p = a.sqrt, chF, chD, lfoCh, dt, comb;
             chF = 0.1 * (60 ** r);
             chD = (((2 ** ((8 + (42 * a)) / 1200)) - 1) / (2pi * chF)).min(0.012);
+            lfoCh = SinOsc.kr(chF, [0, 0.5pi]);
+            dt = 2.collect({ arg ch; (0.015 + (chD * lfoCh[ch])).lag(0.1) });
+            comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], 0) });
+            (sig * (1 - (0.25 * p)).lag(0.05)) + (comb * (0.9 * p).lag(0.05))
+        });
+        // the stock FLANGE's level: the comb's ring adds to the sound, and
+        // without flN its top came out 6 dB over the dry sound
+        fxSlot.value(\four_fx_flange_stock, { arg sig, type, a, r, gate;
+            var p = a.sqrt, lfoFl, dt, flN, comb;
+            lfoFl = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
+            dt = 2.collect({ arg ch; (0.0035 + (0.003 * lfoFl[ch])).lag(0.1) });
+            flN = (1 + (1.2 * p)).reciprocal;
+            comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], (p * 0.12).lag(0.05)) });
+            (sig * flN.lag(0.05)) + (comb * (p * flN).lag(0.05))
+        });
+        // WOBBLE's delay glides in from 0 over 0.65s, and back out at the
+        // release (fxSlot's `hold`). The sine curve's steepest place bends the
+        // pitch by 50 cents, the wow's own reach at the knob's middle. WOBBLE is
+        // the late copy alone: no dry sound.
+        fxSlot.value(\four_fx_wobble, { arg sig, type, a, r, gate;
+            var wowF, wowD, flF, flD, wow, flw, ramp, dt;
             wowF = 0.3 * (6 ** r);
             wowD = ((a * (2 * ((2 ** (50 / 1200)) - 1))) / (2pi * wowF)).min(0.010);
             flF = 6 * (2 ** r);
             flD = (a * (2 * ((2 ** (15 / 1200)) - 1))) / (2pi * flF);
-            lfoCh = SinOsc.kr(chF, [0, 0.5pi]);
-            lfoFl = SinOsc.kr(0.05 * (100 ** r), [0, 0.25pi]);
             wow = (SinOsc.kr(wowF, [0, 0.3]) * 0.7)
                 + (LFNoise2.kr(0.5 * (6 ** r)) * 0.3);
-            flut = SinOsc.kr(flF);
-            flw = flD * flut;
-            // WOBBLE's delay glides in from 0 over 0.65s, and back out at the
-            // release (fxSlot's `hold`, below). The sine curve's steepest
-            // place bends the pitch by 50 cents, the wow's own reach at the
-            // knob's middle. CHORUS and FLANGE keep their dry sound on time,
-            // so their delay does not glide: a sweep would be a flange.
-            // A comb with no decay has no feedback at any delay, 0 included.
+            flw = flD * SinOsc.kr(flF);
             ramp = EnvGen.kr(Env([0, 1, 0], [0.65, 0.65], \sin, 1), gate);
-            dt = 2.collect({ arg ch;
-                Select.kr(idx, [
-                    0.015 + (chD * lfoCh[ch]),
-                    0.0035 + (0.003 * lfoFl[ch]),
-                    (0.012 + (wowD * wow[ch]) + flw) * ramp
-                ]).lag(0.1)
-            });
-            // the stock FLANGE's level: the comb's ring adds to the sound, and
-            // without this its top came out 6 dB over the dry sound
-            flN = (1 + (1.2 * p)).reciprocal;
-            decay = Select.kr(idx, [DC.kr(0), p * 0.12, DC.kr(0)]).lag(0.05);
-            dryG = Select.kr(idx, [1 - (0.25 * p), flN, DC.kr(0)]).lag(0.05);
-            wetG = Select.kr(idx, [0.9 * p, p * flN, DC.kr(1)]).lag(0.05);
-            comb = 2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], decay) });
-            (sig * dryG) + (comb * wetG)
-        }, { arg type; (type > 2.5) * 0.65 });
+            dt = 2.collect({ arg ch; ((0.012 + (wowD * wow[ch]) + flw) * ramp).lag(0.1) });
+            2.collect({ arg ch; CombC.ar(sig[ch], 0.05, dt[ch], 0) })
+        }, { arg type; 0.65 });
         // RESON: the gain law holds a long ring near the level of a short
         // one, and the tanh bounds a peak. The power is 0.25: at 0.5 (the
         // exact law for noise) music came out about 8dB under the other
@@ -1773,7 +1785,7 @@ Engine_Four : CroneEngine {
         fxSlot.value(\four_fx_ring, { arg sig, type, a, r;
             XFade2.ar(sig, sig * SinOsc.ar(20 * (200 ** r), 0, 2.sqrt), (a * 2 - 1))
         });
-        // FLANGE with the plugin (without it, type 2 of \four_fx_mod). The
+        // FLANGE with the plugin (without it, \four_fx_flange_stock). The
         // first one sounded harsh, for three reasons, and each has its answer:
         //   the sweep moved evenly in TIME, so it raced through the top. It
         //     now moves evenly in PITCH: 0.25ms to 8ms on an exponential law

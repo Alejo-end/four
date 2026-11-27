@@ -29,7 +29,7 @@ def dev(w):
     return 1200 * np.log2(fi.min() / 1000), 1200 * np.log2(fi.max() / 1000)
 print("EFFECT, pitch movement of the wet arm on a 1 kHz sine, cents")
 for i, (n, a) in enumerate([('CHORUS amount 1, rate 1', 1), ('CHORUS amount .5, rate .5', .5), ('CHORUS amount 1, rate 0', 1)]):
-    p = a ** 0.5   # the engine's CHORUS law: KEEP THIS IN STEP WITH \four_fx_mod
+    p = a ** 0.5   # the engine's CHORUS law: KEEP THIS IN STEP WITH \four_fx_chorus
     wet = (x[:, 2 * (i + 1)] - (1 - 0.25 * p) * dry) / (0.9 * p)
     lo, hi = dev(wet); print(f"  {n:28s} {lo:+7.1f} .. {hi:+7.1f}")
 for i, n in enumerate(['WOBBLE amount 1, rate 1', 'WOBBLE amount 1, rate 0']):

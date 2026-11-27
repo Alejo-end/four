@@ -2655,7 +2655,7 @@ def stage19():
         n.set("t2_effect2", 1)
         time.sleep(0.4)
         c = lane_nodes()["fx"]
-        ok = a == ["four_fx_mod"] and b == ["four_fx_mod", "four_fx_ring"] and not c
+        ok = a == ["four_fx_chorus"] and b == ["four_fx_chorus", "four_fx_ring"] and not c
         return verdict(ok, f"CHORUS {a}; CHORUS and RING {b}; both OFF {c}")
 
     def c1911():

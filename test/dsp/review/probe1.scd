@@ -111,11 +111,11 @@ Engine_Four.new(ctx, { arg eng;
         // (6, a mode change, is probe9.scd since the fifty-first change)
         // 7. the effects' gain: [source bus, def, type, amt, rate]
         [\flres, 6, 16, [],
-            [[0.0, [\d_recv, def.(\four_fx_flange) ? copy.asBytes]], [0.0, [\d_recv, def.(\four_fx_mod)]],
+            [[0.0, [\d_recv, def.(\four_fx_flange) ? copy.asBytes]], [0.0, [\d_recv, def.(\four_fx_flange_stock)]],
              [0.0, [\d_recv, def.(\four_fx_reson)]], [0.0, [\d_recv, def.(\four_fx_echo)]],
              [0.001, [\s_new, \noise, 900, 0, 0, \out, 40]],
              [0.001, [\s_new, \sine, 901, 0, 0, \out, 44, \freq, 261.6256, \amp, 0.25]]]
-            ++ [[40, \four_fx_flange, 2, 1, 0.5], [40, \four_fx_mod, 2, 1, 0.5], [40, \four_fx_flange, 2, 0, 0.5],
+            ++ [[40, \four_fx_flange, 2, 1, 0.5], [40, \four_fx_flange_stock, 2, 1, 0.5], [40, \four_fx_flange, 2, 0, 0.5],
                 [44, \four_fx_reson, 4, 1, 0.5], [40, \four_fx_reson, 4, 1, 0.5], [40, \four_fx_echo, 6, 1, 0.5],
                 [40, nil, 0, 0, 0], [44, nil, 0, 0, 0]].collect({ |c, i|
                 [[0.002, [\s_new, \copy, 1000 + i, 1, 0, \from, c[0], \to, 80 + (i * 2)]]]

@@ -323,12 +323,10 @@ tracks playing. The supported set reads 51.0% and the dense set 57.7%. Merge `pe
 2. Built (the eighty-second change, branch `perf`): an open filter is a copy, the sends into
    a track run only while one is open, and the meters only while TRACKS shows them. The open
    filter drops DFM1's faint third harmonic, so it needs a listen.
-3. A silent CLOUD track costs more than one that sounds (3.9% against 2.5%). A guess to test
-   on the norns: denormal numbers in Clouds' feedback paths. Set the flush-to-zero bit in
-   FourCloud's calc function and read `measure.py` again.
-4. CHORUS, FLANGE and WOBBLE share `\four_fx_mod`: 90 UGens, mostly control rate, about
-   0.01 point each a slot. A def for each type would be smaller, but a change between the
-   three would crossfade instead of glide for 100 ms. That is the user's call.
+3. DONE 2026-11-28: a silent CLOUD track no longer costs more than one that sounds (19.7% and
+   19.6% for four). Nothing to fix.
+4. DONE 2026-11-28 (the eighty-third change): CHORUS, the stock FLANGE and WOBBLE have one def
+   each, and a change between them crossfades. Eight such slots save about 1.5 points.
 5. PV itself: the C++ is near its floor. Each hop is three forward and two inverse FFTW
    transforms of 2048, and the read and the sinc already use NEON. A real saving needs
    a different algorithm (a smaller frame at high pitch), which changes the sound.

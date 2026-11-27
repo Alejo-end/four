@@ -203,9 +203,11 @@ def check(build):
     # The fifty-sixth change grew two defs on purpose: WOBBLE's delay glide
     # in four_fx_mod (85 to 90) and FLANGE's dry glide (31 to 33), about
     # 0.05% of the thread for each slot that holds one.
-    for name, limit in (('four_fx_mod', 90), ('four_fx_reson', 41), ('four_fx_ring', 21),
+    # The eighty-third change splits four_fx_mod (90) into one def for each type.
+    for name, limit in (('four_fx_chorus', 38), ('four_fx_wobble', 43),
+                        ('four_fx_reson', 41), ('four_fx_ring', 21),
                         ('four_fx_echo', 20 if build == 'plugin' else 28)) + \
-                       ((('four_fx_flange', 33),) if build == 'plugin' else ()):
+                       ((('four_fx_flange', 33),) if build == 'plugin' else (('four_fx_flange_stock', 35),)):
         target(build, f"the UGens of {name} (a law must not grow its def)",
                num(rf'^UGENS {name} (\d+)', runs['p7'][3].replace('\r', '')), limit, '', fmt='.0f')
     if build == 'plugin':

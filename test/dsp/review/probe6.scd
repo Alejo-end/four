@@ -58,8 +58,8 @@ Engine_Four.new(ctx, { arg eng;
         (wait > 0).if({ [[t, [\n_set, ioId, key, 0]], [t + wait, [\n_free, node]]] },
             { [[t, [\n_set, ioId, key, 0], [\n_free, node]]] })
     };
-    var kinds = [nil, \four_fx_mod, eng.hasStretch.if({ \four_fx_flange }, { \four_fx_mod }),
-        \four_fx_mod, \four_fx_reson, \four_fx_ring, \four_fx_echo];
+    // the engine's own table of the effect types' defs (fxKind)
+    var kinds = (0..6).collect({ |t| eng.fxKind(t) });
     var std = syn.collect({ |d| [0.0, [\d_recv, d.asBytes]] })
         ++ (kinds.select(_.notNil).asSet.asArray
             ++ [\four_delay, \four_filt_lo, \four_filt_hi, \four_io, \four_reverb])
