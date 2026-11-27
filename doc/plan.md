@@ -316,7 +316,10 @@ The supported set (four PV at pitch 2 with every effect on) reads 53.6% to 62.2%
 scsynth thread, at the 60% limit. Where the points go (doc/measurements/2026-11-17/): the
 four PV voices about 32, the reverb 6.0, the effect slots about 9, the delay 2.7, drive 2.5.
 
-1. The shimmer (above, item 2): built, about 1 point while the reverb plays at shimmer 0.
+Measured 2026-11-28 (doc/measurements/2026-11-28/): items 1 and 2 took 6 to 8 points from
+every state. The supported set reads 51.0% and the dense set 57.7%. Merge `perf` after a listen.
+
+1. The shimmer (above, item 2): built, 1.2 points while the reverb plays at shimmer 0.
 2. Built (the eighty-second change, branch `perf`): an open filter is a copy, the sends into
    a track run only while one is open, and the meters only while TRACKS shows them. The open
    filter drops DFM1's faint third harmonic, so it needs a listen.

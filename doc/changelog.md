@@ -5636,5 +5636,7 @@ you're not using them, they should cost nothing".
 - Gate rows 19.7 and 19.8 expect `four_filt_open` for an open lane. check_dsp.sh holds the new
   UGen counts. Every render of check_dsp.sh that repeats from run to run is identical to the
   seventy-ninth change's (260 files). The count stays 199.
-- Not tried on the norns: the swaps, the send synth's start and end, the meter's pause, and what
-  each saves. `measure.py budget` before and after, then rows 19.7, 19.8 and stage 22.
+- On the norns the same day (doc/measurements/2026-11-28/): every state of `measure.py budget`
+  costs 6 to 8 points less with the eighty-first change. The dense set reads 57.7% (64.2), the
+  supported set 51.0% (58.0). The swaps, the send synth, the shimmer and the meter come and go
+  as written. Rows 19.7 to 19.9 and stage 22 pass, and 22.7 needs ears.
