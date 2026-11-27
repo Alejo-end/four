@@ -45,7 +45,8 @@ work on this project" at the end of this file.
 5. Hold the session with a first-time player: doc/walkthrough.md has the card, the
    observer's sheet and the listening script. test/device/session.py measures it.
 6. The rest of Phase 2, one item at a time. Then Phase 4 from what the sessions found. Then
-   Phase 5: on 2026-11-27 items 2, 3, 4 and 6 were still open in the engine.
+   Phase 5: on 2026-11-27 items 2, 3, 4 and 6 were still open in the engine. Item 2 is
+   built on branch `perf` (2026-11-28): deploy it, measure it, then merge it.
 7. Answer the decisions at the end of this file. (Two were answered on 2026-11-27:
    `proposal-a` is on GitHub, and the old agent worktrees are removed.)
 
@@ -292,8 +293,8 @@ One at a time, each with a RESTART and a listen.
 1. **Per-track reverb.** One reverb per track costs too much CPU on one scsynth
    core. SPACE is a send into the shared reverb for that reason. Revisit it only
    with a measurement.
-2. **Shimmer costs CPU at zero.** Move the shimmer loop into its own spawn/free
-   synth, like the reverb.
+2. BUILT 2026-11-28 on branch `perf` (the eighty-first change), not on the norns yet:
+   **Shimmer costs CPU at zero.** The shimmer is its own spawn/free synth now.
 3. **The open filter is not a bypass.** At LP, 20 kHz and no resonance, the take
    still passes through the DFM1 ladder. Crossfade to the dry signal at the end
    stop, and make `purity()` test the same end stop.
@@ -307,6 +308,27 @@ One at a time, each with a RESTART and a listen.
    one new command.
 8. **The rest of doc/space-plan.md.** Its section 8 is the order of work, and
    its sections 13 to 15 say what is built.
+
+### Performance, ranked (review of 2026-11-28)
+
+The supported set (four PV at pitch 2 with every effect on) reads 53.6% to 62.2% of the
+scsynth thread, at the 60% limit. Where the points go (doc/measurements/2026-11-17/): the
+four PV voices about 32, the reverb 6.0, the effect slots about 9, the delay 2.7, drive 2.5.
+
+1. The shimmer (above, item 2): built, about 1 point while the reverb plays at shimmer 0.
+2. The open filter (item 3): with the filter open, a track could skip its filter synth. It
+   saves a DFM1 for each such track and makes the open filter the identity. It changes the
+   sound a little (DFM1 adds a third harmonic 37 dB down), so it needs a listen. Measure a
+   DFM1's cost on the norns first.
+3. A silent CLOUD track costs more than one that sounds (3.9% against 2.5%). A guess to test
+   on the norns: denormal numbers in Clouds' feedback paths. Set the flush-to-zero bit in
+   FourCloud's calc function and read `measure.py` again.
+4. CHORUS, FLANGE and WOBBLE share `\four_fx_mod`: 90 UGens, mostly control rate, about
+   0.01 point each a slot. A def for each type would be smaller, but a change between the
+   three would crossfade instead of glide for 100 ms. That is the user's call.
+5. PV itself: the C++ is near its floor. Each hop is three forward and two inverse FFTW
+   transforms of 2048, and the read and the sinc already use NEON. A real saving needs
+   a different algorithm (a smaller frame at high pitch), which changes the sound.
 
 ## Phase 6: the device (the S-4 alternative)
 

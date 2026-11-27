@@ -5591,3 +5591,27 @@ four, eightieth change: **a plan to follow alone, and one number put right (docu
   hundred-and-fifteenth now.
 - On the norns the time sync moved the clock 25 hours after the boot, and sclang took a whole
   core, as CLAUDE.md warns. The restart over SSH cleared it, and four loaded at `count: 199`.
+
+four, eighty-first change: **the shimmer is a synth of its own (engine, test tools; branch `perf`,
+not on the norns)**. 2026-11-28. Phase 5, item 2 of doc/plan.md.
+- The reverb's synth held the shimmer: a PitchShift on each side, a high-pass, a low-pass and a
+  tanh. They ran whenever the reverb did, also at shimmer 0, which is where shimmer starts and
+  stays unless the player raises it. Offline on the Mac (20 synths, 120 s, FourRoom) the room
+  alone took 7.08 s and the room with the shimmer chain 8.79 s: the chain was about a fifth of
+  the synth. On the norns the reverb adds 6.0 points (2026-11-17), so the change should save
+  about 1 point there. That is a guess until `measure.py budget` runs on the device.
+- `\four_shimmer` comes after the reverb. It reads the reverb's return in the same block and
+  writes its tail, already times the glided shimmer, to `shimBus`. The reverb reads that with
+  InFeedback one block later, as it read its LocalIn. `updateShimmer` spawns it while the reverb
+  plays and shimmer is above 0. It frees it with the reverb at once, and otherwise after the
+  glide and `spaceWait`, if shimmer did not rise again. A clear frees it with the reverb.
+- `shim_on` is 0 unless the engine sets it, so a reverb made without a `shim_bus` (a probe)
+  never reads bus 0.
+- At shimmer 0 the output is the old one bit for bit: every render of check_dsp.sh that repeats
+  from run to run (260 files) is identical before and after. The 28 others differ between two
+  runs of the same engine too (unseeded noise), and their rows pass. With shimmer up, the tail
+  differs where PitchShift's random grains fall, and a new shimmer starts with an empty line.
+- The UGens: the reverb 21 with the plugin and 16 without (40 and 35), the shimmer 23. probe1
+  and probe4 spawn the shimmer after each reverb, as the engine does. The count stays 199.
+- To do on the norns: the engine ritual, then `measure.py budget`, and a look that
+  `four_shimmer` is in the node tree only while shimmer is above 0.

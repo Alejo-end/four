@@ -88,6 +88,12 @@ Engine_Four : CroneEngine {
     // the synth is spawned). revGen counts the calls of updateReverb, so a
     // free that waits knows if the mix moved again.
     var <revSynth, <revSendBus, <revRetBus, <revParams, <revMixV, revGen = 0;
+    // the shimmer, a synth of its own after the reverb. It lives only while the
+    // reverb does AND shimmer is above 0: its PitchShift pair, filters and tanh
+    // cost about a fifth of the reverb's synth (offline, 2026-11-28), and
+    // shimmer is 0 unless the player raises it. shimBus carries its output back
+    // into the reverb's input one block later, as LocalIn did.
+    var <shimSynth, <shimBus, shimGen = 0;
     // delay spawn/free synth, same shape: its regeneration loop lives inside
     // it, so freeing it is what flushes the line (which is what \clear wants)
     var <delaySynth, <dlySendBus, <dlyRetBus, <delayParams, dlyGen = 0;
@@ -610,8 +616,10 @@ Engine_Four : CroneEngine {
             revSynth.isNil.if({
                 revSynth = Synth.new(\four_reverb, [
                     \in_bus, revSendBus, \out_bus, revRetBus,
+                    \shim_bus, shimBus, \shim_on, 1
                 ] ++ revParams.getPairs, ioSynth, \addAfter);
             });
+            this.updateShimmer;
         }, {
             revSynth.notNil.if({
                 SystemClock.sched(this.spaceWait, {
@@ -619,8 +627,43 @@ Engine_Four : CroneEngine {
                     ((gen == revGen) and: { revSynth.notNil }).if({
                         revSynth.free;
                         revSynth = nil;
+                        this.updateShimmer;
                     });
                     nil
+                });
+            });
+        });
+    }
+
+    // spawn/free the shimmer synth: alive while the reverb is and shimmer is
+    // above 0. It goes at once with the reverb, whose tail it reads. When
+    // shimmer falls to 0 it waits out the glide (its own gain is the glided
+    // shimmer, so it is silent by then) and spaceWait, and only goes if
+    // shimmer did not rise since. t: the glide time of the last write.
+    updateShimmer { arg t = 0.02;
+        var gen, want = revSynth.notNil and: { (revParams[\shimmer] ? 0) > 0 };
+        shimGen = shimGen + 1;
+        gen = shimGen;
+        want.if({
+            shimSynth.isNil.if({
+                shimSynth = Synth.new(\four_shimmer, [
+                    \in_bus, revRetBus, \out_bus, shimBus,
+                    \shimmer, revParams[\shimmer], \shimmer_pitch, revParams[\shimmer_pitch],
+                    \shimmer_tone, revParams[\shimmer_tone]
+                ], revSynth, \addAfter);
+            });
+        }, {
+            shimSynth.notNil.if({
+                revSynth.isNil.if({
+                    shimSynth.free; shimSynth = nil;
+                }, {
+                    SystemClock.sched(t.max(0.02) + this.spaceWait, {
+                        ((gen == shimGen) and: { shimSynth.notNil }).if({
+                            shimSynth.free;
+                            shimSynth = nil;
+                        });
+                        nil
+                    });
                 });
             });
         });
@@ -788,6 +831,7 @@ Engine_Four : CroneEngine {
         // reverb + delay send/return busses (each 2ch)
         revSendBus = Bus.audio(s, 2);
         revRetBus = Bus.audio(s, 2);
+        shimBus = Bus.audio(s, 2);
         dlySendBus = Bus.audio(s, 2);
         dlyRetBus = Bus.audio(s, 2);
         phaseBus = Bus.control(s, 1);
@@ -2135,9 +2179,13 @@ Engine_Four : CroneEngine {
             Out.ar(out_bus, dOut);
         }).add;
 
-        // reverb + shimmer synth (spawned by updateReverb while rev_mix > 0).
-        // reads the tracks' reverb sends (and dly_rev's echoes), returns the
-        // tail; shimmer recirculates through this synth's own LocalIn/LocalOut.
+        // reverb synth (spawned by updateReverb while rev_mix > 0). reads the
+        // tracks' reverb sends (and dly_rev's echoes), returns the tail. The
+        // shimmer is \four_shimmer, after it: its pitched tail comes back on
+        // shim_bus one block later, as through a LocalIn. shim_on is 0 unless
+        // the engine sets it, so a synth made without a shim_bus (a probe)
+        // never reads bus 0. x * 1 is x, so the sum is the one of the old
+        // synth, which held the shimmer inside it.
         // THREE reverbs, by what is installed: FourRoom (the plugin), else
         // JPverb (sc3-plugins), else FreeVerb. They differ. Measured offline
         // at decays of 0.8, 2 and 7s: the room's T60 is 0.67, 1.79 and 5.79s,
@@ -2150,23 +2198,21 @@ Engine_Four : CroneEngine {
                 rev_moddepth = 0.1, rev_modfreq = 2.0,
                 rev_low = 1.0, rev_mid = 1.0, rev_high = 1.0,
                 rev_lowcut = 500, rev_highcut = 2000,
-                shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0,
-                rev_decay_t = 0.02, rev_damp_t = 0.02, shimmer_t = 0.02;
-            var wet, fbIn, shimFb, revIn, rv, jpClass, ratio, pitched, shimOut;
+                shim_bus = 0, shim_on = 0,
+                rev_decay_t = 0.02, rev_damp_t = 0.02;
+            var wet, revIn, rv, jpClass;
             var roomGain;
             // the three that a fade moves by ear glide (gl). They had no lag,
             // so the decay, the damping and the shimmer's gain moved in steps.
             rev_decay = gl.(rev_decay, rev_decay_t);
             rev_damp = gl.(rev_damp, rev_damp_t);
-            shimmer = gl.(shimmer.clip(0, 0.95), shimmer_t);
             // a DC blocker (3.8 Hz) before every reverb and before the shimmer
             // feedback joins: FourRoom passes DC with 16 dB of gain
             wet = LeakDC.ar(In.ar(in_bus, 2), 0.9995);
             // shimmer feedback: the pitched tail recirculates into the reverb
-            // INPUT so it climbs in octaves. shimmer=0 -> shimOut 0 -> revIn==wet.
-            fbIn = LocalIn.ar(2);
-            shimFb = fbIn;
-            revIn = wet + (shimFb * shimmer);
+            // INPUT so it climbs in octaves. It comes already times the glided
+            // shimmer. With no shimmer synth the bus reads 0 and revIn == wet.
+            revIn = wet + (InFeedback.ar(shim_bus, 2) * shim_on);
             jpClass = "JPverb".asSymbol.asClass;
             // With the plugin the reverb is THE ROOM (doc/space-plan.md): four
             // unitary diffusion steps and eight late lines. It takes 4% of
@@ -2201,6 +2247,17 @@ Engine_Four : CroneEngine {
                 [FreeVerb.ar(revIn[0], 1.0, rs, rev_damp),
                     FreeVerb.ar(revIn[1], 1.0, rs, rev_damp)] * 2
             }) });
+            Out.ar(out_bus, rv);
+        }).add;
+
+        // the shimmer (spawned by updateShimmer while the reverb plays and
+        // shimmer > 0). in_bus is the reverb's return, read in the same block;
+        // out_bus goes back into the reverb's input.
+        SynthDef(\four_shimmer, {
+            arg in_bus, out_bus, shimmer = 0.0, shimmer_pitch = 12.0, shimmer_tone = 4500.0,
+                shimmer_t = 0.02;
+            var rv = In.ar(in_bus, 2), ratio, pitched;
+            shimmer = gl.(shimmer.clip(0, 0.95), shimmer_t);
             // pitch the tail (semitones -> ratio), band-limit so the octave
             // stack stays a halo (HPF kills DC/rumble build-up, LPF tames the
             // metallic hiss), the saturator bounds runaway. STEREO shimmer, a
@@ -2214,9 +2271,7 @@ Engine_Four : CroneEngine {
             pitched = LPF.ar(HPF.ar(pitched, 120), shimmer_tone.clip(500, 12000));
             // tanh for the same reason as the delay loop: this recirculates,
             // and a halo is the last place that wants a hard knee in it.
-            shimOut = th.value(pitched * (shimmer > 0));
-            LocalOut.ar(shimOut);
-            Out.ar(out_bus, rv);
+            Out.ar(out_bus, th.value(pitched * (shimmer > 0)) * shimmer);
         }).add;
 
         s.sync;
@@ -2292,7 +2347,12 @@ Engine_Four : CroneEngine {
                 });
                 revParams.includesKey(name).if({
                     revParams[name] = v;
-                    revSynth.notNil.if({ this.gset(revSynth, name, v, t) });
+                    [\shimmer, \shimmer_pitch, \shimmer_tone].includes(name).if({
+                        shimSynth.notNil.if({ this.gset(shimSynth, name, v, t) });
+                        (name == \shimmer).if({ this.updateShimmer(t ? 0.02) });
+                    }, {
+                        revSynth.notNil.if({ this.gset(revSynth, name, v, t) });
+                    });
                 });
                 delayParams.includesKey(name).if({
                     delayParams[name] = v;
@@ -2485,6 +2545,8 @@ Engine_Four : CroneEngine {
             revGen = revGen + 1;
             delaySynth.notNil.if({ delaySynth.free; delaySynth = nil });
             revSynth.notNil.if({ revSynth.free; revSynth = nil });
+            shimGen = shimGen + 1;
+            shimSynth.notNil.if({ shimSynth.free; shimSynth = nil });
             // ...and a held repeat would go on playing the erased sound
             this.updateRepeat(0);
             // the zero runs in the background: an effect spawned before it lands
@@ -2607,6 +2669,7 @@ Engine_Four : CroneEngine {
         leaveGen.notNil.if({ leaveGen = leaveGen + 1 });
         modeGen.notNil.if({ modeGen = modeGen + 1 });
         leaving.notNil.if({ leaving.do({ arg x; x.notNil.if({ x.free }) }) });
+        shimSynth.notNil.if({ shimSynth.free });
         revSynth.notNil.if({ revSynth.free });
         delaySynth.notNil.if({ delaySynth.free });
         eroSynth.notNil.if({ eroSynth.free });
@@ -2622,6 +2685,7 @@ Engine_Four : CroneEngine {
         playBus.free;
         revSendBus.free;
         revRetBus.free;
+        shimBus.free;
         dlySendBus.free;
         dlyRetBus.free;
         phaseBus.free;

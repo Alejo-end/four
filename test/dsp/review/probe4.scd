@@ -73,7 +73,7 @@ Engine_Four.new(ctx, { arg eng;
     // norns every one of them counts, and a knob's glide must not grow a def
     // (check_dsp.py holds the counts)
     [\four_lane_in, \four_filt_lo, \four_filt_hi, \four_colour, \four_lane_out,
-        \four_delay, \four_reverb].do({ |k|
+        \four_delay, \four_reverb, \four_shimmer].do({ |k|
         ("UGENS " ++ k ++ " " ++ SynthDescLib.global[k].def.children.size).postln;
     });
     "FOUR_PLUGIN_DIR".getenv.notNil.if({
@@ -126,13 +126,17 @@ Engine_Four.new(ctx, { arg eng;
                 [0.01, [\s_new, \four_reverb, 1000 + i, 1, 0, \in_bus, 100, \out_bus, i * 2, \rev_decay, dc]] })],
         // p. shimmer worst case, 60 s: [decay, pitch, source]
         [\shim2, 60, 16, [],
-            [[0.0, [\d_recv, def.(\four_reverb)]],
+            [[0.0, [\d_recv, def.(\four_reverb)]], [0.0, [\d_recv, def.(\four_shimmer)]],
              [0.1, [\s_new, \burst, 900, 0, 0, \out, 100]],
              [0.1, [\s_new, \lf, 901, 0, 0, \out, 104, \dur, 10]],
              [0.1, [\s_new, \dc, 902, 0, 0, \out, 108, \amp, 0.5, \dur, 10]]]
             ++ [[30, -12, 100], [30, -7, 100], [30, 7, 100], [30, 24, 100], [30, 0, 104], [30, 12, 104], [30, 0, 108], [30, 12, 108]].collect({ |c, i|
                 [0.01, [\s_new, \four_reverb, 1000 + i, 1, 0, \in_bus, c[2], \out_bus, i * 2,
-                    \rev_decay, c[0], \shimmer, 0.95, \shimmer_pitch, c[1]]] })],
+                    \shim_bus, 300 + (i * 2), \shim_on, 1, \rev_decay, c[0]]] })
+            // the shimmer, after the reverbs (the engine spawns it after its reverb)
+            ++ [[30, -12, 100], [30, -7, 100], [30, 7, 100], [30, 24, 100], [30, 0, 104], [30, 12, 104], [30, 0, 108], [30, 12, 108]].collect({ |c, i|
+                [0.02, [\s_new, \four_shimmer, 1100 + i, 3, 1000 + i, \in_bus, i * 2, \out_bus, 300 + (i * 2),
+                    \shimmer, 0.95, \shimmer_pitch, c[1]]] })],
         // q. the delay, a 1 kHz tone, time 0.3 s to 0.1 s at 1 s (the engine's 0.2 s lag)
         [\dglide, 3.0, 2, [],
             [[0.0, [\d_recv, def.(\four_delay)]],

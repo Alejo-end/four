@@ -75,11 +75,16 @@ Engine_Four.new(ctx, { arg eng;
              [3.55, [\b_write, 1, dir +/+ tag ++ "_limrecR.wav", "wav", "float"]]]],
         // 3. the shimmer loop: [decay, shimmer, pitch], a noise burst at 0.1 s
         [\shim, 30, 12, [],
-            [[0.0, [\d_recv, def.(\four_reverb)]],
+            [[0.0, [\d_recv, def.(\four_reverb)]], [0.0, [\d_recv, def.(\four_shimmer)]],
              [0.1, [\s_new, \burst, 900, 0, 0, \out, 100]]]
+            // the shimmer is a synth of its own after each reverb, as the engine
+            // spawns it (none at shimmer 0), on its own feedback pair
             ++ [[30, 0.95, 0], [30, 0.95, 12], [30, 0.95, -12], [2, 0.95, 0], [30, 0, 0], [8, 0.7, 0]].collect({ |c, i|
                 [0.01, [\s_new, \four_reverb, 1000 + i, 1, 0, \in_bus, 100, \out_bus, i * 2,
-                    \rev_decay, c[0], \shimmer, c[1], \shimmer_pitch, c[2]]] })],
+                    \shim_bus, 300 + (i * 2), \shim_on, 1, \rev_decay, c[0]]] })
+            ++ [[30, 0.95, 0], [30, 0.95, 12], [30, 0.95, -12], [2, 0.95, 0], [30, 0, 0], [8, 0.7, 0]].collect({ |c, i|
+                (c[1] > 0).if({ [0.02, [\s_new, \four_shimmer, 1100 + i, 3, 1000 + i, \in_bus, i * 2,
+                    \out_bus, 300 + (i * 2), \shimmer, c[1], \shimmer_pitch, c[2]]] }, { nil }) }).reject(_.isNil)],
         // 4. the room's knobs on a live synth: A is set at 1 s, B is left, C starts at
         // size 2, D starts at size 4 (the knob's top), E at 2.1
         [\rsize, 5, 10, [],

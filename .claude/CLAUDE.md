@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-27)
+## STATUS (2026-11-28)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -194,6 +194,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 78th: ugen/README.md says what "identity" is (PLAY bit for bit, PV and WARP under -90 dB) and dates its 64% figure | documents only | |
 | 79th: the plugin's three memory messages print, tried offline on the Mac (branch `proposal-a`) | documents only | |
 | 80th: doc/plan.md's next steps can be followed without an assistant; the doodles are the 115th change | documents only | |
+| 81st: the shimmer is its own synth, so a reverb at shimmer 0 does not pay for it (engine, test tools; branch `perf`) | no: the norns was off the network | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

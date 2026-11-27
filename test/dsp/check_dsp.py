@@ -384,9 +384,11 @@ def check(build):
     # its shimmer had no lag at all. (The Mac has no DFM1 and no JPverb: the
     # filter and the reverb count their stock paths here.)
     # Proposal A adds two to the reverb: the DC blocker at its input, one a side.
+    # The eighty-first change moves the shimmer into a synth of its own (40 and 35
+    # before): the reverb pays for it only while shimmer is above 0.
     for name, limit in (('four_lane_in', 28), ('four_filt_lo', 26), ('four_filt_hi', 14), ('four_colour', 40),
                         ('four_lane_out', 15), ('four_delay', 17 if build == 'plugin' else 21),
-                        ('four_reverb', 40 if build == 'plugin' else 35)):
+                        ('four_reverb', 21 if build == 'plugin' else 16), ('four_shimmer', 23)):
         target(build, f"the UGens of {name} (a glide must not grow a def)",
                num(rf'^UGENS {name} (\d+)', runs['p4'][3].replace('\r', '')), limit, '', fmt='.0f')
     v = num(r'minus B \(left alone\): ([-\d.]+) dBFS', a1)
