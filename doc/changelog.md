@@ -5582,7 +5582,8 @@ four, seventy-ninth change: **the plugin's memory messages print (documents)**. 
 four, eightieth change: **a plan to follow alone, and one number put right (documents)**. 2026-11-27.
 - doc/plan.md's "What comes next" is written to be followed without an assistant: the rows to
   hear, the commands to merge or drop proposal A, and what to write down after each row.
-- Two decisions join its list: push `proposal-a`, and remove the three old agent worktrees.
+- Two decisions joined its list and were answered the same day: `proposal-a` is pushed to
+  GitHub, and the three old agent worktrees are removed (their branches stay local).
 - Phase 5, read against the engine: items 2 (the shimmer lives in the reverb's synth), 3 (the
   open filter), 4 (`preLim` after the level) and 6 (`Limiter.ar` on two channels limits each
   side alone) are still open.

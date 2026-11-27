@@ -33,7 +33,7 @@ work on this project" at the end of this file.
    what to do and what you must hear. Last, proposal A: a take of bass or kick must keep more
    low end than on `main`. After each row, write one line in that row of doc/device-gate.md,
    for example "heard 2026-12-01: the hits stay on the beat".
-2. Decide proposal A. `proposal-a` is `main` plus four commits, so a yes is
+2. Decide proposal A. `proposal-a` holds only commits on top of `main`, so a yes is
    `git checkout main && git merge --ff-only proposal-a && git push origin main`. A no is
    `git checkout main`, and then the engine ritual (step 4 of "How to work"), because the
    norns runs proposal A's engine. Never merge or push `proposal-dsp-fixes`: its history
@@ -46,9 +46,8 @@ work on this project" at the end of this file.
    observer's sheet and the listening script. test/device/session.py measures it.
 6. The rest of Phase 2, one item at a time. Then Phase 4 from what the sessions found. Then
    Phase 5: on 2026-11-27 items 2, 3, 4 and 6 were still open in the engine.
-7. Answer the decisions at the end of this file. Two more wait there now: push
-   `proposal-a` to GitHub so that it is not only on this laptop, and remove the three old
-   agent worktrees under `.claude/worktrees/`.
+7. Answer the decisions at the end of this file. (Two were answered on 2026-11-27:
+   `proposal-a` is on GitHub, and the old agent worktrees are removed.)
 
 What a tool cannot judge, and why the order is so: four has many changes that nobody heard
 (the table in CLAUDE.md, column "Heard"). Each new engine change adds to that pile. So build
@@ -335,9 +334,8 @@ Each one needs a yes or a no. Ask the user. Do not decide.
 6. Which MIDI controller do they own?
 7. One SPACE page (doc/space-plan.md, section 7.2), or DELAY and REVERB as two
    pages, as the user asked in July?
-8. Push `proposal-a` to GitHub (it is on this laptop only)?
-9. Remove the old agent worktrees under `.claude/worktrees/` (`scene-ab`, `fourcloud`,
-   `proposal-dsp-fixes`) with `git worktree remove`?
+8. (Answered 2026-11-27: `proposal-a` is pushed to GitHub. It holds no private history.)
+9. (Answered 2026-11-27: the three agent worktrees are removed. Their branches stay local.)
 
 ## How to work on this project
 
