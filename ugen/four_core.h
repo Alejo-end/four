@@ -1141,6 +1141,108 @@ struct Room {
         outL = l * 0.5f; outR = r * 0.5f;
         dw = (dw + 1) & (DMAX - 1); lw = (lw + 1) & (LMAX - 1);
     }
+
+    // n samples at once, the same as n ticks, bit for bit (test_core proves
+    // it). tick() touches 40 delay lines at every sample, and on the norns the
+    // cache misses were most of the room's cost. Here each line is read and
+    // written in one straight run for a whole chunk. A chunk is at most CHUNK
+    // samples, and short enough that no diffusion write in it lands on a place
+    // that a later read of the same chunk still needs (DMAX - dlen samples
+    // ahead), nor a late line's (every llen is far longer than a chunk).
+    static const int CHUNK = 64;
+    int chunkMax() const {
+        int m = CHUNK;
+        for (int k = 0; k < STEPS; k++)
+            for (int c = 0; c < CH; c++) { const int room = DMAX - dlen[k][c]; if (room < m) m = room; }
+        for (int c = 0; c < CH; c++) { if (llen[c] < m) m = llen[c]; }
+        return m < 1 ? 1 : m;
+    }
+    void process(const float* inL, const float* inR, float* outL, float* outR, int n) {
+        const int lim = chunkMax();
+        while (n > 0) {
+            const int m = n < lim ? n : lim;
+            chunk(inL, inR, outL, outR, m);
+            inL += m; inR += m; outL += m; outR += m; n -= m;
+        }
+    }
+    // copy m samples out of / into a ring of size `mask + 1`, from place `at`,
+    // in at most two straight runs
+    static inline void ringRead(const float* ring, int mask, int at, float* to, int m) {
+        at &= mask;
+        const int first = (mask + 1 - at) < m ? (mask + 1 - at) : m;
+        std::memcpy(to, ring + at, first * sizeof(float));
+        if (first < m) std::memcpy(to + first, ring, (m - first) * sizeof(float));
+    }
+    static inline void ringWrite(float* ring, int mask, int at, const float* from, int m) {
+        at &= mask;
+        const int first = (mask + 1 - at) < m ? (mask + 1 - at) : m;
+        std::memcpy(ring + at, from, first * sizeof(float));
+        if (first < m) std::memcpy(ring, from + first, (m - first) * sizeof(float));
+    }
+    // the Hadamard of hadamard(), on 8 rows of m samples: the same sums in
+    // the same order for each sample, so the result is the same, bit for bit
+    static inline void hadamardRows(float (*X)[CHUNK], int m) {
+        for (int h = 1; h < CH; h <<= 1)
+            for (int i = 0; i < CH; i += h << 1)
+                for (int j = i; j < i + h; j++) {
+                    float* p = X[j]; float* q = X[j + h];
+                    int t = 0;
+#ifdef FOUR_NEON
+                    // four samples at a time: an add, a subtract, the same as below
+                    // (NEON flushes a denormal to 0, which a room input never holds)
+                    for (; t + 4 <= m; t += 4) {
+                        const float32x4_t a = vld1q_f32(p + t), c = vld1q_f32(q + t);
+                        vst1q_f32(p + t, vaddq_f32(a, c)); vst1q_f32(q + t, vsubq_f32(a, c));
+                    }
+#endif
+                    for (; t < m; t++) { const float a = p[t], c = q[t]; p[t] = a + c; q[t] = a - c; }
+                }
+        for (int c = 0; c < CH; c++) {
+            int t = 0;
+#ifdef FOUR_NEON
+            const float32x4_t g = vdupq_n_f32(0.35355339f);
+            for (; t + 4 <= m; t += 4) vst1q_f32(X[c] + t, vmulq_f32(vld1q_f32(X[c] + t), g));
+#endif
+            for (; t < m; t++) X[c][t] *= 0.35355339f;
+        }
+    }
+    void chunk(const float* inL, const float* inR, float* outL, float* outR, int m) {
+        float X[CH][CHUNK], V[CH][CHUNK];
+        for (int c = 0; c < CH; c++) {
+            const float* in = (c & 1) ? inR : inL;
+            for (int i = 0; i < m; i++) X[c][i] = in[i] * 0.5f;
+        }
+        for (int k = 0; k < STEPS; k++) {
+            for (int c = 0; c < CH; c++) {
+                float* b = dbuf[k][c];
+                ringWrite(b, DMAX - 1, dw, X[c], m);
+                ringRead(b, DMAX - 1, dw - dlen[k][c], X[c], m);
+                const float sg = dsign[k][c];
+                for (int i = 0; i < m; i++) X[c][i] *= sg;
+            }
+            hadamardRows(X, m);
+        }
+        for (int c = 0; c < CH; c++) ringRead(lbuf[c], LMAX - 1, lw - llen[c], V[c], m);
+        for (int i = 0; i < m; i++) {
+            float d[CH], sum = 0;
+            for (int c = 0; c < CH; c++) {
+                const float v = V[c][i];
+                const float y = b0[c] * v + b1[c] * zx[c] - a1[c] * zy[c] + 1e-25f;
+                zx[c] = v; zy[c] = y;
+                d[c] = y; sum += y;
+            }
+            sum *= 2.f / CH;
+            float l = 0, r = 0;
+            for (int c = 0; c < CH; c++) {
+                const float v = X[c][i] + d[c] - sum;
+                V[c][i] = v;
+                if (c & 1) r += v; else l += v;
+            }
+            outL[i] = l * 0.5f; outR[i] = r * 0.5f;
+        }
+        for (int c = 0; c < CH; c++) ringWrite(lbuf[c], LMAX - 1, lw, V[c], m);
+        dw = (dw + m) & (DMAX - 1); lw = (lw + m) & (LMAX - 1);
+    }
 };
 
 // THE BUCKET BRIGADE (doc/space-plan.md, section 4). A chain of `half` cells

@@ -233,7 +233,8 @@ static void FourRoom_next(FourRoom* unit, int inNumSamples) {
         unit->core->setDecay(decay, colour);
         unit->lastDecay = decay; unit->lastColour = colour;
     }
-    for (int i = 0; i < inNumSamples; i++) unit->core->tick(inL[i], inR[i], outL[i], outR[i]);
+    // the block form: the same output as tick() sample by sample (test_core)
+    unit->core->process(inL, inR, outL, outR, inNumSamples);
 }
 static void FourRoom_Ctor(FourRoom* unit) {
     unit->core = (four::Room*)RTAlloc(unit->mWorld, sizeof(four::Room));
