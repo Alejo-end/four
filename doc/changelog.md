@@ -5637,6 +5637,7 @@ you're not using them, they should cost nothing".
   UGen counts. Every render of check_dsp.sh that repeats from run to run is identical to the
   seventy-ninth change's (260 files). The count stays 199.
 - On the norns the same day (doc/measurements/2026-11-28/): every state of `measure.py budget`
-  costs 6 to 8 points less with the eighty-first change. The dense set reads 57.7% (64.2), the
+  costs less with the eighty-first change: 1.5 points with every track OFF, 5 to 8 with tracks
+  playing. The dense set reads 57.7% (64.2), the
   supported set 51.0% (58.0). The swaps, the send synth, the shimmer and the meter come and go
   as written. Rows 19.7 to 19.9 and stage 22 pass, and 22.7 needs ears.

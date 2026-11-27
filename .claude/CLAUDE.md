@@ -196,7 +196,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 79th: the plugin's three memory messages print, tried offline on the Mac (branch `proposal-a`) | documents only | |
 | 80th: doc/plan.md's next steps can be followed without an assistant; the doodles are the 115th change | documents only | |
 | 81st: the shimmer is its own synth, so a reverb at shimmer 0 does not pay for it (engine, test tools; branch `perf`) | yes, 2026-11-28, with the 82nd | no |
-| 82nd: an open filter is a copy, the sends into a track are a synth that runs only while one is open, the meters run only on TRACKS (engine, Lua, test tools; branch `perf`) | yes, 2026-11-28, `count: 199`: 6 to 8 points less in every state, the dense set 57.7% (64.2), the supported set 51.0% (58.0). Rows 19.7 to 19.9 and stage 22 pass, 22.7 needs ears (doc/measurements/2026-11-28/) | no |
+| 82nd: an open filter is a copy, the sends into a track are a synth that runs only while one is open, the meters run only on TRACKS (engine, Lua, test tools; branch `perf`) | yes, 2026-11-28, `count: 199`: 1.5 points less with every track OFF and 5 to 8 with tracks playing, the dense set 57.7% (64.2), the supported set 51.0% (58.0). Rows 19.7 to 19.9 and stage 22 pass, 22.7 needs ears (doc/measurements/2026-11-28/) | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
