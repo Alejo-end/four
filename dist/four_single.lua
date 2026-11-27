@@ -13146,14 +13146,19 @@ function init()
   end
   -- the tracks' meters (an engine older than the seventy-fourth change has
   -- none: TRACKS then draws the knob alone, and no line warns)
+  -- They run only while TRACKS draws them (frame_tick), and the engine
+  -- pauses its meter synth when no poll reads it for a second.
   ctx.amp_t = { 0, 0, 0, 0 }
   ctx.has_meter = false
+  ctx.meter_polls = {}
+  ctx.meters_on = true
   for t = 1, NTRACKS do
     local p = poll.set("amp_t" .. t, function(v) ctx.amp_t[t] = v end)
     if p then
       p.time = 1 / FPS
       p:start()
       polls[#polls + 1] = p
+      ctx.meter_polls[#ctx.meter_polls + 1] = p
       ctx.has_meter = true
     end
   end
@@ -13202,6 +13207,14 @@ function init()
     Mpages.erosion_tick()  -- count loop passes while the take erodes
     tick_take_strip()      -- repaint the strip once regen and erosion stop
     Mwav.load_tick()   -- fill a loaded/restored waveform a batch/frame
+    -- the meters: read only while TRACKS shows them
+    local meters = PAGES[ctx.page] == "TRACKS"
+    if meters ~= ctx.meters_on then
+      ctx.meters_on = meters
+      for _, p in ipairs(ctx.meter_polls) do
+        if meters then p:start() else p:stop() end
+      end
+    end
     Mpages.update_wave()
     Mpages.update_tape_wave()
     -- the modulators: they send the engine a swung value and never write a

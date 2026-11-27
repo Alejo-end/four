@@ -80,6 +80,9 @@ Engine_Four : CroneEngine {
     var <playBus;
     var <phaseBus, <recPhaseBus, <recAmpBus;
     var <meterBus, <meterSynth;   // each track's level after its lane (\four_meter)
+    // the meter runs only while a poll reads it: the script polls amp_t1 to
+    // amp_t4 while TRACKS shows the meters. A second with no read pauses it.
+    var meterSeen = 0, meterOn = true;
     var <syncBus;   // four: what each track's drone reads as `sync` (head_sync)
     var <playParams;
     var <ioKeys;
@@ -250,8 +253,8 @@ Engine_Four : CroneEngine {
         lane[\group] = Group.new(playGroup, \addToTail);
         lane[\in] = Synth.new(\four_lane_in, [
             \in_bus, inBus, \sbus, lane[\sBus],
-            \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
         ], lane[\group], \addToTail);
+        lane[\i] = i;
         lane[\gFilt] = Group.new(lane[\group], \addToTail);
         lane[\gCol] = Group.new(lane[\group], \addToTail);
         lane[\gFx] = [Group.new(lane[\group], \addToTail), Group.new(lane[\group], \addToTail)];
@@ -263,21 +266,91 @@ Engine_Four : CroneEngine {
         this.laneFilter(lane);
     }
 
-    // the filter family that is heard: LO for LP and BP, HI for HP. A change
-    // of family releases the old synth and starts the new one in ONE bundle,
-    // so their two 20ms ramps cross exactly.
+    // the filter family that is heard: LO for LP and BP, HI for HP, and
+    // OPEN for a low-pass at its end stop (LP, cutoff 19 kHz or more,
+    // resonance 0.02 or less, the purity mark's own test). OPEN is a copy: an
+    // open filter costs no ladder and is the identity (DFM1 open adds a third
+    // harmonic 37 dB down). A change of family releases the old synth and
+    // starts the new one in ONE bundle, so their two 20ms ramps cross exactly.
+    // Into OPEN the lane waits 0.3 s, so a knob or a modulator that brushes
+    // the end stop does not swap the filter at each pass. Out of OPEN at once.
     laneFilter { arg lane;
-        var want = ((lane[\p][\filt_type] ? 0).round == 1).if({ \four_filt_hi }, { \four_filt_lo });
+        var p = lane[\p], gen, want;
+        var open = ((p[\filt_type] ? 0).round == 0)
+            and: { (p[\cutoff] ? 20000) >= 19000 } and: { (p[\resonance] ? 0) <= 0.02 };
+        want = open.if({ \four_filt_open }, {
+            ((p[\filt_type] ? 0).round == 1).if({ \four_filt_hi }, { \four_filt_lo })
+        });
+        lane[\filtGen] = (lane[\filtGen] ? 0) + 1;
+        gen = lane[\filtGen];
         (lane[\filtKind] != want).if({
-            context.server.makeBundle(nil, {
-                lane[\filt].notNil.if({ lane[\filt].set(\gate, 0) });
-                lane[\filt] = Synth.new(want, [
-                    \sbus, lane[\sBus], \pbus, lane[\pBus],
-                    \cutoff, lane[\p][\cutoff], \resonance, lane[\p][\resonance],
-                    \filt_type, lane[\p][\filt_type],
-                ], lane[\gFilt], \addToTail);
+            ((want == \four_filt_open) and: { lane[\filtKind].notNil }).if({
+                SystemClock.sched(0.3, {
+                    ((gen == lane[\filtGen]) and: { lane[\filtKind] != want }).if({
+                        this.laneSwapFilter(lane, want);
+                    });
+                    nil
+                });
+            }, {
+                this.laneSwapFilter(lane, want);
             });
-            lane[\filtKind] = want;
+        });
+    }
+
+    laneSwapFilter { arg lane, want;
+        context.server.makeBundle(nil, {
+            lane[\filt].notNil.if({ lane[\filt].set(\gate, 0) });
+            lane[\filt] = Synth.new(want, [
+                \sbus, lane[\sBus], \pbus, lane[\pBus],
+                \cutoff, lane[\p][\cutoff], \resonance, lane[\p][\resonance],
+                \filt_type, lane[\p][\filt_type],
+            ], lane[\gFilt], \addToTail);
+        });
+        lane[\filtKind] = want;
+    }
+
+    // THE SENDS INTO A TRACK, a synth of their own after its lane_in. It
+    // exists while any other track sends into this one. With no send (the
+    // usual case) a lane pays for no InFeedback, glide, LeakDC or tanh. It
+    // adds onto the S bus that lane_in wrote, so the sum is the one of the
+    // old lane_in that held both. It starts with every send at 0, and the
+    // sends glide up a moment later, from 0 as before. It goes 0.5 s after
+    // the last send reaches 0, when the glide and LeakDC's tail are over.
+    laneSend { arg i, t = 0.02;
+        var lane = lanes[i], gen, want = false;
+        (1..4).do({ arg from;
+            (from != (i + 1)).if({ ((sendV[from - 1][i] ? 0) > 0).if({ want = true }) });
+        });
+        lane[\sendGen] = (lane[\sendGen] ? 0) + 1;
+        gen = lane[\sendGen];
+        want.if({
+            lane[\send].isNil.if({
+                lane[\send] = Synth.new(\four_lane_send, [
+                    \sbus, lane[\sBus],
+                    \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
+                ], lane[\in], \addAfter);
+                SystemClock.sched(0.01, {
+                    (lane[\send].notNil).if({
+                        (1..4).do({ arg from;
+                            (from != (i + 1)).if({
+                                this.gset(lane[\send], ("snd" ++ from).asSymbol,
+                                    sendV[from - 1][i] ? 0, t);
+                            });
+                        });
+                    });
+                    nil
+                });
+            });
+        }, {
+            lane[\send].notNil.if({
+                SystemClock.sched(t.max(0.02) + 0.5, {
+                    ((gen == lane[\sendGen]) and: { lane[\send].notNil }).if({
+                        lane[\send].free;
+                        lane[\send] = nil;
+                    });
+                    nil
+                });
+            });
         });
     }
 
@@ -346,7 +419,9 @@ Engine_Four : CroneEngine {
             \effect2_amt, { this.gset(lane[\gFx][1], \amt, v, t) },
             \effect2_rate, { this.gset(lane[\gFx][1], \rate, v, t) },
             \grain_level, { this.gset(lane[\in], \pre_gain, v, t) },
-            // cutoff, resonance, and the out synth's level, fx_dly, fx_rev
+            \cutoff, { this.gset(lane[\group], name, v, t); this.laneFilter(lane) },
+            \resonance, { this.gset(lane[\group], name, v, t); this.laneFilter(lane) },
+            // the out synth's level, fx_dly, fx_rev
             { this.gset(lane[\group], name, v, t) }
         );
     }
@@ -1752,10 +1827,14 @@ Engine_Four : CroneEngine {
         // 2.sqrt is the exact inverse of Balance2's -3dB centre in the play
         // defs, so PLAY at pan 0 is the take at unity.
         SynthDef(\four_lane_in, {
-            arg in_bus, sbus, pre_gain = 1.0,
-                snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
+            arg in_bus, sbus, pre_gain = 1.0, pre_gain_t = 0.02;
+            Out.ar(sbus, In.ar(in_bus, 2) * gl.(pre_gain, pre_gain_t) * 2.sqrt);
+        }).add;
+        // the sends from the other tracks (laneSend): only while one is open
+        SynthDef(\four_lane_send, {
+            arg sbus, snd1 = 0, snd2 = 0, snd3 = 0, snd4 = 0,
                 ob1 = 0, ob2 = 0, ob3 = 0, ob4 = 0,
-                pre_gain_t = 0.02, snd1_t = 0.02, snd2_t = 0.02, snd3_t = 0.02, snd4_t = 0.02;
+                snd1_t = 0.02, snd2_t = 0.02, snd3_t = 0.02, snd4_t = 0.02;
             var sendIn = (InFeedback.ar(ob1, 2) * gl.(snd1, snd1_t))
                 + (InFeedback.ar(ob2, 2) * gl.(snd2, snd2_t))
                 + (InFeedback.ar(ob3, 2) * gl.(snd3, snd3_t))
@@ -1764,8 +1843,7 @@ Engine_Four : CroneEngine {
             // send into each other form a loop: with a 3.8 Hz corner its ring fell
             // from about 40 Hz to 9 to 14 Hz and put -10 dBFS below 20 Hz into the
             // limiter (rendered, stock filter, 2026-11-16).
-            Out.ar(sbus, (In.ar(in_bus, 2) * gl.(pre_gain, pre_gain_t) * 2.sqrt)
-                + th.value(LeakDC.ar(sendIn)));
+            Out.ar(sbus, th.value(LeakDC.ar(sendIn)));
         }).add;
         // the filter, as two families: LO is the low-pass ladder (LP, and BP
         // as its peak high-passed), HI is the high-pass ladder. Only the one
@@ -1811,6 +1889,12 @@ Engine_Four : CroneEngine {
                 Out.ar(pbus, out * env);
             }).add;
         });
+        // OPEN: a low-pass at its end stop is no filter at all (laneFilter)
+        SynthDef(\four_filt_open, {
+            arg sbus, pbus, gate = 1;
+            var env = EnvGen.kr(Env.asr(0.02, 1, 0.02, \lin), gate, doneAction: 2);
+            Out.ar(pbus, In.ar(sbus, 2) * env);
+        }).add;
         // COLOR, in place. It exists only while drive or crush is up: at 0
         // both are an exact bypass, so it comes and goes with no fade.
         SynthDef(\four_colour, {
@@ -2316,6 +2400,15 @@ Engine_Four : CroneEngine {
             \own_out, outBuses[0],
             \lane_bus, lanes[0][\pBus],
         ], playGroup, \addAfter);
+        meterSeen = Main.elapsedTime;
+        SystemClock.sched(1, {
+            meterSynth.notNil.if({
+                (meterOn and: { (Main.elapsedTime - meterSeen) > 1 }).if({
+                    meterSynth.run(false); meterOn = false;
+                });
+                1
+            }, { nil })
+        });
         meterSynth = Synth.new(\four_meter, [
             \ob1, outBuses[0], \ob2, outBuses[1], \ob3, outBuses[2], \ob4, outBuses[3],
             \out, meterBus
@@ -2481,8 +2574,12 @@ Engine_Four : CroneEngine {
                     var cmd = ("send_" ++ from ++ "_" ++ to).asSymbol;
                     this.addCommand(cmd, "f", { arg msg;
                         var key = ("snd" ++ from).asSymbol;
+                        var t = this.glideT(cmd);
                         sendV[from - 1][to - 1] = msg[1];
-                        this.gset(lanes[to - 1][\in], key, msg[1], this.glideT(cmd));
+                        lanes[to - 1][\send].notNil.if({
+                            this.gset(lanes[to - 1][\send], key, msg[1], t);
+                        });
+                        this.laneSend(to - 1, t);
                         (to > 1).if({ this.updateStrip(extra[to - 2]) });
                     });
                 });
@@ -2640,7 +2737,11 @@ Engine_Four : CroneEngine {
         });
         4.do({ arg i;
             var bus = Bus.new(\control, meterBus.index + i, 1, meterBus.server);
-            this.addPoll(("amp_t" ++ (i + 1)).asSymbol, { bus.getSynchronous });
+            this.addPoll(("amp_t" ++ (i + 1)).asSymbol, {
+                meterSeen = Main.elapsedTime;
+                (meterOn.not and: { meterSynth.notNil }).if({ meterSynth.run(true); meterOn = true });
+                bus.getSynchronous
+            });
         });
         this.addPoll(\rec_phase, {
             recPhaseBus.getSynchronous;
@@ -2690,7 +2791,7 @@ Engine_Four : CroneEngine {
         dlyRetBus.free;
         phaseBus.free;
         syncBus.free;
-        meterSynth.notNil.if({ meterSynth.free });
+        meterSynth.notNil.if({ meterSynth.free; meterSynth = nil });
         meterBus.free;
         extra.notNil.if({ extra.do({ arg tr; tr[\bus].free; tr[\phase].free }) });
         tRetBus.free;

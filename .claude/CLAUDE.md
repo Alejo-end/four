@@ -195,6 +195,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 79th: the plugin's three memory messages print, tried offline on the Mac (branch `proposal-a`) | documents only | |
 | 80th: doc/plan.md's next steps can be followed without an assistant; the doodles are the 115th change | documents only | |
 | 81st: the shimmer is its own synth, so a reverb at shimmer 0 does not pay for it (engine, test tools; branch `perf`) | no: the norns was off the network | no |
+| 82nd: an open filter is a copy, the sends into a track are a synth that runs only while one is open, the meters run only on TRACKS (engine, Lua, test tools; branch `perf`) | no: the norns was off the network | no |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

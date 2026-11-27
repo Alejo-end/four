@@ -5615,3 +5615,26 @@ not on the norns)**. 2026-11-28. Phase 5, item 2 of doc/plan.md.
   and probe4 spawn the shimmer after each reverb, as the engine does. The count stays 199.
 - To do on the norns: the engine ritual, then `measure.py budget`, and a look that
   `four_shimmer` is in the node tree only while shimmer is above 0.
+
+four, eighty-second change: **what is not in use costs nothing: the open filter, the sends, the
+meters (engine, Lua, test tools; branch `perf`, not on the norns)**. 2026-11-28. The user: "when
+you're not using them, they should cost nothing".
+- THE OPEN FILTER. A low-pass at its end stop (cutoff 19 kHz or more, resonance 0.02 or less: the
+  purity mark's own test) is `\four_filt_open`, a copy of 6 UGens, where it was a DFM1 ladder of 26.
+  It is the identity now (DFM1 open added a third harmonic 37 dB down). Into OPEN the lane waits
+  0.3 s, so a knob or a modulator that brushes the end stop does not swap the filter at each pass,
+  and out of it at once. The swap is the families' 20 ms crossfade. Phase 5, item 3 of the plan.
+- THE SENDS INTO A TRACK. `\four_lane_in` held four InFeedback pairs, their glides, a LeakDC and a
+  tanh for the sends from the other tracks, which are 0 unless the player opens one. They are
+  `\four_lane_send` now, after the lane's in synth, and it exists only while a send into that
+  track is open (it goes 0.5 s after the last one reaches 0). lane_in is 8 UGens (28). The send
+  synth adds onto the bus that lane_in wrote, so the sum is the old one. It starts at 0 and the
+  sends glide up 10 ms later, from 0 as before.
+- THE METERS. The script polls `amp_t1` to `amp_t4` only while TRACKS is on the screen, and the
+  engine pauses `\four_meter` when no poll read it for a second (0.23 points on the norns). A
+  read runs it again. An older script polls all the time, so its meters stay on.
+- Gate rows 19.7 and 19.8 expect `four_filt_open` for an open lane. check_dsp.sh holds the new
+  UGen counts. Every render of check_dsp.sh that repeats from run to run is identical to the
+  seventy-ninth change's (260 files). The count stays 199.
+- Not tried on the norns: the swaps, the send synth's start and end, the meter's pause, and what
+  each saves. `measure.py budget` before and after, then rows 19.7, 19.8 and stage 22.

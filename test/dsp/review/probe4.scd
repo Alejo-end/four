@@ -73,7 +73,7 @@ Engine_Four.new(ctx, { arg eng;
     // norns every one of them counts, and a knob's glide must not grow a def
     // (check_dsp.py holds the counts)
     [\four_lane_in, \four_filt_lo, \four_filt_hi, \four_colour, \four_lane_out,
-        \four_delay, \four_reverb, \four_shimmer].do({ |k|
+        \four_delay, \four_reverb, \four_shimmer, \four_lane_send, \four_filt_open].do({ |k|
         ("UGENS " ++ k ++ " " ++ SynthDescLib.global[k].def.children.size).postln;
     });
     "FOUR_PLUGIN_DIR".getenv.notNil.if({

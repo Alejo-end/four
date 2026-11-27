@@ -295,7 +295,8 @@ One at a time, each with a RESTART and a listen.
    with a measurement.
 2. BUILT 2026-11-28 on branch `perf` (the eighty-first change), not on the norns yet:
    **Shimmer costs CPU at zero.** The shimmer is its own spawn/free synth now.
-3. **The open filter is not a bypass.** At LP, 20 kHz and no resonance, the take
+3. BUILT 2026-11-28 on branch `perf` (the eighty-second change), not on the norns yet:
+   **The open filter is not a bypass.** At LP, 20 kHz and no resonance, the take
    still passes through the DFM1 ladder. Crossfade to the dry signal at the end
    stop, and make `purity()` test the same end stop.
 4. **Resample and regen print after the fader.** Take `preLim` before the level
@@ -316,10 +317,9 @@ scsynth thread, at the 60% limit. Where the points go (doc/measurements/2026-11-
 four PV voices about 32, the reverb 6.0, the effect slots about 9, the delay 2.7, drive 2.5.
 
 1. The shimmer (above, item 2): built, about 1 point while the reverb plays at shimmer 0.
-2. The open filter (item 3): with the filter open, a track could skip its filter synth. It
-   saves a DFM1 for each such track and makes the open filter the identity. It changes the
-   sound a little (DFM1 adds a third harmonic 37 dB down), so it needs a listen. Measure a
-   DFM1's cost on the norns first.
+2. Built (the eighty-second change, branch `perf`): an open filter is a copy, the sends into
+   a track run only while one is open, and the meters only while TRACKS shows them. The open
+   filter drops DFM1's faint third harmonic, so it needs a listen.
 3. A silent CLOUD track costs more than one that sounds (3.9% against 2.5%). A guess to test
    on the norns: denormal numbers in Clouds' feedback paths. Set the flush-to-zero bit in
    FourCloud's calc function and read `measure.py` again.

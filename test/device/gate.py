@@ -2607,8 +2607,9 @@ def stage19():
         time.sleep(0.5)
         lane = lane_nodes()
         kinds = lane_kinds()
+        # an open low-pass is the copy four_filt_open (the eighty-second change)
         ok = (lane["filters"] == 2 and lane["colour"] == 0 and not lane["fx"]
-              and kinds == ["four_filt_lo"] * 4)
+              and kinds == ["four_filt_open"] * 4)
         return verdict(ok, f"at rest {lane}; every lane's filter {kinds}")
 
     def c198():
@@ -2631,8 +2632,8 @@ def stage19():
         n.set("t2_cutoff", 20000)
         ok = (loud > -40 and seen["HP"]["hi"] == 1 and seen["BP"]["hi"] == 0 and seen["LP"]["hi"] == 0
               and all(x["filters"] == 2 for x in seen.values()) and not hits
-              and seen["HP"]["kinds"] == ["four_filt_lo", "four_filt_hi", "four_filt_lo", "four_filt_lo"]
-              and seen["LP"]["kinds"] == ["four_filt_lo"] * 4)
+              and seen["HP"]["kinds"] == ["four_filt_open", "four_filt_hi", "four_filt_open", "four_filt_open"]
+              and seen["LP"]["kinds"] == ["four_filt_open", "four_filt_lo", "four_filt_open", "four_filt_open"])
         return verdict(ok, f"LP, HP, BP, LP at 400 Hz: {seen}; level {loud} dB; breaks {hits[:6]}. Listen to 19.8_filter_swap.wav")
 
     def c199():
