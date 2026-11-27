@@ -1,4 +1,4 @@
-# four: the plan (written 2026-11-12, corrected 2026-11-25)
+# four: the plan (written 2026-11-12, corrected 2026-11-27)
 
 This plan says what to do next, in order, and why. Read CLAUDE.md first: it has
 the hard rules, the deploy ritual and the lessons. The per-change history is in
@@ -22,14 +22,39 @@ deployed at `count: 199`, and stage 21 of doc/device-gate.md was measured on
 Since 2026-11-24 doc/mix-plan.md holds the mix of the tracks (the seventy-third and
 seventy-fourth changes, on `main`). Its step 4 is open.
 
-**What comes next (2026-11-25).** In this order:
-1. The user's ears on the mix (row 22.7), on stage 21's three rows, and on proposal A
-   (branch `proposal-a`, on the norns). Merge proposal A only after that.
-2. The show checks of Phase 1, if a show is near.
-3. The session with a first-time player (doc/walkthrough.md). The tasks of "the observed
-   walkthrough" in Phase 4 can run with the same player.
-4. The rest of Phase 2, item by item. Phase 3 is done.
-5. Phase 4, from what the sessions found. Then Phase 5.
+**What comes next (2026-11-27).** This list is written so that you can follow it without
+an assistant. Each step says what to do and what to write down. The commands are in "How to
+work on this project" at the end of this file.
+
+1. Listen on the norns (about one hour, nothing to build). The norns runs proposal A now,
+   at `count: 199`. First set PARAMS > REVERB to OFF: the system reverb adds reverb that four
+   does not control. Then walk these rows of doc/device-gate.md, in this order: 22.7 (the
+   mix), 21.1, 21.4 and 21.7 (set the tempo to 120 on SCENE with K1+E2 first). Each row says
+   what to do and what you must hear. Last, proposal A: a take of bass or kick must keep more
+   low end than on `main`. After each row, write one line in that row of doc/device-gate.md,
+   for example "heard 2026-12-01: the hits stay on the beat".
+2. Decide proposal A. `proposal-a` is `main` plus four commits, so a yes is
+   `git checkout main && git merge --ff-only proposal-a && git push origin main`. A no is
+   `git checkout main`, and then the engine ritual (step 4 of "How to work"), because the
+   norns runs proposal A's engine. Never merge or push `proposal-dsp-fixes`: its history
+   holds the private set.
+3. If row 22.7 says the mix is still hard, step 4 of doc/mix-plan.md is next (the level from
+   any page). It needs a mock-up first. If it is easy, the MIDI faders are enough, and the
+   step closes.
+4. If a show is near, do Phase 1 (the show checks).
+5. Hold the session with a first-time player: doc/walkthrough.md has the card, the
+   observer's sheet and the listening script. test/device/session.py measures it.
+6. The rest of Phase 2, one item at a time. Then Phase 4 from what the sessions found. Then
+   Phase 5: on 2026-11-27 items 2, 3, 4 and 6 were still open in the engine.
+7. Answer the decisions at the end of this file. Two more wait there now: push
+   `proposal-a` to GitHub so that it is not only on this laptop, and remove the three old
+   agent worktrees under `.claude/worktrees/`.
+
+What a tool cannot judge, and why the order is so: four has many changes that nobody heard
+(the table in CLAUDE.md, column "Heard"). Each new engine change adds to that pile. So build
+no new sound until steps 1 and 6 are heard. Screen and control work (Phase 4) is safe at any
+time: `lua test/check.lua` and the renders prove it, and a script reload brings it to the
+norns.
 
 ## Where the project stands
 
@@ -45,9 +70,8 @@ what to do.
   change, and `proposal-a` stands on it. The `../mangler2` folder is a git worktree on branch `mangler2`. It is
   fully merged, and `git worktree remove ../mangler2` removes it once the user agrees. The
   local folder is still named `mangler`: the user moves it, with no session open in it.
-- **The change log.** The visuals doodles are committed, but their entry is titled
-  "Hundred-and-fourteenth change", a number that the sound fixes already use. Give it a
-  number of its own.
+- **The change log.** The visuals doodles' entry carried the number 114 of the sound
+  fixes. Since 2026-11-27 it is the hundred-and-fifteenth change.
 
 ## Phase 0: bring the device up to the code
 
@@ -107,8 +131,7 @@ whether the show works.
    make sure that the six shapes look right. If they still feel plain, ask which
    part.
 4. **Launchpad colours.** Nobody has seen them on real pads yet.
-5. **Commit.** Done: the doodle changes are committed. Their changelog entry still
-   needs its own number (see "Where the project stands").
+5. **Commit.** Done: the doodle changes are committed, as the hundred-and-fifteenth change.
 6. **The pre-show test.** When the cable is sorted, make sure that:
    - `node visuals/test_bridge.js` passes.
    - `lua test/check.lua` with `LUA53` set passes.
@@ -312,6 +335,9 @@ Each one needs a yes or a no. Ask the user. Do not decide.
 6. Which MIDI controller do they own?
 7. One SPACE page (doc/space-plan.md, section 7.2), or DELAY and REVERB as two
    pages, as the user asked in July?
+8. Push `proposal-a` to GitHub (it is on this laptop only)?
+9. Remove the old agent worktrees under `.claude/worktrees/` (`scene-ab`, `fourcloud`,
+   `proposal-dsp-fixes`) with `git worktree remove`?
 
 ## How to work on this project
 

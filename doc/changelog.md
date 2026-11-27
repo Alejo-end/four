@@ -3763,7 +3763,7 @@ only what softcut cannot (granular, time-stretch, custom filter/delay/reverb). G
 are a **mode switch** on a single SC voice, never run together (Pi4 = one scsynth core,
 xruns past ~60%).
 
-Hundred-and-fourteenth change: **the doodles come only from played events, and six richer
+Hundred-and-fifteenth change: **the doodles come only from played events, and six richer
 shapes (visuals only)**. The ambient words and drawings that appeared when nothing played
 (they showed the Octatrack's screen words, CROSSFADER among them) are gone: with no MIDI event
 nothing is drawn. A note draws one of six shapes by track and pitch (rings with tick marks, a
@@ -5578,3 +5578,15 @@ four, seventy-ninth change: **the plugin's memory messages print (documents)**. 
   real-time memory for 32768 bytes`. 18 to 27 KB: `FourGrain: no real-time memory for 10248
   bytes`. 17 KB: the server refuses the synth itself (`/s_new out of real time memory`).
 - With 64 MB nothing prints. Not run on the norns's scsynth.
+
+four, eightieth change: **a plan to follow alone, and one number put right (documents)**. 2026-11-27.
+- doc/plan.md's "What comes next" is written to be followed without an assistant: the rows to
+  hear, the commands to merge or drop proposal A, and what to write down after each row.
+- Two decisions join its list: push `proposal-a`, and remove the three old agent worktrees.
+- Phase 5, read against the engine: items 2 (the shimmer lives in the reverb's synth), 3 (the
+  open filter), 4 (`preLim` after the level) and 6 (`Limiter.ar` on two channels limits each
+  side alone) are still open.
+- The visuals doodles' entry was a second "Hundred-and-fourteenth change". It is the
+  hundred-and-fifteenth now.
+- On the norns the time sync moved the clock 25 hours after the boot, and sclang took a whole
+  core, as CLAUDE.md warns. The restart over SSH cleared it, and four loaded at `count: 199`.

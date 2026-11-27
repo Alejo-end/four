@@ -8,7 +8,7 @@ block current, and add a change-log entry for every change.
 
 ---
 
-## STATUS (2026-11-25)
+## STATUS (2026-11-27)
 
 This block is the one record of the device, the fingerprint and what nobody has heard.
 doc/plan.md points here. Keep it current. When you change it, date it.
@@ -193,6 +193,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 76th, 77th: a loaded file and the visuals link's lookup no longer hold the script (Lua) | yes, 2026-11-25, loaded at 12:28 | the user, 2026-11-25: "the freeze is gone" (minutes after the load, the Mac on the network) |
 | 78th: ugen/README.md says what "identity" is (PLAY bit for bit, PV and WARP under -90 dB) and dates its 64% figure | documents only | |
 | 79th: the plugin's three memory messages print, tried offline on the Mac (branch `proposal-a`) | documents only | |
+| 80th: doc/plan.md's next steps can be followed without an assistant; the doodles are the 115th change | documents only | |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody
@@ -274,7 +275,8 @@ feeds Hydra (visuals/hydra.js). The bridge also serves a control page
 `/param/` path stays open to the network, so ALLOW is not a wall. It ran with mangler on the device (the 110th and 111th
 changes). No run with the `/four/` addresses is on record.
 
-**Before four.** mangler went to its 114th change at `count: 66`. `full-review` was
+**Before four.** mangler went to its 115th change at `count: 66` (the 115th, the visuals doodles, carried
+the number 114 until 2026-11-27). `full-review` was
 merged into `main` on 2026-10-23. mangler2 then forked from mangler and became four.
 doc/changelog.md holds that history.
 
