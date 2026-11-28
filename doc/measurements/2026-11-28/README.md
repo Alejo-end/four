@@ -65,3 +65,24 @@ The same tool later that day, with the plugin built on the norns that morning (`
   set with the reverb is about 1 to 1.5 points.
 - The output is the same, sample for sample (ugen/test_core.cpp, on the Mac and on the norns),
   so nothing here needs ears.
+
+## The delay: tried, not kept
+
+THE BUCKET BRIGADE (`BBDDelay`, two FourBBD units in `\four_delay`) costs 2.8 points. Timed on
+the norns's CPU, one channel, 20 s of noise, AGE 0.25 as the engine sets it: 0.37 s at a
+TIME of 0.1 s, 0.27 s at 0.3 s (the default) and 0.21 s at 1 s. AGE alone is 0.11 s of that.
+Three rewrites, none of them kept:
+
+- The gains of the two fixed steps (a whole sample, a whole tick) computed once in
+  `setClock`, so a sample with no tick divides nothing. Bit for bit the same, and 5% faster at
+  0.3 s (12% at 1 s): about 0.15 points.
+- The steps of their own length (the first tick in a sample, the rest after the last) from a
+  table and a series in place of exp, sin, cos and four divisions. The same output in every
+  test, and no faster at 0.1 s and 0.3 s: on the norns glibc's exp takes 30 ns and sincos
+  54 ns, and those calls were not the cost.
+- The two channels in one loop: 8 to 12% faster, bit for bit, but it needs a stereo FourBBD
+  and an engine change.
+- AGE's two envelopes in float: 11% faster, and the output changes by up to -28 dB, so no.
+
+The cost is spread over the chain's double arithmetic. Each gain is small, and none of them is
+worth a plugin build and a RESTART alone.
