@@ -5697,3 +5697,24 @@ four, eighty-fifth change: **the review's fixes to THE ROOM's block path (plugin
 - On the norns: plugin built there, `count: 199`, `four: FourStretch on`. `measure.py budget`
   as after the eighty-fourth change: the reverb adds 3.1 points, the dense set 56.6%, the
   supported set 50.4%, no xruns. The plugin before it is `~/fourstretch-backup/FourStretch-2026-11-28a.so`.
+
+four, eighty-sixth change: **the deep review of THE ROOM's block path (plugin, test tools)**.
+2026-11-28, from a second review (Fable) of the eighty-fourth and eighty-fifth changes. It
+found no case where `process` differs from `tick`: 864 cases of rate, size and block length
+under the address sanitizer, and clang and g++ at every level of optimisation.
+- One diffusion step is one pass (`signedHadamard`): the sign, the Hadamard and the scale on
+  8 rows held in NEON registers, four samples at a time, where the step was three passes over
+  memory. The same bits as `tick`. bench_core on the norns: 1.55% of a core (2.0% before,
+  4.2% with `tick`).
+- test_core: the case the floor decides (no loss, denormal noise into an empty room: on the
+  norns 799 samples differ without `floorIn`), and the chunk rule (at 500 Hz a late line is
+  29 samples; without the rule 4,131 samples differ). The comment on the floor and the README
+  say what it does and does not prove. The comment above `process` no longer says that cache
+  misses were the cost: the review measured fewer instructions as the gain. `chunk` is private.
+- On the norns: plugin built there, `count: 199`, `four: FourStretch on`. `measure.py budget`:
+  the reverb adds 2.6 points (3.1 after the eighty-fifth change, 4.8 before the eighty-fourth),
+  the dense set 56.0%, the supported set 48.5%, no xruns. The plugin before it is
+  `~/fourstretch-backup/FourStretch-2026-11-28b.so`.
+- Found and not changed (it changes the sound): at decay 0.1 s with damp 1, `a1` rounds to
+  -1.0 on every line, so the loss filters hold a DC offset (a mean of 0.003 on the left in the
+  review's run, not falling). Waits for the user.

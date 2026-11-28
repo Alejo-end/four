@@ -32,8 +32,10 @@ norns that takes about half the time of `Room::tick` (2.0% of a core against
 moving between blocks, with a line at its longest (96 kHz), and with inputs
 that fade into the denormal range. `build_norns.sh` runs the same proof on the
 norns, where the vector code turns denormals into 0. Both paths treat an input
-under 1e-20 (-400 dB) as 0, so the vector code and the scalar code can never
-part.
+under 1e-20 (-400 dB) as 0, so a fading send brings no denormal into the
+diffusion. (Cancellation inside the diffusion could still make one in
+principle; no signal tried does, and the loss filter's small offset absorbs it
+in the late mix.)
 
 ## How it installs
 

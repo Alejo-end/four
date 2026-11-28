@@ -1079,10 +1079,14 @@ struct Room {
     }
 
     // The input below 1e-20 (-400 dB) is 0. Without it a fading send brings
-    // denormals into the diffusion, and the two paths would part: NEON on the
-    // norns's 32-bit build turns a denormal into 0, the scalar code keeps it.
-    // Above that floor no sum of the diffusion gets near the denormal range
-    // (its smallest step is about 1e-29), so the two stay bit for bit the same.
+    // denormals straight into the diffusion's rows, where the two paths part:
+    // NEON on the norns's 32-bit build turns a denormal into 0, the scalar
+    // code keeps it. The floor does not make a denormal impossible: each step
+    // of the diffusion can cancel to a finer value (rows placed freely reach
+    // 1e-43 after the third step), but no signal tried came near it (31 kinds,
+    // replayed with NEON's flush). Past the diffusion the loss filter's
+    // 1e-25 absorbs any such value in the late mix, which is what keeps the
+    // output the same.
     static inline float floorIn(float v) { return std::fabs(v) < 1e-20f ? 0.f : v; }
 
     // decay: T60 at 0 Hz, in seconds (0 or less: no loss at all, for the proof).
@@ -1158,9 +1162,10 @@ struct Room {
     }
 
     // n samples at once, the same as n ticks, bit for bit (test_core proves
-    // it). tick() touches 40 delay lines at every sample, and on the norns the
-    // cache misses were most of the room's cost. Here each line is read and
-    // written in one straight run for a whole chunk of at most cmax samples.
+    // it). Each line is read and written in one straight run for a whole chunk
+    // of at most cmax samples, and the diffusion runs on rows, four samples at
+    // a time with NEON: fewer instructions than tick() (and fewer passes over
+    // memory), which took the room from 4.4% to 2.0% of a norns core.
     static const int CHUNK = 64;
     void process(const float* inL, const float* inR, float* outL, float* outR, int n) {
         const int lim = cmax;
@@ -1184,35 +1189,47 @@ struct Room {
         std::memcpy(ring + at, from, first * sizeof(float));
         if (first < m) std::memcpy(ring, from + first, (m - first) * sizeof(float));
     }
-    // the Hadamard of hadamard(), on 8 rows of m samples: the same sums in
-    // the same order for each sample, so the result is the same, bit for bit
-    static inline void hadamardRows(float (*X)[CHUNK], int m) {
-        for (int h = 1; h < CH; h <<= 1)
-            for (int i = 0; i < CH; i += h << 1)
-                for (int j = i; j < i + h; j++) {
-                    float* p = X[j]; float* q = X[j + h];
-                    int t = 0;
+    // one diffusion step on 8 rows of m samples: X = hadamard(sign * Y), the
+    // same sums in the same order for each sample as tick(), so the same bits.
+    // NEON takes four samples a pass with the 8 rows in registers; the sign is
+    // a flip of the sign bit, which is what a multiply by -1 or 1 gives. The
+    // butterflies are written out: in a loop over an array of vectors GCC kept
+    // them in memory. The tail is tick()'s own code.
+    static inline void signedHadamard(const float (*Y)[CHUNK], float (*X)[CHUNK], const float* sg, int m) {
+        int t = 0;
 #ifdef FOUR_NEON
-                    // four samples at a time: an add, a subtract, the same as below
-                    // (NEON flushes a denormal to 0: floorIn keeps them out of the rows)
-                    for (; t + 4 <= m; t += 4) {
-                        const float32x4_t a = vld1q_f32(p + t), c = vld1q_f32(q + t);
-                        vst1q_f32(p + t, vaddq_f32(a, c)); vst1q_f32(q + t, vsubq_f32(a, c));
-                    }
+        // (NEON flushes a denormal to 0: floorIn keeps them out of the rows)
+        const float32x4_t g = vdupq_n_f32(0.35355339f);
+#define FOUR_SG(c) const uint32x4_t s##c = vdupq_n_u32(sg[c] < 0 ? 0x80000000u : 0u)
+        FOUR_SG(0); FOUR_SG(1); FOUR_SG(2); FOUR_SG(3); FOUR_SG(4); FOUR_SG(5); FOUR_SG(6); FOUR_SG(7);
+#define FOUR_LD(c) vreinterpretq_f32_u32(veorq_u32(vreinterpretq_u32_f32(vld1q_f32(Y[c] + t)), s##c))
+#define FOUR_BF(a, b) { const float32x4_t d_ = vsubq_f32(a, b); a = vaddq_f32(a, b); b = d_; }
+        for (; t + 4 <= m; t += 4) {
+            float32x4_t x0 = FOUR_LD(0), x1 = FOUR_LD(1), x2 = FOUR_LD(2), x3 = FOUR_LD(3);
+            float32x4_t x4 = FOUR_LD(4), x5 = FOUR_LD(5), x6 = FOUR_LD(6), x7 = FOUR_LD(7);
+            FOUR_BF(x0, x1) FOUR_BF(x2, x3) FOUR_BF(x4, x5) FOUR_BF(x6, x7)     // h = 1
+            FOUR_BF(x0, x2) FOUR_BF(x1, x3) FOUR_BF(x4, x6) FOUR_BF(x5, x7)     // h = 2
+            FOUR_BF(x0, x4) FOUR_BF(x1, x5) FOUR_BF(x2, x6) FOUR_BF(x3, x7)     // h = 4
+            vst1q_f32(X[0] + t, vmulq_f32(x0, g)); vst1q_f32(X[1] + t, vmulq_f32(x1, g));
+            vst1q_f32(X[2] + t, vmulq_f32(x2, g)); vst1q_f32(X[3] + t, vmulq_f32(x3, g));
+            vst1q_f32(X[4] + t, vmulq_f32(x4, g)); vst1q_f32(X[5] + t, vmulq_f32(x5, g));
+            vst1q_f32(X[6] + t, vmulq_f32(x6, g)); vst1q_f32(X[7] + t, vmulq_f32(x7, g));
+        }
+#undef FOUR_SG
+#undef FOUR_LD
+#undef FOUR_BF
 #endif
-                    for (; t < m; t++) { const float a = p[t], c = q[t]; p[t] = a + c; q[t] = a - c; }
-                }
-        for (int c = 0; c < CH; c++) {
-            int t = 0;
-#ifdef FOUR_NEON
-            const float32x4_t g = vdupq_n_f32(0.35355339f);
-            for (; t + 4 <= m; t += 4) vst1q_f32(X[c] + t, vmulq_f32(vld1q_f32(X[c] + t), g));
-#endif
-            for (; t < m; t++) X[c][t] *= 0.35355339f;
+        for (; t < m; t++) {
+            float x[CH];
+            for (int c = 0; c < CH; c++) x[c] = Y[c][t] * sg[c];
+            hadamard(x);
+            for (int c = 0; c < CH; c++) X[c][t] = x[c];
         }
     }
+private:
+    // m is at most CHUNK: only process() calls it
     void chunk(const float* inL, const float* inR, float* outL, float* outR, int m) {
-        float X[CH][CHUNK], V[CH][CHUNK], T[CHUNK];
+        float X[CH][CHUNK], V[CH][CHUNK], Y[CH][CHUNK];
         for (int c = 0; c < CH; c++) {
             const float* in = (c & 1) ? inR : inL;
             for (int i = 0; i < m; i++) X[c][i] = floorIn(in[i]) * 0.5f;
@@ -1224,13 +1241,11 @@ struct Room {
                 // after that. So any dl from 1 to DMAX - 1 works with any chunk.
                 float* b = dbuf[k][c];
                 const int dl = dlen[k][c], old = m < dl ? m : dl;
-                ringRead(b, DMAX - 1, dw - dl, T, old);
-                if (old < m) std::memcpy(T + old, X[c], (m - old) * sizeof(float));
+                ringRead(b, DMAX - 1, dw - dl, Y[c], old);
+                if (old < m) std::memcpy(Y[c] + old, X[c], (m - old) * sizeof(float));
                 ringWrite(b, DMAX - 1, dw, X[c], m);
-                const float sg = dsign[k][c];
-                for (int i = 0; i < m; i++) X[c][i] = T[i] * sg;
             }
-            hadamardRows(X, m);
+            signedHadamard(Y, X, dsign[k], m);
         }
         for (int c = 0; c < CH; c++) ringRead(lbuf[c], LMAX - 1, lw - llen[c], V[c], m);
         for (int i = 0; i < m; i++) {

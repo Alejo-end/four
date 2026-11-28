@@ -571,6 +571,21 @@ int main() {
         expect(diff == 0, "a send fading to 1e-45 and below: samples that differ", (double)diff);
         diff = same(48000, 0.005, 2.0, 0.5, 48000 * 2, mixed, true);
         expect(diff == 0, "denormals and tiny values among the noise: samples that differ", (double)diff);
+        // the case the floor decides: no loss (decay 0), denormal noise into an
+        // empty room. The first return has y exactly 0, so a row value shows in
+        // the output. On the norns (NEON flushes, the scalar code does not)
+        // this fails without floorIn; on the Mac it passes either way.
+        auto tinyNoise = [&](long) { return nd(rng) * 1e-38f; };
+        diff = same(48000, 0.005, 0.0, 0.5, 48000, tinyNoise, false);
+        expect(diff == 0, "no loss, denormal noise into an empty room: samples that differ", (double)diff);
+        // the chunk rule: a late line shorter than CHUNK (500 Hz: llen is 29 to
+        // 53) cuts the chunk to it, and process() is still tick()
+        rb.init(mem2.data(), 500, 0.002);
+        int shortest = Room::LMAX;
+        for (int c = 0; c < Room::CH; c++) shortest = std::min(shortest, rb.llen[c]);
+        expect(rb.cmax == shortest && shortest < Room::CHUNK, "500 Hz: the chunk is the shortest late line", rb.cmax);
+        diff = same(500, 0.002, 2.0, 0.5, 4000, noise, true);
+        expect(diff == 0, "...and process() is tick(): samples that differ", (double)diff);
         {
             rb.init(mem2.data(), 48000, 0.005); rb.setDecay(2.0, 0.5);
             float iL[64], iR[64], pL[64], pR[64]; long den = 0;

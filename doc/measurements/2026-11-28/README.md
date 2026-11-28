@@ -86,3 +86,10 @@ Three rewrites, none of them kept:
 
 The cost is spread over the chain's double arithmetic. Each gain is small, and none of them is
 worth a plugin build and a RESTART alone.
+
+## The room after the two reviews (the eighty-fifth and eighty-sixth changes)
+
+`measure.py budget` again, same tool. The reverb's own step: 4.8 points before the
+eighty-fourth change, 3.3 after it, 3.1 after the eighty-fifth, 2.6 after the eighty-sixth.
+The dense set reads 56.0% and the supported set 48.5%, with no xruns. bench_core on the
+norns: the room takes 4.2% of a core with `tick` and 1.55% with `process`.
