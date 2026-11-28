@@ -5658,14 +5658,20 @@ four, eighty-third change: **one def for each effect type (engine, test tools; b
   tracks read 19.6% on a tone and 19.7% on silent takes, one CLOUD track 6.6% and 6.7%. The
   difference of 2026-11-16 is gone, so nothing is changed for it.
 
-four, eighty-fourth change (IN PROGRESS): **THE ROOM a block at a time (plugin; branch `perf`)**.
+four, eighty-fourth change: **THE ROOM a block at a time (plugin; branch `perf`)**.
 2026-11-28. Measured on the norns first: the reverb synth costs 4.1 points, the delay synth 2.8,
 and io 1.1 (so moving io's record path out would save at most about half a point; not done).
 - `Room::process` runs a chunk of up to 64 samples: each of the 40 delay lines is read and
   written in one straight run (memcpy), and the Hadamard steps run on rows, four samples at a
-  time with NEON. Bit for bit the same as `tick()` on the Mac and on the norns (nine sizes and
-  decays, 20 s each). On the norns's CPU the room alone took 0.73 to 0.76 s per 20 s with tick
+  time with NEON. On the norns's CPU the room alone took 0.73 to 0.76 s per 20 s with tick
   and 0.33 to 0.38 s with process: about half.
-- `FourRoom_next` calls it. NOT DONE: a test in ugen/test_core.cpp, the plugin build on the
-  norns (`ugen/build_norns.sh`), the RESTART, and `measure.py budget`. The norns still runs the
-  eighty-third change with the old plugin.
+- `FourRoom_next` calls it. ugen/test_core.cpp proves it: three sizes, three decays, blocks of
+  1 to 200 samples and a decay that moves between blocks, 1,728,407 samples, none different
+  from `tick()`. The proof passes on the Mac and in `build_norns.sh` on the norns (with NEON).
+- The plugin is built on the norns (`ignore/plugins/armv7l/`, the same file for aarch64). The
+  RESTART installed it at startup (`four: installed the FourStretch plugin at startup`), then
+  `four: FourStretch on`, `count: 199`. The plugin of 2026-11-25 is kept in
+  `~/fourstretch-backup/` on the device.
+- `measure.py budget` (doc/measurements/2026-11-28/README.md): the reverb adds 3.3 points
+  (4.8 before). The dense set reads 56.6% (57.7), the supported set 50.0% (51.0), with no
+  xruns. The states without the reverb moved by 0.6 points or less either way.

@@ -40,3 +40,28 @@ and 22.8 pass. 22.4: each meter reads within 0.4 dB of the output's peak. 22.6: 
 meters cost 0.27 points. 22.7 needs ears.
 
 Not heard: the open filter without DFM1's faint third harmonic.
+
+## The room a block at a time (the eighty-fourth change)
+
+The same tool later that day, with the plugin built on the norns that morning (`Room::process`).
+"Before" is the eighty-second change's "after", above.
+
+| State | Before | After | Change |
+|---|---|---|---|
+| All four tracks OFF | 2.2% | 2.0% | -0.2 |
+| Four PLAY | 6.0% | 6.1% | +0.1 |
+| Four PV at pitch 2, nothing else | 29.4% | 30.0% | +0.6 |
+| The dense voices, nothing else | 36.8% | 37.4% | +0.6 |
+| + the reverb (mix 0.5, every send 0.5) | 41.6% | 40.7% | -0.9 |
+| + shimmer 0.5 | 42.9% | 42.0% | -0.9 |
+| + the delay | 45.8% | 45.0% | -0.8 |
+| + drive 0.5 on every track | 48.5% | 47.5% | -1.0 |
+| + FLANGE in every first slot | 53.6% | 52.7% | -0.9 |
+| + ECHO in every second slot: row 19.27's dense set | 57.7% | 56.6% | -1.1 |
+| Four PV at pitch 2 with all of it: the supported set | 51.0% | 50.0% | -1.0 |
+
+- The reverb's own step is 3.3 points (4.8 before): 1.5 points less. The states without the
+  reverb read up to 0.6 points more, which is the spread between two runs, so the saving on a
+  set with the reverb is about 1 to 1.5 points.
+- The output is the same, sample for sample (ugen/test_core.cpp, on the Mac and on the norns),
+  so nothing here needs ears.

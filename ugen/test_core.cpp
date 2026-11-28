@@ -508,6 +508,33 @@ int main() {
         bool fin = true; float peak = 0;
         for (int i = 0; i < 48000 * 60; i++) { rm.tick(0, 0, l, r); if (!std::isfinite(l) || !std::isfinite(r)) fin = false; if (i > 48000 * 50 && std::fabs(l) > peak) peak = std::fabs(l); }
         expect(fin && peak < 1e-9f, "60 s of silence: all values finite, and the last 10 s under 1e-9", peak);
+        // 5. process() is tick() a block at a time, bit for bit: three sizes, three
+        // decays, blocks of uneven length (1 to 200 samples, so a chunk splits),
+        // the decay moved between blocks as FourRoom_next moves it
+        std::vector<float> mem2(Room::need());
+        static Room rb;
+        std::mt19937 rng(11); std::normal_distribution<float> nd(0, 0.3f);
+        std::uniform_int_distribution<int> len(1, 200);
+        int diff = 0; long total = 0;
+        for (double size : {0.002, 0.005, 0.012})
+            for (double decay : {0.0, 2.0, 12.0}) {
+                rm.init(mem.data(), 48000, size); rb.init(mem2.data(), 48000, size);
+                rm.setDecay(decay, 0.5); rb.setDecay(decay, 0.5);
+                float iL[200], iR[200], pL[200], pR[200];
+                for (long done = 0; done < 48000 * 4;) {
+                    const int n = len(rng);
+                    for (int i = 0; i < n; i++) { iL[i] = nd(rng); iR[i] = nd(rng); }
+                    if ((done / 48000) % 2) { rm.setDecay(decay * 0.5, 0.3); rb.setDecay(decay * 0.5, 0.3); }
+                    rb.process(iL, iR, pL, pR, n);
+                    for (int i = 0; i < n; i++) {
+                        rm.tick(iL[i], iR[i], l, r);
+                        if (l != pL[i] || r != pR[i]) diff++;
+                    }
+                    done += n; total += n;
+                }
+            }
+        char pname[96]; std::snprintf(pname, sizeof pname, "process() against tick(), %ld samples: samples that differ", total);
+        expect(diff == 0, pname, diff);
     }
     std::printf("THE BUCKET BRIGADE\n");
     {
