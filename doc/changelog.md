@@ -5675,3 +5675,5 @@ and io 1.1 (so moving io's record path out would save at most about half a point
 - `measure.py budget` (doc/measurements/2026-11-28/README.md): the reverb adds 3.3 points
   (4.8 before). The dense set reads 56.6% (57.7), the supported set 50.0% (51.0), with no
   xruns. The states without the reverb moved by 0.6 points or less either way.
+
+On 2026-11-28 the user asked to merge `perf` into `main`: the eighty-first to the eighty-fourth change and proposal A are on `main` (a fast-forward).

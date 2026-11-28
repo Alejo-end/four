@@ -111,7 +111,7 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-28 it runs the eighty-fourth change (branch `perf`, on proposal A) at
+- Since 2026-11-28 it runs the eighty-fourth change (branch `perf`, on proposal A, merged into `main` on 2026-11-28) at
   `count: 199`, with the plugin built there that day. Before that, from 2026-11-24, it ran the seventy-fourth change (branch `mix`) at `count: 199`, with
   the plugin built there that day (`ignore/plugins/armv7l/`), which four's startup install
   put in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugins of 2026-11-13, 2026-11-16, 2026-11-24 and 2026-11-25 are kept in
