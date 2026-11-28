@@ -55,7 +55,24 @@ int main() {
             if (us > worst) worst = us;
         }
         double sec = std::chrono::duration<double>(clk::now() - t0).count();
-        std::printf("%-28s %11.2f%% %16.0f   (%g)\n", "THE ROOM, stereo", sec / 10 * 100, worst, acc);
+        std::printf("%-28s %11.2f%% %16.0f   (%g)\n", "THE ROOM, stereo, tick", sec / 10 * 100, worst, acc);
+    }
+    {
+        // the same, a block at a time, as FourRoom_next runs it (Room::process)
+        std::vector<float> mem(Room::need());
+        static Room rm; rm.init(mem.data(), 48000, 0.005); rm.setDecay(2.0, 0.5);
+        double worst = 0; float acc = 0, iL[64], iR[64], oL2[64], oR2[64];
+        auto t0 = clk::now();
+        for (int b = 0; b < 48000 * 10 / 64; b++) {
+            for (int j = 0; j < 64; j++) { iL[j] = L[(b * 64 + j) % len]; iR[j] = R[(b * 64 + j) % len]; }
+            auto a = clk::now();
+            rm.process(iL, iR, oL2, oR2, 64);
+            double us = std::chrono::duration<double, std::micro>(clk::now() - a).count();
+            if (us > worst) worst = us;
+            for (int j = 0; j < 64; j++) acc += oL2[j];
+        }
+        double sec = std::chrono::duration<double>(clk::now() - t0).count();
+        std::printf("%-28s %11.2f%% %16.0f   (%g)\n", "THE ROOM, stereo, process", sec / 10 * 100, worst, acc);
     }
     for (double time : {0.2, 0.5, 1.5}) {
         // THE BUCKET BRIGADE delay, one channel, 16384 cells

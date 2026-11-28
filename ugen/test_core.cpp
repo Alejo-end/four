@@ -4,6 +4,7 @@
 #include "four_core.h"
 #include "four_cloud.h"
 #include <algorithm>
+#include <functional>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -508,33 +509,78 @@ int main() {
         bool fin = true; float peak = 0;
         for (int i = 0; i < 48000 * 60; i++) { rm.tick(0, 0, l, r); if (!std::isfinite(l) || !std::isfinite(r)) fin = false; if (i > 48000 * 50 && std::fabs(l) > peak) peak = std::fabs(l); }
         expect(fin && peak < 1e-9f, "60 s of silence: all values finite, and the last 10 s under 1e-9", peak);
-        // 5. process() is tick() a block at a time, bit for bit: three sizes, three
-        // decays, blocks of uneven length (1 to 200 samples, so a chunk splits),
-        // the decay moved between blocks as FourRoom_next moves it
+        // 5. process() is tick() a block at a time, bit for bit. One runner for
+        // every case: blocks of uneven length (1 to 200 samples, so a chunk
+        // splits), and at random blocks the decay, the colour or both move,
+        // back and forth, as FourRoom_next moves them at a knob's turn.
         std::vector<float> mem2(Room::need());
         static Room rb;
         std::mt19937 rng(11); std::normal_distribution<float> nd(0, 0.3f);
-        std::uniform_int_distribution<int> len(1, 200);
-        int diff = 0; long total = 0;
-        for (double size : {0.002, 0.005, 0.012})
-            for (double decay : {0.0, 2.0, 12.0}) {
-                rm.init(mem.data(), 48000, size); rb.init(mem2.data(), 48000, size);
-                rm.setDecay(decay, 0.5); rb.setDecay(decay, 0.5);
-                float iL[200], iR[200], pL[200], pR[200];
-                for (long done = 0; done < 48000 * 4;) {
-                    const int n = len(rng);
-                    for (int i = 0; i < n; i++) { iL[i] = nd(rng); iR[i] = nd(rng); }
-                    if ((done / 48000) % 2) { rm.setDecay(decay * 0.5, 0.3); rb.setDecay(decay * 0.5, 0.3); }
-                    rb.process(iL, iR, pL, pR, n);
-                    for (int i = 0; i < n; i++) {
-                        rm.tick(iL[i], iR[i], l, r);
-                        if (l != pL[i] || r != pR[i]) diff++;
-                    }
-                    done += n; total += n;
+        std::uniform_int_distribution<int> len(1, 200), pick(0, 7);
+        // returns the samples that differ; `gen` makes the input
+        auto same = [&](double fs, double size, double decay, double colour, long n,
+                        const std::function<float(long)>& gen, bool move) {
+            rm.init(mem.data(), fs, size); rb.init(mem2.data(), fs, size);
+            rm.setDecay(decay, colour); rb.setDecay(decay, colour);
+            float iL[200], iR[200], pL[200], pR[200];
+            long diff = 0;
+            for (long done = 0; done < n;) {
+                const int b = len(rng);
+                for (int i = 0; i < b; i++) { iL[i] = gen(done + i); iR[i] = gen(done + i + 7); }
+                if (move) {
+                    const int w = pick(rng);       // 0: decay, 1: colour, 2: both, else none
+                    double d2 = decay, c2 = colour;
+                    if (w == 0 || w == 2) d2 = (done / 4800) % 2 ? decay * 0.5 : decay;
+                    if (w == 1 || w == 2) c2 = (done / 9600) % 2 ? 0.2 : colour;
+                    if (w <= 2) { rm.setDecay(d2, c2); rb.setDecay(d2, c2); }
                 }
+                rb.process(iL, iR, pL, pR, b);
+                for (int i = 0; i < b; i++) {
+                    float l2, r2; rm.tick(iL[i], iR[i], l2, r2);
+                    if (l2 != pL[i] || r2 != pR[i]) diff++;
+                }
+                done += b;
             }
-        char pname[96]; std::snprintf(pname, sizeof pname, "process() against tick(), %ld samples: samples that differ", total);
-        expect(diff == 0, pname, diff);
+            return diff;
+        };
+        auto noise = [&](long) { return nd(rng); };
+        long diff = 0, total = 0;
+        for (double size : {0.002, 0.005, 0.0105})
+            for (double decay : {0.0, 2.0, 12.0}) { diff += same(48000, size, decay, 0.5, 48000 * 4, noise, true); total += 48000 * 4; }
+        char pname[96]; std::snprintf(pname, sizeof pname, "process() against tick(), %ld samples, knobs moving: samples that differ", total);
+        expect(diff == 0, pname, (double)diff);
+        // a line at its longest (dlen = DMAX - 1, so the ring has 1 sample of
+        // room): 96 kHz at the largest size. A chunk is still 64 samples.
+        rb.init(mem2.data(), 96000, 0.0105);
+        int longest = 0;
+        for (int k = 0; k < Room::STEPS; k++) for (int c = 0; c < Room::CH; c++) longest = std::max(longest, rb.dlen[k][c]);
+        expect(longest == Room::DMAX - 1, "96 kHz, size 0.0105: the longest diffusion line is DMAX - 1", longest);
+        expect(rb.cmax == Room::CHUNK, "...and the chunk is still CHUNK samples", rb.cmax);
+        diff = same(96000, 0.0105, 2.0, 0.5, 96000 * 2, noise, true);
+        expect(diff == 0, "...and process() is tick(): samples that differ", (double)diff);
+        // the floor: below 1e-20 the input is 0, at it and above it is kept
+        expect(Room::floorIn(9.9e-21f) == 0.f && Room::floorIn(-9.9e-21f) == 0.f && Room::floorIn(1e-39f) == 0.f,
+               "the input floor: 9.9e-21, -9.9e-21 and a denormal read 0", 0);
+        expect(Room::floorIn(1e-20f) == 1e-20f && Room::floorIn(-0.25f) == -0.25f, "...and 1e-20 and -0.25 pass unchanged", 0);
+        // a send that fades into the denormal range, and denormals mixed into
+        // noise: the same in both paths (on the norns this is the NEON case),
+        // and nothing in the room's output is a denormal
+        auto fade = [&](long i) { return (float)(0.5 * std::exp(-i / 600.0)) * nd(rng); };
+        auto mixed = [&](long i) { const long k = i % 5; return k == 0 ? 1e-39f : k == 1 ? -3e-42f : k == 2 ? 2e-21f : k == 3 ? 1e-20f : nd(rng); };
+        diff = same(48000, 0.005, 2.0, 0.5, 48000 * 3, fade, false);
+        expect(diff == 0, "a send fading to 1e-45 and below: samples that differ", (double)diff);
+        diff = same(48000, 0.005, 2.0, 0.5, 48000 * 2, mixed, true);
+        expect(diff == 0, "denormals and tiny values among the noise: samples that differ", (double)diff);
+        {
+            rb.init(mem2.data(), 48000, 0.005); rb.setDecay(2.0, 0.5);
+            float iL[64], iR[64], pL[64], pR[64]; long den = 0;
+            for (long b = 0; b < 48000 * 3 / 64; b++) {
+                for (int i = 0; i < 64; i++) { iL[i] = fade(b * 64 + i); iR[i] = fade(b * 64 + i + 3); }
+                rb.process(iL, iR, pL, pR, 64);
+                for (int i = 0; i < 64; i++) if (std::fpclassify(pL[i]) == FP_SUBNORMAL || std::fpclassify(pR[i]) == FP_SUBNORMAL) den++;
+            }
+            expect(den == 0, "...and the room's output holds no denormal", (double)den);
+        }
     }
     std::printf("THE BUCKET BRIGADE\n");
     {

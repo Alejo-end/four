@@ -16,13 +16,24 @@ anyone who wants to know what is in it, or to build it.
 | `FourTanh` | every `tanh` of the engine | The same curve to 2e-7, about ten times as fast on the norns. |
 | `FourGrain` | GRAIN | The pair of stock `GrainBuf` as one UGen, with the same laws and an exact start place. |
 | `FourDelay` | FLANGE, ECHO | A delay with a low-pass and a soft clip in its feedback path. |
-| `FourRoom` | the reverb | Four diffusion steps and eight late lines. |
+| `FourRoom` | the reverb | Four diffusion steps and eight late lines, run a block at a time (`Room::process`). |
 | `FourBBD` | the delay | A bucket brigade with its clock, filters and compander. |
 | `FourCloud` | CLOUD | Mutable Instruments Clouds, the code of the MiClouds UGen of mi-UGens (`vendor/`). |
 
 At speed 1 and pitch 1 the three stretch voices return the take. PLAY is bit
 for bit there, for whole frames. PV and WARP leave a residual under -90 dB
 (`test_core.cpp`), which is far below hearing but is not bit for bit.
+
+FourRoom runs `Room::process`, which works a chunk of up to 64 samples at a
+time: each of its 40 lines is read and written in one straight run, and on the
+norns that takes about half the time of `Room::tick` (2.0% of a core against
+4.4% in `bench_core`). `process` gives the same samples as `tick`, bit for bit.
+`test_core.cpp` proves it with uneven blocks, with the decay and the colour
+moving between blocks, with a line at its longest (96 kHz), and with inputs
+that fade into the denormal range. `build_norns.sh` runs the same proof on the
+norns, where the vector code turns denormals into 0. Both paths treat an input
+under 1e-20 (-400 dB) as 0, so the vector code and the scalar code can never
+part.
 
 ## How it installs
 

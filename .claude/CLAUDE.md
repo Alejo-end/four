@@ -111,10 +111,10 @@ offline DSP check with one verdict (see the workflow). Invariant 3 below is out 
 stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 
 **On the device.** A norns shield on a Pi 4: `norns.local`, user `we`.
-- Since 2026-11-28 it runs the eighty-fourth change (branch `perf`, on proposal A, merged into `main` on 2026-11-28) at
+- Since 2026-11-28 it runs the eighty-fifth change (`main`; `perf` was merged into it on 2026-11-28) at
   `count: 199`, with the plugin built there that day. Before that, from 2026-11-24, it ran the seventy-fourth change (branch `mix`) at `count: 199`, with
   the plugin built there that day (`ignore/plugins/armv7l/`), which four's startup install
-  put in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugins of 2026-11-13, 2026-11-16, 2026-11-24 and 2026-11-25 are kept in
+  put in Extensions. Its scsynth is 3.13.0-dev (the Mac's is 3.14.1). The plugins of 2026-11-13, 2026-11-16, 2026-11-24, 2026-11-25 and the first of 2026-11-28 (`-28a`) are kept in
   `~/fourstretch-backup/` on the device. mi-UGens is installed there too
   (`Extensions/supercollider-plugins/`).
 - `dust/code/mangler` and `dust/code/mangler2` are deleted. `dust/data/mangler` and
@@ -199,6 +199,7 @@ stock UGens. The DSP plan and its measurements: doc/dsp-plan.md.
 | 82nd: an open filter is a copy, the sends into a track are a synth that runs only while one is open, the meters run only on TRACKS (engine, Lua, test tools; branch `perf`) | yes, 2026-11-28, `count: 199`: 1.5 points less with every track OFF and 5 to 8 with tracks playing, the dense set 57.7% (64.2), the supported set 51.0% (58.0). Rows 19.7 to 19.9 and stage 22 pass, 22.7 needs ears (doc/measurements/2026-11-28/) | no |
 | 83rd: one def for each effect type: CHORUS, the stock FLANGE and WOBBLE crossfade like the others (engine, test tools; branch `perf`) | yes, 2026-11-28, `count: 199`: four CHORUS slots 1.6 points (2.5), four WOBBLE 1.7 (2.3), rows 19.10 to 19.12 and 19.29 | no |
 | 84th: THE ROOM a block at a time, the same samples as before (plugin; branch `perf`) | yes, 2026-11-28, `count: 199`, plugin built there: the reverb adds 3.3 points (4.8), the dense set 56.6%, the supported set 50.0% | nothing to hear: bit for bit the same |
+| 85th: the review's fixes to the room's block path: any line length in a chunk, an input floor of 1e-20, more proof (plugin, test tools) | yes, 2026-11-28, `count: 199`, plugin built there: the budget as after the 84th | nothing to hear |
 
 The thirteenth change's entry says that nothing ran on the device. The fifteenth
 change's opening, in the same `four.lua`, drew there, so its Lua is on the device. Nobody

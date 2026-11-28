@@ -1032,6 +1032,7 @@ struct Room {
     float* dbuf[STEPS][CH]; int dlen[STEPS][CH]; float dsign[STEPS][CH];
     float* lbuf[CH]; int llen[CH];
     int dw, lw;                          // write places (one for each kind)
+    int cmax;                            // the longest chunk process() may run (init sets it)
     float b0[CH], b1[CH], a1[CH], zx[CH], zy[CH];   // each line's loss: a first-order shelf
     double fs;
 
@@ -1069,7 +1070,20 @@ struct Room {
             llen[c] = n > LMAX - 1 ? LMAX - 1 : n;
             b0[c] = 1.f; b1[c] = 0.f; a1[c] = 0.f; zx[c] = 0.f; zy[c] = 0.f;
         }
+        // a late line's chunk must not read what the same chunk writes: its
+        // return is a sample's own feedback. Every llen is thousands of
+        // samples, so this is CHUNK, but it is the rule.
+        cmax = CHUNK;
+        for (int c = 0; c < CH; c++) if (llen[c] < cmax) cmax = llen[c];
+        if (cmax < 1) cmax = 1;
     }
+
+    // The input below 1e-20 (-400 dB) is 0. Without it a fading send brings
+    // denormals into the diffusion, and the two paths would part: NEON on the
+    // norns's 32-bit build turns a denormal into 0, the scalar code keeps it.
+    // Above that floor no sum of the diffusion gets near the denormal range
+    // (its smallest step is about 1e-29), so the two stay bit for bit the same.
+    static inline float floorIn(float v) { return std::fabs(v) < 1e-20f ? 0.f : v; }
 
     // decay: T60 at 0 Hz, in seconds (0 or less: no loss at all, for the proof).
     // colour: T60 at the top against T60 at 0 Hz, 1 (bright) down to 0.1 (dark).
@@ -1114,6 +1128,7 @@ struct Room {
     inline void tick(float inL, float inR, float& outL, float& outR) {
         float x[CH];
         // each side to four channels at half level: the energy in is the input's
+        inL = floorIn(inL); inR = floorIn(inR);
         for (int c = 0; c < CH; c++) x[c] = ((c & 1) ? inR : inL) * 0.5f;
         for (int k = 0; k < STEPS; k++) {
             for (int c = 0; c < CH; c++) {
@@ -1145,20 +1160,10 @@ struct Room {
     // n samples at once, the same as n ticks, bit for bit (test_core proves
     // it). tick() touches 40 delay lines at every sample, and on the norns the
     // cache misses were most of the room's cost. Here each line is read and
-    // written in one straight run for a whole chunk. A chunk is at most CHUNK
-    // samples, and short enough that no diffusion write in it lands on a place
-    // that a later read of the same chunk still needs (DMAX - dlen samples
-    // ahead), nor a late line's (every llen is far longer than a chunk).
+    // written in one straight run for a whole chunk of at most cmax samples.
     static const int CHUNK = 64;
-    int chunkMax() const {
-        int m = CHUNK;
-        for (int k = 0; k < STEPS; k++)
-            for (int c = 0; c < CH; c++) { const int room = DMAX - dlen[k][c]; if (room < m) m = room; }
-        for (int c = 0; c < CH; c++) { if (llen[c] < m) m = llen[c]; }
-        return m < 1 ? 1 : m;
-    }
     void process(const float* inL, const float* inR, float* outL, float* outR, int n) {
-        const int lim = chunkMax();
+        const int lim = cmax;
         while (n > 0) {
             const int m = n < lim ? n : lim;
             chunk(inL, inR, outL, outR, m);
@@ -1189,7 +1194,7 @@ struct Room {
                     int t = 0;
 #ifdef FOUR_NEON
                     // four samples at a time: an add, a subtract, the same as below
-                    // (NEON flushes a denormal to 0, which a room input never holds)
+                    // (NEON flushes a denormal to 0: floorIn keeps them out of the rows)
                     for (; t + 4 <= m; t += 4) {
                         const float32x4_t a = vld1q_f32(p + t), c = vld1q_f32(q + t);
                         vst1q_f32(p + t, vaddq_f32(a, c)); vst1q_f32(q + t, vsubq_f32(a, c));
@@ -1207,18 +1212,23 @@ struct Room {
         }
     }
     void chunk(const float* inL, const float* inR, float* outL, float* outR, int m) {
-        float X[CH][CHUNK], V[CH][CHUNK];
+        float X[CH][CHUNK], V[CH][CHUNK], T[CHUNK];
         for (int c = 0; c < CH; c++) {
             const float* in = (c & 1) ? inR : inL;
-            for (int i = 0; i < m; i++) X[c][i] = in[i] * 0.5f;
+            for (int i = 0; i < m; i++) X[c][i] = floorIn(in[i]) * 0.5f;
         }
         for (int k = 0; k < STEPS; k++) {
             for (int c = 0; c < CH; c++) {
+                // sample j of the chunk reads what went in dl samples before
+                // it: from the ring while j < dl, from this chunk's own input
+                // after that. So any dl from 1 to DMAX - 1 works with any chunk.
                 float* b = dbuf[k][c];
+                const int dl = dlen[k][c], old = m < dl ? m : dl;
+                ringRead(b, DMAX - 1, dw - dl, T, old);
+                if (old < m) std::memcpy(T + old, X[c], (m - old) * sizeof(float));
                 ringWrite(b, DMAX - 1, dw, X[c], m);
-                ringRead(b, DMAX - 1, dw - dlen[k][c], X[c], m);
                 const float sg = dsign[k][c];
-                for (int i = 0; i < m; i++) X[c][i] *= sg;
+                for (int i = 0; i < m; i++) X[c][i] = T[i] * sg;
             }
             hadamardRows(X, m);
         }

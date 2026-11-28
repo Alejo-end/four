@@ -31,3 +31,14 @@
 {"kind": "budget", "name": "+ FLANGE in every first slot", "thread": 52.7, "thread_max": 52.8, "poll": 58.9, "poll_max": 58.950176239014, "xruns": 0}
 {"kind": "budget", "name": "+ ECHO in every second slot: row 19.27's dense set", "thread": 56.6, "thread_max": 56.8, "poll": 62.9, "poll_max": 63.051174163818, "xruns": 0}
 {"kind": "budget", "name": "four PV at pitch 2 with all of it: row 19.27's other set", "thread": 50.0, "thread_max": 50.2, "poll": 56.3, "poll_max": 56.771774291992, "xruns": 0}
+{"kind": "budget", "name": "all four OFF", "thread": 1.9, "thread_max": 2.0, "poll": 10.3, "poll_max": 10.416990280151, "xruns": 0}
+{"kind": "budget", "name": "four PLAY", "thread": 6.0, "thread_max": 6.0, "poll": 11.2, "poll_max": 11.237905502319, "xruns": 0}
+{"kind": "budget", "name": "four PV at pitch 2, nothing else", "thread": 30.4, "thread_max": 30.5, "poll": 36.3, "poll_max": 36.342025756836, "xruns": 0}
+{"kind": "budget", "name": "the dense voices, nothing else", "thread": 37.2, "thread_max": 37.4, "poll": 43.0, "poll_max": 43.237174987793, "xruns": 0}
+{"kind": "budget", "name": "+ the reverb (mix 0.5, every send 0.5)", "thread": 40.3, "thread_max": 40.4, "poll": 46.5, "poll_max": 46.959629058838, "xruns": 0}
+{"kind": "budget", "name": "+ shimmer 0.5", "thread": 41.4, "thread_max": 41.6, "poll": 48.0, "poll_max": 48.603317260742, "xruns": 0}
+{"kind": "budget", "name": "+ the delay (mix 0.5, every send 0.5)", "thread": 44.6, "thread_max": 44.6, "poll": 50.8, "poll_max": 51.070671081543, "xruns": 0}
+{"kind": "budget", "name": "+ drive 0.5 on every track", "thread": 47.2, "thread_max": 47.4, "poll": 53.6, "poll_max": 54.579376220703, "xruns": 0}
+{"kind": "budget", "name": "+ FLANGE in every first slot", "thread": 52.4, "thread_max": 52.6, "poll": 58.9, "poll_max": 59.579078674316, "xruns": 0}
+{"kind": "budget", "name": "+ ECHO in every second slot: row 19.27's dense set", "thread": 56.6, "thread_max": 56.8, "poll": 62.8, "poll_max": 63.619136810303, "xruns": 0}
+{"kind": "budget", "name": "four PV at pitch 2 with all of it: row 19.27's other set", "thread": 50.4, "thread_max": 50.4, "poll": 56.4, "poll_max": 56.645011901855, "xruns": 0}

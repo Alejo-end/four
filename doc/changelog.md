@@ -5677,3 +5677,23 @@ and io 1.1 (so moving io's record path out would save at most about half a point
   xruns. The states without the reverb moved by 0.6 points or less either way.
 
 On 2026-11-28 the user asked to merge `perf` into `main`: the eighty-first to the eighty-fourth change and proposal A are on `main` (a fast-forward).
+
+four, eighty-fifth change: **the review's fixes to THE ROOM's block path (plugin, test tools)**.
+2026-11-28, from `/code-review high` on the eighty-fourth change.
+- A diffusion line of any length works with any chunk: sample j reads the ring while j is
+  under the line's length and the chunk's own input after it. A line at DMAX - 1 (96 kHz at
+  the largest size) had cut every chunk to one sample. The chunk length is set once in
+  `init` (`cmax`), not scanned at every block.
+- An input under 1e-20 (-400 dB) is 0 in `tick` and in `process` (`floorIn`), so the NEON
+  rows and the scalar code cannot part on a denormal. On the norns the two paths agreed
+  without it too: the proof with the floor taken out still passes there, except the floor's
+  own check.
+- test_core: the decay, the colour or both move at random blocks, back and forth; a line at
+  DMAX - 1 at 96 kHz; the floor; a send fading below 1e-45; denormals among the noise; no
+  denormal in the output. The old order of the diffusion copy fails the 96 kHz check
+  (173,794 samples differ). All pass on the Mac and in `build_norns.sh`.
+- bench_core times `process` beside `tick`: 2.0% and 4.4% of a norns core. ugen/README.md
+  says what FourRoom runs and how it is proved.
+- On the norns: plugin built there, `count: 199`, `four: FourStretch on`. `measure.py budget`
+  as after the eighty-fourth change: the reverb adds 3.1 points, the dense set 56.6%, the
+  supported set 50.4%, no xruns. The plugin before it is `~/fourstretch-backup/FourStretch-2026-11-28a.so`.
